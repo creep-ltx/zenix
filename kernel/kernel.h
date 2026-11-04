@@ -1021,7 +1021,6 @@ int gcon_grabbed(void);                 /* a console is in graphics mode (ZINE r
 int gcon_away(int to);                  /* con_switch: ask the server to let go -> 1, the switch waits */
 int gcon_shown(int con);                /* con_show: con is the grabbed console -> 1, the server's screen */
 void gcon_key(u8 code, u16 qual, const u8 *ch);
-void gcon_tick(void);                   /* the 100 Hz tick: the pointer */
 void gcon_work(void);                   /* kwork: the pointer's records, the release's deadline */
 void gcon_vblank(void);                 /* the vertical-blank interrupt: the pointer's control words */
 void gcon_proc_exit(int pid);           /* the server ends: the grab with it */

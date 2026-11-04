@@ -25,6 +25,7 @@ Claim a number here **before** using it (system calls, message types, port names
 | 89 `console`'s ops 8 `CON_GRAB` (root, a console's descriptor; `struct ucongrab`, first size 24: a new descriptor reading `struct ugevent` records of 16 bytes) and 9 `CON_GACK` (the grab's descriptor; the `GEV_RELEASE` number answered); record types `GEV_KEY` 1, `GEV_POINTER` 2, `GEV_RELEASE` 3, `GEV_ACQUIRE` 4, `GEV_LOST` 5; qualifier bits `GQ_*` (AmigaOS's `IEQUALIFIER` values: 0x1 0x2 0x4 0x8 0x10 0x20 0x40 0x80, `GQ_REPEAT` 0x200, buttons 0x1000 0x2000 0x4000); `GCHIP_AGA` 1; `memalloc`'s (18) second argument `MEMA_CHIP` 1 (chip RAM; other bits refused) (DESIGN D38 step 2) | branch desk, 2026-11-04 |
 | 96 `peer` (`PEER_CTTY` 1, `PEER_RD` 2, `PEER_WR` 3, `PEER_PORT` 4; `struct upeermem`), 97 `post` (`POST_BUF` 1, `POST_WRITE` 2; `struct upostbuf`, `struct upost`), the port poll bit `POLLRDBAND` 0x80 (Linux's value: something posted into the port's window), `struct ucongrab`'s field `topaz` (size 28, `UCONGRAB_TOPAZ`) (DESIGN D38 step 3) | branch desk, 2026-11-04 |
 | 89 `console`'s `CON_INPUT` kind `CONI_MOUSE` 2 (DESIGN D38 step 5: mouse records dx, dy, buttons for the desktop's tests, root only as CON_INPUT) | branch desk, 2026-11-04 |
+| 93 `zine`'s `struct uzine_info` field `machine` (`UZINE_INFO_MACHINE` 32; `UZI_EMU68` 1: the CPU the desktop names) | branch desk, 2026-11-04 |
 | 89 `console`'s op 10 `CON_MOUSE` (DESIGN D38: the grab's descriptor; a2 THRESHOLD 0..127 \| MULTIPLIER 1..8 << 8, the mouse's acceleration a frame; -EINVAL otherwise) | branch desk, 2026-11-04 |
 | **next free: 98** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
@@ -57,7 +58,7 @@ value) on a port: a message sent to it was cancelled (`UMSG_CANCEL`) since its o
 2026-10-28; recorded by the same audit). The display protocol (DESIGN D38 step 3, `display/proto.h`, version 1): port `display` (the D11 service of
 `/sbin/displayd`; a client's own ports `dpy.PID`), requests `DPY_HELLO` 1 .. `DPY_IMAGE_FREE` 11 and the window
 manager's `DPY_WM_HELLO` 32 .. `DPY_WM_KILL` 42, events `EV_KEY` 1 .. `EV_MINIMISED` 8 and `EV_WM_NEW` 32 ..
-`EV_WM_MENU` 40, `EV_MENU` 9, `DPY_MENU` 12, `DPY_WM_MENUGET` 43, `DPY_WM_MENUPICK` 44, `DPY_WM_PGRAB` 45 (step 5), `DPY_WM_MOUSE` 47 (the mouse's acceleration, the kernel's `CON_MOUSE`), drawing orders `O_CLIP` 1 .. `O_XLINE` 6, and the flags and structs named there (branch desk,
+`EV_WM_MENU` 40, `EV_MENU` 9, `DPY_MENU` 12, `DPY_WM_MENUGET` 43, `DPY_WM_MENUPICK` 44, `DPY_WM_PGRAB` 45 (step 5), `DPY_WM_MOUSE` 47 (the mouse's acceleration, the kernel's `CON_MOUSE`), `DPY_STAT` 14 (the server's counters, for the tests), reserved for D38 revision 3's `dlogin`: `DPY_SESSION` 13 and `DPY_WM_BYE` 46, drawing orders `O_CLIP` 1 .. `O_XLINE` 6, and the flags and structs named there (branch desk,
 2026-11-04). Port names
 registered as services (D11):
 `disk`, `fs`, `fs.*`; `ping` (the test service, served by `msgpingd` since D19 step 0); `net` (D19, the network server:

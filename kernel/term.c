@@ -1,5 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
+#ifndef WCOLS
+#define WCOLS COLS                      /* the columns in use: COLS on the console; term's model (D38) sets its window's */
+#endif
 
 /* Virtual consoles, as on Linux: NCONS (10) of them, /dev/tty1 .. /dev/tty10,
  * switched with Amiga+F1..F10. Each has its own text grid (80 columns, all the
@@ -169,7 +172,7 @@ static inline u32 cellv(const struct term *t, u32 o)       /* a cell's value */
 
 static __attribute__((noinline)) void draw_hi(struct term *t, int y, int x, u32 o, u8 a)
 {
-    udraw(y, x, cellv(t, o), x ? cellv(t, o - 1) : 0, x < COLS - 1 ? cellv(t, o + 1) : 0, a, ((u8 *)t->co)[o],
+    udraw(y, x, cellv(t, o), x ? cellv(t, o - 1) : 0, x < WCOLS - 1 ? cellv(t, o + 1) : 0, a, ((u8 *)t->co)[o],
           eight(t));
 }
 
@@ -196,7 +199,7 @@ static void redraw_all(struct term *t)
 {
     gfx_clear_text(CO_DEF);
     for (int y = 0; y < trows; y++)
-        for (int x = 0; x < COLS; x++)
+        for (int x = 0; x < WCOLS; x++)
             if (t->ch[y][x] != ' ' || t->at[y][x] || t->co[y][x] != CO_DEF)
                 draw(t, y, x);
 }
@@ -308,10 +311,10 @@ static void show_back(struct term *t)
         int k = t->hn - t->back + r;                    /* in the composite (scrollback then grid), 0 the oldest */
         if (k >= t->hn) {
             int y = k - t->hn;
-            for (int x = 0; x < COLS; x++) {
+            for (int x = 0; x < WCOLS; x++) {
                 u32 o = rowx[y] + (u32)x;
                 if (t->at[y][x] & A_HI)                 /* D28: a cell above 0xFF, drawn at display row r */
-                    udraw(r, x, cellv(t, o), x ? cellv(t, o - 1) : 0, x < COLS - 1 ? cellv(t, o + 1) : 0, t->at[y][x],
+                    udraw(r, x, cellv(t, o), x ? cellv(t, o - 1) : 0, x < WCOLS - 1 ? cellv(t, o + 1) : 0, t->at[y][x],
                           t->co[y][x], eight(t));
                 else if (t->ch[y][x] != ' ' || t->at[y][x] || t->co[y][x] != CO_DEF)
                     gfx_cell(r, x, t->ch[y][x], t->at[y][x], t->co[y][x]);
@@ -320,11 +323,11 @@ static void show_back(struct term *t)
         }
         int h = (t->hhead - t->hn + k + HLINES * 2) % HLINES;
         const u8 *l = t->hist[h], *c = t->hist[HLINES + h], *hr = hrow(t->hp, h);
-        for (int x = 0; x < COLS; x++) {
+        for (int x = 0; x < WCOLS; x++) {
             if (hr && hr[x]) {                          /* D28: a high cell (its row byte is never 0) */
                 u32 v = (u32)hr[x] << 8 | l[x];
                 u32 pv = x && hr[x - 1] ? (u32)hr[x - 1] << 8 | l[x - 1] : 0;
-                u32 nv = x < COLS - 1 && hr[x + 1] ? (u32)hr[x + 1] << 8 | l[x + 1] : 0;
+                u32 nv = x < WCOLS - 1 && hr[x + 1] ? (u32)hr[x + 1] << 8 | l[x + 1] : 0;
                 udraw(r, x, v, pv, nv, 0, c[x], eight(t));
             } else if (l[x] != ' ' || c[x] != CO_DEF)
                 gfx_cell(r, x, l[x], 0, c[x]);
@@ -418,7 +421,7 @@ static void blank1(struct term *t, int vis, int y, int x)  /* a half blanked: a 
  * character spanning it loses both halves, as xterm and VTE do */
 static __attribute__((noinline)) void cut(struct term *t, int vis, int y, int x)
 {
-    if (x > 0 && x < COLS && is_tail(t, y, x)) {
+    if (x > 0 && x < WCOLS && is_tail(t, y, x)) {
         blank1(t, vis, y, x - 1);
         blank1(t, vis, y, x);
     }
@@ -477,9 +480,9 @@ static void clear_cells(struct term *t, int vis, int y, int x0, int x1)       /*
         cut(t, vis, y, x1);
     }
     u8 c = bce(t);
-    if (x0 == 0 && x1 == COLS) {
+    if (x0 == 0 && x1 == WCOLS) {
         int same = !panicked;                           /* a blank row erased again: no fill */
-        for (int x = 0; x < COLS && same; x++)
+        for (int x = 0; x < WCOLS && same; x++)
             same = t->ch[y][x] == ' ' && !t->at[y][x] && t->co[y][x] == c;
         blank_rows(t, y, 1);
         if (vis && !same)
@@ -507,7 +510,7 @@ static void erase_screen(struct term *t, int vis, int mode)
         return;
     }
     if (mode == 0) {
-        clear_cells(t, vis, t->cy, t->cx, COLS);
+        clear_cells(t, vis, t->cy, t->cx, WCOLS);
         if (t->cy + 1 < trows) {
             blank_rows(t, t->cy + 1, trows - t->cy - 1);
             if (vis)
@@ -617,15 +620,15 @@ static __attribute__((noinline)) void csi(struct term *t, int vis, char c)
     switch (c) {
     case 'A': t->cy = clamp(t->cy - n, t->cy >= t->top ? t->top : 0, trows - 1); break;
     case 'B': t->cy = clamp(t->cy + n, 0, t->cy <= t->bot ? t->bot : trows - 1); break;
-    case 'C': t->cx = clamp(t->cx + n, 0, COLS - 1); break;
-    case 'D': t->cx = clamp(t->cx - n, 0, COLS - 1); break;
+    case 'C': t->cx = clamp(t->cx + n, 0, WCOLS - 1); break;
+    case 'D': t->cx = clamp(t->cx - n, 0, WCOLS - 1); break;
     case 'E': t->cy = clamp(t->cy + n, 0, trows - 1); t->cx = 0; break;
     case 'F': t->cy = clamp(t->cy - n, 0, trows - 1); t->cx = 0; break;
-    case 'G': t->cx = clamp(arg(t, 0, 1) - 1, 0, COLS - 1); break;
+    case 'G': t->cx = clamp(arg(t, 0, 1) - 1, 0, WCOLS - 1); break;
     case 'd': t->cy = clamp(arg(t, 0, 1) - 1, 0, trows - 1); break;
     case 'H': case 'f':
         t->cy = clamp(arg(t, 0, 1) - 1, 0, trows - 1);
-        t->cx = clamp(arg(t, 1, 1) - 1, 0, COLS - 1);
+        t->cx = clamp(arg(t, 1, 1) - 1, 0, WCOLS - 1);
         break;
     case 'J':
         erase_screen(t, vis, t->nparam ? t->param[0] : 0);
@@ -634,9 +637,9 @@ static __attribute__((noinline)) void csi(struct term *t, int vis, char c)
         break;
     case 'K': {
         int m = t->nparam ? t->param[0] : 0;
-        if (m == 0) clear_cells(t, vis, t->cy, t->cx, COLS);
+        if (m == 0) clear_cells(t, vis, t->cy, t->cx, WCOLS);
         else if (m == 1) clear_cells(t, vis, t->cy, 0, t->cx + 1);
-        else clear_cells(t, vis, t->cy, 0, COLS);
+        else clear_cells(t, vis, t->cy, 0, WCOLS);
         break;
     }
     case 'L': case 'M':                                 /* insert / delete lines at the cursor */
@@ -645,35 +648,35 @@ static __attribute__((noinline)) void csi(struct term *t, int vis, char c)
         t->cx = 0;
         break;
     case 'P': {                                         /* delete characters */
-        if (n > COLS - t->cx) n = COLS - t->cx;
+        if (n > WCOLS - t->cx) n = WCOLS - t->cx;
         if (t->hi) {                                    /* D28: the halves cut at both edges, then the high bytes */
             cut(t, vis, t->cy, t->cx);
             cut(t, vis, t->cy, t->cx + n);
-            memmove(t->hi + rowx[t->cy] + t->cx, t->hi + rowx[t->cy] + t->cx + n, (u32)(COLS - t->cx - n));
+            memmove(t->hi + rowx[t->cy] + t->cx, t->hi + rowx[t->cy] + t->cx + n, (u32)(WCOLS - t->cx - n));
         }
-        memmove(&t->ch[t->cy][t->cx], &t->ch[t->cy][t->cx + n], (u32)(COLS - t->cx - n));
-        memmove(&t->at[t->cy][t->cx], &t->at[t->cy][t->cx + n], (u32)(COLS - t->cx - n));
-        memmove(&t->co[t->cy][t->cx], &t->co[t->cy][t->cx + n], (u32)(COLS - t->cx - n));
-        for (int x = COLS - n; x < COLS; x++) { t->ch[t->cy][x] = ' '; t->at[t->cy][x] = 0; t->co[t->cy][x] = bce(t); }
-        if (vis) for (int x = t->cx; x < COLS; x++) draw(t, t->cy, x);
+        memmove(&t->ch[t->cy][t->cx], &t->ch[t->cy][t->cx + n], (u32)(WCOLS - t->cx - n));
+        memmove(&t->at[t->cy][t->cx], &t->at[t->cy][t->cx + n], (u32)(WCOLS - t->cx - n));
+        memmove(&t->co[t->cy][t->cx], &t->co[t->cy][t->cx + n], (u32)(WCOLS - t->cx - n));
+        for (int x = WCOLS - n; x < WCOLS; x++) { t->ch[t->cy][x] = ' '; t->at[t->cy][x] = 0; t->co[t->cy][x] = bce(t); }
+        if (vis) for (int x = t->cx; x < WCOLS; x++) draw(t, t->cy, x);
         break;
     }
     case '@': {                                         /* insert characters */
-        if (n > COLS - t->cx) n = COLS - t->cx;
+        if (n > WCOLS - t->cx) n = WCOLS - t->cx;
         if (t->hi) {                                    /* D28: a character split at the cursor, one pushed off */
             cut(t, vis, t->cy, t->cx);
-            cut(t, vis, t->cy, COLS - n);
-            memmove(t->hi + rowx[t->cy] + t->cx + n, t->hi + rowx[t->cy] + t->cx, (u32)(COLS - t->cx - n));
+            cut(t, vis, t->cy, WCOLS - n);
+            memmove(t->hi + rowx[t->cy] + t->cx + n, t->hi + rowx[t->cy] + t->cx, (u32)(WCOLS - t->cx - n));
         }
-        memmove(&t->ch[t->cy][t->cx + n], &t->ch[t->cy][t->cx], (u32)(COLS - t->cx - n));
-        memmove(&t->at[t->cy][t->cx + n], &t->at[t->cy][t->cx], (u32)(COLS - t->cx - n));
-        memmove(&t->co[t->cy][t->cx + n], &t->co[t->cy][t->cx], (u32)(COLS - t->cx - n));
+        memmove(&t->ch[t->cy][t->cx + n], &t->ch[t->cy][t->cx], (u32)(WCOLS - t->cx - n));
+        memmove(&t->at[t->cy][t->cx + n], &t->at[t->cy][t->cx], (u32)(WCOLS - t->cx - n));
+        memmove(&t->co[t->cy][t->cx + n], &t->co[t->cy][t->cx], (u32)(WCOLS - t->cx - n));
         for (int x = t->cx; x < t->cx + n; x++) { t->ch[t->cy][x] = ' '; t->at[t->cy][x] = 0; t->co[t->cy][x] = bce(t); }
-        if (vis) for (int x = t->cx; x < COLS; x++) draw(t, t->cy, x);
+        if (vis) for (int x = t->cx; x < WCOLS; x++) draw(t, t->cy, x);
         break;
     }
     case 'X':                                           /* erase characters */
-        clear_cells(t, vis, t->cy, t->cx, t->cx + n > COLS ? COLS : t->cx + n);
+        clear_cells(t, vis, t->cy, t->cx, t->cx + n > WCOLS ? WCOLS : t->cx + n);
         break;
     case 'S':                                           /* scroll up: the whole screen into the scrollback, as a */
         if (t->top == 0 && t->bot == trows - 1)         /* line feed at the bottom would */
@@ -731,10 +734,10 @@ static __attribute__((noinline)) void unhalf(struct term *t, int vis, int w)
 /* the cursor after a character of w columns: the last column defers the wrap (or wraps at once: CONR_WRAPNOW) */
 static void advance(struct term *t, int vis, int w)
 {
-    if (t->cx + w <= COLS - 1)
+    if (t->cx + w <= WCOLS - 1)
         t->cx += w;
     else if (!(t->rules & CONR_WRAPNOW)) {
-        t->cx = COLS - 1;
+        t->cx = WCOLS - 1;
         t->wrap = 1;
     } else {                                            /* CONR_WRAPNOW (D20): ANSI.SYS and the Amiga console */
         t->cx = 0;
@@ -804,11 +807,11 @@ static __attribute__((noinline)) void putcp(struct term *t, int vis, u32 cp)
         linefeed(t, vis);
         t->wrap = 0;
     }
-    if (w == 2 && t->cx == COLS - 1) {                  /* a wide character at the last column wraps first */
+    if (w == 2 && t->cx == WCOLS - 1) {                  /* a wide character at the last column wraps first */
         t->cx = 0;
         linefeed(t, vis);
     }
-    u32 o = rowx[t->cy] + (u32)t->cx, ow = o + (t->cx + w < COLS ? (u32)w : 0);
+    u32 o = rowx[t->cy] + (u32)t->cx, ow = o + (t->cx + w < WCOLS ? (u32)w : 0);
     if (tail_at(t, o) || tail_at(t, ow))
         unhalf(t, vis, w);                              /* a wide character it cuts loses both halves */
     u8 a = t->attr | A_HI, c = t->colour | t->cor;
@@ -958,7 +961,7 @@ control:
         return;
     case '\r': t->cx = 0; t->wrap = 0; return;
     case '\b': if (t->cx) t->cx--; t->wrap = 0; return;
-    case '\t': t->cx = (t->cx + 8) & ~7; if (t->cx >= COLS) t->cx = COLS - 1; t->wrap = 0; return;
+    case '\t': t->cx = (t->cx + 8) & ~7; if (t->cx >= WCOLS) t->cx = WCOLS - 1; t->wrap = 0; return;
     case 7: beep(880, 80); return;                      /* bell */
     }
     if (ch < 32 && (t->esc || !ch || !(t->rules & CONR_PCCTRL)))
@@ -1002,7 +1005,7 @@ static __attribute__((optimize("O2"))) void put1(struct term *t, int vis, u8 ch)
     c[0] = ch;
     c[sizeof t->ch] = a;
     c[2 * sizeof t->ch] = co;
-    if (t->cx != COLS - 1)
+    if (t->cx != WCOLS - 1)
         t->cx++;
     else
         advance(t, vis, 1);                             /* the last column: the wrap deferred, or CONR_WRAPNOW's */

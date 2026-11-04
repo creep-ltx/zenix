@@ -18,7 +18,10 @@ struct uzine_info {                     /* what this machine has (frozen; UZINE_
     u32 attn;                           /* exec AttnFlags as AmigaOS reported them at boot (bootinfo) */
     u32 chip_total, chip_free;          /* Zenix's chip pools: bytes in them, bytes free */
     u32 fast_total, fast_free;          /* the same for fast RAM (0, 0: a chip-only machine) */
+    u32 machine;                        /* (32 bytes or more) UZI_EMU68: a 68k emulated by Emu68 (a PiStorm) */
 };
+#define UZI_EMU68 1
+#define UZINE_INFO_MACHINE 32           /* a size of 32 or more adds machine (D38, 2026-11-04) */
 #define UZINE_INFO_FIRST 28
 
 struct uzine_go {                       /* ZINE_GO's request (frozen; UZINE_GO_FIRST bytes) */

@@ -33,17 +33,20 @@ void input_init(void)
     inited = 1;
 }
 
-/* called from the 100 Hz tick */
+/* called from the 100 Hz tick, and from gcon's vertical blank while a console is in graphics mode */
 void input_poll(void)
 {
     if (!inited)
         return;
+    u16 sv = irq_save();                 /* the tick and gcon's vertical blank both read: one at a time */
     u16 j0 = JOY0DAT, j1 = JOY1DAT;
-    if (j0 != last0)
-        rnd_isr(j0, 0);                  /* mouse movement: mixed, never credited (D19 9.3) */
     dx += (signed char)((j0 & 0xFF) - (last0 & 0xFF));
     dy += (signed char)((j0 >> 8) - (last0 >> 8));
+    u16 l0 = last0;
     last0 = j0;
+    irq_restore(sv);
+    if (j0 != l0)
+        rnd_isr(j0, 0);                  /* mouse movement: mixed, never credited (D19 9.3) */
     last1 = j1;
     u8 pra = CIAA_PRA;
     u16 pot = POTGOR;

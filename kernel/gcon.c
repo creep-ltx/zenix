@@ -82,11 +82,12 @@ static void sprite_pos(struct gcon *g)
 {
     s32 h = g->px - g->hx + 0x100, y = g->py - g->hy + gfx_diwv(), e = y + g->sprh, x;
     if (h < 0) h = 0;
-    x = h >> 1;                         /* lores; AGA places it to the hires pixel too (SPRxCTL bit 4, SH1: 70 ns) */
+    x = h >> 1;                         /* lores; AGA places it to the hires pixel too (SPRxCTL bit 4, SH1: 70 ns;
+                                         * ECS's SHSH1, OCS's unused bit) */
     if (y < 0) y = 0;
     if (e > 511) e = 511;               /* VSTOP has 9 bits: never wrapped above the image */
     g->spr[0] = (u16)((y & 0xFF) << 8 | (x >> 1 & 0xFF));
-    g->spr[1] = (u16)((e & 0xFF) << 8 | (gfx_aga() ? (h & 1) << 4 : 0) | (y >> 8 & 1) << 2 | (e >> 8 & 1) << 1 |
+    g->spr[1] = (u16)((e & 0xFF) << 8 | (h & 1) << 4 | (y >> 8 & 1) << 2 | (e >> 8 & 1) << 1 |
                       (x & 1));
 }
 
@@ -367,14 +368,6 @@ static __attribute__((noinline)) short step(s32 p, s32 d, u32 acc, int scale, s3
     return (short)(p < 0 ? 0 : p >= lim ? lim - 1 : p);
 }
 
-/* the 100 Hz tick (interrupt): a release's deadline for kwork */
-void gcon_tick(void)
-{
-    struct gcon *g = gc;
-    if (g && g->state == G_RELEASING && (s32)(ticks - g->deadline) >= 0)
-        kwork_pending = 1;
-}
-
 /* the vertical-blank interrupt: the mouse read now (its counters and buttons), the pointer moved and its control
  * words written before sprite DMA reads them - so the picture never waits for the tick, a server or a window
  * manager; kwork tells the ring */
@@ -385,10 +378,8 @@ void gcon_vblank(void)
         return;
     s32 dx, dy;
     u32 b;
-    u16 s = irq_save();                 /* the tick (a higher level) reads the same counters */
-    input_poll();
+    input_poll();                       /* (the counters' read is atomic: the tick reads them too) */
     input_take(&dx, &dy, &b);
-    irq_restore(s);
     u16 bq = (u16)((b & 1 ? GQ_LBUTTON : 0) | (b & 2 ? GQ_RBUTTON : 0) | (b & 4 ? GQ_MBUTTON : 0));
     if (dx || dy) {
         g->px = step(g->px, dx, g->acc, 2, g->w);      /* a hires pixel is half a line's width */
@@ -397,8 +388,8 @@ void gcon_vblank(void)
     }
     g->bdown |= (u16)(bq & ~g->btn);
     g->bup |= (u16)(g->btn & ~bq);
-    if (dx || dy || bq != g->btn) {
-        g->btn = bq;
+    if (dx || dy || bq != g->btn || (g->state == G_RELEASING && (s32)(ticks - g->deadline) >= 0)) {
+        g->btn = bq;                    /* (and a release's deadline passed: kwork switches) */
         kwork_pending = 1;
     }
 }

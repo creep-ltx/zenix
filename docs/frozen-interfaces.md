@@ -112,6 +112,11 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   2 (records of 3 bytes: dx, dy as signed counts, the buttons held until the next record; a part record -EINVAL);
   the `/etc/zdesk/` formats (`theme`, `keys`, `bar`, `menu`, `icons`, `themes/NAME.theme`, docs/man/zdesk.txt) and
   their key and action names.
+- **D38, the A1200's first findings (branch desk, 2026-11-04):** `DPY_WM_MOUSE` 47 (a[0] the acceleration, as
+  `CON_MOUSE`), `DPY_STAT` 14 (a[0] six counters: blits, pixels, glyphs, batches, damage painted, copies onto the
+  screen; a[1] bit 0 resets), a `WK_BAR` window of a width asked (0: the screen's, as before); `/etc/zdesk/mouse`
+  (`acceleration none|low|high`); `struct uzine_info`'s `machine` at offset 28 (`UZINE_INFO_MACHINE` 32 bytes or
+  more; `UZI_EMU68` 1: the 68k is Emu68's) and its attn's 68060 bit (0x80) set by the kernel on a CPU with a PCR.
 - **D27 steps 0-1 (the C library, block 3, 2026-10-29):** the error numbers `EDOM` 33, `EOVERFLOW` 75, `EILSEQ` 84 (and
   `ENOTSUP` as a second name of `EOPNOTSUPP` 95); the C library bakes the system-call, error and signal numbers and
   `O_*` flags into every program built on it (DESIGN D27 section 6: already frozen, nothing new beyond the three).

@@ -978,7 +978,7 @@ int main(void)
         me.uid = 1000;
         EXPECT_TRUE(term_conop(OP(CON_READ, 1), (u32)(unsigned long)r, 0) == -EPERM && term_conop(OP(CON_INPUT, 9), 0, 0) == -EPERM &&
                     term_conop(OP(CON_LINE, 1), 0, 0) == -EPERM, "not root: -EPERM, before the descriptor's checks");
-        EXPECT_TRUE(term_conop(OP(10, 1), 0, 0) == -EINVAL, "op 10: -EINVAL (8 and 9 are D38's)");
+        EXPECT_TRUE(term_conop(OP(11, 1), 0, 0) == -EINVAL, "op 11: -EINVAL (8 to 10 are D38's)");
         EXPECT_TRUE(term_conop(OP(CON_GRAB, 1), 0, 0) == -EPERM, "CON_GRAB, not root: -EPERM");
     }
 

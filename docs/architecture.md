@@ -40,7 +40,8 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
   off when a board that is not RAM lies above 16 MB); a 060 gets its store buffer, branch cache and superscalar
   dispatch (`PCR` `ESS`); a CPU with a `PCR` (not under Emu68) is a 68060, so the kernel sets AttnFlags' 68060 bit
   (0x80) that AmigaOS leaves clear without its 68060.library (`ZINE_INFO`'s attn, the desktop's CPU name; the boot
-  log's first `cpu:` line, printed before, still says what the loader passed). A boot self-test switches it off again if chip RAM reads back cached. Off, as before, on
+  log's first `cpu:` line, printed before, still says what the loader passed), and `ZINE_INFO`'s `machine` says
+  `UZI_EMU68` under Emu68. A boot self-test switches it off again if chip RAM reads back cached. Off, as before, on
   68020/68030 (no MMU to keep chip RAM out), under Emu68 (coherent with the chips by itself), with `DCACHE=OFF`
   (bootinfo `+0x84` `kopts`) or the left mouse button held at boot; the boot log says which. `zine_enter` turns the
   data cache off and pushes before the hand-over; `machine_reset` pushes and clears the cache registers before
