@@ -145,7 +145,15 @@ class _Chk:
             prob.append("the root block")
         use(root, "root")
         nbm = (self.n - 2 + 32 * 127 - 1) // (32 * 127)
-        bms = [self.L(root, 79 + i) for i in range(nbm)]
+        bms = [self.L(root, 79 + i) for i in range(min(nbm, 25))]
+        ext = self.L(root, 104)                 # bitmap extension blocks: 127 pointers, then the next one's
+        while ext and len(bms) < nbm and 2 <= ext < self.n:
+            use(ext, "bitmap extension")
+            bms += [self.L(ext, j) for j in range(min(127, nbm - len(bms)))]
+            ext = self.L(ext, 127)
+        if len(bms) < nbm or 0 in bms:
+            prob.append("the bitmap pointers")
+            bms = [b for b in bms if b]
         for b in bms:
             use(b, "bitmap")
             if not self.sum_ok(b):

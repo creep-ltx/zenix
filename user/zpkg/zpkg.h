@@ -186,7 +186,7 @@ void zp_plan_free(struct zp_plan *pl);
 /* ---- the boot partition (4.5, as built 2026-10-31: user/zpkg/bootfs.c) ---- */
 #define ZP_DOS1 0x444F5301u
 #define ZP_DOS3 0x444F5303u
-#define ZP_BOOT_BMPAGES 25u             /* the root's bitmap pointers (no bitmap extension block: about 50 MB) */
+#define ZP_BOOT_BMPAGES (25u + 2u * 127u) /* the root's 25 bitmap pointers and two bitmap extension blocks: about 550 MB */
 typedef int (*zp_blkio)(void *u, zp_u32 blk, unsigned char *buf);      /* one 512-byte block; 0 or <0 */
 struct zp_ffs {
     zp_u32 blocksize;               /* from the RDB partition's DosEnvec (SizeBlock x 4) */

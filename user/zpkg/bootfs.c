@@ -5,7 +5,7 @@
  * DOS\3). This is the strictest code in zpkg, written to the owner's AmigaOS partition, so:
  *   - the whole volume is walked and checked first, every time (nothing is kept between runs): geometry 512-byte
  *     blocks and 2 reserved blocks only, DOS\1 and DOS\3 only, a device that can flush; the root (type, checksum,
- *     hash table size, "bitmap valid", no bitmap extension block), the bitmap blocks' checksums; every directory,
+ *     hash table size, "bitmap valid", at most two bitmap extension blocks), the bitmap blocks' checksums; every directory,
  *     file and link from the root by its hash chains (type, own number, parent, checksum), every file's extension
  *     blocks and data pointers (inside the partition, the count matching the byte size); no block used twice, and
  *     every block in use marked in use in the bitmap. Anything else is refused before a byte is written;
@@ -358,13 +358,14 @@ int zp_boot_open(const struct zp_ffs *f, const char *dir, struct zp_bootvol *v, 
         goto out;
     }
     v->nbm = (f->nblocks - f->reserved + 32 * (LONGS - 1) - 1) / (32 * (LONGS - 1));
-    if (L(buf, L_BMEXT) != 0 || v->nbm > ZP_BOOT_BMPAGES) {
-        rc = refuse(why, "a bitmap extension block (a volume over about 50 MB) is not supported", ZP_EINVAL);
+    if (v->nbm > ZP_BOOT_BMPAGES) {
+        rc = refuse(why, "a boot partition over about 550 MB (more than two bitmap extension blocks) is not supported",
+                    ZP_EINVAL);
         goto out;
     }
     if ((rc = own(v, v->root, why)) != 0)
         goto out;
-    for (i = 0; i < ZP_BOOT_BMPAGES; i++) {
+    for (i = 0; i < 25; i++) {
         b = L(buf, L_BMPAGES + i);
         if ((i < v->nbm) != (b != 0)) {
             rc = refuse(why, "the root's bitmap pointers do not fit the partition", ZP_EINVAL);
@@ -374,6 +375,34 @@ int zp_boot_open(const struct zp_ffs *f, const char *dir, struct zp_bootvol *v, 
             v->bmblk[i] = b;
             if ((rc = own(v, b, why)) != 0)
                 goto out;
+        }
+    }
+    /* the rest in bitmap extension blocks (a volume over about 50 MB): 127 pointers each, then the next one's */
+    b = L(buf, L_BMEXT);
+    if ((v->nbm > 25) != (b != 0)) {
+        rc = refuse(why, "the root's bitmap extension pointer does not fit the partition", ZP_EINVAL);
+        goto out;
+    }
+    while (b) {
+        zp_u32 j;
+        if ((rc = own(v, b, why)) != 0 || (rc = rd(v, b, buf, why)) != 0)
+            goto out;
+        for (j = 0; j < LONGS - 1; j++) {
+            zp_u32 p = L(buf, j);
+            if ((i < v->nbm) != (p != 0)) {
+                rc = refuse(why, "a bitmap extension block's pointers do not fit the partition", ZP_EINVAL);
+                goto out;
+            }
+            if (i < v->nbm) {
+                v->bmblk[i++] = p;
+                if ((rc = own(v, p, why)) != 0)
+                    goto out;
+            }
+        }
+        b = L(buf, LONGS - 1);
+        if ((i < v->nbm) != (b != 0)) {
+            rc = refuse(why, "a bitmap extension block's next pointer does not fit the partition", ZP_EINVAL);
+            goto out;
         }
     }
     v->bm = malloc(BS * v->nbm);
