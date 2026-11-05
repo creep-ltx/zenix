@@ -1166,10 +1166,12 @@ $(BUILD)/zenix-update.zup: $(BUILD)/kernel.bin $(BUILD)/pkg/list tools/mkzup.py 
 	    [ -n "$(RELEASE)" ] || [ -n "$$k" ] || { echo "the test key is missing" >&2; exit 1; }; \
 	    python3 tools/zsign.py sign $${k:+--key "$$k"} $@ >/dev/null
 
-# root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs; 1,024 inodes (512 ran out with the
-# network's files in D19 step 8: cmds2-test makes 150 files)
+# root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs; 16 MB and 2,048 inodes (8 MB and
+# 1,024 left 2.7 MB free on 2026-11-05, and a test filling it failed without a word on 2026-11-04; 512 inodes ran out
+# with the network's files in D19 step 8: cmds2-test makes 150 files). The test images and zenix-boot.hdf's root only:
+# the floppies, the demo floppies, the installer and the SD card's root-card.img are built apart and do not change
 $(BUILD)/zenix.hdf: $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(TESTLIBC) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list $(if $(BOX),$(BUILD)/box.zx)
-	PKGDB=1 $(if $(BOX),BOX="$(BOXAPPS)") tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 8M 1024
+	PKGDB=1 $(if $(BOX),BOX="$(BOXAPPS)") tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 16M 2048
 
 # the same disk wrapped in an RDB, as a real hard disk or CF card has it
 $(BUILD)/zenix-rdb.hdf: $(BUILD)/zenix.hdf tools/mkrdb.py
