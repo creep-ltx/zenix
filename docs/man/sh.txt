@@ -37,7 +37,8 @@ LINE EDITING
              characters the line holds comes back cut, with the bell,
              and does not run)
     Tab      complete a command, a file name or a $variable; twice lists
-             the choices
+             the choices, a path's by their last part (Latex/ Loonies/,
+             as bash shows them)
     The line is UTF-8 (the console's): the keys move, delete and swap
     whole characters, and wide characters take two columns; a byte that is
     not UTF-8 is one character of one column, as the console shows it.

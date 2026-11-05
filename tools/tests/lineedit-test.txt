@@ -13,4 +13,10 @@ send (termtest screen /dev/tty1 'tab-ma''rk' 30 'zpkg -Qq core\\x09\\r' > /dev/n
 wait tab-done 90
 send cat /tmp/tab.txt; echo tab-""shown\r
 wait tab-shown 30
+send mkdir -p /tmp/tc/Latex /tmp/tc/Loonies; echo tc-""made\r
+wait tc-made 30
+send (termtest screen /dev/tty1 'tl-ma''rk' 30 'ls /tmp/tc/L\\x09\\x09\\x15echo tl-don""e\\r' > /dev/null; termtest screen /dev/tty1 '^tl-done' 60 '' > /tmp/tl.txt; echo tl-""over) & echo tl-mark\r
+wait tl-over 90
+send cat /tmp/tl.txt; echo tl-""shown\r
+wait tl-shown 30
 stop

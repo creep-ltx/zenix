@@ -496,8 +496,18 @@ static int find_completions(const char *buf, int pos, char **m, int max, int *ws
     return n;
 }
 
+/* The list shows each match's last part, as bash does (Latex/ Loonies/, not /mnt/sh0/Demos/Latex/ ...): what follows
+ * the last '/' before a final one. The completed line keeps the whole path. */
+static const char *match_shown(const char *s)
+{
+    u32 l = strlen(s); if (l && s[l - 1] == '/') l--;
+    while (l && s[l - 1] != '/') l--;
+    return s + l;
+}
+
 static void list_matches(char **m, int n)
 {
+    for (int i = 0; i < n; i++) m[i] = (char *)match_shown(m[i]);
     int w = 0; for (int i = 0; i < n; i++) { int l = zu8cols(m[i], strlen(m[i])); if (l > w) w = l; }   /* D28: columns */
     w += 2; int cols = 78 / w; if (cols < 1) cols = 1;
     outs("\r\n");

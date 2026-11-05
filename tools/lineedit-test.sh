@@ -24,4 +24,8 @@ sed 's/\x1b\[[0-9;]*[A-Za-z]//g' $OUT/run.log | grep -q '^ahiru$' && ok "... and
 n=$(sed 's/\x1b\[[0-9;]*[A-Za-z]//g' $OUT/run.log | grep -v "^row [0-9]*|" | grep -o "# printf" | wc -l)
 [ "$n" = 1 ] && grep -q '^qz-ok' $OUT/run.log && ok "typing at the end of the line writes only the new characters (the prompt drawn once)" ||
     bad "typing redrew the line: the prompt and 'printf' $n times on the serial copy"
+# Tab twice on a path lists the matches by their last part (Latex/ Loonies/), as bash does, not the whole path
+if grep -q '^row [0-9]*|Latex/ *Loonies/ *|' $OUT/run.log && ! grep -q '^row [0-9]*|/tmp/tc/Latex/' $OUT/run.log; then
+    ok "Tab lists a path's matches by their last part (Latex/  Loonies/)"
+else bad "Tab's list of a path's matches: $(grep -m1 'Latex/' $OUT/run.log)"; fi
 [ $pass = 1 ] && echo "lineedit-test: all passed" || { echo "lineedit-test: FAILED (log $OUT/run.log)"; exit 1; }
