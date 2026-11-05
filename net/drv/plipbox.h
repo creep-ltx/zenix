@@ -64,6 +64,9 @@ struct pb {
     const char *stage;                  /* where the last transfer failed */
     unsigned nlog;                      /* error lines logged (the first 8, then every 256th) */
     u32 tx_ok, tx_err, rx_ok, rx_bad, rx_drop, rx_empty, online_asks, loops;
+    u32 rx_n, rx_ticks, tx_n, tx_ticks;  /* frames of more than a header each way and their ticks on the line (the
+                                         * ticks' sum over many frames is their time, whatever a frame's own) */
+    u32 naps, late;                     /* the driver's sleeps; those after which a request was waiting */
     unsigned char tx[PB_BUF];           /* a frame to send: its size word, then the frame (pb_send's buffer) */
 };
 

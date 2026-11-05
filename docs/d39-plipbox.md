@@ -101,7 +101,13 @@ line `drv` 2,200 -> 2,500; `TOTAL` 181,000 leaves 8 bytes). Claimed in `docs/cla
 
 **The rule for CIA-B's port A** (D19 5.5 asked for one): its bits 3-7 are the serial port's and bits 0-2 the driver's;
 everyone changes them with a single `bset`/`bclr`/`and.b` (an interrupt cannot fall between its read and its write) or
-with interrupts masked. The kernel touches neither port A nor its direction today. The quiesce program's
+with interrupts masked. The kernel touches neither port A nor its direction today. **One exception, the driver's own (2026-11-05):**
+inside a handshaked frame (a receive, a `noburst` send) each POUT edge is one plain write of the whole register, its
+bits 3-7 as read at the frame's start (`pb_ctrl_lo`), not a `bset`'s read and write: one CIA access a byte fewer.
+That holds only while nothing else writes CIA-B's port A during a frame (nothing does: `grep` the kernel); a writer of
+the serial port's RTS or DTR, if one ever comes, must not run while the parallel port is claimed, or the driver goes
+back to `bset`. Bursts keep `bset` and `bclr` (3 accesses a byte, as plipbox.device): the box's burst loop was never
+tried at 2. The quiesce program's
 read-modify-write is C in `kernel/drv.c`'s `quiesce()` (a read, then a write): it is safe only while no interrupt
 handler writes CIA-B's port A or its direction; a handler that ever does (hardware handshake on the serial lines, say)
 must come with interrupts masked around that step.
@@ -190,10 +196,21 @@ keepalive within 5 s, puts it online again (a frame out also makes it ask for th
 ## 7. Speed (the model's clock, not measured)
 
 On the model (section 8), with each CIA access one E-clock cycle and the box's times estimated from its code: a 1,514-byte
-frame takes 6.4 ms to send in a burst (230 KB/s), 11.1 ms handshaked (133 KB/s), 11.1 ms to receive (133 KB/s, the box's
-2.3 ms from its chip included). The plipbox's own benchmark (`doc/src/benchmark.md`, 0.6, an A500 with an ACA 1230/33
-under AmigaOS) measured 234.8 KB/s for burst sends on the line and about 114 KB/s through the whole bridge, which the
-model's burst figure matches. Real numbers come from the A1200 (section 9).
+frame takes 6.4 ms to send in a burst (230 KB/s), 8.9 ms handshaked (165 KB/s), 9.0 ms to receive (165 KB/s, the box's
+2.3 ms from its chip included); before the plain writes of section 4 (2026-11-05) 11.1 ms handshaked and 11.1 ms to
+receive. The plipbox's own benchmark (`doc/src/benchmark.md`, 0.6, an A500 with an ACA 1230/33 under AmigaOS) measured
+234.8 KB/s for burst sends on the line, which the model's burst figure matches, and "114 KB/s" through the whole bridge:
+that figure is a UDP echo (`python/pio_test`: 1,400 bytes out, the same back, `v = 2 x 1400 / round trip`), one frame
+each way per 24.5 ms with both directions counted, not a one-way download.
+
+**A download on the model** (`tools/plipbox-flow.c`, 2026-11-05): the driver's real line code and its turn's waits, the
+box's model with the ENC28J60's real receive ring (6,656 bytes: four full frames), the 10 Mbit wire, a TCP sender as
+Linux's without SACK (Reno, NewReno's partial ACKs), netd as lwIP's receive rules. The owner's 880 KB `wget` with netd's
+large-profile window (16 KB): **7.6 s, 116 KB/s before, 6.0 s, 146 KB/s now**; the ring overflows about 24 times (the
+sender's window holds 11 segments, the ring 4) and costs about 4 %: a window of four segments would lose none (151 KB/s),
+not worth a per-interface window in netd on these numbers. The driver sleeps about 13 times in the whole download:
+the poll interval is not where the time goes on the model, nor is netd's batching (2 ms of netd a frame: 120 KB/s).
+The A1200's 47 KB/s (section 13) is therefore not explained by the model: section 13 says how the next run tells.
 
 ## 8. Tests
 
@@ -215,6 +232,9 @@ model's burst figure matches. Real numbers come from the A1200 (section 9).
   buffer (the request waits); the loopback frame; the end and the quiesce program as the kernel checks it; the box's
   burst receive as AmigaOS does it, with and without gaps (section 5); one gap of 0.6 or 1.2 s at 248 places of a
   receive and a handshaked send (the frame lost or whole, never wrong).
+- **On the PC, `tools/plipbox-flow.c`** (run by `tools/plipbox-test.sh`): the download of section 7, checked: at least
+  135 KB/s on the model, the ring's overflows under 12 % of the time, a window of four segments without overflow, the
+  driver seldom asleep while frames come, and its own end-of-run figure (section 13) within 8-10.5 ms a frame.
 - **In FS-UAE, `tools/eth-test.sh l`**: FS-UAE has no plipbox. Nothing on the port: "nothing answers on the parallel
   port: BUSY stays high (no plipbox, or it is off)" and status 1, five times, then netd gives it up; the port claimed and
   released with its 3 quiesce steps each time; no fault, no eth0, `ping 127.0.0.1` answers; 200 sectors of the boot floppy
@@ -247,7 +267,8 @@ comes: the FLG interrupt), frames wrong (the burst's timing on the 060: `noburst
 ## 10. Sizes (*measured* 2026-11-04, `-m68020-60 -Os`)
 
 `/sbin/net/plipbox` 12,308 bytes on the disk (code 6,775, bss 3,332; in memory 14,372 bytes, with its 8 KB stack about
-22 KB; `ne2000` is 18,188). The kernel
+22 KB; `ne2000` is 18,188). 2026-11-05: 13,308 bytes on the disk (+724 from 12,584 before: the line's figures, the gap check
+of section 5, the plain writes). The kernel
 +240 bytes (section 4). A machine whose `/etc/network/interfaces` does not name it pays the kernel's 240 bytes only.
 
 ## 11. Open questions for the owner (a safe default in place)
@@ -272,5 +293,19 @@ logged); the deadlines are in the kernel's ticks, not a hard-coded PAL E-clock r
 The owner's plipbox (an Arduino Nano with an ENC28J60) on the parallel port of the A1200 with the Apollo 1260, release
 2026110402, `driver plipbox` as eth1 with the FA411's eth0 taken down: it worked at the first start. The box's own MAC
 (1a:11:af:a0:47:11, plipbox's default), DHCP gave an address, `ping google.se` 8 of 8 answered, 33-48 ms (the FA411:
-24-29 ms). Throughput not yet measured. Read from a photo of the screen.
+24-29 ms). `time wget -O /dev/null` of an 880 KB file from the NAS (the owner, 2026-11-04, release
+2026110402, the 060's data cache still off): plipbox 18.99 s (47 KB/s), the FA411 2.75 s (327 KB/s). Read from photos
+of the screen.
+
+**Looked at on the model (2026-11-05, section 7):** 47 KB/s is 31 ms a frame where the model's line took 11.1 ms (9.0
+now). The model finds no wait between frames (the driver sleeps 13 times in the download), and the FA411's 327 KB/s on
+the same machine says netd, TCP and wget cost under 4.5 ms a frame. What changed: a received frame takes one CIA access
+a byte fewer (section 4), 11.1 -> 9.0 ms on the model, so if the line is what is slow on the A1200 the same download
+should go from about 47 to about 55-60 KB/s; and the driver now says at its end where its time went:
+`frames in N, X ms each on the line; out N, X ms each; N sleeps, N of them with a frame waiting at the end`.
+**The next run:** the same `time wget -O /dev/null` of the 880 KB file, then `ifdown` the plipbox's interface and
+`dmesg | grep plipbox`. If "ms each on the line" is near 9-11, the line is as modelled and the time goes elsewhere (many
+sleeps with a frame waiting: the poll interval; few: TCP losses in the box's 4-frame ring, then a smaller window for
+the plipbox is the next step, about 4 % on the model); if it is near 25-30 ms, the line itself is slower on the 1260
+than one E-clock cycle an access, and the A1200's own CIA timing is the thing to measure.
 

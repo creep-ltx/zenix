@@ -141,7 +141,9 @@ int main(int argc, char **argv)
     pb_log(&b, "interface %d", r);
     u32 lastlook = sys_ticks();
     for (int idle = 0;;) {
-        if (drv_wait(b.down ? 10 : idle > 2 ? 2 : idle ? 1 : 0) < 0) break;
+        int nap = pb_idle_ticks(&b, idle);
+        if (drv_wait(nap) < 0) break;
+        pb_woke(&b, nap);
         int moved = 0;
         if (b.down && (u32)(sys_ticks() - lastlook) >= PB_RETRY) {
             lastlook = sys_ticks();
@@ -175,6 +177,7 @@ int main(int argc, char **argv)
         int asks = a >= 0 && (u32)a != b.acks && !b.down && sink_take(0, &spare) >= 0;
         idle = moved || q.x.more || npend || q.x.ndone || asks ? 0 : idle + 1;
     }
+    pb_report(&b);
     pb_stop(&b);
     pb_log(&b, "the doorbell closed (ifdown, or netd is gone): the box told, the port let go");
     return 0;

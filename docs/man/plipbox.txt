@@ -63,8 +63,12 @@ DIAGNOSTICS
     its size bytes: ... switch the box off and on" (the box's firmware
     then keeps driving the data lines); "the parallel port is
     another driver's"; "the doorbell closed ...: the box told, the port
-    let go". The kernel's own lines: "drv: pid N (plipbox) claims the
-    parallel port", "drv: claim of 0xbfe101 ... released".
+    let go". At the driver's end (ifdown), its figures for the line:
+    "frames in N, X ms each on the line; out N, X ms each; N sleeps,
+    N of them with a frame waiting at the end" (where a transfer's time
+    goes: DESIGN D39 section 13). The kernel's own lines: "drv: pid N
+    (plipbox) claims the parallel port", "drv: claim of 0xbfe101 ...
+    released".
 
 NOTES
     No multicast, no promiscuous mode (the box has neither). The line

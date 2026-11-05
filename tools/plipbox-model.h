@@ -62,6 +62,8 @@ static struct {
     int held;                           /* in the burst's exit loop (the trap) */
     /* the box's frames */
     struct mframe in[64]; unsigned nin, inhead;     /* from the network, to the Amiga */
+    unsigned enc_cap, enc_used;         /* the ENC28J60's receive ring in bytes (0: no limit), the bytes held */
+    unsigned long enc_full;             /* frames the full ring dropped */
     struct mframe out[2048]; unsigned nout;         /* to the network, from the Amiga (the last 2048) */
     unsigned long out_total, in_dropped, magic_online, magic_offline, magic_loop;
     unsigned long status_err, status_ok;
@@ -98,6 +100,9 @@ static uint8_t m_bus(void)                  /* the data lines */
 #define BWAIT(cond, period, tmo) do { M.dl = (tmo) ? M.at + (tmo) : M_NOW_MAX; M.timedout = 0; M.pc = __LINE__; \
     case __LINE__: if (!(cond)) { if (M.dl <= now) { M.at = M.dl; M.timedout = 1; } \
                                   else { M.at = now + 1 + m_rnd(period); return; } } } while (0)
+
+/* a frame's room in the ENC28J60's ring: its CRC and the chip's 6-byte status, rounded to a word */
+static unsigned m_enc_size(unsigned len) { return (len + 4 + 6 + 1) & ~1u; }
 
 static void m_frame_magic(void)
 {
@@ -150,6 +155,7 @@ static void m_fill(void)
         M.nin--;
         memcpy(M.buf, f->d, f->len);
         M.size = f->len;
+        M.enc_used -= m_enc_size(f->len);       /* the box reads it out of the ring at once (fill_pkt) */
     } else {
         M.garbage_reads++;              /* the real box reads the ENC28J60 where no frame is */
         M.size = 0;
@@ -322,13 +328,16 @@ static void m_box(uint64_t now)
                 /* bridge_loop: the network's frames */
                 if (M.nin && !M.req_pending) {
                     if (M.online) m_pulse();
-                    else { M.inhead = (M.inhead + 1) % 64; M.nin--; M.in_dropped++; }
+                    else { M.enc_used -= m_enc_size(M.in[M.inhead].len); M.inhead = (M.inhead + 1) % 64; M.nin--; M.in_dropped++; }
                 }
                 BYIELD(M_MAIN);
             }
         }
     }
 }
+
+/* the network beyond the box (tools/plipbox-flow.c: a TCP sender, the 10 Mbit wire), run up to now before the box */
+static void (*m_net)(uint64_t now);
 
 /* ---- the Amiga's side ---- */
 static void m_tick(void)                /* one access's time, a gap before it now and then, the box up to then */
@@ -340,6 +349,7 @@ static void m_tick(void)                /* one access's time, a gap before it no
     if (M.gap_once_at && M.accesses + 1 == M.gap_once_at) { M.t += M.gap_once; M.gap_once_at = 0; }
     M.t += (uint64_t)(M_E + M.cpu);
     M.accesses++;
+    if (m_net) m_net(M.t);
     m_box(M.t);
 }
 static void m_check_ports(void)
@@ -414,11 +424,14 @@ static void m_box_restart(void)
     M.pc = 0;
     M.at = M.t;
     M.nin = 0;
+    M.enc_used = 0;
 }
 /* a frame from the network */
 static void m_net_in(const unsigned char *d, unsigned len)
 {
     if (M.nin == 64) { M.in_dropped++; return; }
+    if (M.enc_cap && M.enc_used + m_enc_size(len) > M.enc_cap) { M.in_dropped++; M.enc_full++; return; }
+    M.enc_used += m_enc_size(len);
     struct mframe *f = &M.in[(M.inhead + M.nin) % 64];
     f->len = len;
     memcpy(f->d, d, len);
@@ -427,6 +440,14 @@ static void m_net_in(const unsigned char *d, unsigned len)
 /* the model's time passes with the driver doing nothing (it waits on netd's doorbell) */
 static void m_idle(uint64_t ns)
 {
-    M.t += ns;
-    m_box(M.t);
+    if (!m_net) {
+        M.t += ns;
+        m_box(M.t);
+        return;
+    }
+    for (uint64_t end = M.t + ns; M.t < end;) {     /* the network's events in their order */
+        M.t += end - M.t < 20000 ? end - M.t : 20000;
+        m_net(M.t);
+        m_box(M.t);
+    }
 }
