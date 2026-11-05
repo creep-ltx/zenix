@@ -93,6 +93,9 @@ void ev_to(int cl, struct dpyev *e)
     }
     c->pend[c->npend++] = *e;
 }
+/* a whole drag's exposes not answered yet (a bit a client) and since when: what is drawn off the screen is shown when
+ * they have drawn (their next DPY_DRAW), or after 60 ms, so a frame never shows the part cleared and not yet drawn */
+static u32 expose_wait, expose_t;
 void ev_win(int s, int type, int code, int arg, int x, int y, int w, int h)
 {
     struct win *wi = &wins[s];
@@ -102,6 +105,11 @@ void ev_win(int s, int type, int code, int arg, int x, int y, int w, int h)
     e.x = (s16)x; e.y = (s16)y; e.w = (u16)w; e.h = (u16)h;
     e.qual = btns;
     ev_to(wi->cl, &e);
+    if (type == EV_EXPOSE && shadowing) {       /* a whole drag uncovered a part its program draws: shown with it */
+        if (!expose_wait)
+            expose_t = sys_hrtime();
+        expose_wait |= 1u << wi->cl;
+    }
 }
 void ev_wm(int type, int win, int code, int arg, int x, int y, int w, int h)
 {
@@ -337,8 +345,10 @@ static void button(int which, int down, u16 qual)
         fpress.uy = pty;
     }
     if (dragging) {
-        if (!down && which == 1)
+        if (!down && which == 1) {
+            drag_moved = 0;
             win_drag_event(ptx, pty, 1);
+        }
         return;
     }
     if (s < 0)
@@ -425,7 +435,7 @@ static void pointer(const struct ugevent *e)
     if (moved) {
         grab_check();
         if (dragging)
-            win_drag_event(ptx, pty, 0);
+            drag_moved = 1;             /* one move a pass of the main loop, to where the pointer is by then */
         else {
             int part, s = grab_w >= 0 ? grab_w : win_at(ptx, pty, &part);
             if (s >= 0 && (grab_w >= 0 || (wins[s].flags & WF_MOTION))) {
@@ -461,6 +471,7 @@ static void kernel_events(void)
             const struct ugevent *e = &ev[i];
             switch (e->type) {
             case GEV_RELEASE:           /* the blit in progress ends, the blitter is the kernel's: then the answer */
+                shadow_end();           /* (a drag goes on drawing on the screen itself) */
                 blit_idle();
                 use_blit = 0;
                 sys_congack(gfd, (u16)e->x);
@@ -481,6 +492,7 @@ static void kernel_events(void)
     }
 }
 void kick(void) { kernel_events(); }
+int drag_moved;
 
 /* ---- the requests ---- */
 static int peer(struct umsg *m, int op, u32 addr, u32 len)
@@ -515,6 +527,7 @@ static void drop(int cl)
     struct client *c = &cls[cl];
     if (!c->used)
         return;
+    expose_wait &= ~(1u << cl);
     c->used = 0;
     if (wm_cl == cl)
         wm_gone();
@@ -659,6 +672,7 @@ static int req(struct umsg *m)
         if ((a[1] & 1) || (a[2] & 1) || a[2] > 65536 || peer(m, PEER_RD, a[1], a[2]) < 0)
             return -EFAULT;
         u32 bad = ~0u;
+        expose_wait &= ~(1u << cl);
         drag_hide();
         win_draw((int)(w - wins), (const u16 *)a[1], a[2] / 2, &bad);
         drag_show();
@@ -751,12 +765,17 @@ static int req(struct umsg *m)
         return 0;
     }
     case DPY_STAT: {
-        if (peer(m, PEER_WR, a[0], 24) < 0)
+        int nw = a[1] & 2 ? 12 : 6;
+        if (peer(m, PEER_WR, a[0], (u32)nw * 4) < 0)
             return -EFAULT;
         u32 *o = (u32 *)a[0];
         o[0] = nblits; o[1] = npix; o[2] = nglyphs; o[3] = ndraws; o[4] = npaints; o[5] = ncopies;
+        if (nw > 6) {
+            o[6] = nmoves; o[7] = tmoves; o[8] = nshows; o[9] = tshows; o[10] = twaits; o[11] = nlate;
+        }
         if (a[1] & 1)
-            nblits = npix = nglyphs = ndraws = npaints = ncopies = 0;
+            nblits = npix = nglyphs = ndraws = npaints = ncopies = nmoves = tmoves = nshows = tshows = twaits =
+                nlate = 0;
         return 0;
     }
     case DPY_SESSION:
@@ -924,6 +943,23 @@ int main(int argc, char **argv)
         while ((m = sys_recv(port, 0)) && (int)m != -1) {
             int r = req(m);
             sys_reply(m, r);
+        }
+        /* a whole drag (D38 6.3): one move a pass, to where the mouse is by then; what changed shown at once, timed
+         * to the beam - unless a program still has to draw a part the move uncovered (then the next pass) */
+        if (expose_wait && (!shadowing || (u32)(sys_hrtime() - expose_t) >= 42000u))
+            expose_wait = 0;
+        if (!expose_wait) {
+            if (drag_moved) {
+                drag_moved = 0;
+                if (dragging)
+                    win_drag_event(ptx, pty, 0);
+            }
+            if (shadowing && !expose_wait) {
+                if (dragging)
+                    shadow_show();
+                else
+                    shadow_end();
+            }
         }
         if ((u32)(sys_ticks() - alive_at) >= 100) {     /* once a second: a client that ended without DPY_BYE */
             alive_at = sys_ticks();

@@ -30,6 +30,9 @@ extern int aga;
 extern u32 chip_used, chip_budget;      /* the kept copies' chip RAM (D38 6.2: 256 KB, then simple refresh) */
 extern u32 nblits, npix, nglyphs, ncopies;  /* DPY_STAT's counters (draw.c) */
 extern u32 ndraws, npaints;             /* DPY_DRAW batches (displayd.c), damage painted (win.c) */
+extern u32 nmoves, tmoves;              /* DPY_STAT's drag counters: a whole window's moves, their E-clock ticks (win.c) */
+extern u32 nshows, tshows, twaits, nlate;   /* shows onto the screen on view, their ticks, the ticks waited for the
+                                         * beam, shows that missed the beam's rule (draw.c) */
 
 /* draw.c */
 void blit_idle(void);           /* the blitter's last blit ended (before letting go of it) */
@@ -38,7 +41,11 @@ void bm_xor(struct bm *b, const struct rect *r, int pen);            /* invert t
 void bm_copy(struct bm *s, int sx, int sy, struct bm *d, const struct rect *dr);   /* dr's size from (sx, sy) */
 void bm_text(struct bm *b, int x, int y, const u8 *glyph, int fg, int bg, int attr, const struct rect *clip);
 void bm_image(const struct bm *img, const u8 *mask, int sx, int sy, struct bm *d, const struct rect *dr);
-int bm_alloc(struct bm *b, int w, int h, int depth);   /* chip RAM, 0 or -ENOMEM; a kept copy (b->kept) counted */
+int bm_alloc(struct bm *b, int w, int h, int depth);
+extern int shadowing;           /* a whole window's drag: scr is a drawn screen, shown once a pass (D38 6.3) */
+int shadow_begin(void);         /* 1: drawing goes to the drawn screen from now on; 0: no chip RAM for it */
+void shadow_show(void);         /* what changed onto the screen on view, timed to the beam */
+void shadow_end(void);          /* shown, freed: drawing on the screen on view again */   /* chip RAM, 0 or -ENOMEM; a kept copy (b->kept) counted */
 void bm_free(struct bm *b);
 
 /* rectangles and regions */
@@ -103,3 +110,4 @@ void ev_wm(int type, int win, int code, int arg, int x, int y, int w, int h);
 extern int wm_cl;               /* the window manager's client slot, -1 none */
 const u8 *dpy_image(int id, int cl, struct bm **img);         /* an image (cl's, or any: -1) and its mask (0: none) */
 void kick(void);                /* drain the kernel's ring now (a drag's loop) */
+extern int drag_moved;          /* the pointer moved during a drag: one move a pass of the main loop */

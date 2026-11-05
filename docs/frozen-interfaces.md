@@ -114,7 +114,8 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   their key and action names.
 - **D38, the A1200's first findings (branch desk, 2026-11-04):** `DPY_WM_MOUSE` 47 (a[0] the acceleration, as
   `CON_MOUSE`), `DPY_STAT` 14 (a[0] six counters: blits, pixels, glyphs, batches, damage painted, copies onto the
-  screen; a[1] bit 0 resets), a `WK_BAR` window of a width asked (0: the screen's, as before); `/etc/zdesk/mouse`
+  screen; a[1] bit 0 resets; bit 1 (2026-11-05): twelve, six more after them: a whole drag's moves and their E-clock
+  ticks, shows of the drawn screen and their ticks, ticks waited for the beam, shows late for it), a `WK_BAR` window of a width asked (0: the screen's, as before); `/etc/zdesk/mouse`
   (`acceleration none|low|high`); `struct uzine_info`'s `machine` at offset 28 (`UZINE_INFO_MACHINE` 32 bytes or
   more; `UZI_EMU68` 1: the 68k is Emu68's) and its attn's 68060 bit (0x80) set by the kernel on a CPU with a PCR.
 - **D38 revision 3 (dlogin, branch desk, 2026-11-04):** `DPY_SESSION` 13 (root's client and root's caller only, on the

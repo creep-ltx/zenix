@@ -25,7 +25,11 @@ DESCRIPTION
         mem                free RAM, the memory of displayd and dpytest
         stat [LABEL]       the server's counters since the last stat
                            (DPY_STAT): blits, pixels, glyphs, draws,
-                           paints, copies; then counted from 0 again
+                           paints, copies; a whole drag's moves, their
+                           time (movet, E-clock ticks), shows, their
+                           time (showt), the time waited for the beam
+                           (waitt), shows late for it; then counted
+                           from 0 again
         events             the events received so far, a line each
         quit               the end
 

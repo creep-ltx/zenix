@@ -465,3 +465,41 @@ The details revision 3 left to the review, as built (branch desk, verified in FS
   programs are cut off from the screen, not ended (and without an MMU memory is readable by any program). The Text console session closes the display and runs the
   user's shell on console 1; its end brings the greeter back.
 - Not yet: autologin, a user list, shutdown and reboot buttons, a session chosen per user; the clock is UTC.
+
+## The A1200's finding of 2026-11-05: a dragged window tore
+
+The owner's PiStorm A1200 (the demo floppy; Emu68 says 68040, so zdesk's `drag auto` moved the whole window): the
+window showed at two places at once mid-move, its top at the new place and its bottom at the old, the text smeared.
+And Ahiru, Sumi and ctop did not follow a terminal window's resize. What was found and done (branch drag, verified in
+FS-UAE, not yet on the A1200):
+
+- **The cause:** a move painted the damage (the old and the new place together) straight onto the screen on view, back
+  to front in several passes (the background, the frames, the insides from their kept copies), and before that took a
+  fresh copy of the moved window's inside (chip RAM allocated and cleared, the inside copied out, by the CPU when its
+  column was not on a 16-pixel word) and freed it after. That took more than a frame, so the raster showed whatever
+  was half done when it passed: a torn frame, on any CPU, since the blitter's speed sets the time. A move was made for
+  every mouse event, however far behind the drawing was.
+- **Now (`display/server/draw.c`, `win.c`, `displayd.c`):** a whole window's drag draws into a second screen in chip
+  RAM (a copy of the screen taken when the drag starts: 80 KB at 4 planes, freed at its end; every drawing call is the
+  same, the screen's pointer is swapped) and notes the rectangles it drew. At most one move a pass of the server's
+  loop, to where the pointer is by then (the mouse's moves since are merged). At the end of the pass what changed is
+  copied onto the screen on view: one blit of whole words, B to D, top to bottom, started where the beam can neither
+  overtake it nor come round to meet it before it ends: after the beam left the band when the copy fits in a frame,
+  else (a copy slower than the beam) just after the beam passed the band's top. The copy's speed is measured from the
+  shows themselves (about 1 us a word of one plane in FS-UAE's A1200 with the 4-plane display, against the HRM's
+  0.56 without contention). The moved window keeps its inside's copy for the whole drag. A part the move uncovers that
+  a program draws itself (the desktop's icons, a simple refresh window) is shown together with that program's
+  drawing, or after 60 ms. Without chip RAM for the second screen the drag is an outline. `DPY_STAT` counts the drag's
+  moves, shows, their times, the time waited for the beam, and shows the server's own check finds late for it.
+- **Measured** (`tools/drag-test.sh`, FS-UAE's stock A1200 with 4 MB fast, a 400 x 140 window over another,
+  dragged for about five seconds; emulator figures, not the real machine's): before, 99 moves, 119.6 ms each, 86
+  blits and 124,135 pixels a move, 2 of 14 screenshots torn; now, 120 moves, 75.9 ms drawing each (88 blits, 68,116
+  pixels), 2.8 shows a move of 6.3 ms each and 1.2 ms waiting for the beam on average, 0 of 14 torn, 0 shows late.
+  Whole drag stays slow on a 14 MHz 68020 (about 10 moves a second for that window), so `drag auto` keeps the outline
+  there (question 3's default); `drag whole` in a theme asks for it anyway. displayd grew by 4,124 bytes of code
+  (39,188 -> 43,312), and takes 80 KB of chip RAM while a whole window is dragged.
+- **Resize in the text-UI programs:** the library (`ports/tui/zenix/core.c`) now notes SIGWINCH (a handler without
+  SA_RESTART, so a wait ends), reads the size again and gives upstream's TE_RESIZE, which Ahiru, Sumi and ctop already
+  answer for CTerm on AmigaOS; the AmigaOS layer's `Wait()` answers the terminal's bit for it. `tuitest` checks it on
+  a pty.
+

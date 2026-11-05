@@ -7,6 +7,8 @@
 
 #define CUST(o) (*(volatile u16 *)(0xDFF000 + (o)))
 #define DMACONR CUST(0x002)
+#define VPOSR   CUST(0x004)
+#define VHPOSR  CUST(0x006)
 #define BLTCON0 CUST(0x040)
 #define BLTCON1 CUST(0x042)
 #define BLTAFWM CUST(0x044)
@@ -25,6 +27,7 @@ int use_blit;
 u32 nblits, npix, nglyphs, ncopies;              /* DPY_STAT's counters: blits started, pixels drawn (a rectangle once, every
                                          * plane), glyphs drawn */
 u32 chip_used, chip_budget = 256u << 10;
+u32 nshows, tshows, twaits, nlate;
 
 /* the blitter's busy bit, read twice (the first read may come before the blit starts); a blit of a screen takes tens
  * of milliseconds: past half a second (the E-clock) it is stuck, and drawing goes on (a rule of the project: every wait
@@ -153,6 +156,7 @@ static int clip_bm(const struct bm *b, struct rect *r)
 static u16 fmask(int x) { return (u16)(0xFFFF >> (x & 15)); }
 static u16 lmask(int x1) { return (u16)(0xFFFF << (15 - ((x1 - 1) & 15))); }
 
+static void dirty_add(const struct rect *r);
 /* minterms: A the mask (BLTADAT with the edge masks), C and D the bitmap */
 #define MT_SET 0xFA
 #define MT_CLR 0x0A
@@ -196,6 +200,8 @@ void bm_fill(struct bm *b, const struct rect *rr, int pen)
     struct rect r = *rr;
     if (!b->p || !clip_bm(b, &r))
         return;
+    if (b == &scr)
+        dirty_add(&r);
     npix += (u32)(r.x1 - r.x0) * (u32)(r.y1 - r.y0);
     for (int k = 0; k < b->depth; k++) {
         int on = pen >> k & 1;
@@ -210,6 +216,8 @@ void bm_xor(struct bm *b, const struct rect *rr, int pen)
     struct rect r = *rr;
     if (!b->p || !clip_bm(b, &r))
         return;
+    if (b == &scr)
+        dirty_add(&r);
     for (int k = 0; k < b->depth; k++)
         if (pen >> k & 1) {
             if (use_blit)
@@ -312,6 +320,229 @@ static void blit_block(struct bm *s, int sx, int sy, struct bm *d, const struct 
     BLTSIZE = (u16)((n & 1023) << 6 | W);
     nblits++;
 }
+/* ---- a drawn screen and the one on view (a whole window's drag; D38 6.3, the owner's A1200 of 2026-11-05) ----
+ * Moving a window paints the damage back to front: the background, the frames, the insides from their copies, each
+ * pixel once, but in several passes and not top to bottom. Painted on the screen on view, the raster shows whatever
+ * is half done when it passes: the window's top at the new place and its bottom at the old (a torn frame), on any
+ * CPU, as the blitter's speed sets the time. So while a whole window is dragged, the server draws into a second
+ * screen in chip RAM (shadow_begin: a copy of the screen, its pointer swapped into scr, so every drawing call is
+ * the same) and notes what it drew (dirty); once a pass of the main loop (one move at most, the mouse's moves since
+ * merged) shadow_show copies what changed onto the screen on view: one blit of whole words, B to D, top to bottom,
+ * started where the beam cannot overtake it nor come round to meet it before it ends (beam_rule), so every frame
+ * shows the area all as it was or all as it is. The screen's first line is the kernel's DIW_V (the same make
+ * variable); a frame is 312 lines on PAL, 262 on NTSC (by the screen's height, as the kernel chose it). */
+#ifndef DIW_V
+#define DIW_V 0x2C
+#endif
+#define NDIRTY 4
+int shadowing;                          /* scr is the drawn screen; shown is the one on view */
+static struct bm shown;
+static struct rect dirty[NDIRTY];
+static int ndirty;
+static u32 area(const struct rect *r) { return (u32)(r->x1 - r->x0) * (u32)(r->y1 - r->y0); }
+static void unite(struct rect *a, const struct rect *b)
+{
+    if (b->x0 < a->x0) a->x0 = b->x0;
+    if (b->y0 < a->y0) a->y0 = b->y0;
+    if (b->x1 > a->x1) a->x1 = b->x1;
+    if (b->y1 > a->y1) a->y1 = b->y1;
+}
+/* r (clipped to the screen) joins the rectangle that grows least by it; an overlap always joins */
+static void dirty_add(const struct rect *r)
+{
+    if (!shadowing)
+        return;
+    int best = -1;
+    u32 grow = ~0u;
+    for (int i = 0; i < ndirty; i++) {
+        struct rect u = dirty[i], k;
+        unite(&u, r);
+        u32 g = area(&u) - area(&dirty[i]);
+        if (r_and(&k, &dirty[i], r))
+            g = 0;
+        if (g < grow) { grow = g; best = i; }
+    }
+    if (best >= 0 && (grow == 0 || ndirty == NDIRTY))
+        unite(&dirty[best], r);
+    else
+        dirty[ndirty++] = *r;
+}
+static int frame_lines(void) { return scr.h > 200 ? 312 : 262; }
+/* the display line the beam is on (0 the screen's first; negative above it, in the border and the vertical blank) */
+static int beam(void)
+{
+    u16 a, b, c;
+    do {
+        a = VPOSR;
+        b = VHPOSR;
+        c = VPOSR;
+    } while ((a ^ c) & 1);              /* line 255 to 256 (or to 0) between the reads: again */
+    return ((a & 1) << 8 | b >> 8) - DIW_V;
+}
+/* when a copy of lines y0..y1-1, W words wide, may start: a span of the beam's lines [*lo, *lo + *len). The copy goes
+ * top to bottom at r microseconds a line, the beam at 64 (L lines a frame, H in the band). Two ways:
+ *  - started after the beam left the band (lo = y1): the frame on show is untouched whatever the copy's speed; it
+ *    must end each line before the beam is back at it: at most d lines late, d < L - H (at y0) and
+ *    H r < (L - d) 64 (at y1);
+ *  - started after the beam passed y0 (lo = y0), when the copy is surely slower than the beam: the beam stays ahead
+ *    of it, and each line must end before the beam comes round: (y - y0) (r - 64) < (L - d) 64 up to y1.
+ * The one that allows the later start is taken (the shorter wait); the second only if r is at least a third over 64.
+ * r is W x depth x k, k the nanoseconds a word of one plane takes: the HRM's 564 (4 ticks a word, B to D) without
+ * contention; with the display's 4 planes, the Copper and the CPU's reads of the blitter's busy bit it was about
+ * 1,040 in FS-UAE's A1200 (emulator figures), so k starts at 1,000 and follows what the big shows take (show_k: up
+ * at once, down slowly). The allowances are reckoned with r a quarter more, less 8 lines for the start and the
+ * scheduler; at least 4 lines (the wait's loop must see the beam in it). */
+static u32 show_k = 1000;
+static void beam_rule(int y0, int y1, int words, int *lo, int *len)
+{
+    int L = frame_lines(), H = y1 - y0;
+    s32 rl = (s32)((u32)words * scr.depth * show_k), bl = 64000, rh = rl + rl / 4;  /* ns a line */
+    s32 fast = L - H * rh / bl, slow = rl * 3 >= bl * 4 ? L - H * (rh - bl) / bl : -1;
+    if (fast > L - H)
+        fast = L - H;
+    if (slow > fast) {
+        *lo = y0;
+        *len = slow;
+    } else {
+        *lo = y1;
+        *len = fast;
+    }
+    *len -= 8;
+    if (*len < 4)
+        *len = 4;
+}
+/* until the beam is in [lo, lo + len) of the frame's lines; 0 if not within 60 ms (3 frames: the beam stopped?) */
+static int beam_wait(int lo, int len)
+{
+    int L = frame_lines();
+    u32 t0 = sys_hrtime();
+    for (int n = 0;; n++) {
+        int d = ((beam() - lo) % L + L) % L;
+        if (d < len)
+            return 1;
+        if (!(n & 15) && sys_hrtime() - t0 > 42000u)    /* (the clock's call is slower than a line now and then) */
+            return 0;
+    }
+}
+/* the server's own check of a show (DPY_STAT's late): the copy of y0..y1 started with the beam on b0 and took us
+ * microseconds; taken as even, line y was written by (y - y0 + 1) / H of it. Every frame must show the band all as it
+ * was or all as it is. With the beam inside the band at the start, the frame on show has shown the lines above it as
+ * they were, so the lines below it must still be so when the beam gets there, and the next frame shows all new; with
+ * the beam outside, the band's next showing is all old or all new, and if old the one after all new. */
+static int show_torn(int b0, u32 us, int y0, int y1)
+{
+    int L = frame_lines(), H = y1 - y0, early = 0, later = 0, bad = 0, in = b0 >= y0 && b0 < y1;
+    u32 fr = (u32)L * 64;
+    for (int y = y0; y < y1; y++) {
+        u32 w = (u32)(y - y0 + 1) * us / (u32)H;
+        int d = ((y - b0) % L + L) % L;
+        if (!d)
+            d = L;                      /* the beam on the line itself: it shows the old one now */
+        u32 p1 = (u32)d * 64;           /* the beam's next pass over line y */
+        if (in && y > b0)
+            bad |= w < p1 || w >= p1 + fr;      /* still old in this frame, new in the next */
+        else if (in)
+            bad |= w >= p1;                     /* new in the next frame */
+        else if (w < p1)
+            early++;
+        else {
+            later++;
+            bad |= w >= p1 + fr;
+        }
+    }
+    return bad || (early && later);
+}
+/* the drawn screen from now on: a copy of the one on view (1 if so; 0 no chip RAM, or the blitter is not ours) */
+int shadow_begin(void)
+{
+    if (shadowing)
+        return 1;
+    if (!use_blit || !scr.p)
+        return 0;
+    u8 *p = sys_memalloc_chip(scr.stride * scr.h);
+    if (!p)
+        return 0;
+    shown = scr;
+    struct bm d = scr;
+    d.p = p;
+    struct rect all = { 0, 0, (s16)scr.w, (s16)scr.h };
+    if (scr.h * scr.depth <= 1024)
+        blit_block(&shown, 0, 0, &d, &all, 0);
+    else
+        memcpy(p, scr.p, scr.stride * scr.h);
+    blit_idle();
+    scr.p = p;
+    shadowing = 1;
+    ndirty = 0;
+    return 1;
+}
+/* what was drawn since the last show onto the screen on view, each rectangle (whole words) timed to the beam */
+void shadow_show(void)
+{
+    if (!shadowing)
+        return;
+    if (ndirty > 1) {                   /* one show for all when their box is not much more (a wait for the beam each) */
+        struct rect u = dirty[0];
+        u32 sum = area(&dirty[0]);
+        for (int i = 1; i < ndirty; i++) {
+            unite(&u, &dirty[i]);
+            sum += area(&dirty[i]);
+        }
+        if (area(&u) <= sum + sum / 2) {
+            dirty[0] = u;
+            ndirty = 1;
+        }
+    }
+    for (int i = 0; i < ndirty; i++) {
+        struct rect r = dirty[i];
+        r.x0 = (s16)(r.x0 & ~15);
+        r.x1 = (s16)((r.x1 + 15) & ~15);
+        if (r.x1 > scr.w)
+            r.x1 = (s16)scr.w;
+        int words = (r.x1 - r.x0) >> 4, lo, len;
+        if (words <= 0 || r.y1 <= r.y0)
+            continue;
+        if ((r.y1 - r.y0) * scr.depth > 1024)
+            r.y1 = (s16)(r.y0 + 1024 / scr.depth);      /* (never: the screen's height at its depth is 1,024) */
+        beam_rule(r.y0, r.y1, words, &lo, &len);
+        blit_idle();                    /* the drawing finished first */
+        u32 t0 = sys_hrtime();
+        int ok = beam_wait(lo, len);
+        u32 t1 = sys_hrtime();
+        int b0 = beam();
+        blit_block(&scr, r.x0, r.y0, &shown, &r, 0);
+        blit_idle();
+        u32 t2 = sys_hrtime();
+        twaits += t1 - t0;
+        tshows += t2 - t1;
+        nshows++;
+        u32 us = (t2 - t1) * 141u / 100u, k = us * 1000u / ((u32)(r.y1 - r.y0) * (u32)words * scr.depth);
+        if ((r.y1 - r.y0) * words >= 512) {     /* a big one (a small one is mostly the call's own time) */
+            show_k = k > show_k ? k : (7 * show_k + k) / 8;    /* what the copies take on this machine */
+            if (show_k < 564)
+                show_k = 564;
+        }
+        if (!ok || show_torn(b0, us, r.y0, r.y1)) {
+            if (nlate++ < 4 || !(nlate & 255))      /* (the serial line: the first few, then one in 256) */
+                dprintf(2, "displayd: a show late for the beam: lines %d..%d, %d words, the beam at %d (wanted %d "
+                        "+%d), %u us%s\n", r.y0, r.y1, words, b0, lo, len, us, ok ? "" : ", the beam not seen");
+        }
+    }
+    ndirty = 0;
+}
+/* back to drawing on the screen on view: what is left shown, the drawn screen freed */
+void shadow_end(void)
+{
+    if (!shadowing)
+        return;
+    shadow_show();
+    blit_idle();
+    u8 *p = scr.p;
+    scr.p = shown.p;
+    shadowing = 0;
+    sys_memfree(p);
+}
+
 void bm_copy(struct bm *s, int sx, int sy, struct bm *d, const struct rect *dr)
 {
     struct rect r = *dr;
@@ -324,8 +555,10 @@ void bm_copy(struct bm *s, int sx, int sy, struct bm *d, const struct rect *dr)
     if (sx < 0 || sy < 0 || sx + (r.x1 - r.x0) > s->w || sy + (r.y1 - r.y0) > s->h)
         return;                         /* never read outside the source */
     npix += (u32)(r.x1 - r.x0) * (u32)(r.y1 - r.y0);
-    if (d == &scr)
+    if (d == &scr) {
         ncopies++;
+        dirty_add(&r);
+    }
     int depth = s->depth < d->depth ? s->depth : d->depth;
     int same = s == d, after = same && (r.y0 > sy || (r.y0 == sy && r.x0 > sx));
     int sh = (r.x0 & 15) - (sx & 15);
@@ -362,6 +595,8 @@ void bm_image(const struct bm *img, const u8 *mask, int sx, int sy, struct bm *d
     sy += r.y0 - dr->y0;
     if (sx < 0 || sy < 0 || sx + (r.x1 - r.x0) > img->w || sy + (r.y1 - r.y0) > img->h)
         return;
+    if (d == &scr)
+        dirty_add(&r);
     blit_idle();
     for (int y = r.y0; y < r.y1; y++) {
         int iy = sy + y - r.y0;
@@ -390,6 +625,8 @@ void bm_text(struct bm *b, int x, int y, const u8 *glyph, int fg, int bg, int at
     if (!b->p || !clip_bm(b, &c) || !r_and(&c, &c, &cell))
         return;
     if (attr & TA_INV) { int t = fg; fg = bg; bg = t; }
+    if (b == &scr)
+        dirty_add(&c);
     if (use_blit)
         blit_idle();
     nglyphs++;
