@@ -142,6 +142,80 @@ const char *za_ram(const char *path)
     return same(path, n, "RAM") || same(path, n, "Ram Disk") ? c + 1 : 0;
 }
 
+/* part s (n bytes) after the key's top (out[0..*o), top its first byte past "DEV:"): 1, or 0 when it does not fit */
+static int key_part(char *out, zu32 *o, zu32 top, const char *s, zu32 n, zu32 max)
+{
+    if (!n) {                           /* "/" alone: up one */
+        if (*o == top)
+            return 0;                   /* above the device's top */
+        while (*o > top && out[*o - 1] != '/')
+            (*o)--;
+        if (*o > top)
+            (*o)--;                     /* the '/' before the part that went */
+        return 1;
+    }
+    zu32 sep = *o > top;
+    if (*o + sep + n + 1 > max)
+        return 0;
+    if (sep)
+        out[(*o)++] = '/';
+    for (zu32 i = 0; i < n; i++)
+        out[(*o)++] = s[i];
+    return 1;
+}
+
+int za_key(const char *path, const char *vol, char *out, zu32 max)
+{
+    static const char *const sub[] = { "C", "S", "L", "LIBS", "DEVS", "FONTS" };
+    const char *c = path, *rest = path, *first = 0;
+    while (*c && *c != ':')
+        c++;
+    zu32 n = (zu32)(c - path), o;
+    if (max < 5)
+        return 0;
+    if (!*c || !n || same(path, n, "SYS") || same(path, n, "PROGDIR") || (vol && vol[0] && same(path, n, vol)))
+        cpy(out, "SYS:", 4);            /* the program's volume (no device: its own directory, the volume's top) */
+    else if (same(path, n, "RAM") || same(path, n, "Ram Disk"))
+        cpy(out, "RAM:", 4);
+    else {
+        for (zu32 k = 0; k < sizeof sub / sizeof sub[0]; k++)
+            if (same(path, n, sub[k]))
+                first = sub[k];         /* the volume's own directory of that name */
+        if (first)
+            cpy(out, "SYS:", 4);
+        else {
+            if (n + 2 > max)
+                return 0;
+            for (zu32 i = 0; i < n; i++)
+                out[i] = (char)up((zu8)path[i]);
+            out[n] = ':';
+            out[n + 1] = 0;
+        }
+    }
+    if (*c)
+        rest = c + 1;
+    zu32 top = len(out);
+    o = top;
+    if (first && !key_part(out, &o, top, first, len(first), max))
+        return 0;
+    for (const char *p = rest; *p;) {
+        const char *s = p;
+        while (*p && *p != '/')
+            p++;
+        if (*p == '/' && !p[1] && p > s) {      /* a '/' at the end: the part, no going up */
+            if (!key_part(out, &o, top, s, (zu32)(p - s), max))
+                return 0;
+            break;
+        }
+        if (!key_part(out, &o, top, s, (zu32)(p - s), max))
+            return 0;
+        if (*p == '/')
+            p++;
+    }
+    out[o] = 0;
+    return 1;
+}
+
 /* the next word of the command (quoted or not) into w (max bytes with its 0): its length, or -1 too long; *pp moved on.
  * 0 at the end of the command */
 static int word(const char **pp, const char *end, char *w, zu32 max)

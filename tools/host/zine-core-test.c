@@ -564,6 +564,26 @@ static void test_path(void)
           "path: an unassigned path stands for itself only");
     CHECK(za_ram("RAM:a") && !strcmp(za_ram("ram:a"), "a") && za_ram("Ram Disk:b/c") && !za_ram("RAMX:a") &&
           !za_ram("ram") && !strcmp(za_ram("RAM:"), ""), "path: RAM: and Ram Disk:");
+    /* the memory files' keys (16.9): one name per file, whatever the path's form */
+    {
+        static const char *const kv[][2] = {
+            { "data", "SYS:data" }, { "PROGDIR:data", "SYS:data" }, { "sys:Data", "SYS:Data" }, { "MyDemo:data", "SYS:data" },
+            { ":data", "SYS:data" }, { "c:Assign", "SYS:C/Assign" }, { "LIBS:x.library", "SYS:LIBS/x.library" },
+            { "ram:x", "RAM:x" }, { "Ram Disk:x", "RAM:x" }, { "RAM:", "RAM:" }, { "t:tmp.1", "T:tmp.1" },
+            { "env:Sys/def_pref", "ENV:Sys/def_pref" }, { "dh0:a/b/c", "DH0:a/b/c" }, { "a/b//c", "SYS:a/c" },
+            { "a//b", "SYS:b" }, { "a/b/", "SYS:a/b" }, { "C:/x", "SYS:x" }, { "a//", "SYS:" }, { 0, 0 } };
+        for (int i = 0; kv[i][0]; i++)
+            CHECK(za_key(kv[i][0], "MyDemo", o, sizeof o) && !strcmp(o, kv[i][1]), "key: %s -> %s (%s)", kv[i][0], kv[i][1], o);
+        CHECK(!za_key("/x", "MyDemo", o, sizeof o) && !za_key("t:/x", "MyDemo", o, sizeof o) && !za_key("a///x", 0, o, sizeof o),
+              "key: above a device's top refused");
+        CHECK(!za_key("ram:abcdefgh", 0, o, 10) && za_key("ram:abcde", 0, o, 10) && !strcmp(o, "RAM:abcde"),
+              "key: the limit (max bytes with the end)");
+        for (int n = 1; n < 14; n++) {                  /* every short room: never written past (ASan) */
+            char *b = malloc((size_t)n);
+            CHECK(za_key("dh0:abc/def", 0, b, (zu32)n) == (n >= 12), "key: room %d", n);
+            free(b);
+        }
+    }
     struct za_cmd c;
     const char *cmd = "Ram:Assign LIBS: Ram:";
     CHECK(za_parse(cmd, strlen(cmd), &c) == 1 && !strcmp(c.name, "LIBS") && c.n == 1 && !strcmp(c.dir[0], "Ram:") &&

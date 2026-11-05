@@ -16,7 +16,7 @@ ok() { echo "PASS $1"; }
 no() { echo "FAIL $1"; pass=0; }
 log=$(tr -d '\r' < $L)
 n=$(echo "$log" | grep -ac '^zine: back after [0-9]* s (0)')
-[ "$n" = 42 ] && ok "every session came back (the kernel's 'back' line 42 times)" || no "the kernel's 'back' line $n times, not 42 (21 null sessions; zexit, the long name, zhello, ztake, zcrash, zbadcall, zalloc, zscreen, zovl twice, zpkt twice, zlibs, zmmu, zfpu; ztake with the background writer; three by name; the group member twice)"
+[ "$n" = 43 ] && ok "every session came back (the kernel's 'back' line 43 times)" || no "the kernel's 'back' line $n times, not 43 (21 null sessions; zexit, the long name, zhello, ztake, zcrash, zbadcall, zalloc, zscreen, zovl twice, zpkt twice, zlibs, zwrite, zmmu, zfpu; ztake with the background writer; three by name; the group member twice)"
 echo "$log" | grep -aq '^count=20 ok=20' && ok "the console's shell ran zine twenty times and went on" || no "the console's loop: $(echo "$log" | grep -a '^count=')"
 f1=$(echo "$log" | grep -a -m1 '^fast RAM free' | tr -dc 0-9); f2=$(echo "$log" | grep -a '^fast RAM free' | sed -n 2p | tr -dc 0-9)
 c1=$(echo "$log" | grep -a -m1 '^chip RAM free' | tr -dc 0-9); c2=$(echo "$log" | grep -a '^chip RAM free' | sed -n 2p | tr -dc 0-9)
@@ -64,6 +64,11 @@ zl '^zlibs: still loaded after the delete; RemLibrary expunged it' && ok "zlibs:
 zl '^zlibs: audio.device gave the four channels' && zl "^ZINE: audio.device's command 3 (CMD_WRITE)" && ok "zlibs: semaphores; audio.device's channels allocated, a second request and CMD_WRITE refused" || no "zlibs: audio.device: $(echo "$log" | grep -a 'zlibs\|audio' | tail -2)"
 zl "^zlibs: Paula's channel 0 interrupt through SetIntVector" && zl '^zlibs: CIA-B timer A through ciab.resource' && ok "zlibs: Paula's level 4 interrupt (SetIntVector) and CIA-B timer A (ciab.resource) delivered" || no "zlibs: the interrupts: $(echo "$log" | grep -a 'zlibs' | tail -2)"
 zl '^zlibs: memory as at the start' && zl '^zlibs-rc=0' && ok "zlibs: AvailMem as at the start, return code 0" || no "zlibs: the end: $(echo "$log" | grep -a 'zlibs' | tail -3)"
+# 16.9: a write to any path kept in memory for the session (zwrite.S), the disk untouched
+zl '^zwrite: T:, ENV:, the program.s folder and DH0: written and read back from memory' && ok "zwrite: T:, ENV:, PROGDIR: and DH0: files written and read back by other forms of their paths; NIL: keeps nothing" || no "zwrite: the paths: $(echo "$log" | grep -a 'zwrite' | tail -2)"
+zl '^zwrite: its own zexit shadowed by what it wrote' && zl '^zwrite: zhello changed through MODE_READWRITE, a copy in memory' && ok "zwrite: a file of its own folder shadowed by a written one; MODE_READWRITE changes a copy in memory" || no "zwrite: the shadow: $(echo "$log" | grep -a 'zwrite' | tail -2)"
+zl '^zwrite: the deleted files are gone for the session' && zl '^zwrite-rc=0' && ok "zwrite: DeleteFile of a shadowed, an unwritten and a T: file: not found afterwards, a second delete ERROR_OBJECT_NOT_FOUND; return code 0" || no "zwrite: the deletes: $(echo "$log" | grep -a 'zwrite' | tail -3)"
+zl '^zwdisk-same' && ok "zwrite: the disk afterwards as before (zexit, zhello, zbadcall the same bytes; no zw.new, zw or T written)" || no "zwrite: the disk changed after the session"
 # (a kernel log line may land inside the zbg line: the count and the last line are checked apart)
 echo "$log" | grep -aq '^zbg=400' && echo "$log" | grep -aq 'last=399$' && ok "a background job writing a file during a session: its requests held at the sync and done afterwards, none lost" || no "the held writes: $(echo "$log" | grep -a '^zbg=' | tail -1)"
 # 16.5: a 68030 MMU instruction on a CPU without that MMU (the 68020 here) is a no-op; an FPU instruction this machine

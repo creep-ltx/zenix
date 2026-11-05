@@ -501,11 +501,11 @@ u32 c_SetIoErr(u32 e)
     return o;
 }
 
-/* ---- dos's files (5.6): the program's directory as the volume zine made (user/zine/zvol.h), read-only; a file
- * opened to be written takes the bytes and keeps none (owner answer 3: what a program writes is gone afterwards),
- * as does NIL:. A FileHandle (44 bytes) is given, its fh_Args the slot here. ---- */
+/* ---- dos's files (5.6): the program's directory as the volume zine made (user/zine/zvol.h), never written; a file
+ * written on any path is one of ZINE's memory files (16.9, below), gone with the session (owner answer 3); NIL:
+ * takes the bytes and keeps none. A FileHandle (44 bytes) is given, its fh_Args the slot here. ---- */
 #define NFILES 16
-static struct { u8 used, sink, ram; u32 ent, pos, fh; } files[NFILES];     /* ram: a RAM: file's index + 1 */
+static struct { u8 used, sink, ram; u32 ent, pos, fh; } files[NFILES];     /* ram: a memory file's index + 1 */
 #define MODE_OLDFILE 1005
 #define MODE_NEWFILE 1006
 #define MODE_READWRITE 1004
@@ -521,15 +521,17 @@ static int slot_of(u32 fh)
     return -1;
 }
 
-/* ---- ZINE's RAM: and the assigns (docs/d29-zine.md 16.8). A program may write files to RAM: and read them back,
- * load them (LoadSeg, OpenLibrary) and delete them; they live in its own memory (AllocMem) and are gone with the
- * session (owner answer 3). Files written anywhere else take the bytes and keep none, as before. Names compare without
- * case; a RAM: name is the whole path after "RAM:" (no directories). The assigns are zpath.h's: Open, LoadSeg,
+/* ---- ZINE's memory files and the assigns (docs/d29-zine.md 16.8, 16.9). Every file a program writes, on any path
+ * (RAM:, T:, ENV:, its own folder, SYS:, DH0:), is kept in its own memory (AllocMem) under the path's key (zpath.h
+ * za_key: "PROGDIR:x" and "x" are one file), read back by that path, loaded (LoadSeg, OpenLibrary) and deleted, and
+ * gone with the session (owner answers 3 and of 2026-11-04): nothing reaches a disk. A memory file stands in front of
+ * the volume's file of the same path for reads and deletes; deleting a volume file leaves a memory file marked gone,
+ * which hides it for the rest of the session. Names compare without case. The assigns are zpath.h's: Open, LoadSeg,
  * DeleteFile and OpenLibrary follow them. ---- */
 static void say3(const char *a, const char *b, const char *c);
 #define NRAM 32
 #define ZPATH 200                       /* bytes of a path with its assigns followed */
-static struct { char *name; u32 nlen, buf, cap, size, open; } ramf[NRAM];   /* name 0: the slot is free */
+static struct { char *name; u32 nlen, buf, cap, size, open, gone; } ramf[NRAM];  /* name (the key) 0: free */
 static struct za_table assigns;
 
 static int ram_find(const char *n)
@@ -540,12 +542,12 @@ static int ram_find(const char *n)
     return -1;
 }
 
-/* a new, empty RAM: file: its index, or -1 and IoErr */
+/* a new, empty memory file of key n: its index, or -1 and IoErr */
 static int ram_new(const char *n)
 {
     u32 l = slen(n);
-    if (!l || l > ZV_NAMEMAX) {
-        Z.ioerr = l ? 210 : 212;        /* ERROR_INVALID_COMPONENT_NAME, ERROR_OBJECT_WRONG_TYPE (RAM: itself) */
+    if (!l || n[l - 1] == ':') {
+        Z.ioerr = 212;                  /* ERROR_OBJECT_WRONG_TYPE: a device itself ("RAM:") */
         return -1;
     }
     for (int i = 0; i < NRAM; i++)
@@ -555,9 +557,10 @@ static int ram_new(const char *n)
                 break;
             zmemcpy(m, n, l + 1);
             ramf[i].name = m, ramf[i].nlen = l, ramf[i].buf = ramf[i].cap = ramf[i].size = ramf[i].open = 0;
+            ramf[i].gone = 0;
             return i;
         }
-    say3("ZINE: RAM: is full (ZINE keeps 32 files there, in the program's memory): no room for ", n, "\n");
+    say3("ZINE: the program's written files are full (ZINE keeps 32, in the program's memory): no room for ", n, "\n");
     Z.ioerr = 221;                      /* ERROR_DISK_FULL */
     return -1;
 }
@@ -585,7 +588,7 @@ static u32 ram_write(int r, u32 pos, const char *s, u32 n)
         if (!nb)                        /* overflowed, or no room for the doubled size: just what is needed */
             nb = zx_AllocMem(cap = end, MEMF_PUBLIC);
         if (!nb) {
-            say3("ZINE: RAM: is full (no memory left in the program's): ", ramf[r].name, " not written\n");
+            say3("ZINE: no memory left in the program's to keep what it writes: ", ramf[r].name, " not written\n");
             Z.ioerr = 221;              /* ERROR_DISK_FULL */
             return (u32)-1;
         }
@@ -601,20 +604,47 @@ static u32 ram_write(int r, u32 pos, const char *s, u32 n)
     return n;
 }
 
-/* where a path names a file now: 1 a RAM: file (*r), 2 a volume entry (*ent: a file or a directory), 0 none, with
- * *nodev 1 when every path it stands for lies on a device ZINE has not (NIL:, DH0:) */
+/* 1 when path is on a device that is a stream, not a disk (NIL:, CONSOLE:, PRT:, SER:, PAR:, AUX:): what is written
+ * goes and nothing is kept, a read is at its end at once; everything else is a disk, its writes kept in memory */
+static int stream_dev(const char *path)
+{
+    static const char *const dev[] = { "NIL", "CONSOLE", "PRT", "SER", "PAR", "AUX" };
+    const char *c = path;
+    while (*c && *c != ':')
+        c++;
+    if (*c)
+        for (u32 i = 0; i < sizeof dev / sizeof dev[0]; i++)
+            if (zv_same(path, (u32)(c - path), dev[i]))
+                return 1;
+    return 0;
+}
+
+/* path's key (zpath.h) in k: 1, or 0 when it has none (too long, above a device's top) */
+static int key_of(const char *path, char *k)
+{
+    return za_key(path, ((const struct zv_hdr *)Z.a.vol)->volname, k, ZPATH);
+}
+
+/* where a path names a file now: 1 a memory file (*r), 2 a volume entry (*ent: a file or a directory), 0 none, with
+ * *nodev 1 when every path it stands for lies on a device ZINE has not (NIL:, DH0:) and holds no memory file; *r a
+ * memory file marked gone that hid the path (else -1) */
 static char hit[ZPATH];                 /* the path locate found its file as */
 static int locate(const char *name, u32 *ent, int *r, int *nodev)
 {
-    int dev = 0, seen = 0;
+    int dev = 0, seen = 0, g = -1;
+    char k[ZPATH];
     *nodev = 0;
     for (u32 i = 0; za_expand(&assigns, name, i, hit, sizeof hit); i++) {
         seen = 1;
-        const char *rn = za_ram(hit);
-        if (rn) {
+        int m = key_of(hit, k) ? ram_find(k) : -1;
+        if (m >= 0 && !ramf[m].gone) {
+            *r = m;
+            return 1;
+        }
+        if (m >= 0 || za_ram(hit)) {    /* deleted this session (hides the volume's file), or on RAM: */
             dev = 1;
-            if ((*r = ram_find(rn)) >= 0)
-                return 1;
+            if (m >= 0 && g < 0)
+                g = m;
             continue;
         }
         int e = zv_find((const void *)Z.a.vol, 0, hit, ent);
@@ -624,6 +654,7 @@ static int locate(const char *name, u32 *ent, int *r, int *nodev)
             return 2;
     }
     *nodev = seen && !dev;
+    *r = g;
     return 0;
 }
 
@@ -688,24 +719,46 @@ u32 c_Open(const char *name, s32 mode)
     u32 ent = 0;
     int r = -1, nodev = 0;
     int w = locate(name, &ent, &r, &nodev);
-    if (mode == MODE_NEWFILE || (mode == MODE_READWRITE && !w)) {
-        char p[ZPATH];
-        const char *rn = za_expand(&assigns, name, 0, p, sizeof p) ? za_ram(p) : 0;
-        if (rn) {                       /* RAM: keeps what is written (a new file, or an old one emptied) */
-            if (w == 1 && mode == MODE_NEWFILE)
-                ramf[r].size = 0;
-            else if (w != 1 && (r = ram_new(rn)) < 0)
-                return 0;
-            return fh_new(0, 0, r + 1);
+    if (mode == MODE_NEWFILE || (mode == MODE_READWRITE && w != 1)) {
+        /* every path keeps what is written, in memory (16.9): a new file, an old one emptied, or (MODE_READWRITE) a
+         * copy of the volume's file to change; at the path it was found as, else the name's first meaning */
+        char p[ZPATH], k[ZPATH];
+        if (w == 2)
+            zmemcpy(p, hit, sizeof p);
+        else if (!za_expand(&assigns, name, 0, p, sizeof p)) {
+            Z.ioerr = 210;              /* ERROR_INVALID_COMPONENT_NAME: too long */
+            return 0;
         }
-        return fh_new(0, 1, 0);         /* elsewhere: the bytes go, nothing is kept (owner answer 3) */
+        if (stream_dev(p))
+            return fh_new(0, 1, 0);     /* NIL: and the like take the bytes and keep none */
+        if (w == 2 && zv_ent((const void *)Z.a.vol, ent)->dir) {
+            Z.ioerr = 212;              /* ERROR_OBJECT_WRONG_TYPE: a directory */
+            return 0;
+        }
+        if (!key_of(p, k)) {
+            Z.ioerr = 210;
+            return 0;
+        }
+        int m = w == 1 ? r : ram_find(k);
+        if (m < 0 && (m = ram_new(k)) < 0)
+            return 0;
+        if (mode == MODE_NEWFILE || ramf[m].gone)
+            ramf[m].size = 0;
+        ramf[m].gone = 0;
+        if (w == 2 && mode == MODE_READWRITE) {
+            const struct zv_ent *e = zv_ent((const void *)Z.a.vol, ent);
+            ramf[m].size = 0;
+            if (e->size && ram_write(m, 0, (const char *)Z.a.vol + e->off, e->size) == (u32)-1)
+                return 0;
+        }
+        return fh_new(0, 0, m + 1);
     }
     if (w == 1)
         return fh_new(0, 0, r + 1);
     if (w == 2 && !zv_ent((const void *)Z.a.vol, ent)->dir)
         return fh_new(ent, 0, 0);
-    if (!w && nodev)
-        return fh_new(0, 1, 0);         /* NIL: and the like */
+    if (!w && stream_dev(name))
+        return fh_new(0, 1, 0);         /* NIL: and the like: at the end at once (any other missing file: not found) */
     static const char msg[] = "ZINE: no file ";
     zb_out(msg, sizeof msg - 1);
     zb_out(name, slen(name));
@@ -780,32 +833,43 @@ s32 c_Seek(u32 fh, s32 pos, s32 mode)
     return old;
 }
 
-/* dos DeleteFile (-72): a RAM: file goes (not while it is open: ERROR_OBJECT_IN_USE, as RAM: answers); the
- * program's own files are read-only and other disks are not ZINE's to touch: refused, said in the output */
+/* dos DeleteFile (-72), in memory only (16.9): a memory file goes (not while it is open: ERROR_OBJECT_IN_USE, as
+ * RAM: answers); one of the volume (the program's own files), or a memory file in front of one, is marked gone, so
+ * the path finds nothing for the rest of the session while the disk keeps the file. A directory of the volume is
+ * refused, said in the output. */
 u32 c_DeleteFile(const char *name)
 {
     u32 ent = 0;
     int r = -1, nodev = 0;
     int w = name ? locate(name, &ent, &r, &nodev) : 0;
+    char k[ZPATH];
     if (w == 1) {
         if (ramf[r].open) {
             Z.ioerr = 202;              /* ERROR_OBJECT_IN_USE */
             return 0;
         }
-        ram_free(r);
+        u32 e;
+        if (zv_find((const void *)Z.a.vol, 0, ramf[r].name, &e)) {
+            ram_free(r);                /* nothing of the volume behind it */
+            return (u32)-1;
+        }
+        if (ramf[r].buf)                /* in front of a volume file: kept, marked gone */
+            zx_FreeMem(ramf[r].buf, ramf[r].cap);
+        ramf[r].buf = ramf[r].cap = ramf[r].size = 0, ramf[r].gone = 1;
         return (u32)-1;
     }
     if (w == 2) {
-        say3("ZINE: ", Z.blk->name, " asked to delete ");
-        say3(name, ", one of its own files: they are read-only under ZINE, nothing deleted\n", "");
-        Z.ioerr = 214;                  /* ERROR_DISK_WRITE_PROTECTED */
-        return 0;
-    }
-    if (nodev) {
-        say3("ZINE: ", Z.blk->name, " asked to delete ");
-        say3(name, ", on a disk ZINE does not give it: nothing deleted\n", "");
-        Z.ioerr = 218;                  /* ERROR_DEVICE_NOT_MOUNTED */
-        return 0;
+        if (zv_ent((const void *)Z.a.vol, ent)->dir) {
+            say3("ZINE: ", Z.blk->name, " asked to delete ");
+            say3(name, ", a directory of its own: ZINE deletes files only, nothing deleted\n", "");
+            Z.ioerr = 214;              /* ERROR_DISK_WRITE_PROTECTED */
+            return 0;
+        }
+        int m = key_of(hit, k) ? ram_new(k) : -1;
+        if (m < 0)
+            return 0;
+        ramf[m].gone = 1;               /* the volume's file hidden for the session; the disk keeps it */
+        return (u32)-1;
     }
     Z.ioerr = 205;                      /* ERROR_OBJECT_NOT_FOUND */
     return 0;
@@ -941,8 +1005,8 @@ u32 c_LoadSeg(const char *name, u32 tab, u32 fh)
     u32 wsize = inf.nhunks * sizeof(struct zh_seg) + 8, seg = 0;
     struct zh_seg *work = (struct zh_seg *)zx_AllocMem(wsize, MEMF_PUBLIC);
     struct zh_ops ops = { zb_hunk_alloc, zb_hunk_free, 0 };
-    if (name && inf.ovl && ent == ~0u) {    /* the overlay handle is a volume file's: not one of RAM: */
-        say3("ZINE: ", name, " is overlaid: ZINE loads overlaid programs from the program's own files, not from RAM:\n");
+    if (name && inf.ovl && ent == ~0u) {    /* the overlay handle is a volume file's: not a memory file's */
+        say3("ZINE: ", name, " is overlaid: ZINE loads overlaid programs from the program's own files, not from ones it wrote\n");
         if (work)
             zx_FreeMem((u32)work, wsize);
         Z.ioerr = ERROR_FILE_NOT_OBJECT;
@@ -990,13 +1054,16 @@ u32 c_Write(u32 fh, const char *buf, s32 n)
 {
     int fs = slot_of(fh);
     if (fs >= 0 && n >= 0) {
-        if (files[fs].ram) {            /* RAM: keeps it (16.8) */
+        if (files[fs].ram) {            /* a memory file keeps it (16.8, 16.9) */
             u32 k = ram_write(files[fs].ram - 1, files[fs].pos, buf, (u32)n);
             if (k != (u32)-1)
                 files[fs].pos += k;
             return k;
         }
-        return files[fs].sink ? (u32)n : (u32)-1;     /* a written file keeps nothing; the program's files are read-only */
+        if (files[fs].sink)
+            return (u32)n;              /* NIL: */
+        Z.ioerr = 223;                  /* ERROR_WRITE_PROTECTED: a volume file opened to be read */
+        return (u32)-1;
     }
     if (fh != Z.out_fh || n < 0) {
         Z.ioerr = 114;                  /* ERROR_OBJECT_WRONG_TYPE: not a handle ZINE gave */

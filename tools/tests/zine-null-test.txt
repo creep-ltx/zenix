@@ -45,6 +45,10 @@ send zine /tests/zine/zpkt u; echo zpktu-rc=$?\r
 wait zpktu-rc= 60
 send zine /tests/zine/zlibs; echo zlibs-rc=$?\r
 wait zlibs-rc= 90
+send mkdir -p /tmp/zwref; cp /tests/zine/zexit /tests/zine/zhello /tests/zine/zbadcall /tmp/zwref/; zine /tests/zine/zwrite; echo zwrite-rc=$?\r
+wait zwrite-rc= 90
+send cmp /tests/zine/zexit /tmp/zwref/zexit && cmp /tests/zine/zhello /tmp/zwref/zhello && cmp /tests/zine/zbadcall /tmp/zwref/zbadcall && ! ls /tests/zine/zw.new /tests/zine/zw /tests/zine/T 2>/dev/null && echo zwdisk-""same; rm -r /tmp/zwref\r
+wait zwdisk- 30
 send rm -f /home/zbg; sh -c 'i=0; while [ $i -lt 400 ]; do echo $i >> /home/zbg; i=$((i+1)); done' & zine /tests/zine/ztake; wait; echo zbg=$(grep -c . /home/zbg) last=$(tail -1 /home/zbg)\r
 wait (?s)zbg=\d+.*?last=\d+\D 90
 send zine /tests/zine/zmmu; echo zmmu-rc=$?; zine /tests/zine/zfpu; echo zfpu-rc=$?\r

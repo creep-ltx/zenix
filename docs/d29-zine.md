@@ -316,8 +316,8 @@ the output ring (C start-up code opens `*` for errors), `Open("NIL:")` a sink. L
 a BPTR to the volume's DosList entry). Names are found by ZINE itself in the volume;
 there is no handler process (a program that sends packets to `pr_FileSystemTask` or `pr_ConsoleTask` finds 0 there and
 fails as under a missing handler); a packet sent to a file handle's own `fh_Type` is answered by ZINE (16.7). `Execute`
-runs nothing and answers done (16.7), but an `Assign` ZINE does itself; `DeleteFile` deletes files of ZINE's `RAM:`
-(16.8).
+runs nothing and answers done (16.7), but an `Assign` ZINE does itself; what a program writes, on any path, is kept
+in its memory and `DeleteFile` deletes there (16.8, 16.9).
 
 ### 5.5 intuition.library and the resources
 
@@ -363,9 +363,11 @@ revision 2's FFS image and device: AmigaOS's own filesystem is not running, so Z
 - **Limits:** if the directory holds more than 16 MB, more than half the free fast RAM, or more than 500 files, only the
   program goes in, with a warning ("only NAME was copied: its directory holds 23 MB; a program that loads files may not
   find them: give it a directory of its own").
-- **Writes** (owner answer 3): as built, a file written to `RAM:` lives in the program's own memory for the session
-  (it can be read, loaded and deleted: 16.8) and is gone afterwards; a write anywhere else takes the bytes and keeps
-  none. The volume block itself is never written, so it is in the checksums. `Rename` and the rest are the "not
+- **Writes** (owner answer 3, and 2026-11-04 "not all demos write to the same location"): as built (16.9), a file
+  written on any path (`RAM:`, `T:`, `ENV:`, the program's own folder, `SYS:`, `DH0:`) lives in the program's own
+  memory for the session (it can be read back by that path, loaded and deleted; it stands in front of the volume's
+  file of that path) and is gone afterwards; nothing is ever written to a disk. `NIL:` and the other stream devices
+  keep nothing. The volume block itself is never written, so it is in the checksums. `Rename` and the rest are the "not
   supported" stop.
 - The reader is a shared C file of `zine` with a host test.
 
@@ -1304,7 +1306,7 @@ MakeFunctions and the semaphores, the RKRM Devices manual for audio.device, the 
 - **RAM:** (`blibs.c`): a file opened for writing on `RAM:` (or `Ram Disk:`) lives in the program's own memory
   (AllocMem, grown as written, up to 32 files, names without case as AmigaDOS's) and can be read back, sought, loaded
   with `LoadSeg`, opened as a library and deleted; it is gone with the session (owner answer 3). A write anywhere else
-  still keeps nothing; the program's own files stay read-only.
+  still keeps nothing; the program's own files stay read-only (since 16.9 every path keeps what is written).
 - **Assigns** (`user/zine/zpath.c`, plain C with a host test): up to 8 names of up to 3 directories each, followed by
   `Open`, `LoadSeg`, `DeleteFile` and `OpenLibrary` (each directory in turn when looking a file up; the first when
   creating one; an assign through another followed up to 4 times). At the start `LIBS:` is `SYS:LIBS` (the program's
@@ -1364,6 +1366,52 @@ REMOVE, the limits, chains, every prefix of a command). Not yet: Ltx-Snigelsaft 
 
 Sizes (the 68020-60 build): the blob 32,312 -> 40,728 bytes (memory 36,304 -> 45,864; the assigns' table is 2.6 KB of it); the assigns core 1,863
 bytes at -Os; `/bin/zine` and the kernel unchanged.
+
+### 16.9 A write to any path kept in memory (2026-11-05, branch fix1105)
+
+Owner, 2026-11-04: "not all demos write to the same location". 16.8 kept only what a program wrote to `RAM:`; a write
+to `T:`, `ENV:`, the program's folder, `SYS:` or another disk was answered as done and dropped, so a demo that writes a
+file and reads it back elsewhere than `RAM:` found nothing.
+
+**Built** (`blibs.c`, `zpath.c` `za_key`; *read*: the AmigaDOS Manual's path rules, the NDK 3.2's `dos/dos.h` for the
+error numbers):
+- **One store for every path.** A file opened with `MODE_NEWFILE` (or `MODE_READWRITE` when the path names nothing)
+  on any path goes to ZINE's memory files (16.8's `RAM:` files, now for every path): up to 32 files, in the program's
+  memory (AllocMem, grown as written), gone with the session. Never a disk: ZINE has no disk to write to, and the
+  volume block stays as `zine` made it (its checksum still holds at the way back).
+- **The key.** A file is found by its path with the assigns followed, in one form (`za_key`, zpath.h, host-tested):
+  `"data"`, `"PROGDIR:data"`, `"SYS:data"`, `":data"` and the volume's own name are one file (`SYS:data`); the
+  volume's `C:`, `S:`, `L:`, `LIBS:`, `DEVS:`, `FONTS:` are its directories (`SYS:C/x`, as `zv_find` has them);
+  `RAM:` and `Ram Disk:` one device; any other device by its name in capitals (`T:x`, `ENV:Sys/x`, `DH0:a/b`); `/`
+  and `//` go up one, a `/` at the end is dropped, names compare without case. Too long (200 bytes) or above a
+  device's top: `ERROR_INVALID_COMPONENT_NAME`.
+- **Shadowing.** At each place a path stands for (16.8's assigns, in turn), a memory file comes before the volume's
+  file: `Open`, `LoadSeg` and `OpenLibrary` read what the program wrote. `MODE_READWRITE` on one of the volume's files
+  copies it into a memory file first, so a program that changes a file of its own changes its copy. A volume's
+  directory cannot be opened for writing (`ERROR_OBJECT_WRONG_TYPE`).
+- **Deletes.** `DeleteFile` of a memory file frees it (open: `ERROR_OBJECT_IN_USE`); of one of the volume's files, or
+  of a memory file in front of one, leaves a memory file marked gone: the path finds nothing for the rest of the
+  session (`ERROR_OBJECT_NOT_FOUND`), the disk keeps the file. A volume's directory is refused and said
+  (`ERROR_DISK_WRITE_PROTECTED`). A missing path: `ERROR_OBJECT_NOT_FOUND` (16.8 answered `ERROR_DEVICE_NOT_MOUNTED`
+  for another disk's; there is no "other disk" now).
+- **Streams.** `NIL:`, `CONSOLE:`, `PRT:`, `SER:`, `PAR:` and `AUX:` take what is written and keep nothing; a read is
+  at its end at once. Any other missing file is not found (16.8 gave an empty file for a path on a device ZINE did
+  not know). A write to one of the volume's files opened to be read: `ERROR_WRITE_PROTECTED`.
+- **Locks.** ZINE has no `Lock` yet (5.4 lists it, but the vector is still the "not supported" stop): a program that
+  locks a file stops there and names the call, as before; when `Lock` comes, it finds the same files.
+
+*Verified* in FS-UAE (`tools/zine-emu-test.sh`, A1200 68020 4 MB fast): `zwrite` (`tools/tests/zine/zwrite.S`) writes
+`T:zw.tmp`, `ENV:Zw/pref`, `PROGDIR:zw.new` and `DH0:zw/deep` and reads each back by another form of its path
+(`t:ZW.TMP`, `env:zw//Zw/pref`, `zw.new` and `SYS:zw.new`, `dh0:ZW/deep/`); `NIL:` keeps nothing; its folder's
+`zexit` is read (the real file), shadowed by a written `PROGDIR:zexit` and read back as `zexit`; `zhello` opened
+`MODE_READWRITE`, its first two bytes changed, read back with the rest its own; `DeleteFile` of the shadowed `zexit`,
+of `zbadcall` (never written) and of `T:zw.tmp`: each then not found, a second delete `ERROR_OBJECT_NOT_FOUND`; return
+code 0. Afterwards the shell finds the disk as before (`cmp` of `zexit`, `zhello`, `zbadcall` against copies taken
+before; no `zw.new`, `zw` or `T` in the folder). `zlibs` (16.8) passes unchanged. On the PC (`tools/host/zine-test.sh`
+core): `za_key`'s forms, the limits, every short buffer.
+
+Sizes (the 68020-60 build): the blob 40,728 -> 42,116 bytes (memory 45,864 -> 47,480); `/bin/zine` and the kernel
+unchanged.
 
 ## 17. Questions for the owner (what ZINE should be)
 

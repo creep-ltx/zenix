@@ -33,6 +33,15 @@ int za_expand(const struct za_table *t, const char *path, zu32 i, char *out, zu3
 /* The part after "RAM:" (or "Ram Disk:") when path is on ZINE's RAM:, else 0 */
 const char *za_ram(const char *path);
 
+/* ZINE's memory files (docs/d29-zine.md 16.9): every file a program writes, on any path, is kept in its memory under
+ * one name per file, its key: path (with its assigns followed) in one form, so that "data", "PROGDIR:data",
+ * "SYS:data" and "VOLNAME:data" are one file, and "ram:x" and "Ram Disk:x" another. The key is "DEV:rest": DEV is
+ * "SYS" for the program's volume (no device, ":", "SYS:", "PROGDIR:", the volume's name vol), "SYS:C/" for the
+ * volume's own C:, S:, L:, LIBS:, DEVS:, FONTS: (as zv_find has them), "RAM" for RAM: and "Ram Disk:", else the
+ * device's name in capitals ("T", "ENV", "DH0"); rest with '/' or "//" going up one, no '/' at either end. 1 and the
+ * key in out (max bytes with its 0), or 0 (longer than max - 1, or above a device's top). Keys compare without case. */
+int za_key(const char *path, const char *vol, char *out, zu32 max);
+
 /* An Execute command line that is an Assign ("Assign NAME: DIR...", "C:Assign", "Ram:Assign"; the options ADD,
  * REMOVE; DEFER and PATH taken as a plain assign): */
 struct za_cmd {
