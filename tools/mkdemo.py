@@ -46,14 +46,15 @@ def main() -> None:
         sys.exit("mkdemo.py: the stage 2 and the kernel must be ZEXE images")
     if len(image) % 1024 or image[1080:1082] != b"\x53\xef":
         sys.exit("mkdemo.py: the RAM disk must be an ext2 image of whole 1 KB blocks")
-    if len(bootcode) > 1020 - 12:
-        sys.exit(f"mkdemo.py: bootblock code too big: {len(bootcode)} > {1020 - 12}")
+    if len(bootcode) > 1016 - 12:
+        sys.exit(f"mkdemo.py: bootblock code too big: {len(bootcode)} > {1016 - 12}")
     s2_mem = max(struct.unpack(">I", stage2[12:16])[0], len(stage2))
     s2 = pad(stage2)
 
     bb = bytearray(1024)
     bb[0:4] = b"DOS\0"
     bb[8:12] = struct.pack(">I", len(s2))
+    bb[1016:1020] = struct.pack(">I", track)       # the disk's track bytes: demoboot.S compares the drive's
     bb[1020:1024] = struct.pack(">I", (s2_mem + 3) & ~3)
     bb[12:12 + len(bootcode)] = bootcode
     bb[4:8] = struct.pack(">I", 0xFFFFFFFF - carry_sum(bytes(bb)))

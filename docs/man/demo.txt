@@ -28,9 +28,10 @@ DESCRIPTION
     program on this disk, a "box" (as BusyBox): each name is a link to it,
     and it runs the command its name says, as the separate program would.
 
-    A network card (an A2065, the PiStorm's Ethernet, an NE2000 PC Card) is
-    set up by DHCP; then telnet(1) reaches BBSes, with Zmodem downloads
-    (rz(1)), and ping(8) and host(1) work.
+    The network: with a card (an A2065, the PiStorm's Ethernet, an NE2000
+    PC Card) its driver and netd(8) bring it up as ifconfig(8) says (not
+    yet by itself at boot); then telnet(1) reaches BBSes, with Zmodem
+    downloads (rz(1)), and ping(8) and host(1) work.
 
 FILES
     /usr/lib/demo/session  the desktop session: the welcome, then zdesk
@@ -38,7 +39,12 @@ FILES
 
 NOTES
     The loader refuses a machine without 4 MB of fast RAM, a 68000 and a
-    damaged disk, saying why on the screen; nothing is changed then. The
+    damaged disk, saying why on the screen; nothing is changed then.
+    Before that, the bootblock fills the screen with one colour when it
+    fails: red, no memory; yellow, the disk's tracks are not the drive's
+    (the HD disk in a drive Kickstart runs as a DD one, such as a Gotek
+    that does not say it is an HD drive: use the DD disk there); orange,
+    a read error; green, a damaged loader. The
     floppy carries no filesystem (Linux sees an empty disk). Zenix is free
     software (GPL-2.0); the notices of the code from other projects are in
     /usr/share/licenses. The source: https://github.com/creep-ltx/zenix

@@ -4,14 +4,25 @@
  * checksum and enters at offset 12 with a1 = the trackdisk request and a6 = ExecBase. Only 68000 code: the stage 2
  * itself tells a 68000 Amiga that it cannot run Zenix.
  *
- * tools/mkdemo.py patches the long at offset 8 with the stage 2's size on the disk (a multiple of 512) and the
+ * tools/mkdemo.py patches the long at offset 8 with the stage 2's size on the disk (a multiple of 512), the long at
+ * offset 1016 with the disk's track bytes (5632 DD, 11264 HD) and the
  * long at offset 1020 with the memory it needs (the ZEXE's mem_size, at least its file size). The plain RAM floppy's
  * bootblock (boot/bootblock.S) stays as it is.
  *
  * The stage 2 is read from this disk only, and checked: its header, the relocation table inside the file, every
- * relocated long inside the image. A failure turns the whole screen red (the bootblock colours of boot/handoff.S). */
+ * relocated long inside the image. A failure fills the whole screen with one colour that says which (a photo of
+ * the screen is the report; none is a boot stage colour of boot/handoff.S):
+ *   red     no memory for the stage 2
+ *   yellow  the disk's tracks are not this drive's: the HD disk in a drive Kickstart runs as DD (11 sectors a track;
+ *           a Gotek that does not say it is an HD drive), or the DD disk where 22 are read; checked before reading,
+ *           against the track size tools/mkdemo.py writes at offset 1016 (TD_GETGEOMETRY, Kickstart 2.0 and newer)
+ *   orange  a read error (trackdisk gave up)
+ *   green   the stage 2 read is not a good ZEXE (its header, its relocations) */
 #define DIAG_BLUE       0x00F
-#define DIAG_RED        0xF00
+#define FAIL_NOMEM      0xF00
+#define FAIL_TRACKS     0xFF0
+#define FAIL_READ       0xF80
+#define FAIL_BAD        0x0F0
 
     .text
     .globl  _start
@@ -33,8 +44,26 @@ _start:
 2:
     jsr     -198(%a6)               /* AllocMem (never freed: the OS dies) */
     tst.l   %d0
-    beq     fail
+    beq     failmem
     move.l  %d0,%a4                 /* a4 = the stage 2 */
+
+    /* the drive's sectors a track against the disk's (offset 1016): TD_GETGEOMETRY into 32 bytes of the stack */
+    cmp.w   #36,20(%a6)
+    blo.s   8f                      /* (Kickstart 1.3 has no TD_GETGEOMETRY; the stage 2 refuses it anyway) */
+    lea     -32(%sp),%sp
+    move.w  #22,28(%a5)             /* io_Command = TD_GETGEOMETRY */
+    move.l  #32,36(%a5)
+    move.l  %sp,40(%a5)
+    move.l  %a5,%a1
+    jsr     -456(%a6)               /* DoIO */
+    move.l  20(%sp),%d1             /* dg_TrackSectors */
+    lea     32(%sp),%sp
+    tst.b   %d0
+    bne.s   8f                      /* no answer: the read below says what it can */
+    mulu.w  #512,%d1
+    cmp.l   _start+1004(%pc),%d1    /* the disk's track bytes (offset 1016) */
+    bne     failtracks
+8:
 
     move.w  #2,28(%a5)              /* io_Command = CMD_READ */
     move.l  %d7,36(%a5)             /* io_Length */
@@ -43,36 +72,36 @@ _start:
     move.l  %a5,%a1
     jsr     -456(%a6)               /* DoIO */
     tst.b   %d0
-    bne     fail
+    bne     failread
 
     /* the ZEXE header (tools/mkzexe.py): 'ZEXE' at +4, image size +8, mem size +12, nreloc +16, reloc_off +20 */
     cmp.l   #0x5A455845,4(%a4)
-    bne     fail
+    bne     failbad
     move.l  8(%a4),%d5              /* image size */
     cmp.l   %d7,%d5
-    bhi     fail
+    bhi     failbad
     cmp.l   12(%a4),%d6             /* the memory taken holds the image and its BSS */
-    blo     fail
+    blo     failbad
     move.l  16(%a4),%d4             /* nreloc */
     move.l  20(%a4),%d3             /* reloc_off */
     cmp.l   %d5,%d3                 /* the table lies after the image and inside the file */
-    blo     fail
+    blo     failbad
     cmp.l   #0x10000,%d4            /* far more than any stage 2 has: refused before the multiply */
-    bhs     fail
+    bhs     failbad
     move.l  %d4,%d0
     lsl.l   #2,%d0
     add.l   %d3,%d0
     cmp.l   %d7,%d0
-    bhi     fail
+    bhi     failbad
     lea     (%a4,%d3.l),%a0         /* a0 = the relocation table */
     move.l  %d5,%d2
     subq.l  #4,%d2                  /* the last place a long fits in the image */
     bra.s   3f
 2:  move.l  (%a0)+,%d0              /* a long that holds a link-time address */
     cmp.l   %d2,%d0
-    bhi     fail
+    bhi     failbad
     btst    #0,%d0                  /* a 68000 reads longs only at even addresses */
-    bne     fail
+    bne     failbad
     move.l  %a4,%d1
     add.l   %d1,(%a4,%d0.l)
 3:  dbf     %d4,2b
@@ -94,12 +123,23 @@ _start:
     move.l  %a5,%a1
     jmp     (%a4)                   /* d7 = its size on the disk: the table follows it */
 
+failmem:
+    move.w  #FAIL_NOMEM,%d2
+    bra.s   fail
+failtracks:
+    move.w  #FAIL_TRACKS,%d2
+    bra.s   fail
+failread:
+    move.w  #FAIL_READ,%d2
+    bra.s   fail
+failbad:
+    move.w  #FAIL_BAD,%d2
 fail:
-    move.w  #DIAG_RED,0xDFF180      /* the whole screen red = the bootblock failed (no memory, a read error, a bad stage 2) */
+    move.w  %d2,0xDFF180            /* the whole screen in the failure's colour (above) */
     move.w  #9,28(%a5)              /* TD_MOTOR, io_Length 0: the drive's motor off */
     clr.l   36(%a5)
     move.l  %a5,%a1
     jsr     -456(%a6)               /* DoIO */
 7:  moveq   #0,%d0
-    jsr     -318(%a6)               /* Wait(0): the boot task sleeps for good, the screen stays red */
+    jsr     -318(%a6)               /* Wait(0): the boot task sleeps for good, the colour stays */
     bra.s   7b

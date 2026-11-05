@@ -203,8 +203,11 @@ As built (step 2, 2026-11-05; `boot/demounpack.h` is the one description of the 
 reads it):
 
 ```
-byte 0        the bootblock (boot/demoboot.S, 'DOS\0', checksum): +8 the stage 2's size on the disk, +1020 its memory;
-              reads the stage 2, relocates it (a ZEXE), clears its BSS, jumps to it
+byte 0        the bootblock (boot/demoboot.S, 'DOS\0', checksum): +8 the stage 2's size on the disk, +1016 the disk's
+              track bytes, +1020 its memory; checks the drive's sectors a track against the disk's, reads the stage 2,
+              relocates it (a ZEXE), clears its BSS, jumps to it; a failure is one colour on the whole screen: red no
+              memory, yellow the disk's tracks are not the drive's (the HD disk in a drive Kickstart runs as DD),
+              orange a read error, green a bad stage 2
 byte 1024     the stage 2 loader (boot/demoload*.c, 16 KB with tinfl at -O2), padded to 512
 then          the table, one sector: 'ZDM1', version 1, the stream's offset and length, the kernel's part (kernel.bin
               padded to 512) and its memory, the RAM disk's size, the disk's size, a track's bytes (5632 DD, 11264
@@ -345,7 +348,10 @@ free (RAM disk 2,964 blocks, 3.2 MB unpacked with the kernel); each RAM disk kee
 171,596 bytes, a ZEXE with gzip's 32 KB stack, so every box command takes about 217 KB while it runs (the whole box,
 not shared): step 8 judges it. In FS-UAE (`tools/demo-test.sh`): both disks boot to the desktop's login on the A1200
 with 4 MB of fast RAM; 1,885 KB of fast RAM were free after the DD boot (the kernel's count). The HD disk needs about
-3.4 MB of one fast-RAM block (it fitted the 4 MB A1200 in FS-UAE, leaving about 0.6 MB of fast RAM to Zenix).
+3.4 MB of one fast-RAM block (it fitted the 4 MB A1200 in FS-UAE, leaving 909 KB of fast RAM to Zenix). **On the
+owner's A1200 (2026-11-05):** the DD disk boots to the desktop from the Gotek (the PiStorm A1200); the HD disk gave
+the bootblock's failure colour: Kickstart ran the Gotek as a DD drive (it sought cylinder 1 head 1, a DD track's
+place), so the HD disk's tracks cannot be read there; the bootblock now says so in yellow before reading.
 
 Efforts are rough, in this session's own hours.
 

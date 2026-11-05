@@ -4,7 +4,8 @@
  * the Amiga, tools/demoload-host-test.c on the PC with the same source (damaged streams, a fuzzer, the sanitizers).
  *
  * The disk (made by tools/mkdemo.py; not frozen: only this loader reads it):
- *   byte 0       the bootblock (boot/demoboot.S): +8 the stage 2's size on the disk, +1020 its memory size
+ *   byte 0       the bootblock (boot/demoboot.S): +8 the stage 2's size on the disk, +1016 the track bytes, +1020
+ *                its memory size
  *   byte 1024    the stage 2 (a ZEXE the bootblock relocates), padded to 512
  *   then         the table, one 512-byte sector (below)
  *   then         the stream (zlib: deflate with a 2-byte header and an Adler-32 of everything unpacked), from a
