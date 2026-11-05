@@ -99,7 +99,7 @@ MIN_TMP_MB=${ZENIX_MIN_TMP_MB:-2048}
 LONGEST="zinstall-test sysupdate-test ssh-test wget-test zpkg-emu-test remote-test nfs-emu-test update-test rootcheck-test svc-test matrix crypto68k-test diag-test colour-test bbs-test cmds2-test pure-test prio-test zenixboot-test zroot-test mounttest zenixfstest floppy-test users-test"
 declare -A SPLIT
 SPLIT[svc-test]="a z zs b n r d|o zo u l|f|s h t dmg c"   # f alone: it stays at stock speed (STOCK)
-SPLIT[demo-test]="d|h|c x y t"                      # D25: DD, HD, the refusals (2 MB chip, damaged, tracks), term size
+SPLIT[demo-test]="d|h|c x y t|n"                    # D25: DD, HD, the refusals (2 MB chip, damaged, tracks), term size; the network by itself
 SPLIT[fat-test]="16|32"                             # the two rounds, FAT16 and FAT32
 SPLIT[colour-test]="1 4 2|3 s4 s16 s7"    # the 1-plane run first (its edges are the reference); s*: the setting (D18)
 SPLIT[rootcheck-test]="r b|i|h|u"                 # u: the choices when a repair fails (man rescue)

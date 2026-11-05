@@ -28,10 +28,12 @@ DESCRIPTION
     program on this disk, a "box" (as BusyBox): each name is a link to it,
     and it runs the command its name says, as the separate program would.
 
-    The network: with a card (an A2065, the PiStorm's Ethernet, an NE2000
-    PC Card) its driver and netd(8) bring it up as ifconfig(8) says (not
-    yet by itself at boot); then telnet(1) reaches BBSes, with Zmodem
-    downloads (rz(1)), and ping(8) and host(1) work.
+    The network comes up by itself: at boot netd(8) looks for a card (the
+    PiStorm's Ethernet, an A2065, an NE2000 PC Card such as the FA411; on
+    the HD disk also a plipbox) and asks DHCP for an address; dmesg says
+    what it found, ifconfig(8) shows the address. Without a card netd
+    stops again and gives its memory back. Then telnet(1) reaches BBSes,
+    with Zmodem downloads (rz(1)), and ping(8) and host(1) work.
 
 FILES
     /usr/lib/demo/session  the desktop session: the welcome, then zdesk

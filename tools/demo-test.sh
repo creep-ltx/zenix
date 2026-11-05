@@ -10,15 +10,19 @@
 #   y   the bootblock's track check: a DD disk whose bootblock expects HD tracks (offset 1016 = 11264, the checksum
 #       made right) in the DD drive: the whole screen yellow (what the HD disk shows in a drive Kickstart runs as DD,
 #       a Gotek on the owner's A1200, 2026-11-05)
+#   n   the network by itself (D19 6.3, the card probe): the DD disk with an A2065 (FS-UAE's slirp, in a network
+#       namespace of its own): netd finds the board with no /etc/network/interfaces and DHCP gives 10.0.2.15; the
+#       genet and ne2000 drivers found nothing and were not started again. (d and h have no card: netd looked, said
+#       so and stopped.)
 #   t   a term window's program starts with the size the window got (the full test image, zdesk from the serial
 #       shell): 80 columns and a frame do not fit the screen, zdesk gives 78 or 79, and the program must see that
 #       (ctop drew 80 into them, its line ends wrapping into stray digits: "ru40ing", 2026-11-05)
-# usage: demo-test.sh [d h c x y t]   (all by default). Screenshots in ZENIX_OUT.
+# usage: demo-test.sh [d h c x y t n]   (all by default). Screenshots in ZENIX_OUT.
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
 OUT=${ZENIX_OUT:-/tmp/zenix-demo-test}; mkdir -p "$OUT"
 export ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenix-demo-serial}
-PARTS=${*:-d h c x y t}
+PARTS=${*:-d h c x y t n}
 make -s BUILD=$BD $BD/zenix-demo.adf $BD/zenix-demo-hd.adf > "$OUT/build.log" 2>&1 || { echo "FAIL build"; tail "$OUT/build.log"; exit 1; }
 grep -h "adf:" "$OUT/build.log" | sed 's/^/  /'
 pass=1
@@ -53,6 +57,8 @@ for kind in d h; do
     want "$what: init runs, the demo's motd shows" "$S" "Zenix demo disk - everything runs from memory"
     want "$what: dlogin starts the display server on console 1" "$S" "display: console 1 handed to"
     want "$what: guest is logged in on the desktop by itself (dlogin's autologin)" "$S" "^dlogin: guest (uid 1001) logged in: Desktop"
+    want "$what: no card: netd looked for one by itself (the A2065's driver found none)" "$S" "netd: eth0: no card for /sbin/net/a2065"
+    want "$what: ... and stopped again, its memory given back" "$S" "netd: no network card found and none configured: netd stops"
     grep -aq "session ended\|could not start\|not found\|no window" "$S" && no "$what: the session runs (no errors on the serial port)" || ok "$what: the session runs (no errors on the serial port)"
     [ -f "$OUT/$kind-loading.png" ] && [ -f "$OUT/$kind-desktop.png" ] && ok "$what: screenshots of the loading bar and the desktop" || no "$what: screenshots"
     [ "$(sha256sum < "$OUT/$kind-build/$(basename "$adf")")" = "$sum" ] && ok "$what: the ADF is unchanged after the boot" || no "$what: the ADF changed"
@@ -115,6 +121,19 @@ EOS
     ZENIX_SERIAL=${ZENIX_SERIAL}-t ZENIX_BUILD=$B tools/run-test.sh fsuae/a1200-020-fast.fs-uae 120 "$OUT/t.txt" 2>&1 | tr -d '\r' > "$OUT/t.log"
     grep -aqE "^termtest size: rows 2[0-9] columns 7[89]$" "$OUT/t.log" && ok "term: an 80-column window the screen shrinks: its program starts with the columns it got" || { no "term: the program's size at its start"; grep -a "termtest size" "$OUT/t.log"; }
     grep -aqx "termtest size: rows 10 columns 60" "$OUT/t.log" && ok "term -c 60 -r 10: the program sees 10 rows, 60 columns" || no "term -c 60 -r 10";;
+esac
+case " $PARTS " in *" n "*)
+    B=$OUT/n-build; rm -rf "$B"; mkdir -p "$B"; cp $BD/zenix-demo.adf "$B/"
+    sed '/^\[fs-uae\]/a network_card = a2065' fsuae/demo/demo.fs-uae > "$OUT/n.fs-uae"
+    printf 'wait demo: the Zenix demo disk.s loader 120\nwait (?m)netd: eth0: DHCP gave 300\nsleep 5\n' > "$OUT/n.txt"
+    # a network namespace of its own: FS-UAE's slirp answers DHCP itself and reaches nothing outside
+    ZENIX_SERIAL=${ZENIX_SERIAL}-n ZENIX_BUILD=$B unshare -rn tools/run-test.sh "$OUT/n.fs-uae" 400 "$OUT/n.txt" 2>&1 | tr -d '\r' > "$OUT/n.log"
+    want "network: no interfaces file: netd tried genet first, which found nothing" "$OUT/n.log" "netd: eth0: no card for /sbin/net/genet"
+    want "network: ... the A2065's driver found the board: up with DHCP, as the kernel log says" "$OUT/n.log" "netd: eth0: /sbin/net/a2065 found a card: up with DHCP"
+    want "network: ... DHCP gave it 10.0.2.15" "$OUT/n.log" "netd: eth0: DHCP gave 10.0.2.15"
+    want "network: ... the ne2000 driver was tried as eth1 and found nothing" "$OUT/n.log" "netd: eth1: no card for /sbin/net/ne2000"
+    grep -aq "netd stops" "$OUT/n.log" && no "network: netd stays (it serves eth0)" || ok "network: netd stays (it serves eth0)"
+    [ "$(grep -ac 'started /sbin/net/genet' "$OUT/n.log")" -le 1 ] && ok "network: genet was started once, not again" || no "network: genet started more than once";;
 esac
 rm -rf "$OUT"/*-build
 exit $((1 - pass))

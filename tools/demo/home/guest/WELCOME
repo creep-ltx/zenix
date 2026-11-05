@@ -12,6 +12,6 @@ Amiga is switched off.
  Amiga+Tab     next window  Amiga+Space  the menu
  Amiga+F2..F10 text consoles (log in as guest); Amiga+F1 back
  man demo      what is on this disk; man NAME for a command
- ifconfig      the network (a network card: see man demo)
+ ifconfig      the network (a card is found by itself)
 
 Press Return to close this window.

@@ -98,7 +98,8 @@ picolibc and the text-UI library each.
 - **The keymap:** `sv` and `us` in the kernel, one setting for all consoles; `kbd_set_keymap` exists, nothing calls
   it.
 - **The network:** netd brings an interface up only from `/etc/network/interfaces` (ROADMAP's real-hardware findings:
-  "netd should start a card it finds with DHCP without /etc/network/interfaces", not built).
+  "netd should start a card it finds with DHCP without /etc/network/interfaces"; built 2026-11-05 for every Zenix,
+  D19 6.3's card probe, 7.5 below).
 - **Kernel room:** `kernel.bin` leaves 812 bytes on the mount tests' floppy, whose rule (`tools/ksize-budget` ROOM)
   wants 800; that floppy's RAM disk (`root-mount.img`, 699 KB) had **3 free blocks** at 99b1101 (`dumpe2fs`; the
   Makefile's comment says 35: a finding for the main session).
@@ -295,11 +296,14 @@ every Zenix. No question at boot: it would hold the visitor up for its time limi
 ### 7.5 The network
 
 **netd starts a card it finds, with DHCP, when `/etc/network/interfaces` names none** (the owner's real-hardware
-finding of 2026-11-04 in ROADMAP, fixed for every Zenix): at its start (a line in the demo's `svctab`, as revision 2
-planned, T7.2) it runs each driver of `/sbin/net` once; a driver that finds no hardware ends at once with status 69
-(`EX_UNAVAILABLE`, revision 2's T9.2) and is not restarted; the first that finds its card gets `eth0` and DHCP. So a
-machine without a card pays a fraction of a second; whether netd then ends (it also serves the loopback) is decided
-in the step's review. Then `sntp` sets the clock (the stock A1200 has no battery clock; the bar shows the time).
+finding of 2026-11-04 in ROADMAP, fixed for every Zenix). **As built (2026-11-05, D19 6.3, the card probe):** the
+demo has no `/etc/network/interfaces`, so init starts `ifup -a --boot` without waiting; netd tries each shipped driver
+of `/sbin/net` once, in turn (genet, a2065, ne2000, and plipbox on the HD disk); a driver that finds no hardware ends
+with its reason (any status: a probe's driver that ends before it attaches is never restarted, so no status 69 was
+needed) and the next is tried; one that finds its card is `ethN` with DHCP. With no card netd stops again (its memory
+back) and starts on demand at the next socket call. The kernel log says each step (`tools/demo-test.sh` d, h: no card,
+netd stops; n: the A2065 gets its address). Then `sntp` sets the clock when `/etc/sntp` exists (the stock A1200 has no
+battery clock).
 
 ## 8. Memory on the minimum machine
 
@@ -388,7 +392,7 @@ About five working days in all, steps 2 and 6 the largest.
 
 - `SYS_console` op `CON_KEYMAP` (Linux's permission rule, 7.4); `/etc/console`'s `keymap` word; `loadkeys`.
 - `/etc/dlogin`'s `autologin` word.
-- The drivers' exit status 69 and netd's search without `/etc/network/interfaces` (D19's driver contract appended).
+- netd's search without `/etc/network/interfaces`: built as D19 6.3's card probe (2026-11-05; no exit status 69 needed).
 - Kernel room: 812 bytes left on the mount tests' floppy (rule 800) and 3 free blocks in its RAM disk at 99b1101.
 - Not frozen (only the demo reads it): the stage 2's table and the disk's layout.
 
