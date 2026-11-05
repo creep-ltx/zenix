@@ -12,8 +12,11 @@ DESCRIPTION
     the boot menu of a disk that holds several systems, for example the
     SD card made by tools/mkdualcard.sh: Emu68's FAT partition, an Amiga
     RDB with a small boot partition (BOOT) and the AmigaOS partitions, and
-    Zenix's root and /home. Kickstart boots BOOT (the highest boot
-    priority); its S:Startup-Sequence is the one line "SYS:bootmenu".
+    Zenix's root and /home. Kickstart boots BOOT (boot priority 4: above
+    the other partitions, below the floppy's 5, so a disk in DF0 still
+    boots first; a tie at 5 goes to the partition); its
+    S:Startup-Sequence is the one line "SYS:bootmenu". tools/bootpri.py
+    shows or sets a partition's boot priority on an image or a card.
 
     bootmenu reads S:BootMenu.conf, shows the entries in the boot Shell's
     window and waits for a choice: Up/Down and Return, or the entry's

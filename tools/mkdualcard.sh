@@ -3,7 +3,7 @@
 # Make the image of an Emu68 SD card that boots AmigaOS or Zenix from a boot menu (docs/man/bootmenu.txt):
 #   MBR p1  type 0x0c  the Emu68 FAT partition, copied from FAT.img (the owner's own: Emu68, config.txt, Kickstart)
 #       p2  type 0x76  an Amiga RDB, copied from AMIGA.img: its first partition is the boot partition (BOOT, FFS,
-#                      bootable, the highest boot priority), filled here with bootmenu, zenixboot and the kernel; the
+#                      bootable, boot priority 4: above the others, below DF0's 5; tools/bootpri.py sets it), filled here with bootmenu, zenixboot and the kernel; the
 #                      other partitions (AmigaOS's) are kept as they are in AMIGA.img
 #       p3  type 0x83  the Zenix root (ext2, every program), ROOTSIZE
 #       p4  type 0x83  Zenix's /home (ext2, the homes of rootfs/home), HOMESIZE; /etc/fstab mounts it
