@@ -207,6 +207,9 @@ static int load_db(void)
     }
     return 0;
 }
+/* the packages a person does not choose (man zpkg, LISTS): the test programs and the package manager's bootstrap for systems
+ * older than it; -Sl, -Sln and -Ss leave them out unless --all (they still install and show by name: -S, -Si, -Q) */
+static int internal_pkg(const char *name) { return !strcmp(name, "zenix-tests") || !strcmp(name, "zpkg-new"); }
 static struct zf_pkg *inst_find(const char *name)
 {
     for (int i = 0; i < ninst; i++) if (!strcmp(inst[i]->name, name)) return inst[i];
@@ -1165,7 +1168,7 @@ static int cmd_fetch(const char *dir, int zfs)
     if (download(0)) bad++;
     for (int i = 0; i < ix.npkg; i++) {
         const struct zp_pkg *p = &ix.pkg[i];
-        if (p->base || !p->file || !strcmp(p->name, "zenix-tests") || !strcmp(p->name, "zpkg-new")) continue;
+        if (p->base || !p->file || internal_pkg(p->name)) continue;
         say("%s", p->file);
         if (download(p)) bad++;
     }
@@ -1369,6 +1372,40 @@ static void cache_cap(void)
 }
 
 /* ---- queries ---- */
+static int show_all;
+/* the state of a package of the list here: "" not installed, else the installed one against the list's */
+static const char *pkg_state(const struct zp_pkg *p, const struct zf_pkg *k)
+{
+    if (!k) return "";
+    return k->vnum == p->vnum ? " [installed]" : k->vnum > p->vnum ? " [newer installed]" : " [older installed]";
+}
+#define COLS 79                         /* every line fits an 80-column screen: the 80th column would wrap */
+/* text into b (holding have bytes already, at most COLS) from column at, cut at a word with "..." when it is too long */
+static void fit(char *b, u32 have, const char *t)
+{
+    u32 room = COLS - have, n = strlen(t);
+    if (n <= room) { memcpy(b + have, t, n + 1); return; }
+    if (room < 4) { b[have] = 0; return; }
+    u32 cut = room - 3;
+    while (cut > room / 2 && t[cut] != ' ') cut--;   /* at a space, unless that loses more than half */
+    while (cut && t[cut - 1] == ' ') cut--;
+    memcpy(b + have, t, cut);
+    memcpy(b + have + cut, "...", 4);
+}
+/* the first line of a package: name, version, state; desc (or 0) after them from column 37 */
+static void pkg_line(const struct zp_pkg *p, const char *desc)
+{
+    char b[COLS + 1];
+    u32 n;
+    snprintf(b, sizeof b, "%-15s %s%s", p->name, p->vstr, pkg_state(p, inst_find(p->name)));
+    n = strlen(b);
+    if (desc && *desc && n < COLS - 8) {
+        while (n < 36) b[n++] = ' ';
+        b[n++] = ' ';
+        fit(b, n, desc);
+    }
+    dprintf(1, "%s\n", b);
+}
 static int ci_has(const char *s, const char *w)
 {
     for (; *s; s++) {
@@ -1386,9 +1423,19 @@ static int cmd_search(char **words, int n)
         int ok = 1;
         for (int j = 0; j < n && ok; j++) ok = ci_has(p->name, words[j]) || (p->desc && ci_has(p->desc, words[j]));
         if (!ok) continue;
-        struct zf_pkg *k = inst_find(p->name);
-        dprintf(1, "%s %s%s%s\n    %s\n", p->name, p->vstr, k ? " [installed" : "", k ? (k->vnum == p->vnum ? "]" : ", another version]") : "",
-               p->desc ? p->desc : "");
+        if (internal_pkg(p->name) && !show_all) continue;
+        pkg_line(p, 0);
+        for (const char *d = p->desc ? p->desc : ""; *d;) {     /* the description wrapped at words, 4 in */
+            u32 n = strlen(d), w = COLS - 4;
+            if (n > w) {
+                u32 c = w;
+                while (c > w / 2 && d[c] != ' ') c--;
+                n = c > w / 2 ? c : w;
+            }
+            dprintf(1, "    %.*s\n", (int)n, d);
+            d += n;
+            while (*d == ' ') d++;
+        }
     }
     return 0;
 }
@@ -1398,9 +1445,9 @@ static int cmd_list(int notinst)
     for (int i = 0; i < ix.npkg; i++) {
         const struct zp_pkg *p = &ix.pkg[i];
         struct zf_pkg *k = inst_find(p->name);
-        if (notinst && k) continue;
+        if ((notinst && k) || (internal_pkg(p->name) && !show_all)) continue;
         if (quiet) dprintf(1, "%s\n", p->name);                     /* -Slq: names only (pacman's), for Tab */
-        else dprintf(1, "%-16s %s%s%s\n", p->name, p->vstr, k ? " [installed" : "", k ? (k->vnum == p->vnum ? "]" : ", another version]") : "");
+        else pkg_line(p, p->desc);
     }
     return 0;
 }
@@ -1478,7 +1525,7 @@ static int usage(void)
            "       zpkg -Q [NAME...] | -Qi NAME... | -Ql NAME... | -Qo PATH... | -Qu\n"
            "       zpkg -R[s][n] NAME... | -U FILE... | --back NAME\n"
            "       zpkg --fetch DIR [--zfs]\n"
-           "  options: --snapshot NAME  --ignore-expiry  --reset-serial CHANNEL  --ram  --yes   (man zpkg)\n");
+           "  options: --snapshot NAME  --ignore-expiry  --reset-serial CHANNEL  --ram  --yes  --all   (man zpkg)\n");
     return 2;
 }
 
@@ -1499,6 +1546,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--ignore-expiry")) ignore = 1;
         else if (!strcmp(argv[i], "--ram")) ram = 1;
         else if (!strcmp(argv[i], "--yes")) yes = 1;
+        else if (!strcmp(argv[i], "--all")) show_all = 1;
         else if (!strcmp(argv[i], "-q")) quiet = 1;
         else if (argv[i][0] == '-' && argv[i][1] && argv[i][1] != '-' && !op) op = argv[i] + 1;
         else if (argv[i][0] == '-') return usage();

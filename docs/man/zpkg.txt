@@ -13,7 +13,7 @@ SYNOPSIS
     zpkg --back NAME [--yes]
     zpkg --fetch DIR [--zfs]
     options: --snapshot NAME  --ignore-expiry  --reset-serial CHANNEL
-             --ram  -q
+             --ram  -q  --all
 
 DESCRIPTION
     zpkg keeps Zenix's programs up to date from a package repository on
@@ -41,12 +41,23 @@ DESCRIPTION
              installed one is newer (after a channel change)
     -S NAME  install packages and the dependencies they are missing,
              dependencies first; -Sw only downloads and checks them
-    -Ss      search the stored list's names and descriptions
+    -Ss      search the stored list's names and descriptions: a line
+             with the name, version and state, then the description
+             wrapped at words
     -Si      a package of the stored list, in words
-    -Sl      every package of the stored list, one a line, the installed
-             ones marked; -Sln only those not installed; -Slq and
-             -Qq the names alone (the shell's Tab completes package
-             names with them after -S, -Si, -Ss, -Sw, -R and -Q)
+    -Sl      every package of the stored list, one a line: the name,
+             the version, its state, the description (cut at a word
+             with ... where the line would pass 79 columns); -Sln only
+             those not installed; -Slq and -Qq the names alone (the
+             shell's Tab completes package names with them after -S,
+             -Si, -Ss, -Sw, -R and -Q). The state of an installed one:
+             [installed] (the list's version), [older installed] (the
+             list has a newer one: -Syu brings it), [newer installed]
+             (the list's is older: -Syuu goes down to it).
+             -Sl, -Sln and -Ss leave out zenix-tests (the test
+             programs) and zpkg-new (for a system whose zpkg cannot
+             write the boot partition, zpkg-new(8)); --all shows
+             them. -S, -Si and -Q still take them by name.
     -Sc      empty the download cache down to the installed version and
              the one before of each package
     -Q       the installed packages (-Qi in words, -Ql their files,
@@ -126,6 +137,8 @@ OPTIONS
     --ram             go on although the root is a RAM disk (what is
                       installed is gone at the next start)
     -q                fewer words
+    --all             -Sl, -Sln and -Ss list zenix-tests and zpkg-new
+                      too
 
 FILES
     /etc/zpkg.conf            channel NAME, server URL (in order), hold

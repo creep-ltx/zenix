@@ -50,7 +50,7 @@ python3 -c 'import sys; d = open(sys.argv[1], "rb").read(); assert d.count(b"hel
 open(sys.argv[2], "wb").write(d.replace(b"hello from pid", b"HELLO from pid"))' $BD/hello.zx $OUT/hello2
 python3 tools/mkzup.py repack $OUT/b2/pkg zenix-tests /bin/hello=$OUT/hello2 >/dev/null || { echo "FAIL repack"; exit 1; }
 head -c 300000 /dev/urandom >$OUT/extradata; printf 'extra: a test package\n' >$OUT/extrareadme
-python3 tools/mkzup.py pkg $OUT/b2/pkg extralib $V2 0.2 --dep base:$V2 --desc "a test library for zpkg-test" \
+python3 tools/mkzup.py pkg $OUT/b2/pkg extralib $V2 0.2 --dep base:$V2 --desc "a test library for zpkg-test, its words running on past the end of lines" \
     d:755:0:0:/usr d:755:0:0:/usr/share d:755:0:0:/usr/share/extralib f:644:0:0:$OUT/extradata:/usr/share/extralib/data >/dev/null &&
 python3 tools/mkzup.py pkg $OUT/b2/pkg extra $V2 0.2 --dep base:$V2 --dep extralib:$V2 --desc "a test program for zpkg-test" \
     d:755:0:0:/usr d:755:0:0:/usr/share d:755:0:0:/usr/share/extra f:644:0:0:$OUT/extrareadme:/usr/share/extra/readme \
@@ -112,6 +112,8 @@ echo ==ss; zpkg -Ss extra; echo ss=$?
 echo ==si; zpkg -Si extra; echo si=$?
 echo ==sl; zpkg -Sl; echo sl=$?
 echo ==sln; zpkg -Sln; echo sln=$?
+echo ==sla; zpkg -Sl --all; echo sla=$?
+echo ==ssa; zpkg -Ss --all test; echo ssa=$?
 echo ==s1; zpkg -S extra; echo s1=$?; zpkg -Q extra extralib; cat /var/lib/zpkg/deps; cat /usr/share/extra/readme
 echo ==qo; zpkg -Qo /usr/share/extra/readme /bin/ls /nothing; echo qo=$?
 echo ==ql; zpkg -Ql extra; echo ql=$?
@@ -172,7 +174,16 @@ if full:
     w = sec("sy2"); check(st("sy2") == 0 and "up to date" in w, "-Sy again: latest only, the stored list used", w)
     w = sec("qu"); check(st("qu") == 0 and "zenix-tests" in w, "-Qu: zenix-tests has a newer version", w)
     w = sec("ss"); check(st("ss") == 0 and "extralib" in w and "a test program for zpkg-test" in w, "-Ss: names and descriptions", w)
-    w = sec("sl"); check(st("sl") == 0 and re.search(r"^extra +\S+$", w, re.M) and re.search(r"^coreutils +\S+ \[installed", w, re.M), "-Sl: every package, the installed marked", w)
+    w = sec("sl"); check(st("sl") == 0 and re.search(r"^extra +\S+ +a test program for zpkg-test$", w, re.M) and
+                         re.search(r"^coreutils +\S+ \[installed\] +basic file", w, re.M), "-Sl: every package with its description, the installed marked", w)
+    check(re.search(r"^extralib +\S+ +a test library for zpkg-test, its word.*[^ ]\.\.\.$", w, re.M) and
+          all(len(l) <= 79 for l in w.splitlines()), "-Sl: every line within 79 columns, a long description cut at a word with ...", w)
+    check(not re.search(r"^(zenix-tests|zpkg-new) ", w, re.M) and not re.search(r"^(zenix-tests|zpkg-new) ", sec("ss"), re.M) and
+          not re.search(r"^(zenix-tests|zpkg-new) ", sec("sln"), re.M), "-Sl, -Sln, -Ss: zenix-tests and zpkg-new left out", w)
+    w = sec("sla"); check(st("sla") == 0 and re.search(r"^zenix-tests +\S+ \[older installed\]", w, re.M) and re.search(r"^zpkg-new ", w, re.M),
+                          "-Sl --all: zenix-tests (installed, the list has a newer one: older installed) and zpkg-new shown", w)
+    w = sec("ssa"); check(st("ssa") == 0 and re.search(r"^zenix-tests +\S+ \[older installed\]$", w, re.M) and re.search(r"^extralib ", w, re.M) and
+                          all(len(l) <= 79 for l in w.splitlines()), "-Ss --all: zenix-tests found, every line within 79 columns", w)
     w = sec("sln"); check(st("sln") == 0 and re.search(r"^extra ", w, re.M) and not re.search(r"^coreutils ", w, re.M), "-Sln: only those not installed", w)
     w = sec("si"); check(st("si") == 0 and "Depends on  : base>=" in w and "extralib>=" in w, "-Si: the block in words", w)
 w = sec("s1")
