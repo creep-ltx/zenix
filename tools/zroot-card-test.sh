@@ -296,7 +296,9 @@ open(sys.argv[2], "wb").write(d[i - 32:])' $d/n.hdf $d/n2.img
     printf 'wait zenix:/# 600\nsleep 2\nsend fsck.zenixfs -y ide0p1; echo rc4=$?\\r\nwait (?m)^rc4= 600\nsleep 1\nstop\n' >$d/k4.txt
     run $d/m4.fs-uae 800 $d/k4.txt $d/4.log
     check "r: the floppy repairs it: fsck.zenixfs -y, status 0" "$(grep -aq 'superblock rewritten' $d/4.log && grep -aq 'rc4=0' $d/4.log && echo ok || echo bad)"
-    # two newest commit records destroyed: read-only, the choices, the shell
+    # two newest commit records destroyed: read-only, the choices, the shell. The keys are typed as soon as the menu's
+    # last line is there, never after a sleep on the PC's clock: in fast mode the Amiga's 30 s default ran out during
+    # one (2026-11-05), and a key typed before boot reads it waits in the queue (tty_setmode keeps what was typed)
     read -r gen1 gen2 < <(python3 -I -c '
 import struct, sys
 d = open(sys.argv[1], "rb").read()
@@ -308,11 +310,8 @@ print(r[0][1], r[1][1])' $d/root.img)
     cp $d/c.hdf $d/c-before.hdf
     conf $d/m5.fs-uae $d/c.hdf $BD/zenix-zfs.adf
     cat >$d/k5.txt <<'EOF'
-wait Choose \(man rescue\) 600
-sleep 0.5
-send 2
-sleep 2
-send 3
+wait 4  reboot 600
+send 23
 wait zenix:/# 120
 sleep 1
 send echo x > /nofile; echo w=$?; cat /etc/motd >/dev/null; echo r=$?; fsck.zenixfs ide0p1; echo rc=$?\r
@@ -329,8 +328,7 @@ EOF
     check "r: fsck.zenixfs -y refuses to build on this state: nothing written to the disk" "$(grep -aq 'nothing changed' $d/5.log && cmp -s $d/c.hdf $d/c-before.hdf && echo ok || echo bad)"
     # --old: on the owner's word, build on it; the shell's exit goes on read-write
     cat >$d/k6.txt <<'EOF'
-wait Choose \(man rescue\) 600
-sleep 0.5
+wait 4  reboot 600
 send 3
 wait zenix:/# 120
 sleep 1
