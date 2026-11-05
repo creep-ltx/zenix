@@ -79,6 +79,8 @@ yet on the A1200.
 best effort, not a target (not a hard limit; as lean as possible stays the rule).
 
 ## The order of work (approved by the owner 2026-10-25)
+**Paused (owner 2026-11-05, to save quota for other work).** Unfinished: branch hw1105 (worktree ~/Projects/zenix-hw1105 on the PC): plipbox speed, the FA411's address read, ctop's CPU figures; resume it first, then this list.
+
 The phases below say *what*; this says *in which order*. When one item is done, the next starts at once. Real-hardware findings and problems found along the way are
 fixed next, ahead of everything here ("fix things when we find them"). A focused audit closes every block; its findings
 are fixed at once. Two independent design reviews for deep core changes, one for features.
