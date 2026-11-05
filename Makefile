@@ -526,7 +526,7 @@ STACK_pfs3d := 8192
 # library display/lib/libdisplay.c linked into each client (static, D38 5), the test client dpytest ----
 DPYDOBJS := $(patsubst %,$(BUILD)/dpyd-%.no,displayd win draw font)
 $(BUILD)/dpyd-%.no: display/server/%.c display/server/dpyd.h display/proto.h user/libz.h user/usys.h | $(BUILD)
-	$(CC) $(UCFLAGS) -Iuser $(if $(filter displayd win,$*),-Os) -c $< -o $@
+	$(CC) $(UCFLAGS) -Iuser -DDIW_V=$(DIWV) $(if $(filter displayd win,$*),-Os) -c $< -o $@
 $(BUILD)/displayd.uelf: $(DPYDOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(DPYDOBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
 STACK_displayd := 8192
