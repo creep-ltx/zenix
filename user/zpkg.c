@@ -804,6 +804,23 @@ static int rdb_rd(unsigned lba, void *buf) { return dmsg(DISK_READ, (u32)rdb_h, 
 
 #define DT_RDB_IN_MBR 0x52444200u       /* diskd: MBR type 0x76, an Amiga RDB inside (Emu68's convention) */
 struct bootpart { char name[16]; struct zp_ffs f; struct dpart d; };
+static int boot_refused;                /* no usable boot partition was found, or the one found was refused */
+static const char *myname = "zpkg";     /* the name zpkg runs as (argv[0]'s last part): zpkg-new says no hint */
+/* the system could not be placed: when /bin/zpkg-new is installed and newer than this zpkg, it may know the partition
+ * better (D22 4.5's bootstrap: an older zpkg left behind by a writer's fix, the owner's finding of 2026-11-04) */
+static void zpkg_new_hint(void)
+{
+    struct ustat st;
+    struct zf_pkg k;
+    u32 len;
+    const struct zf_pkg *me = inst_find("zpkg");
+    if (!boot_refused || !strcmp(myname, "zpkg-new") || sys_stat("/bin/zpkg-new", &st) < 0) return;
+    char *t = slurp(DB "/zpkg-new.manifest", &len, 1u << 20);
+    if (!t || zf_manifest_parse(&k, t, len, DB "/zpkg-new.manifest")) return;
+    if (k.vnum > (me ? me->vnum : 0))
+        say("/bin/zpkg-new (%u) is newer than this zpkg (%u) and may place the system where this one cannot: "
+            "run zpkg-new -Syu", k.vnum, me ? me->vnum : 0);
+}
 /* the boot partition: 0 (bp filled, opened for reading), or < 0 with the reason said */
 static int boot_find2(struct bootpart *bp, struct diskinfo *di, struct rdb *rr, char *why2);
 static int boot_find(struct bootpart *bp)
@@ -866,6 +883,7 @@ static int boot_find2(struct bootpart *bp, struct diskinfo *di, struct rdb *rr, 
         }
     }
     if (found) { bp->f.u = &bp->d; return 0; }
+    boot_refused = 1;
     if (why) {
         say("no usable AmigaDOS boot partition with a Zenix folder was found; these could not be checked: %s. If one "
             "of them is the boot partition, that is why nothing is written; start AmigaOS on it once (it checks and "
@@ -924,12 +942,17 @@ static int system_put(const char *file, int verified)
     int sn = fd >= 0 ? sys_read(fd, sig, sizeof sig) : -1;
     if (fd >= 0) sys_close(fd);
     if (sn != ZC_SIG_SIZE || file_sha(file, &size, sha)) { say("%s: cannot read it and its .sig", file); return 1; }
-    if (boot_find(&bp)) return 1;
+    if (boot_find(&bp)) { zpkg_new_hint(); return 1; }
     int h = dmsg(DISK_OPEN, (u32)bp.name, DISK_RAW, 0, 0);
     if (h < 0) { say("%s: cannot open it for writing (%s)", bp.name, h == -EBUSY ? "something has it mounted" : zstrerror(h)); return 1; }
     bp.d.h = h;
     bp.f.write = dk_write;
-    if (zp_boot_open(&bp.f, "Zenix", &v, &why)) { say("%s, the boot partition: %s: nothing written", bp.name, why); return 1; }
+    if (zp_boot_open(&bp.f, "Zenix", &v, &why)) {
+        say("%s, the boot partition: %s: nothing written", bp.name, why);
+        boot_refused = 1;
+        zpkg_new_hint();
+        return 1;
+    }
     if (zp_boot_find(&v, B_ZUP, &bf, &why) == 0) {         /* one there already: the same, or restart first */
         u8 hv[4] = { 0, 0, 0, 0 }, s2[ZC_SIG_SIZE];
         int same = bf.size == size && boot_sha(&v, &bf, got) == 0 && !memcmp(got, sha, 32);
@@ -1537,6 +1560,7 @@ int main(int argc, char **argv)
     int fetchz = 0;
     signal(SIGPIPE, SIG_IGN);
     cn.fd = -1;
+    if (argc > 0 && argv[0]) { const char *s = strrchr(argv[0], '/'); myname = s ? s + 1 : argv[0]; }
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--snapshot") && i + 1 < argc) snapshot = argv[++i];
         else if (!strcmp(argv[i], "--back") && i + 1 < argc) back = argv[++i];

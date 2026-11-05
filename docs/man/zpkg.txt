@@ -121,7 +121,9 @@ SYSTEM UPDATES
     From a system whose zpkg cannot write the boot partition (Zenix
     2026103000): zpkg -Syu brings the package zpkg-new (this zpkg as
     /bin/zpkg-new), then zpkg-new -Syu writes the system, then reboot
-    (zpkg-new(8)).
+    (zpkg-new(8)). When zpkg finds no boot partition it can use, or one
+    it cannot read, and an installed /bin/zpkg-new is newer than itself,
+    its last line says so: "run zpkg-new -Syu".
 
 OPTIONS
     --snapshot NAME   read the dated snapshot NAME instead of the

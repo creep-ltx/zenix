@@ -19,7 +19,8 @@
 #       e2fsck -fn
 #   m   the owner's card layout (tools/mkcard.py sd: an MBR, the RDB inside its partition of type 0x76, the root a PC
 #       partition), Zenix started from the floppy: zpkg -Syu finds the boot partition inside the MBR's RDB and writes
-#       the update there; then a disk without a boot partition: zpkg says what it cannot do, writes nothing
+#       the update there; then a disk without a boot partition: zpkg says what it cannot do, writes nothing, and with
+#       a newer /bin/zpkg-new installed it says "run zpkg-new -Syu"
 #   z   a ZenixFS root (DESIGN D34; the disk made by mkcard.py ide, kernel-zfs behind zenixboot, version $VZ): zpkg -Syu takes the
 #       list's systemz line: a program installed live, zenixz-$V1 written to the boot partition; reboot: zenixboot installs it,
 #       zup the root half; then zpkg -Syu installs what waited; the root's fsck on the PC clean
@@ -280,12 +281,20 @@ part_m() {
     e2fsck -fn $d/root-after.img >$d/e2fsck.log 2>&1 && R "PASS m: the root: e2fsck -fn clean" || R "FAIL m: the root: e2fsck (log $d/e2fsck.log)"
     # a disk without a boot partition (the root alone, started from the floppy): said, nothing written
     root_img $d/root2.img $BD/zenix.hdf || { R "FAIL m: the second root image"; return; }
+    # ... with a /bin/zpkg-new newer than its zpkg installed (the owner's finding of 2026-11-04): zpkg names it
+    get $d/root2.img /var/lib/zpkg/zpkg.manifest | sed -e 's/^name zpkg$/name zpkg-new/' -e 's/^version [0-9]* /version 2099010100 /' \
+        -e 's#/bin/zpkg$#/bin/zpkg-new#' | grep -v '^c \|^depends ' >$d/zpkg-new.manifest
+    put $d/root2.img $d/zpkg-new.manifest /var/lib/zpkg/zpkg-new.manifest 644
+    put $d/root2.img $BD/zpkg.zx /bin/zpkg-new 755
     fsconf $d/m2.fs-uae $d/root2.img $BD/zenix.adf
     inner m2 $d/m2.fs-uae 3000 $d/keys.txt 8099
     unshare --map-root-user --map-auto -nm $OUT/inner-m2.sh >$d/run2.log 2>&1 || R "FAIL m: the second run ($(grep -a 'FAIL\|timed out' $d/run2.log | head -2 | tr '\n' ' '))"
     get $d/root2.img /tests/o21 >$d/o21b
     check "m: no boot partition (a floppy start): zpkg says it puts no system update there, exit 1" \
         "$([ "$(has $d/o21b 'no AmigaDOS boot partition with a Zenix folder')" = ok ] && [ "$(has $d/o21b '^r21=1')" = ok ] && echo ok || echo bad)"
+    check "m: ... and, /bin/zpkg-new being newer, its last word: run zpkg-new -Syu" \
+        "$(has $d/o21b '^zpkg: /bin/zpkg-new \(2099010100\) is newer than this zpkg \([0-9]+\) and may place the system where this one cannot: run zpkg-new -Syu$')"
+    check "m: ... no such word where the system was written (the card)" "$(grep -aq 'zpkg-new -Syu' $d/o21 && echo bad || echo ok)"
 }
 
 part_z() {
