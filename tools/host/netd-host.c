@@ -1008,6 +1008,24 @@ static int config_test(void)
     ok(n == 6 && strstr(logbuf, "unknown word 'frobnicate'") && strstr(logbuf, "unknown method (dhcp or static) 'loopback'") &&
        strstr(logbuf, "bad driver name '../evil'"),
        "interfaces: unknown words reported with their line and ignored, an ignored stanza's lines with it (%d reports)", n);
+    /* the card probe (D19 6.3): a driver a stanza names is as its stanza says; noprobe keeps netd away from others */
+    ok(!netd_probe_wanted(&c, "genet") && !netd_probe_wanted(&c, "slip") && netd_probe_wanted(&c, "ne2000") &&
+       netd_probe_wanted(&c, "plipbox"), "probe: genet has a stanza (as it says), ne2000 and plipbox are looked for");
+    {
+        const char *np = "noprobe plipbox a2065\niface eth0 inet dhcp\n    driver ne2000\nnoprobe ../x\n";
+        memset(&c, 0, sizeof c);
+        logbuf[0] = 0;
+        n = netd_parse_interfaces(np, strlen(np), &c);
+        ok(n == 1 && strstr(logbuf, "bad driver name '../x'") && c.nnoprobe == 2 && !c.noprobe_all &&
+           !netd_probe_wanted(&c, "plipbox") && !netd_probe_wanted(&c, "a2065") && !netd_probe_wanted(&c, "ne2000") &&
+           netd_probe_wanted(&c, "genet"), "probe: noprobe names two, a stanza a third, genet is still looked for (%d reports)", n);
+        np = "noprobe\n";
+        n = netd_parse_interfaces(np, strlen(np), &c);
+        ok(n == 0 && c.noprobe_all && !netd_probe_wanted(&c, "genet") && !netd_probe_wanted(&c, "ne2000"),
+           "probe: noprobe alone: no card is looked for");
+        memset(&c, 0, sizeof c);
+        ok(netd_probe_wanted(&c, "a2065"), "probe: no file: every card is looked for");
+    }
     {
         const char *rc = "nameserver 10.0.2.3\nnameserver ::1\nnameserver 8.8.8.8\nnameserver 1.1.1.1\nsearch lan\noptions x\nbogus\n";
         n = netd_parse_resolv(rc, strlen(rc), &c);

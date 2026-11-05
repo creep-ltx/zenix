@@ -7,7 +7,7 @@ SYNOPSIS
     ifconfig [-a]
     ifconfig IFACE
     ifconfig IFACE [ADDRESS[/PREFIX]] [netmask MASK] [up | down]
-    ifup -a | IFACE...
+    ifup -a [--boot] | IFACE...
     ifdown -a | IFACE...
 
 DESCRIPTION
@@ -33,11 +33,17 @@ DESCRIPTION
                         a new address (and netmask) on an interface that
                         is up, until netd starts again; connections on
                         the old address end
-    ifup -a             brings up every interface with an "auto" line
-                        (init(8) does this at boot, without waiting);
-                        as root, then starts sntp(8) on its own (not
-                        waited for, its report thrown away) when
-                        /etc/sntp exists
+    ifup -a             brings up every interface with an "auto" line,
+                        and looks for the cards no stanza names (CARDS
+                        FOUND BY THEMSELVES below); as root, then starts
+                        sntp(8) on its own (not waited for, its report
+                        thrown away) when /etc/sntp exists
+    ifup -a --boot      the same, as init(8) runs it at boot without
+                        waiting: when there is no
+                        /etc/network/interfaces, or it has an "auto"
+                        line. When nothing is found and nothing is
+                        configured, netd stops again and gives its
+                        memory back (dmesg: "netd stops")
     ifdown -a           takes down every interface but the loopback
 
     ifup reads /etc/network/interfaces, /etc/resolv.conf and /etc/hosts
@@ -68,6 +74,9 @@ DESCRIPTION
         pointopoint P   the far end, when it is not on the net
         mtu N           at most 1006 on SLIP
         hostname H      the machine's name (sent with DHCP)
+    noprobe [NAME...]   netd never looks for a card with these drivers
+                        (all of them without a NAME): for a printer on
+                        the parallel port, "noprobe plipbox"
 
     The SLIP example (the PC runs zenix-slirp):
 
@@ -83,6 +92,20 @@ DESCRIPTION
         auto eth0
         iface eth0 inet dhcp
             driver a2065
+
+CARDS FOUND BY THEMSELVES
+    At its start and at every ifup -a, netd tries each shipped driver
+    that no stanza names (genet, a2065, ne2000, plipbox, in that order,
+    one at a time) as the next free ethN with DHCP. A driver that finds
+    no card says why in dmesg and ends; netd writes "netd: eth0: no
+    card for /sbin/net/NAME" and does not start it again. One that
+    finds its card is an interface as if a stanza named it: "netd:
+    eth0: /sbin/net/a2065 found a card: up with DHCP (no stanza in
+    /etc/network/interfaces names it)". A card a stanza names keeps its
+    stanza (a static address, its own name); write one for a fixed
+    address. Looking costs a moment of the driver's start each (the
+    plipbox's about 0.7 s); a file with no "auto" line starts no netd
+    at boot at all, and "noprobe" alone turns the looking off.
 
 EXIT STATUS
     0 if everything asked was done; 1 if something was not (said on

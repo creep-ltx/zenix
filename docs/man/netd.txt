@@ -11,9 +11,11 @@ DESCRIPTION
     /usr/share/licenses/lwIP) with Zenix's own layer around it (DESIGN
     D19, docs/d19-network.md). It is the service "net": boot registers
     it when /sbin/netd exists, and the kernel starts it the first time
-    a program opens a socket. A machine that never uses the network
-    never loads it. Programs never talk to netd directly: they use the
-    BSD socket calls (socket, connect, send, ...), the kernel checks
+    a program opens a socket, or at boot (init's ifup -a --boot) to look
+    for network cards: when it finds none and nothing is configured it
+    stops again, so a machine without a network gives its memory back.
+    Programs never talk to netd directly: they use the BSD socket calls
+    (socket, connect, send, ...), the kernel checks
     every pointer and does every wait, and netd answers each request at
     once, so ^C and poll work on sockets as on pipes.
 
@@ -27,7 +29,10 @@ DESCRIPTION
     At its start netd opens its port, then reads /etc/hosts,
     /etc/resolv.conf and /etc/network/interfaces (the last only if root
     owns it and nobody else may write it) and brings up the interfaces
-    with an "auto" line; ifup reads them again. SLIP opens /dev/ttyS0
+    with an "auto" line, then looks for the cards no stanza names (each
+    shipped driver in turn, as ethN with DHCP; ifconfig(8), CARDS FOUND
+    BY THEMSELVES; the kernel log says what it found); ifup reads them
+    again. SLIP opens /dev/ttyS0
     without ever waiting on it: what does not fit the port's send ring
     waits in netd's own queue. SLIP has no checksum of its own, so netd
     checks every frame from the line (the IPv4 header and the TCP, UDP

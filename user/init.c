@@ -135,11 +135,15 @@ static void font_setup(void)
     oflush();
 }
 
-/* /etc/network/interfaces has an "auto" line (its first word is auto): read in small pieces, init lives for ever */
+/* the network at boot (D19 6.3): /etc/network/interfaces has an "auto" line (its first word is auto), or there is no
+ * such file and there is a netd (it looks for a card, and stops when it finds none); a file without an auto line
+ * starts nothing. Read in small pieces: init lives for ever */
 static int auto_iface(void)
 {
     char b[128];
+    struct ustat st;
     int fd = sys_open("/etc/network/interfaces", O_RDONLY), n, k = 0;   /* k: letters of "auto" seen, -1: not this line */
+    if (fd == -ENOENT) return sys_stat("/sbin/netd", &st) == 0;
     if (fd < 0) return 0;
     while ((n = sys_read(fd, b, sizeof b)) > 0)
         for (int i = 0; i < n; i++) {
@@ -338,7 +342,7 @@ int main(void)
     }
     font_setup();                                       /* D28: after mount -a, before the first login */
     if (auto_iface()) {                                 /* the network (DESIGN D19 6.3): started, never waited for */
-        char *ia[] = { "/bin/ifup", "-a", 0 };
+        char *ia[] = { "/bin/ifup", "-a", "--boot", 0 };
         sys_spawn("/bin/ifup", ia, 0);
     }
     daemons_load();                                     /* DESIGN D24 7: started in the loop, never waited for */

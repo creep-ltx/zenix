@@ -143,6 +143,8 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   null value pointer answers the O_NONBLOCK flag; the `/etc/network/interfaces` subset (D19) and `/etc/hosts`,
   `/etc/resolv.conf`; `/dev/ttyS0`'s truthful POLLOUT (1 KB of the send ring free) and O_NONBLOCK reads/writes (the
   planned exception to D16 rule 11 for this one device); boot's `net` -> `/sbin/netd` at nice 0.
+  Since 2026-11-04 (the card probe, D19 6.3): `NETIFREQ_BOOT` 4 (UP of every auto interface and the probe, netd may
+  stop after it; an older netd answers -EINVAL and `ifup` asks UP); the interfaces file's word `noprobe [DRIVER...]`.
   Since steps 6-8: `SYS_drv`'s `DRV_*` ops 1-7, `DRVC_CLEAN` 1 / `DRVC_INVAL` 2; `struct udrvattach` (first size 180)
   and `udrvxfer` (872), each stating its own size; `udrvstep`/`udrvquiesce` (8 steps, `DRVS_WRITE` 1, `DRVS_RMW` 2);
   `DRV_MAXBUF` 32, `DRV_BATCH` 16, `DRVA_DMA` 1, `DRVA_LINK` 2; the NETDRV message layout (a[0] the driver's pid, a[1]

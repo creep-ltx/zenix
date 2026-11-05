@@ -13,6 +13,19 @@ BD=${ZENIX_BUILD:-build}
 make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
 OUT=${ZENIX_OUT:-/tmp/zenix-sock}; mkdir -p $OUT
+# no card probe at boot (D19 6.3): a file without an auto line starts no netd at boot, as before the probe
+noprobe_file() {    # IMG
+    printf '# the card probe is off in this test\nnoprobe\n' > "$OUT/noprobe-interfaces"
+    debugfs -w -f - "$1" >/dev/null 2>&1 <<EOD
+mkdir /etc/network
+sif /etc/network uid 0
+write $OUT/noprobe-interfaces /etc/network/interfaces
+sif /etc/network/interfaces uid 0
+sif /etc/network/interfaces gid 0
+sif /etc/network/interfaces mode 0100644
+EOD
+}
+noprobe_file $BD/zenix.hdf                      # socktestd is "net" here: no netd at boot
 cat > $OUT/script.txt <<'EOS'
 wait zenix:/# 90
 sleep 1

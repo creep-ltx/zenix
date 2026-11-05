@@ -11,9 +11,11 @@ DESCRIPTION
     console's colours from /etc/console (below), then prints /etc/motd, runs
     "mount -a" if there is an /etc/fstab (so the filesystems listed there
     are mounted before anyone can log in), loads the console's Unicode
-    font (the font line, below), starts "ifup -a" without
-    waiting for it if /etc/network/interfaces has an "auto" line (the
-    network, ifconfig(8): no login waits for a cable), and then looks
+    font (the font line, below), starts "ifup -a --boot" without
+    waiting for it if /etc/network/interfaces has an "auto" line or
+    there is no such file and there is a netd (the network, ifconfig(8):
+    netd also looks for network cards, and stops when it finds none; no
+    login waits for a cable), and then looks
     after the ten
     virtual consoles (/dev/tty1 .. /dev/tty10, Amiga+F1 .. Amiga+F10), like
     a Unix init with a getty on each terminal:

@@ -19,10 +19,23 @@ OUT=${ZENIX_OUT:-/tmp/zenix-ctop}; mkdir -p $OUT
 BD=${ZENIX_BUILD:-build}
 make -s BUILD=$BD all >$OUT/build.log 2>&1 || { echo "FAIL the build"; tail -5 $OUT/build.log; exit 1; }
 pass=1
+# no card probe at boot (D19 6.3): a file without an auto line starts no netd at boot, as before the probe
+noprobe_file() {    # IMG
+    printf '# the card probe is off in this test\nnoprobe\n' > "$OUT/noprobe-interfaces"
+    debugfs -w -f - "$1" >/dev/null 2>&1 <<EOD
+mkdir /etc/network
+sif /etc/network uid 0
+write $OUT/noprobe-interfaces /etc/network/interfaces
+sif /etc/network/interfaces uid 0
+sif /etc/network/interfaces gid 0
+sif /etc/network/interfaces mode 0100644
+EOD
+}
 
 part_c() {
 rm -f $BD/zenix.hdf                     # a fresh root: no keys file from an earlier run
 make -s BUILD=$BD $BD/zenix.hdf >>$OUT/build.log 2>&1 || { echo "FAIL the image"; tail -5 $OUT/build.log; exit 1; }
+noprobe_file $BD/zenix.hdf              # the net box first without netd: none at boot
 ZENIX_BUILD=$BD tools/run-test.sh fsuae/a1200-020.fs-uae 400 tools/tests/ctop-test.txt 2>&1 | tr -d '\r' > $OUT/run.log
 python3 - "$OUT/run.log" <<'PY'
 import re, sys

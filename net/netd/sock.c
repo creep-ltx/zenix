@@ -164,6 +164,13 @@ int netd_changed(struct netd_ready *out, int max)
     return n;
 }
 
+int netd_nsockets(unsigned idx, unsigned gen)
+{
+    int i, n = 0;
+    for (i = 0; i < NETD_NSOCK; i++) if (slots[i].s && !((unsigned)i == idx && slots[i].gen == gen)) n++;
+    return n;
+}
+
 /* ---- memory of a socket ---- */
 /* lwIP's TCP and UDP pools are everyone's: the users other than root together may hold all but a few of them, so
  * root's servers and its own connections always find one (as the kernel's NSOCK_ROOT; audit 2026-10-28 S3: one user's

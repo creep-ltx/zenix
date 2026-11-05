@@ -14,7 +14,8 @@
 # claim), netd starts it again and gives it up after 5 ends, the rest of the network (the loopback) keeps working.
 #   tools/eth-test.sh [PART...]      e: the A2065 (all of the above), g: genet without a GENET, p i m: the PC Card
 #                                    NE2000 driver with an empty slot, an IDE card, memory in the slot's addresses,
-#                                    l: the plipbox driver with nothing on the parallel port
+#                                    l: the plipbox driver with nothing on the parallel port; a s c: the card probe
+#                                    with no /etc/network/interfaces (the A2065 found; no card: netd stops) and with one
 # Needs unprivileged user namespaces (unshare -rn), as slip-test.
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
@@ -119,7 +120,7 @@ part_g() {
     rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
     debugfs -w -R "mkdir /etc/network" $BD/zenix.hdf >/dev/null 2>&1
     debugfs -w -R "sif /etc/network uid 0" $BD/zenix.hdf >/dev/null 2>&1
-    printf 'auto eth0\niface eth0 inet dhcp\n    driver genet\n' > $OUT/interfaces-g
+    printf 'noprobe\nauto eth0\niface eth0 inet dhcp\n    driver genet\n' > $OUT/interfaces-g
     put $OUT/interfaces-g /etc/network/interfaces 644
     cat > $OUT/genet.sh <<'EOS'
 for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
@@ -147,8 +148,8 @@ EOS
     ok=0; [ "$n" = 5 ] && [ "$(grep -acE 'net: eth0: /sbin/net/genet \(pid [0-9]+\) ended, status 1$' $k)" = 5 ] &&
         grep -aq 'net: eth0: /sbin/net/genet given up after 5 ends in 60 s (ifup eth0 starts it again)' $k && ok=1
     check "genet without a GENET: \"no GENET in the hardware table\" and status 1, five times, then given up ($n lines)" $ok "$(grep -a 'genet\|eth0' $k | tail -12)"
-    ok=0; ! grep -aq 'drv: pid\|drv: claim\|\[kernel\]' $k && ! grep -aq '^eth0' $OUT/g-ifc.txt && grep -aqx 'st=0' $OUT/g-ifc.txt && ok=1
-    check "it touched nothing: no claim, no fault, no eth0" $ok "$(grep -a 'drv:\|kernel' $k | tail -5; cat $OUT/g-ifc.txt)"
+    ok=0; ! grep -aq 'drv: pid\|drv: claim\|\[kernel\]\|looking for its card' $k && ! grep -aq '^eth0' $OUT/g-ifc.txt && grep -aqx 'st=0' $OUT/g-ifc.txt && ok=1
+    check "it touched nothing: no claim, no fault, no eth0 (and noprobe: no card probe)" $ok "$(grep -a 'drv:\|kernel\|card' $k | tail -5; cat $OUT/g-ifc.txt)"
     ok=0; grep -aq '2 packets transmitted, 2 received, 0% packet loss' $OUT/g-ping.txt && ok=1
     check "netd still serves: ping 127.0.0.1" $ok "$(cat $OUT/g-ping.txt)"
     e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-g.log 2>&1 && echo "PASS the host's e2fsck finds the root clean (g)" || { echo "FAIL e2fsck (g)"; pass=0; }
@@ -279,8 +280,105 @@ EOS
     e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-l.log 2>&1 && echo "PASS the host's e2fsck finds the root clean (l)" || { echo "FAIL e2fsck (l)"; pass=0; }
 }
 
-[ $# = 0 ] && set -- e g p i m l
+
+# Parts a, s, c (DESIGN D19 6.3, the card probe; a real-hardware finding, the A1200 2026-11-04: a card worked only once
+# /etc/network/interfaces was written by hand): a: no file, FS-UAE's A2065: init's ifup -a --boot starts netd, which
+# tries the shipped drivers in turn; the A2065's finds its board and eth0 comes up with DHCP (the log says so), the
+# others found nothing and are not started again, netd stays; s: no file, no card: the same probe finds nothing and
+# netd stops (its memory given back), and the next socket call starts it again; c: a file whose stanza names the A2065
+# (static, not DHCP) and "noprobe plipbox": eth0 keeps its stanza's address, netd looks for neither, the others it does
+probe_img() {   # probe_img NAME [INTERFACES-TEXT]: the image, the script, the run's script
+    local nm=$1
+    rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
+    if [ -n "$2" ]; then
+        debugfs -w -R "mkdir /etc/network" $BD/zenix.hdf >/dev/null 2>&1
+        debugfs -w -R "sif /etc/network uid 0" $BD/zenix.hdf >/dev/null 2>&1
+        printf "$2" > $OUT/interfaces-$nm
+        put $OUT/interfaces-$nm /etc/network/interfaces 644
+    fi
+    cat > $OUT/probe-$nm.sh <<EOS
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+    dmesg | grep -q 'no card for /sbin/net/plipbox\|netd stops\|eth1: no card for /sbin/net/ne2000' && break
+    sleep 1
+done
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    [ $nm = s ] && break                # no socket call here: it would start netd again
+    ifconfig eth0 2>/dev/null | grep -q 'lease [0-9]\|inet 10.0.2.15' && break
+    sleep 1
+done
+sleep 2
+ps > /tmp/$nm-ps.txt
+ifconfig > /tmp/$nm-ifc.txt 2>&1; echo st=\$? >> /tmp/$nm-ifc.txt
+ping -c 2 \$( [ $nm = s ] && echo 127.0.0.1 || echo 10.0.2.2 ) > /tmp/$nm-ping.txt 2>&1; echo st=\$? >> /tmp/$nm-ping.txt
+sleep 3
+ps > /tmp/$nm-ps2.txt
+dmesg > /tmp/$nm-k.txt
+sync
+EOS
+    put $OUT/probe-$nm.sh /tests/probe.sh 755
+    cat > $OUT/$nm.txt <<EOS
+wait zenix:/# 90
+sleep 1
+send sh /tests/probe.sh > /tmp/probe.out 2>&1; echo probe-do""ne\r
+wait probe-done 150
+stop
+EOS
+}
+probe_get() { local f; for f in ps ifc ping ps2 k; do get /tmp/$1-$f.txt > $OUT/$1-$f.txt; done; }
+part_a() {
+    probe_img a
+    sed '/^\[fs-uae\]/a network_card = a2065' fsuae/a1200-020.fs-uae > "$OUT/a1200-a2065.fs-uae"
+    run "$OUT/a1200-a2065.fs-uae" 250 "$OUT/a.txt" > $OUT/a.log 2>&1
+    local rc=$? k=$OUT/a-k.txt ok
+    [ $rc = 0 ] || { echo "FAIL a: the run (exit $rc)"; tail -3 $OUT/a.log; pass=0; }
+    probe_get a
+    ok=0; grep -aq 'netd: eth0: no stanza names genet: looking for its card (DHCP if there is one)' $k &&
+        grep -aq 'netd: eth0: no card for /sbin/net/genet' $k && grep -aq 'netd: eth0: no stanza names a2065: looking for its card' $k &&
+        grep -aq 'netd: eth0: /sbin/net/a2065 found a card: up with DHCP (no stanza in /etc/network/interfaces names it)' $k &&
+        grep -aq 'netd: eth1: no stanza names ne2000' $k && grep -aq 'netd: eth1: no card for /sbin/net/ne2000' $k &&
+        grep -aq 'netd: eth1: no card for /sbin/net/plipbox' $k && ok=1
+    check "a: no /etc/network/interfaces: netd looks for each card in turn, the kernel log says what it found" $ok "$(grep -a 'netd:\|net: ' $k | tail -16)"
+    ok=0; grep -aq '^eth0: flags=<UP,BROADCAST,RUNNING,DEFAULT,DHCP>' $OUT/a-ifc.txt && grep -aq 'inet 10.0.2.15  netmask 255.255.255.0  gateway 10.0.2.2' $OUT/a-ifc.txt &&
+        ! grep -aq '^eth1' $OUT/a-ifc.txt && grep -aq '2 received, 0% packet loss' $OUT/a-ping.txt && ok=1
+    check "a: the A2065 found: eth0 by DHCP (10.0.2.15), ping 10.0.2.2; no eth1" $ok "$(cat $OUT/a-ifc.txt $OUT/a-ping.txt)"
+    ok=0; [ "$(grep -ac 'started /sbin/net/genet\|started /sbin/net/ne2000\|started /sbin/net/plipbox' $k)" = 3 ] &&
+        grep -aq ' netd$' $OUT/a-ps2.txt && ! grep -aq 'netd stops' $k && ok=1
+    check "a: the drivers that found nothing were started once each, not again; netd stays" $ok "$(grep -a 'started /sbin/net' $k; cat $OUT/a-ps2.txt)"
+    e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-a.log 2>&1 && echo "PASS the host's e2fsck finds the root clean (a)" || { echo "FAIL e2fsck (a)"; pass=0; }
+}
+part_s() {
+    probe_img s
+    ZENIX_BUILD=$BD tools/run-test.sh fsuae/a1200-020.fs-uae 200 "$OUT/s.txt" > $OUT/s.log 2>&1
+    local rc=$? k=$OUT/s-k.txt ok
+    [ $rc = 0 ] || { echo "FAIL s: the run (exit $rc)"; tail -3 $OUT/s.log; pass=0; }
+    probe_get s
+    ok=0; grep -aq 'netd: no network card found and none configured: netd stops (it starts again when a program needs the network)' $k &&
+        grep -aqE 'svc: net: netd \(pid [0-9]+\) stopped' $k && ! grep -aq ' netd$\|/sbin/net' $OUT/s-ps.txt &&
+        ! grep -aq 'found a card' $k && ok=1
+    check "s: no file, no card: the probe finds nothing, netd says so and stops (not running afterwards)" $ok "$(grep -a 'netd\|svc: net' $k | tail -10; cat $OUT/s-ps.txt)"
+    ok=0; grep -aq '2 received, 0% packet loss' $OUT/s-ping.txt && grep -aq ' netd$' $OUT/s-ps2.txt &&
+        [ "$(grep -ac 'netd stops' $k)" = 1 ] && [ "$(grep -ac 'netd: serving net' $k)" = 2 ] && ok=1
+    check "s: ping 127.0.0.1 starts netd again, and it stays" $ok "$(cat $OUT/s-ping.txt $OUT/s-ps2.txt; grep -a 'serving net\|stops' $k)"
+    e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-s.log 2>&1 && echo "PASS the host's e2fsck finds the root clean (s)" || { echo "FAIL e2fsck (s)"; pass=0; }
+}
+part_c() {
+    probe_img c 'noprobe plipbox\nauto eth0\niface eth0 inet static\n    driver a2065\n    address 10.0.2.15/24\n    gateway 10.0.2.2\n'
+    sed '/^\[fs-uae\]/a network_card = a2065' fsuae/a1200-020.fs-uae > "$OUT/a1200-a2065.fs-uae"
+    run "$OUT/a1200-a2065.fs-uae" 250 "$OUT/c.txt" > $OUT/c.log 2>&1
+    local rc=$? k=$OUT/c-k.txt ok
+    [ $rc = 0 ] || { echo "FAIL c: the run (exit $rc)"; tail -3 $OUT/c.log; pass=0; }
+    probe_get c
+    ok=0; grep -aq '^eth0: flags=<UP,BROADCAST,RUNNING,DEFAULT>  mtu 1500' $OUT/c-ifc.txt && grep -aq 'inet 10.0.2.15  netmask 255.255.255.0' $OUT/c-ifc.txt &&
+        grep -aq '2 received, 0% packet loss' $OUT/c-ping.txt && ok=1
+    check "c: the A2065's stanza (static) is kept: eth0 10.0.2.15 without DHCP, ping 10.0.2.2" $ok "$(cat $OUT/c-ifc.txt $OUT/c-ping.txt)"
+    ok=0; ! grep -aq 'names a2065\|names plipbox\|/sbin/net/plipbox' $k && grep -aq 'netd: eth1: no stanza names ne2000' $k &&
+        grep -aq 'netd: eth1: no card for /sbin/net/ne2000' $k && ok=1
+    check "c: not looked for: the A2065 (its stanza) and the plipbox (noprobe); the ne2000 was (eth1, no card)" $ok "$(grep -a 'netd:\|net: ' $k | tail -12)"
+    e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-c.log 2>&1 && echo "PASS the host's e2fsck finds the root clean (c)" || { echo "FAIL e2fsck (c)"; pass=0; }
+}
+
+[ $# = 0 ] && set -- e g p i m l a s c
 for p in "$@"; do
-    case $p in e|g|p|i|m|l) "part_$p" ;; *) echo "eth-test: unknown part $p"; exit 2 ;; esac
+    case $p in e|g|p|i|m|l|a|s|c) "part_$p" ;; *) echo "eth-test: unknown part $p"; exit 2 ;; esac
 done
 exit $((1 - pass))

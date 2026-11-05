@@ -149,6 +149,9 @@ struct unetifreq {
 #define NETIFREQ_UP   1         /* as its stanza in /etc/network/interfaces says (the files read again) */
 #define NETIFREQ_DOWN 2
 #define NETIFREQ_ADDR 3         /* a new address (and netmask, 0: keep it) on an interface that is up */
+#define NETIFREQ_BOOT 4         /* as UP with the name "", from init at boot (ifup -a --boot): when the auto interfaces
+                                 * and the card probe leave netd nothing to serve, it stops (D19 6.3; an older netd:
+                                 * -EINVAL, and ifup asks UP) */
 
 /* SOCK_ROUTE's request (frozen, first size UROUTE_FIRST: len), written back */
 struct uroute {

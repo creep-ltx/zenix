@@ -12,6 +12,18 @@ BD=${ZENIX_BUILD:-build}
 make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 OUT=${ZENIX_OUT:-/tmp/zenix-netd}; mkdir -p $OUT
 get() { debugfs -R "cat $1" $BD/zenix.hdf 2>/dev/null | tr -d '\r'; }
+# no card probe at boot (D19 6.3): a file without an auto line starts no netd at boot, as before the probe
+noprobe_file() {    # IMG
+    printf '# the card probe is off in this test\nnoprobe\n' > "$OUT/noprobe-interfaces"
+    debugfs -w -f - "$1" >/dev/null 2>&1 <<EOD
+mkdir /etc/network
+sif /etc/network uid 0
+write $OUT/noprobe-interfaces /etc/network/interfaces
+sif /etc/network/interfaces uid 0
+sif /etc/network/interfaces gid 0
+sif /etc/network/interfaces mode 0100644
+EOD
+}
 pass=1
 check_lines() {     # FILE CHECK...: each "nettest CHECK: PASS" line
     local f=$1 c line; shift
@@ -27,6 +39,7 @@ check_lines() {     # FILE CHECK...: each "nettest CHECK: PASS" line
 
 part_s() {
     rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
+    noprobe_file $BD/zenix.hdf                  # netd starts at the first socket call here, not at boot
     cat > $OUT/s.txt <<'EOS'
 wait zenix:/# 90
 sleep 1
@@ -98,6 +111,7 @@ EOS
 
 part_l() {
     rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
+    noprobe_file $BD/zenix.hdf
     cat > $OUT/l.txt <<'EOS'
 wait zenix:/# 90
 sleep 1

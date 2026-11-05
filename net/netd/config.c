@@ -88,8 +88,18 @@ int netd_parse_interfaces(const char *text, unsigned long len, struct netd_confi
     int nw, i, j, nauto = 0, skip = 0;
     memset(c->ifs, 0, sizeof c->ifs);
     c->nifs = 0;
+    c->nnoprobe = c->noprobe_all = 0;
     while ((nw = next_line(&r, buf, w)) >= 0) {
         if (!nw) continue;
+        if (!strcmp(w[0], "noprobe")) {         /* Zenix's word (D19 6.3), as auto anywhere: no card probe for these */
+            if (nw == 1) c->noprobe_all = 1;
+            for (i = 1; i < nw; i++) {
+                if (strchr(w[i], '/') || strlen(w[i]) >= sizeof c->noprobe[0]) { report(&r, "bad driver name", w[i]); continue; }
+                if (c->nnoprobe == NETD_IFMAX) { report(&r, "too many noprobe drivers", w[i]); continue; }
+                strcpy(c->noprobe[c->nnoprobe++], w[i]);
+            }
+            continue;
+        }
         if (!strcmp(w[0], "auto")) {
             for (i = 1; i < nw; i++) {
                 if (!name_ok(w[i], NETD_IFNAME - 1)) { report(&r, "bad interface name", w[i]); continue; }
@@ -162,6 +172,15 @@ int netd_parse_interfaces(const char *text, unsigned long len, struct netd_confi
         }
     }
     return r.reports;
+}
+
+int netd_probe_wanted(const struct netd_config *c, const char *driver)
+{
+    int i;
+    if (c->noprobe_all) return 0;
+    for (i = 0; i < c->nnoprobe; i++) if (!strcmp(c->noprobe[i], driver)) return 0;
+    for (i = 0; i < c->nifs; i++) if (!strcmp(c->ifs[i].driver, driver)) return 0;     /* configured: as its stanza says */
+    return 1;
 }
 
 int netd_parse_resolv(const char *text, unsigned long len, struct netd_config *c)

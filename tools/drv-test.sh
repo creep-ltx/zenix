@@ -36,7 +36,7 @@ part_p() {
     rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
     mkd /sbin/net; mkd /etc/network
     put $BD/drv-fake.zx /sbin/net/fake 755
-    printf 'auto eth0\niface eth0 inet static\n    driver fake bad\n    address 10.9.0.15/24\n\nauto eth1\niface eth1 inet static\n    driver fake dma\n    address 10.8.0.15/24\n' > $OUT/interfaces
+    printf 'noprobe\nauto eth0\niface eth0 inet static\n    driver fake bad\n    address 10.9.0.15/24\n\nauto eth1\niface eth1 inet static\n    driver fake dma\n    address 10.8.0.15/24\n' > $OUT/interfaces
     put $OUT/interfaces /etc/network/interfaces 644
     cat > $OUT/drv.sh <<'EOS'
 sleep 2

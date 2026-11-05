@@ -140,9 +140,10 @@ static void start_sntp(void)
 /* ifup / ifdown [-a | IFACE...] */
 static int updown(int argc, char **argv, int up)
 {
-    int all = 0, n = 0, bad = 0;
+    int all = 0, n = 0, bad = 0, boot = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-a")) all = 1;
+        else if (up && !strcmp(argv[i], "--boot")) boot = all = 1;     /* init's: netd may stop when nothing is there */
         else if (argv[i][0] == '-') { dprintf(2, "usage: %s -a | IFACE...\n", prog); return 2; }
         else n++;
     }
@@ -150,7 +151,8 @@ static int updown(int argc, char **argv, int up)
     int s = up ? sock_again() : sock(0);
     if (s < 0) return 1;
     if (all) {
-        int r = ifset(s, "", up ? NETIFREQ_UP : NETIFREQ_DOWN, 0, 0);
+        int r = ifset(s, "", boot ? NETIFREQ_BOOT : up ? NETIFREQ_UP : NETIFREQ_DOWN, 0, 0);
+        if (r == -EINVAL && boot) r = ifset(s, "", NETIFREQ_UP, 0, 0);    /* a netd older than NETIFREQ_BOOT */
         if (r < 0) { dprintf(2, "%s -a: %s\n", prog, why(r)); bad = 1; }
         else if (up) start_sntp();
     }

@@ -147,6 +147,7 @@ int netd_set_search(const char *domain);       /* resolv.conf's search (or domai
 unsigned netd_bits(unsigned idx, unsigned gen);     /* the socket's ready bits now (also what the next push compares) */
 struct netd_ready { unsigned short idx, gen, bits; };
 int netd_changed(struct netd_ready *out, int max);  /* sockets whose bits changed since netd_bits/netd_changed */
+int netd_nsockets(unsigned idx, unsigned gen);      /* the sockets open now but (idx, gen) (lookups included) */
 
 /* ---- configuration (6.1) ---- */
 #define NETD_IFNAME 8
@@ -168,7 +169,13 @@ struct netd_config {
     unsigned long dns[2];               /* resolv.conf's name servers, network order */
     int ndns;
     char search[64];
+    char noprobe[NETD_IFMAX][16];       /* "noprobe DRIVER...": cards netd never looks for (a printer on the port) */
+    int nnoprobe, noprobe_all;          /* noprobe_all: a "noprobe" line without names */
 };
+/* the card probe (D19 6.3): a driver netd looks for a card with at its start and at ifup -a when no stanza names that
+ * driver and no noprobe line does; the probe's interfaces are ethN, DHCP. The drivers, in the order they are tried. */
+#define NETD_PROBE_DRIVERS { "genet", "a2065", "ne2000", "plipbox" }
+int netd_probe_wanted(const struct netd_config *c, const char *driver);
 /* Each parser reports a word it does not know with a line "netd: FILE:LINE: ..." and ignores it (6.1); it returns
  * the number of such reports. Text comes as read from the file (any length; lines of at most 255 bytes). */
 int netd_parse_interfaces(const char *text, unsigned long len, struct netd_config *c);

@@ -432,6 +432,9 @@ for CIA-B's shared port A is in its section 4).
       address 10.0.2.15/24
       gateway 10.0.2.2
   ```
+  A word of Zenix's own, added 2026-11-04 with the card probe (6.3), anywhere in the file: `noprobe [DRIVER...]`, the
+  drivers netd never tries a card with (all of them when none is named), e.g. `noprobe plipbox` for a printer on the
+  parallel port.
 - **`/etc/resolv.conf`** (`nameserver`, `search`) and **`/etc/hosts`**, standard. DHCP's DNS servers stay in netd's
   memory and show in `ifconfig` (nothing written behind the owner's back).
 - **Read at netd's start and on `ifup`/`ifconfig` (a reload), never per request** (a file read from a floppy takes
@@ -457,8 +460,26 @@ old address (`tcp_netif_ip_addr_changed`); programs see `ECONNABORTED`.
   after a fixed amount of work per turn.
 - netd **opens its port before** it brings interfaces up (D11's 30 s start deadline), then reads
   `/etc/network/interfaces` and brings up the `auto` ones.
-- At boot **`init` starts `ifup -a` without waiting for it** when the file has an `auto` line (that call starts netd;
-  logins never wait for a DHCP lease or a missing cable). A machine without the file never starts netd.
+- At boot **`init` starts `ifup -a --boot` without waiting for it** when the file has an `auto` line, or when there is
+  no file and `/sbin/netd` exists (that call starts netd; logins never wait for a DHCP lease or a missing cable). A
+  file without an `auto` line starts nothing at boot.
+- **The card probe** (2026-11-04, a real-hardware finding: on the A1200 the FA411 and the plipbox worked only once
+  `/etc/network/interfaces` was written by hand): at its start and at every `ifup -a`, after the `auto` stanzas, netd
+  tries each shipped driver (`NETD_PROBE_DRIVERS`: genet, a2065, ne2000, plipbox, in that order) that no stanza names
+  (whatever its method or auto line: a configured card keeps its configuration) and no `noprobe` line names, one at a
+  time, as the first free `ethN` with DHCP, when `/sbin/net/NAME` exists. The drivers find their hardware already
+  (the hardware table, the PC Card's status bit, the plipbox's answer within 0.7 s) and end with the reason when it is
+  not there; a probe's driver that ends before it attaches is forgotten (`netd: eth0: no card for /sbin/net/NAME`),
+  never started again, and the next driver is tried; one that attaches is an interface as a stanza's, restarted the
+  same way (`netd: eth0: /sbin/net/a2065 found a card: up with DHCP (no stanza in /etc/network/interfaces names
+  it)`). A file netd may not use (not root's alone) means no probe either. Only netd's children may call `SYS_drv`, so
+  the probe is netd's: nobody else can look at a card.
+- **The memory comes back (`NETIFREQ_BOOT`):** `ifup -a --boot` asks UP with op 4. When the probe is done, netd decides
+  once: no interface but the loopback, no driver, and no socket but ifup's own, and it stops with status 0 (`netd: no
+  network card found and none configured: netd stops ...`; D11's clean stop, not counted as an end), so the stock
+  A1200 without a network still gives the ~100 KB back (7.2), at the cost of loading netd and the four drivers once at
+  boot. Any later socket call starts it again on demand, and that netd stays. Tests that check the loopback alone turn
+  the probe off with a file holding `noprobe` (no auto line: no netd at boot), as the machine's owner can.
 
 ### 6.4 Commands (each with its page, `commands.md`, `features.md`, in its build step)
 
@@ -505,7 +526,8 @@ is inline.
 ### 7.2 A machine that does not use the network (the stock A1200 as the owner runs it today)
 
 **About 28-30 KB more free memory than today**: the kernel grows by 6-7.5 KB of code and 1 KB of data, and the
-36,688-byte zfsd image is no longer resident. netd is never loaded. The disk holds `/sbin/netd` and the pages.
+36,688-byte zfsd image is no longer resident. netd is never loaded, but for the card probe at boot when there is no
+`/etc/network/interfaces` (6.3: it stops again when it finds nothing). The disk holds `/sbin/netd` and the pages.
 
 ### 7.3 A machine that does (*estimates*, measured at steps 5 and 8)
 
