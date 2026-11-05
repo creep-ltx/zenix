@@ -161,6 +161,28 @@ static void test_fa411(void)
     CHECK(M.gcfg == CFG_0V_250NS && (M.gcs & CS_WR) && !M.gayle_irq_writes, "Gayle: 0 V, 250 ns, writes on, its interrupt registers untouched");
     CHECK(n.ax == 2 && M.gpio == 0x10 && n.phy == 0x10, "the chip: AX88790 (TEST register), the internal PHY selected and found at %d", n.phy);
     CHECK(!memcmp(n.mac, MAC, 6) && !memcmp(M.par, MAC, 6), "the MAC from 0x400 in its memory, in the station address");
+    CHECK(M.mac_reads == 2 && !logged("the MAC address"), "the MAC read twice, the same, no word said (%u reads)", M.mac_reads);
+
+    /* the real FA411 once read ff:ff:ff:ff:36:8b (2026-11-04): reads that come out wrong first */
+    for (unsigned flaky = 1; flaky <= 5; flaky += 2) {
+        card(CHIP_AX88790, CIS_FA411, sizeof CIS_FA411, 0x3C0, 1, 0, 5);
+        M.mac_flaky = flaky;
+        nlog = 0;
+        unsigned long us0 = M.us;
+        r = bring_up();
+        CHECK(r == 0 && !memcmp(n.mac, MAC, 6) && logged("the MAC address read as ff:ff:ff:ff:34:56") &&
+              logged("the MAC address read right on try"), "%u flaky reads of the MAC (ff:ff:ff:ff:34:56): read again after "
+              "a settle of the CIA's ticks, the right one taken, what was read said (%u reads, %.0f ms)", flaky, M.mac_reads,
+              (double)(M.us - us0) / 1000);
+    }
+    card(CHIP_AX88790, CIS_FA411, sizeof CIS_FA411, 0x3C0, 1, 0, 5);
+    M.mac_flaky = 100;
+    nlog = 0;
+    r = bring_up();
+    CHECK(r != 0 && M.mac_reads == 2 * NE_MACTRIES && logged("is not a usable one"), "a MAC that never reads right: %d tries, "
+          "then the card refused, \"not a usable one\" (%u reads)", NE_MACTRIES, M.mac_reads);
+    card(CHIP_AX88790, CIS_FA411, sizeof CIS_FA411, 0x3C0, 1, 0, 5);
+    r = bring_up();
     CHECK(M.imr == 0 && (M.cr & CR_STA) && M.rcr == (RCR_AB | RCR_AX_INTT) && M.dcr == DCR_WORD && M.pstart == NE_RXSTART &&
           M.pstop == NE_MEMEND && M.curr == NE_RXSTART, "started: polled (IMR 0), broadcasts, word mode, the ring %x-%x", M.pstart, M.pstop);
     M.link = 0;
@@ -342,6 +364,12 @@ static void test_dp8390(void)
     CHECK(r == 0 && !n.ax && n.phy < 0 && n.cis.index == 0x20 && n.io == 0x300 && !n.cis.anybase && M.cor == 0x20,
           "brought up: entry %x at %x (the power and timing descriptions skipped), COR %x (%d)", n.cis.index, n.io, M.cor, r);
     CHECK(!memcmp(n.mac, MAC, 6) && !strcmp(n.cis.vers[0], "Acme"), "the MAC from the doubled PROM");
+    card(CHIP_DP8390, CIS_NE, sizeof CIS_NE, 0x3F8, 0, 0x300, 0x20);
+    M.mac_flaky = 2;
+    nlog = 0;
+    r = bring_up();
+    CHECK(r == 0 && !memcmp(n.mac, MAC, 6) && logged("read right on try 2"), "the PROM read wrong twice (ff:ff:ff:ff:..): "
+          "read again, the right MAC taken (%u reads)", M.mac_reads);
     ne_link_poll(&n, 1);
     CHECK(n.link && M.rcr == RCR_AB, "no MII: the link taken as up; RCR %x", M.rcr);
     unsigned g0 = got;

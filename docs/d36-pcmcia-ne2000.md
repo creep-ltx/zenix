@@ -113,6 +113,14 @@ inside. So the driver handles three chips and finds out which at run time:
 - **DP8390 and clones:** ne.c's PROM read (32 bytes in byte mode; a 16-bit card gives each byte twice; an 8-bit NE1000
   is refused), then word mode and the same memory check. No PHY: the link is taken as up.
 - A MAC address that is all zeros, all ones or a multicast one is refused.
+- **The MAC is read until two reads agree** (2026-11-05, a real-hardware finding: the FA411 in the A1200 with the 1260
+  once read ff:ff:ff:ff:36:8b, 2026-11-04, and its own address when netd started the driver again): each try reads it
+  twice (the AX88x90's words at 0x400, or a DP8390 card's PROM); two reads that agree on a likely address (usable, and
+  fewer than two 0xFF bytes) are taken; else the next try comes after a settle of 2 ticks (10-20 ms on the kernel's CIA
+  timer, `NE_MACSETTLE`), 4 tries at most (`NE_MACTRIES`). Every failed try is said in the log ("the MAC address read
+  as A and B (try N of 4: the two reads differ / not a likely address)"), and a success after one: "read right on try N
+  of 4". The same unlikely address on all 4 tries is taken as the card's (ne_probe still refuses an unusable one); the
+  same undoubled PROM twice is an NE1000 at once. A card read right the first time costs two reads and no word.
 
 **The AX88x90's quirks, handled as `axnet_cs` handles them:** RCR's bit 6 always set; full duplex in TCR's bit 7, set
 from the PHY's partner abilities when the link comes up; an interrupt status bit that does not always clear at the first
@@ -158,7 +166,7 @@ the card may be put in after power-on.
   the ring wrapping, 500 each way at once, a netd without buffers (drops counted), an overrun, a damaged header (the
   chip started again), a stuck send, the quiesce program applied to the model; the card's comings and goings through `ne_watch` as
   the driver's loop calls it: out during a look at the chip (nothing touched, no frame made up), a card bouncing for
-  0.4 s (not touched), back after half a second, another card (its MAC differs), a memory card put in instead; an AX88190 whose PHY is powered down; a plain DP8390 card (power and timing descriptions skipped,
+  0.4 s (not touched), back after half a second, another card (its MAC differs), a memory card put in instead; the MAC read wrong 1, 3 or 5 times (ff:ff:ff:ff:34:56: read again, the right one taken, said) and always (refused after 4 tries), a PROM read wrong twice; an AX88190 whose PHY is powered down; a plain DP8390 card (power and timing descriptions skipped,
   doubled PROM); a card named FA411 with a DP8390 inside (the model answers no I/O for a configuration the card does not have:
   configured again with the CIS's index, read as a DP8390); refusals (an NE1000, a memory
   card, an empty slot, no CIS, a card that decodes other ports); 20,000 damaged CISes under AddressSanitizer.
@@ -200,7 +208,7 @@ timing), frames not moving (the ring or the byte order).
 
 `/sbin/net/ne2000` 15,616 bytes (`a2065` 8,752: the CIS reader, the PHY, the two chips, the card's comings and
 goings); in memory with its stack 19,436 bytes before its first frame. The kernel +296 bytes (section 3). A machine
-whose `/etc/network/interfaces` does not name it pays nothing.
+whose `/etc/network/interfaces` does not name it pays nothing. 2026-11-05: 19,564 bytes on the disk (+1,036 from 18,528: the MAC read again and its log lines).
 
 ## 10. The review (one independent read-only pass, 2026-11-03)
 

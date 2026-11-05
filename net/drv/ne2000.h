@@ -122,6 +122,8 @@
 #define NE_LINKEVERY    100             /* ticks between looks at the PHY (1 s) */
 #define NE_TXSTUCK      100             /* ticks (1 s) a send may take before the chip is reset */
 #define NE_SETTLE       50              /* ticks (0.5 s) a card put in must stay in before it is used */
+#define NE_MACTRIES     4               /* reads of the MAC address (each read twice) before the card is refused */
+#define NE_MACSETTLE    2               /* ticks (the kernel's CIA timer: 10-20 ms) between two tries */
 enum { NE_HERE, NE_AWAY, NE_LEFT, NE_BACK, NE_OTHER, NE_BAD };
 
 struct ne_cis {

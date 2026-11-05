@@ -32,6 +32,10 @@ static struct model {
     int chip;
     unsigned char mem[0x10000];
     unsigned char mac[6];
+    unsigned mac_flaky;                 /* the next reads of the MAC (at 0x400, or the PROM) give 0xFF for the first
+                                         * four bytes, as the real FA411 once did (ff:ff:ff:ff:36:8b) */
+    int mac_bad;                        /* this read is one of them */
+    unsigned mac_reads;
     unsigned char cr, isr, imr, dcr, rcr, tcr, pstart, pstop, bnry, curr, tpsr, par[6], mar[8];
     unsigned tbcr, rsar, rbcr, dma_addr, dma_left;
     int dma_dir;                        /* 0 none, 1 read, 2 write */
@@ -92,8 +96,15 @@ static unsigned char m_mem_rd(unsigned a)
 {
     a &= 0xFFFF;
     if (a < 0x4000) {                                   /* below the frame memory */
-        if (M.chip == CHIP_AX88190 || M.chip == CHIP_AX88790)
-            return a >= 0x400 && a < 0x406 ? M.mac[a - 0x400] : 0;
+        int ax = M.chip == CHIP_AX88190 || M.chip == CHIP_AX88790;
+        unsigned first = ax ? 0x400 : 0, k = ax ? a - 0x400 : (a & 31) / (M.chip == CHIP_NE1000 ? 1 : 2);
+        if (a == first) {                               /* a read of the address starts */
+            M.mac_reads++;
+            M.mac_bad = M.mac_flaky > 0;
+            if (M.mac_flaky) M.mac_flaky--;
+        }
+        if (M.mac_bad && k < 4 && (!ax || a < 0x406)) return 0xFF;
+        if (ax) return a >= 0x400 && a < 0x406 ? M.mac[a - 0x400] : 0;
         return M.mem[a & 31];                           /* the PROM, repeated */
     }
     return M.mem[a];
