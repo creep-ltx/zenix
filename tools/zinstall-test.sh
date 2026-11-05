@@ -17,6 +17,15 @@
 #      chain the same; it boots and the user logs in; then zinstall --undo from the floppy gives the old table back, every sector
 #   k  a disk with Zenix already: reinstall keeping /home and the users (the user's file is still there, the user logs in), then
 #      reinstall erasing /home (the users kept, the file gone)
+#   u  set it up yourself (D35 3b) on a card laid out like the owner's (MBR: FAT32, a 0x76 with BOOT, FFS 128 MB with its own boot
+#      menu and an older Zenix's files, and SH0, PFS3; p3 0x83 1 GB marked; p4 0x83 4 GB): the refusals first (FAT, the 0x76, a
+#      wrong name, a root that would not be taken), then BOOT kept, p3 ZenixFS, p4 ext2: only the MBR sector written, FAT, SH0, the
+#      RDB the same, BOOT checked by amitools (zenixboot and the kernel new, the menu untouched, the old state gone); started from
+#      the kernel floppy, and from a copy of BOOT by its own menu and zenixboot
+#   e  the same card with an ext2 /home holding a user's file: kept (byte-identical), every question as a person meets it (the
+#      package server too); the user logs in and finds the file; then the root kept as well, with no questions: users, name, files
+#   d  an RDB disk set up by hand: DH2 formatted as the start-up partition (its menu starts DH0 first), DH3 the root, DH4 a ZenixFS
+#      /home, --server; DH0, DH1 the same; it starts AmigaOS by itself, and Zenix by the menu's other line
 #   h  no floppy: from AmigaOS on a 68060 (zenixboot, the kernel and the RAM disk with the set, as files on DH0); --list, the install
 #   n  from an existing Zenix: its root stays mounted on the same disk; the files through zpkg --fetch from a test server over
 #      FS-UAE's A2065 into the free space; the new system boots, the old root unchanged
@@ -26,7 +35,7 @@ cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
 OUT=${ZENIX_OUT:-/tmp/zenix-zinstall}; mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 SER=${ZENIX_SERIAL:-/tmp/zenix-zinstall-serial}
-PARTS="${*:-f a m z b c r n o h k}"
+PARTS="${*:-f a m z b c r n o h k u e d}"
 make -s BUILD=$BD all install-floppies $BD/zenix.adf $BD/zenix-zfs.adf >"$OUT/make.log" 2>&1 || { tail "$OUT/make.log"; echo "FAIL the build"; exit 1; }
 make -s -C zenixfs build/zenixfs-tool >/dev/null 2>&1 || { echo "FAIL the host tool"; exit 1; }
 BD=$(cd "$BD" && pwd)
@@ -223,6 +232,8 @@ wait Choose .Return = 1, ext2 30
 send \r
 wait Choose .Return = 1, ext2 30
 send \r
+wait Package server 30
+send \r
 wait To erase the whole disk 30
 send yes\r
 wait Nothing was changed 10
@@ -233,6 +244,8 @@ send 1\r
 wait Choose .Return = 1.: 30
 send 2\r
 wait Choose .Return = 1, ext2 30
+send \r
+wait Package server 30
 send \r
 wait To erase the whole disk 30
 send ide0\r
@@ -254,6 +267,8 @@ send \r
 wait filesystem for your files 30
 wait Choose .Return = 1, ext2 30
 send 2\r
+wait Package server 30
+send \r
 wait To erase the whole disk 30
 send ERASE ide0\r
 wait The computer's name 1500
@@ -612,6 +627,8 @@ wait Choose .Return = 1.: 30
 send 2\r
 wait Choose .Return = 1, ext2 30
 send \r
+wait Package server 30
+send \r
 wait type its name exactly 30
 send ide0p1\r
 wait Nothing was changed 10
@@ -951,6 +968,8 @@ wait Keep the users 30
 send \r
 wait Choose .Return = 1, ext2 30
 send \r
+wait Package server 30
+send \r
 wait Type yes to go on 30
 send yes\r
 $INSTALLED
@@ -983,6 +1002,8 @@ EOS
 wait zenix:/# 120
 sleep 1
 send zinstall --reinstall --erase-home --keep-users --root-fs ext2 --home-fs ext2\r
+wait Package server 30
+send \r
 wait Type yes to go on 30
 send yes\r
 $INSTALLED
@@ -1009,6 +1030,409 @@ EOS
     run $OUT/k2.fs-uae 600 $OUT/k6.txt $OUT/k6.log
     check "k: after erasing /home bea still logs in; her file is gone" "$(grep -aq '^zi-k6' $OUT/k6.log && ! grep -aq '^was-here$' $OUT/k6.log && echo ok || echo bad)"
     host_fs k $d ZR0 ext2
+    empty $d
+}
+
+# ---- u, e, d: set it up yourself (D35 3b) ----
+mk_card() {   # IMG ext2|raw: laid out like the owner's PiStorm card: p1 FAT32, p2 0x76 with BOOT (FFS 128 MB, its own boot
+              # menu, an older Zenix's files) and SH0 (PFS3), p3 0x83 1 GB (active, as tools/mkdualcard.sh leaves it), p4 0x83 4 GB
+    local i=$1 fat=$((64 * 2048)) g=$((1024 * 2048)) h=$((4096 * 2048)) s2 l2 s3 s4
+    printf 'SYS:bootmenu\n' >$OUT/card-ss
+    printf '# the test card%ss own menu: Zenix by itself\ntimeout 1\ndefault 1\nZenix = run SYS:zenixboot\nAmigaOS = partition SH0\n' "'" >$OUT/card-conf
+    head -c 50000 /dev/urandom >$OUT/card-oldzb
+    head -c 160000 /dev/urandom >$OUT/card-oldk
+    printf 'zenixboot-state 1\nversion 7\nphase trial\nhandovers 1\nend\n' >$OUT/card-state
+    python3 tools/mkffs.py $OUT/card-boot.img 130536K BOOT $OUT/card-ss=S/Startup-Sequence $OUT/card-conf=S/BootMenu.conf \
+        $BD/bootmenu=bootmenu $OUT/card-oldzb=zenixboot $OUT/card-oldk=Zenix/zenix $OUT/card-state=Zenix/state \
+        $OUT/card-oldk=Zenix/zenix.old >/dev/null
+    python3 tools/mkrdb-multi.py $OUT/card-rdb.hdf $OUT/card-boot.img:ffs:BOOT:boot 32256K:pfs3:SH0:boot >/dev/null
+    l2=$(( $(stat -c %s $OUT/card-rdb.hdf) / 512 ))
+    s2=$((2048 + fat)); s3=$(( (s2 + l2 + 2047) / 2048 * 2048 )); s4=$((s3 + g))
+    truncate -s 0 $i; truncate -s $(( (s4 + h) * 512 )) $i
+    head -c 200000 /dev/urandom | dd of=$i bs=512 seek=2048 conv=notrunc status=none
+    dd if=$OUT/card-rdb.hdf of=$i bs=512 seek=$s2 conv=notrunc,sparse status=none
+    head -c 100000 /dev/urandom | dd of=$i bs=512 seek=$s3 conv=notrunc status=none
+    sfdisk -q $i <<EOS
+label: dos
+2048,$fat,c
+$s2,$l2,76
+$s3,$g,83,*
+$s4,$h,83
+EOS
+    if [ "$2" = ext2 ]; then
+        mkdir -p $OUT/card-home/anna
+        echo kept-letter >$OUT/card-home/anna/letter
+        fakeroot sh -c 'chown -R 0:0 "$1"; chown -R 1000:100 "$1/anna"; mke2fs -q -t ext2 -E revision=0 -b 1024 -N 8192 -L home -d "$1" -F "$2" 4G' \
+            sh $OUT/card-home $OUT/card-home.img
+        dd if=$OUT/card-home.img of=$i bs=512 seek=$s4 conv=notrunc,sparse status=none
+        empty $OUT/card-home.img
+    else
+        head -c 100000 /dev/urandom | dd of=$i bs=512 seek=$s4 conv=notrunc status=none
+    fi
+    mv $OUT/card-boot.img $OUT/card-boot0.hdf       # (as made: amitools' view of it, for boot_kept)
+    empty $OUT/card-rdb.hdf
+}
+card_same() {    # IMG FILE: what nothing may change: the FAT partition, SH0, the RDB's own cylinder, the MBR sector
+    local s2
+    s2=$($CK parts $1 | grep '^slot1 ' | cut -d' ' -f2)
+    { $CK sums $1 slot0 SH0; $CK bytes $1 0 1; $CK bytes $1 $s2 1008; } >$2
+}
+boot_kept() {    # NAME IMG KERNEL: BOOT as zinstall left it, read by amitools; the menu and the other files as they were
+    local n=$1 b=$OUT/$1-boot.hdf
+    $CK cut $2 BOOT $b
+    # amitools' xdfscan counts 4 more bits in a last bitmap long that is not full than tools/mkffs.py writes (seen on a fresh
+    # 130536 KB volume of mkffs.py's, 2026-11-05): what it says must be what it says of the volume as it was made
+    check "$n: BOOT is a valid volume (tools/ffsread.py; amitools' xdfscan finds nothing it did not find before)" "$(python3 tools/ffsread.py $b check | grep -q '^ok, 0 leaked' && [ "$(xdfscan -v $b | grep -a ERROR | sed 's/^ *//')" = "$(xdfscan -v $OUT/card-boot0.hdf | grep -a ERROR | sed 's/^ *//')" ] && echo ok || echo bad)"
+    xdftool $b read Zenix/zenix $OUT/$n-k >/dev/null 2>&1
+    check "$n: BOOT:Zenix/zenix is the build's kernel for the root" "$(yes_if cmp $OUT/$n-k $3)"
+    xdftool $b read zenixboot $OUT/$n-zb >/dev/null 2>&1
+    check "$n: BOOT:zenixboot is the build's (the older one replaced)" "$(yes_if cmp $OUT/$n-zb $BD/zenixboot)"
+    xdftool $b read S/BootMenu.conf $OUT/$n-conf >/dev/null 2>&1
+    xdftool $b read bootmenu $OUT/$n-bm >/dev/null 2>&1
+    check "$n: BOOT's own boot menu and its files untouched" "$(cmp -s $OUT/$n-conf $OUT/card-conf && cmp -s $OUT/$n-bm $BD/bootmenu && echo ok || echo bad)"
+    check "$n: zenixboot's old state and the old kernel are gone" "$(xdftool $b list 2>/dev/null | grep -qE 'state|zenix\.old' && echo bad || echo ok)"
+}
+booted_m() {    # NAME LOG ROOTTYPE ROOTDEV HOST USER: the checks of a boot of a disk set up by hand
+    local n=$1 l=$2
+    check "$n: it boots to its login, with its name ($5)" "$(has $l "^$5 login:")"
+    check "$n: the user logs in with its password" "$(has $l "^uid=[0-9]+\\($6\\) gid=100\\(users\\)")"
+    check "$n: root logs in with root's password" "$(has $l '^zi-root-ok')"
+    check "$n: / is $4 ($3)" "$(has $l "^$4 +/ +$3")"
+    check "$n: a file on / and one in the user's home survive a restart" "$(grep -aq '^was-here$' $l && grep -aq '^on-root$' $l && echo ok || echo bad)"
+    check "$n: no panic" "$(hasnt $l 'panic')"
+}
+
+part_u() {    # the owner's case: BOOT kept, root p3 formatted ZenixFS, /home p4 formatted; refusals first
+    local d=$OUT/u.img
+    mk_card $d raw
+    card_same $d $OUT/u.before
+    cp --sparse=always $d $OUT/u.orig
+    fsconf $OUT/u.fs-uae $d 2048 8192 4
+    cat >$OUT/u.txt <<EOS
+wait zenix:/# 120
+sleep 1
+send $ACC_PREP\r
+wait zi-prep 10
+send zinstall $ACC_OPTS\r
+wait Choose a number 30
+send m\r
+wait 1. The start-up partition 30
+send 1\r
+wait cannot be used for this 30
+wait 1. The start-up partition 30
+send 4\r
+wait To format it, type its name 30
+send DH9\r
+wait Not chosen 30
+wait 1. The start-up partition 30
+send 3\r
+wait Choose .Return = 1, keep. 30
+send \r
+wait 2. The system part 30
+send 2\r
+wait cannot be used for this 30
+wait 2. The system part 30
+send 6\r
+wait Choose .Return = 1, ext2 30
+send \r
+wait To format it, type its name 30
+send ide0p6\r
+wait 3. Your files 30
+send \r
+wait Nothing was changed 30
+sleep 1
+send sync; zinstall $ACC_OPTS\r
+wait Choose a number 30
+send m\r
+wait 1. The start-up partition 30
+send 3\r
+wait Choose .Return = 1, keep. 30
+send \r
+wait 2. The system part 30
+send 5\r
+wait Choose .Return = 1, ext2 30
+send 2\r
+wait To format it, type its name 30
+send ide0p5\r
+wait 3. Your files 30
+send 6\r
+wait To format it, type its name 30
+send ide0p6\r
+wait Type yes to go on 60
+send yes\r
+$INSTALLED
+sleep 2
+send echo zi-e""nd\r
+wait zi-end 30
+stop
+EOS
+    run $OUT/u.fs-uae 2400 $OUT/u.txt $OUT/u1.log
+    check "u: a FAT partition and a 0x76 container cannot be chosen" "$([ "$(grep -ac 'cannot be used for this' $OUT/u1.log)" = 2 ] && echo ok || echo bad)"
+    check "u: SH0 (PFS3) can only be formatted as the start-up, and a wrong name does not choose it" "$(grep -aq 'Nothing on SH0 can be kept' $OUT/u1.log && grep -aq '^Not chosen' $OUT/u1.log && echo ok || echo bad)"
+    check "u: the root on p4 with p3 marked (not chosen) is refused before anything is written" "$(has $OUT/u1.log 'would stay the root')"
+    check "u: the install says it is done" "$(has $OUT/u1.log '^Done\. Zenix is on this disk')"
+    check "u: the plan: BOOT kept, Zenix's files added, the old system's taken away" "$(grep -aq 'Start-up: BOOT (ide0p3), 127 MB, AmigaDOS FFS$' $OUT/u1.log && grep -aq '^    KEPT. Added: zenixboot' $OUT/u1.log && grep -aq "Taken away, the old Zenix's: Zenix/state, zenix.old" $OUT/u1.log && echo ok || echo bad)"
+    check "u: the plan: p3 formatted ZenixFS, p4 ext2, only the MBR sector written" "$(grep -aq 'System (root): ide0p5, 1024 MB, Linux (0x83)$' $OUT/u1.log && grep -aq '^    FORMATTED as ZenixFS' $OUT/u1.log && grep -aq 'Partition table blocks written: 0 (then 0 when all is checked)' $OUT/u1.log && echo ok || echo bad)"
+    check "u: the plan names what it does not touch" "$(has $OUT/u1.log 'Not touched: ide0p1, ide0p2, SH0')"
+    card_same $d $OUT/u.after
+    check "u: the FAT partition, SH0, the RDB and the MBR sector are byte-identical" "$(yes_if cmp $OUT/u.before $OUT/u.after)"
+    check "u: p3 is still 0x83 and marked, p4 0x83" "$($CK parts $d | grep -q '^slot2 .* 83 128 ' && $CK parts $d | grep -q '^slot3 .* 83 0 ' && echo ok || echo bad)"
+    boot_kept u $d $BD/kernel-zfs.bin
+    $CK cut $d slot2 $OUT/u-root.bin
+    check "u: the host's fsck finds the ZenixFS root clean" "$(yes_if $Z fsck $OUT/u-root.bin)"
+    $CK cut $d slot3 $OUT/u-home.bin
+    check "u: the host's e2fsck finds /home clean" "$(yes_if e2fsck -fn $OUT/u-home.bin)"
+    empty $OUT/u-root.bin $OUT/u-home.bin
+    # started from the kernel floppy, as the plan says for an MBR disk under Kickstart
+    fsconf $OUT/u2.fs-uae $d 2048 8192 kernel:$BD/zenix-zfs.adf
+    boot_script $OUT/u2.txt amiga2 bea beapw2 rootpw2
+    run $OUT/u2.fs-uae 900 $OUT/u2.txt $OUT/u2.log
+    booted_m u $OUT/u2.log zenixfs ide0p5 amiga2 bea
+    check "u: /home is p4 (ext2)" "$(has $OUT/u2.log '^ide0p6 +/home +ext2')"
+    # and from the kept BOOT itself: Kickstart starts a copy of it (in an RDB of its own, the second drive on the IDE port:
+    # Kickstart's own disk code reads no MBR), its own menu runs zenixboot, which starts the kernel zinstall put in
+    # BOOT:Zenix/; Zenix serves the first drive, the card, and takes its root and /home from there
+    $CK cut $d BOOT $OUT/u-boot1.img
+    python3 tools/mkrdb-multi.py $OUT/u-boot2.hdf $OUT/u-boot1.img:ffs:BOOT:boot >/dev/null
+    empty $OUT/u-boot1.img
+    cat >$OUT/u3.fs-uae <<EOC
+[fs-uae]
+accuracy = 1
+amiga_model = A1200
+kickstart_file = \$ZENIX_KICKSTART_DIR/kicka1200.rom
+chip_memory = 2048
+fast_memory = 8192
+floppy_drive_speed = 0
+serial_port = /tmp/zenix-serial
+uae_serial_direct = true
+hard_drive_0 = $d
+hard_drive_0_controller = ide0
+hard_drive_0_type = rdb
+hard_drive_1 = $OUT/u-boot2.hdf
+hard_drive_1_controller = ide1
+hard_drive_1_type = rdb
+joystick_port_0 = none
+joystick_port_1 = none
+EOC
+    cat >$OUT/u3.txt <<'EOS'
+wait amiga2 login: 300
+sleep 1
+send root\r
+wait Password: 30
+send rootpw2\r
+wait amiga2:/ 60
+sleep 1
+send mount; echo zi-u""3\r
+wait zi-u3 30
+sleep 1
+stop
+EOS
+    run $OUT/u3.fs-uae 600 $OUT/u3.txt $OUT/u3.log
+    check "u: started by BOOT's own menu and zenixboot: the kernel from BOOT:Zenix/ on the new root" "$(grep -aq 'zenixboot.*loading Zenix/zenix' $OUT/u3.log && grep -aqE '^ide0p5 +/ +zenixfs' $OUT/u3.log && echo ok || echo bad)"
+    card_same $d $OUT/u.after2
+    check "u: unchanged after running on it" "$(yes_if cmp $OUT/u.before $OUT/u.after2)"
+    empty $d $OUT/u.orig $OUT/u-boot.hdf $OUT/u-boot2.hdf $OUT/card-boot0.hdf
+}
+
+part_e() {    # keep /home with its files; the questions as a person meets them (the package server too); then the root kept
+    local d=$OUT/e.img
+    mk_card $d ext2
+    card_same $d $OUT/e.before
+    fsconf $OUT/e.fs-uae $d 2048 8192 4
+    cat >$OUT/e.txt <<'EOS'
+wait zenix:/# 120
+sleep 1
+send zinstall\r
+wait Choose a number 30
+send m\r
+wait 1. The start-up partition 30
+send 3\r
+wait Choose .Return = 1, keep. 30
+send \r
+wait 2. The system part 30
+send 5\r
+wait Choose .Return = 1, ext2 30
+send \r
+wait To format it, type its name 30
+send ide0p5\r
+wait 3. Your files 30
+send 6\r
+wait Choose .Return = 1, keep. 30
+send \r
+wait Package server 30
+send ftp://nowhere\r
+wait An address starting with http 30
+send http://10.0.2.2:8088/zenix\r
+wait Type yes to go on 60
+send yes\r
+wait The computer's name 1500
+send amiga3\r
+wait A password for root 30
+send rootpw3\r
+wait Type it again to check: 30
+send rootpw3\r
+wait Your user name for logging in 30
+send anna\r
+wait Your full name 30
+send Anna\r
+wait A password for anna 30
+send annapw3\r
+wait Type it again to check: 30
+send annapw3\r
+wait Done\. Zenix is on this disk|Stopped\. 1500
+sleep 2
+send echo zi-e""nd\r
+wait zi-end 30
+stop
+EOS
+    run $OUT/e.fs-uae 2400 $OUT/e.txt $OUT/e1.log
+    check "e: the install says it is done" "$(has $OUT/e1.log '^Done\. Zenix is on this disk')"
+    check "e: a server address that is not http:// is asked again" "$(has $OUT/e1.log 'An address starting with http')"
+    check "e: the plan: /home kept with its files, the server" "$(grep -aq '^    KEPT (ext2) with its files' $OUT/e1.log && grep -aq 'Updates come from: http://10.0.2.2:8088/zenix' $OUT/e1.log && echo ok || echo bad)"
+    $CK cut $d slot3 $OUT/e-home.bin            # (mounted to make anna's home: its superblock's mount count and time change)
+    check "e: /home (p4) kept: anna's letter read on the PC, e2fsck clean" "$(debugfs -R 'cat /anna/letter' $OUT/e-home.bin 2>/dev/null | grep -q '^kept-letter$' && e2fsck -fn $OUT/e-home.bin >/dev/null 2>&1 && echo ok || echo bad)"
+    empty $OUT/e-home.bin
+    card_same $d $OUT/e.after
+    check "e: the FAT partition, SH0, the RDB and the MBR sector are byte-identical" "$(yes_if cmp $OUT/e.before $OUT/e.after)"
+    boot_kept e $d $BD/kernel.bin
+    cat >$OUT/e2.txt <<'EOS'
+wait amiga3 login: 240
+sleep 1
+send anna\r
+wait Password: 30
+send annapw3\r
+wait amiga3: 60
+sleep 1
+send id; cat /home/anna/letter; grep '^server' /etc/zpkg.conf; mount\r
+sleep 4
+send echo zi-e""2\r
+wait zi-e2 30
+send exit\r
+wait amiga3 login: 30
+send root\r
+wait Password: 30
+send rootpw3\r
+wait amiga3:/ 60
+send echo on-root > /note; sync; echo zi-w""rote\r
+wait zi-wrote 30
+send sync; umount /home; sync\r
+sleep 3
+stop
+EOS
+    fsconf $OUT/e2.fs-uae $d 2048 8192 kernel:$BD/zenix.adf
+    run $OUT/e2.fs-uae 900 $OUT/e2.txt $OUT/e2.log
+    check "e: anna logs in; the letter on the kept /home is hers and still there" "$(grep -aqE '^uid=[0-9]+\(anna\)' $OUT/e2.log && grep -aq '^kept-letter$' $OUT/e2.log && echo ok || echo bad)"
+    check "e: /etc/zpkg.conf names the server chosen" "$(has $OUT/e2.log '^server http://10.0.2.2:8088/zenix$')"
+    check "e: / is p3 (ext2), /home p4" "$(grep -aqE '^ide0p5 +/ +ext2' $OUT/e2.log && grep -aqE '^ide0p6 +/home +ext2' $OUT/e2.log && echo ok || echo bad)"
+    # the root kept too, with no questions: its users, its name and its files stay
+    cat >$OUT/e3.txt <<'EOS'
+wait zenix:/# 120
+sleep 1
+send zinstall --startup keep:BOOT --root keep:ide0p5 --home keep:ide0p6 --server none\r
+wait Type yes to go on 60
+send yes\r
+wait Done\. Zenix is on this disk|Stopped\. 1500
+sleep 2
+send echo zi-e""nd\r
+wait zi-end 30
+stop
+EOS
+    run $OUT/e.fs-uae 2400 $OUT/e3.txt $OUT/e3.log
+    check "e: the root kept: done with no question about where or about the users" "$(grep -aq '^Done\. Zenix is on this disk' $OUT/e3.log && ! grep -aq "The computer's name" $OUT/e3.log && echo ok || echo bad)"
+    check "e: the plan says the root is kept" "$(has $OUT/e3.log '^    KEPT .ext2.: its files stay')"
+    check "e: the users and the name were kept" "$(has $OUT/e3.log 'The users and the computer.s name of the old Zenix are kept')"
+    cat >$OUT/e4.txt <<'EOS'
+wait amiga3 login: 240
+sleep 1
+send anna\r
+wait Password: 30
+send annapw3\r
+wait amiga3: 60
+sleep 1
+send cat /home/anna/letter /note; grep -c '^server' /etc/zpkg.conf; echo zi-e""4\r
+wait zi-e4 30
+send exit\r
+sleep 2
+stop
+EOS
+    run $OUT/e2.fs-uae 900 $OUT/e4.txt $OUT/e4.log
+    check "e: after it anna logs in with her password; her letter and the root's own file are still there" "$(grep -aq '^kept-letter$' $OUT/e4.log && grep -aq '^on-root$' $OUT/e4.log && echo ok || echo bad)"
+    check "e: --server none: no server line" "$(has $OUT/e4.log '^0$')"
+    $CK cut $d slot2 $OUT/e-root.bin
+    check "e: the host's e2fsck finds the kept root clean" "$(yes_if e2fsck -fn $OUT/e-root.bin)"
+    $CK cut $d slot3 $OUT/e-home.bin
+    check "e: and /home" "$(yes_if e2fsck -fn $OUT/e-home.bin)"
+    empty $d $OUT/e-root.bin $OUT/e-home.bin $OUT/e-boot.hdf $OUT/card-boot0.hdf
+}
+
+part_d() {    # an RDB disk set up by hand: DH2 a new start-up partition (with the menu), DH3 the root, DH4 /home (ZenixFS)
+    local d=$OUT/d.hdf
+    printf 'SYS:zenixboot nosuchkernel\n' >$OUT/ss
+    head -c 500000 /dev/urandom >$OUT/wbfile
+    python3 tools/mkffs.py $OUT/dh0.img 32256K Workbench --intl $OUT/ss=S/Startup-Sequence $BD/zenixboot=zenixboot $OUT/wbfile=Prefs/wbfile >/dev/null
+    python3 tools/mkffs.py $OUT/dh1.img 8064K Work --intl $OUT/wbfile=Data/wbfile >/dev/null
+    python3 tools/mkrdb-multi.py $d $OUT/dh0.img:ffs3:DH0:boot $OUT/dh1.img:ffs3:DH1:- 16128K:pfs3:DH2:- 120960K:pfs3:DH3:- 64512K:pfs3:DH4:- >/dev/null
+    $CK sums $d DH0 DH1 >$OUT/d.before
+    fsconf $OUT/d.fs-uae $d 2048 8192 4
+    cat >$OUT/d.txt <<EOS
+wait zenix:/# 120
+sleep 1
+send $ACC_PREP\r
+wait zi-prep 10
+send zinstall $ACC_OPTS --home-fs zenixfs --server http://10.0.2.2:8088/zenix\r
+wait Choose a number 30
+send m\r
+wait 1. The start-up partition 30
+send 3\r
+wait To format it, type its name 30
+send DH2\r
+wait 2. The system part 30
+send 4\r
+wait Choose .Return = 1, ext2 30
+send \r
+wait To format it, type its name 30
+send DH3\r
+wait 3. Your files 30
+send 5\r
+wait To format it, type its name 30
+send DH4\r
+wait Type yes to go on 60
+send yes\r
+$INSTALLED
+sleep 2
+send echo zi-e""nd\r
+wait zi-end 30
+stop
+EOS
+    run $OUT/d.fs-uae 2400 $OUT/d.txt $OUT/d1.log
+    check "d: the install says it is done" "$(has $OUT/d1.log '^Done\. Zenix is on this disk')"
+    check "d: the plan: DH2 formatted as the start-up, its menu starts DH0" "$(grep -aq 'Start-up: DH2 (ide0p3), 15 MB, PFS3$' $OUT/d1.log && grep -aq '^    FORMATTED: everything on it is LOST' $OUT/d1.log && grep -aq 'The menu starts DH0 by itself' $OUT/d1.log && echo ok || echo bad)"
+    check "d: the plan: only the three PART blocks written" "$(has $OUT/d1.log 'Partition table blocks written: [0-9]+ [0-9]+ [0-9]+ .then [0-9]+ [0-9]+ when')"
+    $CK sums $d DH0 DH1 >$OUT/d.after
+    check "d: DH0 and DH1 are byte-identical" "$(yes_if cmp $OUT/d.before $OUT/d.after)"
+    check "d: the table: DH2 FFS bootable above DH0, DH3 ext2 marked and not mounted by AmigaOS, DH4 ZenixFS not mounted" "$($CK parts $d | grep -q '^DH2 .* 444f5301 1 1$' && $CK parts $d | grep -q '^DH3 .* 4c4e5800 3 0$' && $CK parts $d | grep -q '^DH4 .* 5a4e4601 2 0$' && echo ok || echo bad)"
+    $CK cut $d DH3 $OUT/d-root.bin
+    check "d: the host's e2fsck finds the root clean" "$(yes_if e2fsck -fn $OUT/d-root.bin)"
+    check "d: /etc/zpkg.conf names the server" "$(debugfs -R 'cat /etc/zpkg.conf' $OUT/d-root.bin 2>/dev/null | grep -q '^server http://10.0.2.2:8088/zenix$' && echo ok || echo bad)"
+    $CK cut $d DH4 $OUT/d-home.bin
+    check "d: the host's fsck finds the ZenixFS /home clean" "$(yes_if $Z fsck $OUT/d-home.bin)"
+    empty $OUT/d-root.bin $OUT/d-home.bin
+    fsconf $OUT/d2.fs-uae $d 2048 8192 none
+    printf 'wait nosuchkernel 120\nsleep 2\nstop\n' >$OUT/d2.txt
+    run $OUT/d2.fs-uae 200 $OUT/d2.txt $OUT/d2.log
+    check "d: at power-on the new menu's default starts AmigaOS's DH0" "$(has $OUT/d2.log 'nosuchkernel')"
+    python3 -I - $d <<'PY'
+import sys
+f = open(sys.argv[1], "r+b")
+d = f.read(1 << 30)
+i = d.find(b"timeout 5\ndefault 1\n")
+assert i > 0
+f.seek(i + 18); f.write(b"2")
+PY
+    boot_script $OUT/d3.txt amiga2 bea beapw2 rootpw2
+    run $OUT/d2.fs-uae 900 $OUT/d3.txt $OUT/d3.log
+    booted_m d $OUT/d3.log ext2 ide0p4 amiga2 bea
+    check "d: /home is DH4 (ZenixFS)" "$(has $OUT/d3.log '^ide0p5 +/home +zenixfs')"
     empty $d
 }
 

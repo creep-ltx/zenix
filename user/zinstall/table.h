@@ -44,6 +44,7 @@ struct t_part {
     signed char region;                 /* the RDB it is in, -1 for an MBR entry */
     signed char holds;                  /* an MBR 0x76 entry: the region inside it, -1 if none */
     t_u8 del;                           /* marked to be deleted (the partition step): free space for the plan, gone from the table */
+    t_u32 envlen, sizeblock, secblk, reserved;      /* RDB: its DosEnvec's TableSize, SizeBlock (longs), SectorPerBlock, Reserved */
 };
 
 struct t_region {                       /* one RDB */
@@ -72,7 +73,7 @@ struct tdisk {
     struct t_region region[T_MAXREGION];
 };
 
-enum t_optkind { TO_NEWCONT, TO_FREE, TO_PART, TO_WHOLE, TO_REINSTALL, TO_REMOVE };
+enum t_optkind { TO_NEWCONT, TO_FREE, TO_PART, TO_WHOLE, TO_REINSTALL, TO_REMOVE, TO_MANUAL };
 struct t_opt {
     enum t_optkind kind;
     int region, part;                   /* TO_FREE: the RDB; TO_PART: the partition */
@@ -97,7 +98,7 @@ struct t_want {
 #define T_MINHOME (4u * 2048)
 #define T_HOME_REST 0xFFFFFFFFu         /* TL_CUSTOM's home: all that is left */
 struct t_newp {
-    char label[8];
+    char label[32];                     /* the new partition's name; set it up yourself: the chosen one's (an MBR entry: its device) */
     t_u32 lo, hi;                       /* cylinders of its RDB */
     t_u32 start, sectors;               /* on the whole disk */
     t_u32 dostype, blk;                 /* blk on the whole disk */
@@ -115,6 +116,7 @@ struct t_plan {
     int nw1, nw2, commit1;              /* writes of stage 1 (nw1, the one that makes the new table real: commit1), of stage 2 */
     struct t_write w1[T_MAXW], w2[5];
     int erase_home;                     /* TO_REINSTALL: /home made anew too */
+    int how[3], part[3];                /* TO_MANUAL: each role's TM_* and partition (-1: none); nw[] then holds the chosen ones */
 };
 
 /* Read the disk. busy: the sectors of mounted devices on this medium. 0 (anything found, see d->kind), -1 a read failed */
@@ -143,4 +145,17 @@ int t_commit(const struct tio *io, struct t_write *w, int n, const char **why);
 int t_plan_reinstall(const struct tdisk *d, const struct tio *io, const struct t_want *w, int erase_home, struct t_plan *p, const char **why);
 int t_plan_remove(const struct tdisk *d, const struct tio *io, struct t_plan *p, const char **why);
 
-const char *t_typename(const struct t_part *p);   /* in words: "AmigaDOS FFS", "PFS3", "Linux (ext2)", "FAT32" ... */
+const char *t_typename(const struct t_part *p);
+
+/* ---- set it up yourself (DESIGN D35 3b): every role on an existing partition, kept or formatted ---- */
+enum { TM_NONE, TM_KEEP, TM_FORMAT };
+enum { TF_NONE, TF_EXT2, TF_ZENIXFS, TF_FFS };
+#define T_MAXBOOT ((25u + 2u * 127u) * 4064u)  /* a start-up partition's most: the FFS writers' bitmap (ffsw.h, bootfs.c) */
+struct t_role { int part, how, fs; };   /* part: d->part[], -1 none; how TM_*; fs (formatted root, /home): 1 ZenixFS, 0 ext2 */
+/* what filesystem partition i holds, by its first sectors: TF_* */
+int t_fs_at(const struct tdisk *d, const struct tio *io, int i);
+/* why partition i may not have this role (R_*) kept or formatted (TM_*); 0 if it may */
+const char *t_role_refused(const struct tdisk *d, const struct tio *io, int role, int i, int how);
+/* the plan for three roles (r[R_BOOT] how TM_NONE: no start-up partition; r[R_HOME] TM_NONE: /home a folder on the root):
+ * only the chosen partitions' own PART blocks and the MBR sector are written. 0, or -1 with *why */
+int t_plan_manual(const struct tdisk *d, const struct tio *io, const struct t_role r[3], struct t_plan *p, const char **why);   /* in words: "AmigaDOS FFS", "PFS3", "Linux (ext2)", "FAT32" ... */

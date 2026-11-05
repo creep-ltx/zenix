@@ -11,7 +11,10 @@ SYNOPSIS
              [--reinstall [--erase-home] [--keep-users|--new-users]]
              [--remove-zenix] [--elsewhere]
              [--user NAME [--user-name TEXT] --user-password-file FILE |
-              --no-user]
+              --no-user] [--server URL|none]
+    zinstall --root keep:NAME|format:NAME
+             [--startup keep:NAME|format:NAME|none]
+             [--home keep:NAME|format:NAME|none] [options as above]
     zinstall --list
     zinstall --undo [FILE]
 
@@ -73,6 +76,48 @@ THE MACHINE AND ITS ACCOUNTS
     The shipped accounts user and guest, which have no password, are
     locked, unless one is your name. The options answer these questions
     instead (a password from the first line of a file).
+
+SET IT UP YOURSELF
+    At "Where should Zenix go?", m lets you choose a partition that is
+    already there for each part of Zenix, and say keep or format for
+    each: the start-up partition (zenixboot, the kernel, a boot menu),
+    the system part (root) and your files (/home). Any combination: for
+    example keep a BOOT partition and only add the kernel to it, format a
+    Linux partition for the root, keep /home with its files.
+
+    The start-up partition is a partition of an Amiga table (also one
+    inside a 0x76), or none: then Zenix starts from its boot floppy.
+    Kept, it must be an AmigaDOS FFS volume (DOS\1 or DOS\3, up to about
+    550 MB): zenixboot is added in its top folder (another one there is
+    replaced), the kernel as Zenix/zenix, and the old Zenix's files of
+    zenixboot (state, zenix.old, waiting updates) are deleted. Its boot
+    menu, its Startup-Sequence and its other files stay as they are; if
+    nothing there starts zenixboot, the plan says which line to add from
+    AmigaOS. Formatted, it gets the boot menu as ZB0 has.
+
+    The root and /home may be partitions of an Amiga table or PC
+    partitions of type 0x83 (Linux), used as they are. Formatted, they
+    get ext2 or ZenixFS. Kept, the filesystem on them stays: a kept root
+    gets Zenix's own files written anew over its own, and its users,
+    passwords and computer name are kept; a kept /home keeps its files.
+
+    Formatting takes typing the partition's name. The plan shows every
+    part, what is erased and what is kept, and the table blocks written;
+    yes then starts it. Never offered: a FAT partition, a whole 0x76
+    container, a mounted partition, anything in a damaged table. The
+    chosen root is marked as the one Zenix starts (bootable, or the
+    active flag of a PC partition); another one marked that is not chosen
+    is refused. --undo is not offered after it.
+
+    --startup, --root and --home do the same with no questions: keep:NAME
+    or format:NAME (NAME: the Amiga name or the device, ide0p5) or none,
+    with --root-fs and --home-fs for what is formatted.
+
+THE PACKAGE SERVER
+    Before the plan it asks which package server zpkg uses for updates
+    (Return: the running system's, or none from the floppies; none for no
+    server). It goes into the new /etc/zpkg.conf. --server URL|none
+    answers it; a run with --root-password-file takes the default.
 
 DELETING PARTITIONS
     At "Where should Zenix go?", d lists the partitions and lets you mark
@@ -160,6 +205,7 @@ EXIT STATUS
 FILES
     /etc/zinstall.set  the install floppies' list (on their RAM disk)
     /lib/zinstall/ the boot partition's programs
+    /etc/zpkg.conf     its server line, as chosen
 
 SEE ALSO
     fdisk(8), zpkg(8), bootmenu(8), zenixboot(8), mkfs.ext2(8),

@@ -113,7 +113,7 @@ SPLIT[zpkg-emu-test]="e|s|m"                       # D22 8.2: the A2065, SLIP, 1
 SPLIT[sysupdate-test]="b|m|z"                         # D22 amendment 2: the owner's way from 2026103000; the card layout
 SPLIT[nfs-emu-test]="m|b|w|r|u"                     # D23: reading, hard, soft, killed; the lazy fstab boot; writing; reboot; users
 SPLIT[remote-test]="c|s|l|b"                        # D24: the stock A1200 (c, d, r), the screen, 1 MB of chip RAM, init's daemons
-SPLIT[zinstall-test]="f r|a|m|z|b|c|n|o h|k"               # D35: from the floppies, refusals; beside AmigaOS; 2+4 MB; ZenixFS there; 2 MB chip alone; the card; the network
+SPLIT[zinstall-test]="f r|a|m|z|b|c|n|o h|k|u|e|d"               # D35: from the floppies, refusals; beside AmigaOS; 2+4 MB; ZenixFS there; 2 MB chip alone; the card; the network
 SPLIT[update-test]="install bad|cold previous|panic hang|powercut zfscut|refused nozup|zfsroot|zfsreal slowzup"   # the two cuts in one (STOCK)
 # the matrix as two jobs: the machines that stay at stock speed (STOCK) in one, the others in the other
 m=($(ls fsuae/*.fs-uae fsuae/matrix/*.fs-uae | sed 's#.*/##; s#\.fs-uae##' | grep -vx 'mounts\|zroot'))   # as matrix.sh

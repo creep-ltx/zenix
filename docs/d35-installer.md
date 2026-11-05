@@ -4,7 +4,7 @@
 Status: **built on branch install (2026-11-01 to 11-03), the last feature of block 4 (ROADMAP "The order of work", item 4). The outline is
 the owner's ("an installer: partition, format, copy, boot menu"; a boot floppy or an existing Zenix; no PC); the details were delegated and
 are decided here. Tested on image files and in FS-UAE only: it has never run on a real disk, and nothing here touches the owner's card.**
-What was measured is in section 11.
+What was measured is in section 11. Section 3b (set it up yourself, the owner 2026-11-04) was built on branch inst2, 2026-11-05.
 
 ## 1. What it is
 `zinstall` runs on Zenix itself, from the install floppy or from an existing Zenix, and puts Zenix on a hard disk, CF or SD card: pick a
@@ -144,7 +144,8 @@ partition's Amiga name or its device, `ide0p5`), with `--root-fs`, `--home-fs`.
 **The owner's card** (MBR: p1 FAT32 for Emu68, p2 0x76 with BOOT, FFS 128 MB with the owner's boot menu, and SH0, PFS3; p3 0x83 1 GB;
 p4 0x83 4 GB) installs with: start-up BOOT kept (zenixboot and `Zenix/zenix` added, the menu untouched), root p3 formatted ZenixFS
 (kernel-zfs), /home p4 formatted or kept. Written to the table: at most the MBR sector, twice (p3's active flag off, then on). Tested on
-an image laid out like it (`zinstall-test` u, e), with the host tests.
+an image laid out like it (`zinstall-test` u, e; d an RDB disk), with the host tests; in u Kickstart also starts a copy of the kept BOOT
+(as the IDE slave), whose own menu runs zenixboot, which starts the kernel zinstall put there. Not run on the real card.
 
 **The package server** (asked in every install, before the summary; `--server URL|none`): which server zpkg uses for updates. The default
 is the first `server` line of the running system's `/etc/zpkg.conf` (an existing Zenix, or none on the floppy); `none` leaves the new
@@ -226,6 +227,12 @@ If a step fails, it stops and says what is done; the table has only unbootable, 
 
 ## 8. Shared things touched
 - `tools/mkzup.py`: a family `zinstall`. `user/rdb.h`: `RDB_MAXUSED` may be raised by a program that includes it, and is 512 by default (it was 128: with a PFS3 handler of 121 LSEG blocks, RDSK, FSHD and 6 PART blocks passed it, and after a split install the disk server said at every boot "a block chain leaves the RDB area or loops" about a table that was right; found on the real A1200 2026-11-04, reproduced on the host by `tools/host/rdbread-host.c`, which reads with rdb.h's own default; AmigaOS was not affected: every chain block lay within RDBBlocksHi and HighRDSKBlock). The message for a full table is now its own. `user/zpkg.c`: `zpkg --fetch DIR [--zfs]`, growth only. Makefile: the program, its RAM disk, the floppies. No system call, message, or number claimed.
+  Section 3b (branch inst2, 2026-11-05): zpkg's boot partition writer `user/zpkg/bootfs.c` is linked into zinstall too, and grew by
+  `zp_boot_cd` (the root or a folder in it), `zp_boot_mkdir`, `zp_boot_replace` (a file anew in its own header block) and `zp_boot_delete`,
+  each in the safe order and tested as the rest of it (`tools/host/zpkg-test.sh boot`: AmigaOS's rules, xdfscan, a cut before every
+  write); `user/zinstall/bootkeep.c` is the kept start-up partition's code on top of it; `user/zinstall/ffsw.c` writes bitmap extension
+  blocks (a formatted start-up partition up to about 550 MB). The install floppy's RAM disk grew from 600 to 632 KB for zinstall's
+  31 KB more (`RAMDISK_INSTALL_K`).
 - The floppy set's format is not frozen: disk 1's own program reads it, always of the same build.
 
 ## 9. The review
@@ -244,11 +251,11 @@ The machine Zenix is made for (CLAUDE.md, 2026-11-04) is a stock A1200 (68EC020)
 install must pass there (`zinstall-test` m, z). 2 MB of chip RAM alone is best effort (part b reports, never fails).
 | | |
 |---|---|
-| `zinstall` | 113,900 bytes (ZEXE), -Os, with the password code it shares with passwd and useradd |
-| The install floppies | 4 disks: disk 1 the bootblock, the kernel (172 KB), a RAM disk of 600 KB and part of the set, core first, the optional ones on disks 3-4 |
+| `zinstall` | 145,268 bytes (ZEXE), -Os, with the password code it shares with passwd and useradd, and zpkg's boot partition writer (2026-11-05, section 3b; it was 113,900) |
+| The install floppies | 4 disks: disk 1 the bootblock, the kernel (172 KB), a RAM disk of 632 KB (600 before section 3b) and part of the set, core first, the optional ones on disks 3-4 |
 | No floppy (`install/from-amigaos/`) | zenixboot 53 KB, the kernel 172 KB, `zinstall-ram.img` 3,400 KB (needs fast RAM) |
 | Free at the prompt, booted from disk 1 | 2 + 4 MB: 1,255 KB chip and 3,505 KB fast; 2 MB chip alone: 729 KB |
-| Lowest free memory seen while installing (sampled at each file and program end; a child's peak in between is not seen) | 2 + 4 MB: 4,285 KB with ext2, 4,162 KB with ZenixFS; 2 MB chip alone: 277 KB with ext2 (one partition), ZenixFS refused |
+| Lowest free memory seen while installing (sampled at each file and program end; a child's peak in between is not seen) | 2 + 4 MB: 4,198 KB with ext2, 4,075 KB with ZenixFS; 2 MB chip alone: 220 KB with ext2 (one partition), ZenixFS refused (2026-11-05, after section 3b: 87 KB, 87 KB and 57 KB less than on 11-04, the bigger RAM disk and program) |
 | What zinstall wants free before it writes anything | 350 KB (ext2), 500 KB (ZenixFS): measured use plus a margin; less, and it says so and writes nothing |
 | The check after the copy | fsck.ext2 -n needs about 12 bytes per inode, two block bitmaps and 96 KB (zinstall gives the copy's 32 KB window and track buffer back first); where that is more than is free it is skipped and said (every file was already checked against its SHA-256), and the line to run later is printed |
 | The installed machine, one login | 2 + 4 MB: 1,855 KB chip free and 3,464 KB fast (ext2) or 3,196 KB fast (ZenixFS); 2 MB chip alone: 1,287 KB on ext2 |
@@ -262,3 +269,6 @@ the check after zinstall has exited), and fsck.ext2 reading the inode table in g
 None of it is done: the floor that must pass is 2 + 4 MB.
 
 Tests: `tools/zinstall-host-test.sh` (314 checks, the fuzzer 300,000 rounds, ASAN and UBSAN), `tools/zinstall-test.sh` f r a m z b c n o h k (m z b: 71 checks, 2026-11-04), `useradd-test` (63) and `users-test` (61) after the shared password code.
+Section 3b (2026-11-05, fast mode): `zinstall-host-test` 349 checks (the owner's card's layout in every role combination that matters, the
+refusals, a cut at nine points, the fuzzer with manual plans: only chosen PART blocks and the MBR sector written), `zpkg-test boot` 113
+(bootfs's new calls, a cut before each write), `zinstall-test` 303 with the new parts u (25), e (20), d (16), `sysupdate-test` 27.

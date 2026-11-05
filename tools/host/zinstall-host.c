@@ -4,6 +4,9 @@
  *   zinstall-host install IMG WHICH [MB] [zfs]     do option WHICH (a number as zinstall shows), the filesystems faked:
  *                                                  stage 1, marks in the root and /home, the boot partition, stage 2
  *   zinstall-host fuzz SEED ROUNDS IMG...          damaged tables: t_read, t_options and t_plan_make must end
+ *   zinstall-host manual IMG BOOT ROOT HOME        set it up yourself (D35 3b): each role none, keep:NAME or format:NAME[:zfs]
+ *                                                  (NAME a label or a device); a kept start-up partition gets its files
+ *                                                  through bootkeep.c, a formatted one ffsw's volume
  * Environment: ZI_CUT=N a power cut after N sector writes (exit 99); ZI_TABLE_ONLY=1 stage 1 only; ZI_CHANGE=LBA:BYTE:VALUE
  * a change on the disk after the plan was made, before the re-read; ZI_CUT_TABLE=1 ZI_CUT counts table writes only. */
 #include <fcntl.h>
@@ -14,6 +17,7 @@
 #include <sys/stat.h>
 #include "../../user/zinstall/table.h"
 #include "../../user/zinstall/ffsw.h"
+#include "../../user/zinstall/bootkeep.h"
 
 static int fd;
 static long cut = -1, written;
@@ -125,6 +129,13 @@ bad:
     return -1;
 }
 
+/* a kept start-up partition (bootkeep.c over bootfs.c), through the same confinement */
+static int kb_rd(void *u, zp_u32 b, unsigned char *buf) { (void)u; return prd(0, b, 1, buf); }
+static int kb_wr(void *u, zp_u32 b, unsigned char *buf) { (void)u; return pwr(0, b, 1, buf); }
+static int kb_fl(void *u) { (void)u; return 0; }
+static unsigned char zbblob[53000], kblob[172000];
+static int blob_src(void *u, zp_u32 off, unsigned char *buf, zp_u32 n) { memcpy(buf, (unsigned char *)u + off, n); return 0; }
+
 static struct tdisk d;
 static struct t_plan pl;
 static struct t_opt opts[T_MAXOPT];
@@ -208,6 +219,27 @@ static int fuzz(unsigned long rounds, int nimg, char **names)
         (void)t_whole_refused(&d);
         if (frnd() % 3 == 0)                    /* the partition step: some marked to delete */
             for (int i = 0; i < d.nparts; i++) if (frnd() % 2 && !t_del_refused(&d, i)) d.part[i].del = 1;
+        if (d.nparts && frnd() % 2) {           /* set it up yourself: random roles; only chosen blocks and sector 0 written */
+            struct t_role rr[3];
+            const char *why;
+            for (int k = 0; k < 3; k++) {
+                rr[k].how = (int)(frnd() % 3); rr[k].part = (int)(frnd() % (unsigned long long)d.nparts); rr[k].fs = (int)(frnd() & 1);
+            }
+            if (frnd() % 2) rr[R_ROOT].how = TM_FORMAT;
+            if (t_plan_manual(&d, &mio, rr, &pl, &why)) refused++;
+            else {
+                plans++;
+                for (int w = 0; w < pl.nw1 + pl.nw2; w++) {
+                    t_u32 lba = w < pl.nw1 ? pl.w1[w].lba : pl.w2[w - pl.nw1].lba;
+                    int okw = lba == 0;
+                    for (int k = 0; k < 3; k++) if (pl.part[k] >= 0 && d.part[pl.part[k]].how == TP_RDB && d.part[pl.part[k]].blk == lba) okw = 1;
+                    if ((d.zr >= 0 && d.part[d.zr].blk == lba) || (d.zb >= 0 && d.part[d.zb].blk == lba)) okw = 1;
+                    if (!okw || lba >= s) { printf("zinstall-fuzz: a manual plan writes block %u, not a chosen one\n", lba); return 3; }
+                }
+                for (int k = 0; k < 3; k++)
+                    if (pl.part[k] >= 0 && ((unsigned long long)pl.nw[k].start + pl.nw[k].sectors > s || !pl.nw[k].sectors)) { printf("zinstall-fuzz: a role outside the disk\n"); return 3; }
+            }
+        }
         int n = t_options(&d, &mio, opts, T_MAXOPT);
         opts_tot += (unsigned long)n;
         for (int i = 0; i < n; i++) {
@@ -237,6 +269,70 @@ static int fuzz(unsigned long rounds, int nimg, char **names)
     return 0;
 }
 
+static int role_arg(const char *a, struct t_role *r)
+{
+    static char b[64];
+    r->part = -1; r->how = TM_NONE; r->fs = 0;
+    if (!strcmp(a, "none")) return 0;
+    strncpy(b, a, sizeof b - 1);
+    char *c = strchr(b, ':');
+    if (!c) return -1;
+    *c++ = 0;
+    r->how = !strcmp(b, "keep") ? TM_KEEP : !strcmp(b, "format") ? TM_FORMAT : -1;
+    char *z = strchr(c, ':');
+    if (z) { *z++ = 0; r->fs = !strcmp(z, "zfs"); }
+    for (int i = 0; i < d.nparts; i++) if (!strcmp(d.part[i].label, c) || !strcmp(d.part[i].dev, c)) r->part = i;
+    return r->how < 0 ? -1 : 0;
+}
+static int manual(int argc, char **argv, t_u32 sect, struct t_busy *bz, int nbz)
+{
+    static const char *const rn[3] = { "boot", "root", "home" }, *const hn[3] = { "none", "keep", "format" };
+    struct t_role r[3];
+    const char *why;
+    for (int k = 0; k < 3; k++) if (role_arg(argv[3 + k], &r[k])) { printf("bad role %s\n", argv[3 + k]); return 2; }
+    for (int k = 0; k < 3; k++) {
+        const char *w = r[k].how == TM_NONE ? 0 : t_role_refused(&d, &io, k, r[k].part, r[k].how);
+        if (w) printf("role %s refused: %s\n", rn[k], w);
+    }
+    if (t_plan_manual(&d, &io, r, &pl, &why)) { printf("refused: %s\n", why); return 1; }
+    for (int k = 0; k < 3; k++)
+        if (pl.part[k] >= 0)
+            printf("role %s %s %s start=%u sectors=%u blk=%u dostype=%08x\n", rn[k], hn[pl.how[k]], pl.nw[k].label, pl.nw[k].start, pl.nw[k].sectors, pl.nw[k].blk, pl.nw[k].dostype);
+    printf("zenixfs %d homefs %d pri %d aos %s nw1 %d nw2 %d\n", pl.zenixfs, pl.homefs, pl.pri, pl.aos[0] ? pl.aos : "-", pl.nw1, pl.nw2);
+    for (int i = 0; i < pl.nw1; i++) printf("w1 %u\n", pl.w1[i].lba);
+    for (int i = 0; i < pl.nw2; i++) printf("w2 %u\n", pl.w2[i].lba);
+    for (unsigned i = 0; i < sizeof zbblob; i++) zbblob[i] = (unsigned char)(i * 7 + 3);
+    for (unsigned i = 0; i < sizeof kblob; i++) kblob[i] = (unsigned char)(i * 2654435761u >> 24);
+    struct zp_ffs f = { 512, 2, 0, 0, 1, kb_rd, kb_wr, kb_fl, 0 };
+    if (pl.how[R_BOOT] == TM_KEEP) {
+        struct bk_look k;
+        pstart = pl.nw[R_BOOT].start; psect = pl.nw[R_BOOT].sectors;
+        f.dostype = pl.nw[R_BOOT].dostype; f.nblocks = psect;
+        f.write = 0;
+        if (bk_look(&f, sizeof zbblob, blob_src, zbblob, sizeof kblob, &k, &why)) { printf("keep refused: %s\n", why); return 1; }
+        printf("look zb=%d same=%d dir=%d kern=%d starts=%d nold=%d old=%s free=%u need=%u\n", k.zb_there, k.zb_same, k.dir_there,
+               k.kern_there, k.starts_zb, k.nold, k.nold ? k.old : "-", k.nfree, k.need);
+        f.write = kb_wr;
+    }
+    if (getenv("ZI_PLAN_ONLY")) return 0;
+    if (t_same(&d, &io, sect, bz, nbz) != 1) { printf("changed: nothing written\n"); return 1; }
+    if (getenv("ZI_CUT")) cut = atol(getenv("ZI_CUT"));
+    if (t_commit(&io, pl.w1, pl.nw1, &why)) { printf("commit: %s\n", why); return 1; }
+    printf("stage1 %ld\n", written);
+    if (pl.how[R_ROOT] == TM_FORMAT && fake_fs(&pl.nw[R_ROOT], 0xA5)) return 1;
+    if (pl.how[R_HOME] == TM_FORMAT && fake_fs(&pl.nw[R_HOME], 0x5A)) return 1;
+    if (pl.how[R_BOOT] == TM_FORMAT && write_boot(&pl)) return 1;
+    if (pl.how[R_BOOT] == TM_KEEP) {
+        static const zp_u32 date[3] = { 17000, 60, 0 };
+        if (bk_write(&f, sizeof zbblob, blob_src, zbblob, sizeof kblob, blob_src, kblob, date, &why)) { printf("keep: %s\n", why); return 1; }
+        printf("kept files written\n");
+    }
+    printf("files %ld\n", written);
+    if (t_commit(&io, pl.w2, pl.nw2, &why)) { printf("commit2: %s\n", why); return 1; }
+    printf("done %ld\n", written);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 3) { fprintf(stderr, "usage: see the source\n"); return 2; }
@@ -262,6 +358,7 @@ int main(int argc, char **argv)
     }
     int n = t_options(&d, &io, opts, T_MAXOPT);
     if (!strcmp(argv[1], "list")) { show(&d); show_opts(&d, opts, n); return 0; }
+    if (!strcmp(argv[1], "manual") && argc == 6) return manual(argc, argv, sect, &bz, nbz);
     if (!strcmp(argv[1], "reinstall") || !strcmp(argv[1], "remove")) {      /* the Zenix already there: made again, or taken out */
         const char *why;
         struct t_want w = { TL_RECOMMENDED, 0, 0, argc > 3 && !strcmp(argv[3], "zfs"), 0 };
