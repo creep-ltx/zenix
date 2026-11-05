@@ -313,7 +313,7 @@ $(BUILD)/zenix-ram.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/root
 # and the other disks hold the set, package bundles one after another. RAMDISK_INSTALL_K: enough for those programs and /tmp;
 # what it takes from disk 1 is what the set does not get there (the build says how much is left).
 INSTALLAPPS := init login sh ls cat echo ps free df sync mount umount mkdir mkfs_ext2 mkfs_zenixfs fsck_ext2 fsck_zenixfs fdisk reboot zfsd dmesg zinstall
-RAMDISK_INSTALL_K := 600
+RAMDISK_INSTALL_K := 632
 $(BUILD)/root-install.img: $(USERZX) $(SBINZX) $(shell find rootfs -type f) tools/mkroot.sh
 	NOMAN=1 NOPURE=1 NOTESTS=1 MOUNTDIRS="mnt" tools/mkroot.sh $@ $(BUILD) "$(INSTALLAPPS)" $(RAMDISK_INSTALL_K)K 96
 # and, for a start from AmigaOS with no floppy (install/from-amigaos/: zenixboot, the kernel, zinstall-ram.img), the same programs with
@@ -366,13 +366,15 @@ $(BUILD)/zup.uelf: $(BUILD)/zup.uo $(BUILD)/zpkgfmt.uo $(BUILD)/miniz_tinfl.uo $
 
 # zinstall (DESIGN D35, docs/man/zinstall.txt): the tables and the boot partition's writer in files of their own (the PC's tests
 # build the same files, tools/zinstall-host-test.py), inflate, SHA-256 and the package formats as zup has them
-ZINSTALLOBJS := $(BUILD)/zinstall-table.uo $(BUILD)/zinstall-ffsw.uo $(BUILD)/zpkgfmt.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo \
-                $(BUILD)/pw.uo $(BUILD)/sha.uo
+ZINSTALLOBJS := $(BUILD)/zinstall-table.uo $(BUILD)/zinstall-ffsw.uo $(BUILD)/zinstall-bootkeep.uo $(BUILD)/cr/user/zpkg/bootfs.o \
+                $(BUILD)/zpkgfmt.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo $(BUILD)/pw.uo $(BUILD)/sha.uo
 $(BUILD)/zinstall-table.uo: user/zinstall/table.c user/zinstall/table.h user/rdb.h user/sha256.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
 $(BUILD)/zinstall-ffsw.uo: user/zinstall/ffsw.c user/zinstall/ffsw.h user/sha256.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
-$(BUILD)/zinstall.uo: user/zinstall.c user/pw.h user/zpw.h user/zinstall/table.h user/zinstall/ffsw.h user/zpkgfmt.h user/sha256.h user/libz.h user/usys.h kernel/diskproto.h | $(BUILD)
+$(BUILD)/zinstall-bootkeep.uo: user/zinstall/bootkeep.c user/zinstall/bootkeep.h user/zpkg/zpkg.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/zinstall.uo: user/zinstall.c user/pw.h user/zpw.h user/zinstall/table.h user/zinstall/ffsw.h user/zinstall/bootkeep.h user/zpkg/zpkg.h user/zpkgfmt.h user/sha256.h user/libz.h user/usys.h kernel/diskproto.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os $(MINIZ_CFLAGS) -c $< -o $@
 $(BUILD)/zinstall.uelf: $(BUILD)/zinstall.uo $(ZINSTALLOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/zinstall.uo $(ZINSTALLOBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@

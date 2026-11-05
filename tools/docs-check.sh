@@ -83,6 +83,7 @@ if [ "$1" = "--staged" ] || [ "$1" = "--commit" ]; then
         user/zpkg/*) ;;          # zpkg's core (DESIGN D22): a library of the coming zpkg, no page of its own yet
         user/wget/*) ;;          # wget's core (DESIGN D21 step 7): a library of the coming wget, no page of its own yet
         user/zine/*) ;;          # ZINE's cores (DESIGN D29 step 1): libraries of the coming zine and its blob, no page of their own
+        user/zinstall/*) ;;      # zinstall's parts (DESIGN D35: tables, the boot partition writers): its page is zinstall.txt
         user/*.c)
             b=$(basename "$c" .c); n=$(echo "$b" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')
             case "$b" in libz|regex|miniz|fsd|pw|clockfile|sha|sha256|zenixfsd|zenixfs_disk|zpkgfmt|zmalloc|zenv|zout|zerrtab|zsig|zpoll|zsock|zhelp|zpw|zpty|libctest|tuitest) continue;; esac     # libraries, servers, the libraries' test programs: no page of their own

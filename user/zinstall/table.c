@@ -146,6 +146,7 @@ static int read_rdb(struct tdisk *d, t_u32 base, t_u32 limit, int *count)
         if (hrd(p->blk, b)) return -1;
         t_u32 fl = be32(b + 5 * 4), pri = be32(b + (32 + 15) * 4);
         p->nomount = (fl & FLG_NOMOUNT) != 0;
+        p->envlen = be32(b + 32 * 4); p->sizeblock = be32(b + 33 * 4); p->secblk = be32(b + 36 * 4); p->reserved = be32(b + 38 * 4);
         p->pri = (int)pri > 127 ? 127 : (int)pri < -128 ? -128 : (signed char)(int)pri;
     }
     return 1;
@@ -1167,3 +1168,194 @@ int t_plan_remove(const struct tdisk *d, const struct tio *io, struct t_plan *p,
     return 0;
 }
 
+
+/* ---- set it up yourself (DESIGN D35 3b) ---- */
+int t_fs_at(const struct tdisk *d, const struct tio *io, int i)
+{
+    const struct t_part *p = &d->part[i];
+    t_u8 b[512];
+    int ffs = 0;
+    if (i < 0 || i >= d->nparts || p->sectors < 8 || io->rd(io->ctx, p->start, 1, b)) return TF_NONE;
+    if (!memcmp(b + 32, "ZNFS", 4)) return TF_ZENIXFS;
+    ffs = be32(b) == 0x444F5301u || be32(b) == 0x444F5303u;
+    if (io->rd(io->ctx, p->start + 2, 1, b)) return TF_NONE;
+    if (b[56] == 0x53 && b[57] == 0xEF) return TF_EXT2;
+    return ffs ? TF_FFS : TF_NONE;
+}
+
+static int devnum(const struct t_part *p) { return (p->dev[5] - '0') * (p->dev[6] ? 10 : 1) + (p->dev[6] ? p->dev[6] - '0' : 0); }
+
+const char *t_role_refused(const struct tdisk *d, const struct tio *io, int role, int i, int how)
+{
+    const char *t = table_refused(d);
+    if (t) return t;
+    if (i < 0 || i >= d->nparts) return "no such partition";
+    const struct t_part *p = &d->part[i];
+    if (p->busy) return "it is in use now (mounted)";
+    if (!p->sectors) return "the table does not say where it is";
+    if (d->noedit) return d->noedit;
+    if (p->how == TP_MBR) {
+        if (is_fat(p->mbrtype)) return "a FAT partition: it may hold Emu68, the Kickstart, a PC's files; never touched";
+        if (p->mbrtype == 0x76) return "it holds an Amiga table with partitions of its own: choose one of those";
+        if (is_ext(p->mbrtype)) return "an extended partition; never touched";
+        if (p->mbrtype != 0x83) return "a PC partition of a type this program does not know; never touched";
+        if (role == R_BOOT) return "a PC partition: Kickstart and Emu68 start only from an Amiga table's partitions";
+    } else if (d->region[(int)p->region].noedit) return d->region[(int)p->region].noedit;
+    if (role == R_BOOT) {
+        if (p->envlen < 16 || p->sizeblock != 128 || p->secblk != 1) return "its blocks are not of 512 bytes, which the start-up partition needs";
+        if (p->sectors < 2u * 2048) return "too small for the start-up partition (at least 2 MB)";
+        if (p->sectors > T_MAXBOOT) return "too big for the start-up partition (at most about 550 MB)";
+        if (how == TM_KEEP) {
+            if (p->dostype != 0x444F5301u && p->dostype != 0x444F5303u) return "it is not an AmigaDOS FFS partition (DOS\\1 or DOS\\3) whose files could be kept";
+            if (p->reserved != 2 || t_fs_at(d, io, i) != TF_FFS) return "no AmigaDOS FFS volume of the usual kind was found on it";
+        } else if (d->region[(int)p->region].base == 0 && (unsigned long long)p->start + p->sectors > 8388608ull)
+            return "it lies past 4 GB, where Kickstart 3.1 cannot start from";
+        return 0;
+    }
+    if (p->how == TP_RDB && p->envlen < 16) return "its table entry is of an old kind with no filesystem type in it";
+    if (role == R_ROOT && devnum(p) > 14) return "Zenix looks for its root among the first 14 partitions only";
+    if (how == TM_KEEP) {
+        int fs = t_fs_at(d, io, i);
+        if (fs != TF_EXT2 && fs != TF_ZENIXFS) return "no ext2 or ZenixFS filesystem was found on it to keep";
+        if (p->how == TP_RDB && p->dostype != (fs == TF_EXT2 ? DT_EXT2 : DT_ZENIXFS)) return "its table entry names another filesystem than the one on it";
+    } else if (p->sectors < (role == R_ROOT ? T_MINROOT : T_MINHOME))
+        return role == R_ROOT ? "too small for the system part (at least 32 MB)" : "too small for /home (at least 4 MB)";
+    return 0;
+}
+
+/* a block of the plan as stage 1 left it (or as it is now) */
+static int as_after1(const struct t_plan *p, const struct tio *io, t_u32 lba, t_u8 *out)
+{
+    for (int i = p->nw1 - 1; i >= 0; i--) if (p->w1[i].lba == lba) { memcpy(out, p->w1[i].data, 512); return 0; }
+    return io->rd(io->ctx, lba, 1, out);
+}
+
+int t_plan_manual(const struct tdisk *d, const struct tio *io, const struct t_role r[3], struct t_plan *p, const char **why)
+{
+    static t_u32 q[128];
+    static t_u8 m[512];
+    memset(p, 0, sizeof *p);
+    p->opt = (struct t_opt){ TO_MANUAL, -1, r[R_ROOT].part, 0, 0 };
+    p->atomic = 1;
+    *why = 0;
+    cur = d;
+    cio = io;
+    if (table_refused(d)) { *why = table_refused(d); return -1; }
+    if (r[R_ROOT].how == TM_NONE) { *why = "the system part (root) is needed"; return -1; }
+    for (int k = 0; k < 3; k++) {
+        p->how[k] = r[k].how;
+        p->part[k] = r[k].how == TM_NONE ? -1 : r[k].part;
+        if (r[k].how == TM_NONE) continue;
+        const char *w = t_role_refused(d, io, k, r[k].part, r[k].how);
+        if (w) { *why = w; return -1; }
+        for (int j = 0; j < k; j++)
+            if (r[j].how != TM_NONE && r[j].part == r[k].part) { *why = "one partition cannot have two roles"; return -1; }
+    }
+    p->zenixfs = r[R_ROOT].how == TM_KEEP ? t_fs_at(d, io, r[R_ROOT].part) == TF_ZENIXFS : r[R_ROOT].fs != 0;
+    p->homefs = r[R_HOME].how == TM_NONE ? 0 : r[R_HOME].how == TM_KEEP ? t_fs_at(d, io, r[R_HOME].part) == TF_ZENIXFS : r[R_HOME].fs != 0;
+    /* Zenix takes the first root marked (user/rootpick.h): any other one marked would stay the root */
+    for (int i = 0; i < d->nparts; i++) {
+        const struct t_part *x = &d->part[i];
+        int root = x->how == TP_MBR ? x->mbrtype == 0x83 : x->dostype == DT_EXT2 || x->dostype == DT_ZENIXFS;
+        if (root && x->bootable && i != p->part[R_ROOT] && i != p->part[R_HOME] && i != d->zr) {
+            *why = "another partition is marked as the root Zenix starts from, and would stay the root: take its mark off first (fdisk boot N off), or choose it";
+            return -1;
+        }
+    }
+    p->nnew = r[R_HOME].how == TM_NONE ? 2 : 3;
+    for (int k = 0; k < 3; k++) {
+        if (p->part[k] < 0) continue;
+        const struct t_part *x = &d->part[p->part[k]];
+        struct t_newp *n = &p->nw[k];
+        strncpy(n->label, x->label[0] ? x->label : x->dev, sizeof n->label - 1);
+        n->start = x->start; n->sectors = x->sectors; n->blk = x->how == TP_RDB ? x->blk : 0;
+        n->lo = x->lowcyl; n->hi = x->highcyl;
+        n->dostype = k == R_BOOT ? (r[k].how == TM_KEEP ? x->dostype : 0x444F5301u) : x->how == TP_MBR ? DT_EXT2 :
+                     ((k == R_ROOT ? p->zenixfs : p->homefs) ? DT_ZENIXFS : DT_EXT2);
+    }
+    if (p->part[R_BOOT] >= 0) p->cyl = d->part[p->part[R_BOOT]].how == TP_RDB ? d->region[(int)d->part[p->part[R_BOOT]].region].cyl : 0;
+    /* a new start-up partition's menu: what this disk starts by itself, the chosen ones aside; its priority above the highest */
+    if (r[R_BOOT].how == TM_FORMAT) {
+        int best = -129, maxpri = -129;
+        for (int i = 0; i < d->nparts; i++) {
+            const struct t_part *x = &d->part[i];
+            if (x->how != TP_RDB || !x->bootable || x->nomount || x->pri == -128) continue;
+            if (i == p->part[R_BOOT] || i == p->part[R_ROOT] || i == p->part[R_HOME] || i == d->zb || i == d->zr || i == d->zh) continue;
+            if (x->pri > maxpri) maxpri = x->pri;
+            if (x->dostype == DT_EXT2 || x->dostype == DT_ZENIXFS) continue;
+            if (x->pri > best) { best = x->pri; strncpy(p->aos, x->label, sizeof p->aos - 1); }
+        }
+        p->pri = maxpri == -129 ? 0 : maxpri >= 127 ? 127 : maxpri + 1;
+        if (p->aos[0] && !menu_name_ok(p->aos)) { *why = "the partition this disk starts from has a name the boot menu cannot use (a space at its end, a colon): rename it first"; return -1; }
+    }
+    /* stage 1: the chosen partitions' own blocks: not bootable, not mounted by AmigaOS, the new dostype; the active flags of chosen 0x83 entries off */
+    memcpy(m, d->sec0, 512);
+    int mbrw = 0;
+    for (int k = 0; k < 3; k++) {
+        if (p->part[k] < 0) continue;
+        const struct t_part *x = &d->part[p->part[k]];
+        if (x->how == TP_MBR) {
+            t_u8 *e = m + 446 + 16 * x->slot;
+            if (e[0] == 0x80) { e[0] = 0; mbrw = 1; }
+            continue;
+        }
+        if (k == R_BOOT && r[k].how == TM_KEEP) continue;      /* a kept start-up partition's entry is not written */
+        t_u8 old[512];
+        if (io->rd(io->ctx, x->blk, 1, old)) { *why = "cannot read the table"; return -1; }
+        to_longs(q, old);
+        if (q[0] != RDB_ID_PART || !rdb_sum_ok(q) || q[1] < 32 + 17 || q[1] > 128) { *why = "a chosen partition's table block does not add up"; return -1; }
+        if (k == R_HOME) q[5] = (q[5] | FLG_NOMOUNT) & ~FLG_BOOT;
+        else q[5] = FLG_NOMOUNT;
+        if (r[k].how == TM_FORMAT) q[32 + 16] = p->nw[k].dostype;
+        if (k == R_BOOT) { q[32 + 6] = 2; q[32 + 7] = 0; }   /* Reserved 2, PreAlloc 0: the FFS volume ffsw writes */
+        rdb_sum(q);
+        t_u8 nb[512];
+        to_bytes(nb, q);
+        if (!memcmp(nb, old, 512)) continue;
+        if (add_write(p, x->blk, 0, nb, 1, old)) { *why = "too many writes"; return -1; }
+    }
+    if (mbrw && plan_write(p, io, 0, 0, m, 1)) { *why = "cannot read the disk"; return -1; }
+    p->commit1 = p->nw1 ? p->nw1 - 1 : 0;
+    /* stage 2: the root's mark; an earlier Zenix's marks off; a new start-up partition bootable last */
+    {
+        const struct t_part *x = &d->part[p->part[R_ROOT]];
+        struct t_write *w = &p->w2[p->nw2++];
+        w->flush = 1;
+        if (x->how == TP_MBR) {
+            w->lba = 0;
+            if (as_after1(p, io, 0, w->old)) { *why = "cannot read the disk"; return -1; }
+            memcpy(w->data, w->old, 512);
+            w->data[446 + 16 * x->slot] = 0x80;
+        } else {
+            w->lba = x->blk;
+            if (as_after1(p, io, x->blk, w->old)) { *why = "cannot read the table"; return -1; }
+            to_longs(q, w->old);
+            q[5] = FLG_BOOT | FLG_NOMOUNT;
+            rdb_sum(q);
+            to_bytes(w->data, q);
+        }
+    }
+    for (int k = 0; k < 2; k++) {
+        int i = k == 0 ? d->zr : d->zb;
+        if (i < 0 || i == p->part[R_BOOT] || i == p->part[R_ROOT] || i == p->part[R_HOME] || !d->part[i].bootable) continue;
+        struct t_write *w = &p->w2[p->nw2++];
+        w->lba = d->part[i].blk; w->flush = 1;
+        if (io->rd(io->ctx, w->lba, 1, w->old)) { *why = "cannot read the table"; return -1; }
+        to_longs(q, w->old);
+        if (q[0] != RDB_ID_PART || !rdb_sum_ok(q)) { *why = "the old Zenix's table block does not add up"; return -1; }
+        q[5] &= ~FLG_BOOT;
+        rdb_sum(q);
+        to_bytes(w->data, q);
+    }
+    if (r[R_BOOT].how == TM_FORMAT) {
+        struct t_write *w = &p->w2[p->nw2++];
+        w->lba = p->nw[R_BOOT].blk; w->flush = 1;
+        if (as_after1(p, io, w->lba, w->old)) { *why = "cannot read the table"; return -1; }
+        to_longs(q, w->old);
+        q[5] = FLG_BOOT;
+        q[32 + 15] = (t_u32)p->pri;
+        rdb_sum(q);
+        to_bytes(w->data, q);
+    }
+    return 0;
+}

@@ -819,7 +819,10 @@ static int fsrc_read(void *u, zp_u32 off, unsigned char *buf, zp_u32 n)
 /* boot IMG DOSTYPE [noflush] [BS RES]              the walk: "ok FREE LEAK HEADERS DIR"
  * bootfind IMG DOSTYPE NAME                        Zenix/NAME: "ok SIZE NBLK HEADER BLOCK..."
  * bootcreate IMG DOSTYPE NAME FILE [CUT]           a new file Zenix/NAME with FILE's bytes ("created")
- * bootwrite IMG DOSTYPE NAME OFF FILE              FILE's bytes at OFF into Zenix/NAME's data blocks ("written") */
+ * bootwrite IMG DOSTYPE NAME OFF FILE              FILE's bytes at OFF into Zenix/NAME's data blocks ("written")
+ * bootput IMG DOSTYPE DIR NAME FILE [CUT]          DIR/NAME made anew from FILE, DIR - the root ("put"; zinstall, D35 3b)
+ * bootdel IMG DOSTYPE DIR NAME [CUT]               DIR/NAME deleted ("deleted")
+ * bootmkdir IMG DOSTYPE NAME [CUT]                 a directory NAME in the root ("made") */
 static int boot_cmd(int argc, char **argv)
 {
     struct img m;
@@ -828,6 +831,7 @@ static int boot_cmd(int argc, char **argv)
     struct zp_bootfile bf;
     const char *why = "", *cmd = argv[1];
     int rc, wr = strcmp(cmd, "boot") && strcmp(cmd, "bootfind");
+    static const zp_u32 date3[3] = { 17800, 600, 0 };
     long sz;
     memset(&m, 0, sizeof m);
     m.f = fopen(argv[2], wr ? "r+b" : "rb");
@@ -866,7 +870,30 @@ static int boot_cmd(int argc, char **argv)
         fclose(m.f);
         return 1;
     }
-    if (!strcmp(cmd, "boot")) {
+    if (!strcmp(cmd, "bootput") || !strcmp(cmd, "bootdel")) {
+        int put = cmd[4] == 'p', at = put ? 7 : 6;
+        m.cut = argc > at ? atol(argv[at]) : 0;
+        rc = zp_boot_cd(&v, strcmp(argv[4], "-") ? argv[4] : "", &why);
+        if (!rc && put) {
+            size_t n;
+            char *data = readfile(argv[6], &n);
+            struct fsrc src = { (const unsigned char *)data, (zp_u32)(data ? n : 0) };
+            rc = data ? zp_boot_replace(&v, argv[5], (zp_u32)n, fsrc_read, &src, date3, &why) : -2;
+            free(data);
+        } else if (!rc)
+            rc = zp_boot_delete(&v, argv[5], &why);
+        if (rc)
+            printf("refused %d: %s\n", rc, why);
+        else
+            printf(put ? "put\n" : "deleted\n");
+    } else if (!strcmp(cmd, "bootmkdir")) {
+        m.cut = argc > 5 ? atol(argv[5]) : 0;
+        rc = zp_boot_mkdir(&v, argv[4], date3, &why);
+        if (rc)
+            printf("refused %d: %s\n", rc, why);
+        else
+            printf("made\n");
+    } else if (!strcmp(cmd, "boot")) {
         printf("ok %u %u %u %u\n", v.nfree, v.nleak, v.nheaders, v.dir);
     } else if (!strcmp(cmd, "bootfind")) {
         rc = zp_boot_find(&v, argv[4], &bf, &why);
@@ -952,7 +979,9 @@ int main(int argc, char **argv)
         return 0;
     }
     if ((argc >= 4 && !strcmp(argv[1], "boot")) || (argc == 5 && !strcmp(argv[1], "bootfind")) ||
-        ((argc == 6 || argc == 7) && !strcmp(argv[1], "bootcreate")) || (argc == 7 && !strcmp(argv[1], "bootwrite")))
+        ((argc == 6 || argc == 7) && !strcmp(argv[1], "bootcreate")) || (argc == 7 && !strcmp(argv[1], "bootwrite")) ||
+        ((argc == 7 || argc == 8) && !strcmp(argv[1], "bootput")) || ((argc == 6 || argc == 7) && !strcmp(argv[1], "bootdel")) ||
+        ((argc == 5 || argc == 6) && !strcmp(argv[1], "bootmkdir")))
         return boot_cmd(argc, argv);
     fprintf(stderr, "usage: zpkg-core-test units | index FILE | latest FILE | boot IMG DOSTYPE [noflush] [BS RES]"
                     " | bootfind IMG DOSTYPE NAME | bootcreate IMG DOSTYPE NAME FILE [CUT] | bootwrite IMG DOSTYPE NAME OFF FILE\n");
