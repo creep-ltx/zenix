@@ -97,6 +97,7 @@ part_c() {
 if [ ! -e /var/r-boot1 ]; then
     touch /var/r-boot1
     /sbin/wasabid 2> /tmp/wd1.log &
+    trap '' INT     # until netd owns the line, the PC's SLIP frames reach this shell: a 0x03 in them was a ^C (2026-11-05)
     sleep 5
     ps > /tmp/r-ps-idle.txt; free > /tmp/r-free-idle.txt
     mv /sbin/netd.off /sbin/netd
