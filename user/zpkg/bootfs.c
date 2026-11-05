@@ -17,7 +17,12 @@
  *     blocks marked in use that no file names (a leak: AmigaOS never validates a volume whose bitmap is valid, so the
  *     next create gives them back in its own bitmap writes, the walk having proved that nothing names them);
  *   - nothing else on the volume is ever changed: no other file, no directory but the hash-chain link, no date;
- *   - an existing file's data blocks may be overwritten in place (zp_boot_pwrite): no metadata changes.
+ *   - an existing file's data blocks may be overwritten in place (zp_boot_pwrite): no metadata changes;
+ *   - for zinstall's kept start-up partition (DESIGN D35 3b): a directory made in the root (zp_boot_mkdir, the same
+ *     order as a file), files in the root (zp_boot_cd ""), a file replaced (zp_boot_replace: the new data and extension
+ *     blocks in free blocks, the bitmap, then the ONE write of its header in its own place; the old blocks given back
+ *     after) and a file deleted (zp_boot_delete: the ONE write that unlinks it, its blocks given back after). A cut
+ *     leaves the old file or the new one, at worst with a leak as above.
  * zenixboot (under Kickstart's own dos) then reads, checks and installs the files as D15 built it.
  */
 #include <string.h>
@@ -550,135 +555,171 @@ zp_u32 zp_boot_blocks(zp_u32 size)
     return 1 + n + (n > HT ? (n - HT + HT - 1) / HT : 0);
 }
 
-int zp_boot_create(struct zp_bootvol *v, const char *name, zp_u32 size, zp_src src, void *u, const zp_u32 date[3],
-                   const char **why)
+/* the blocks of a new file's body (data and extension blocks, nb in order, as zp_boot_blocks counts them without
+ * the header): its data from src, the extension blocks naming hdrblk their file. ptr: the data blocks in file order;
+ * *first_ext: the first extension block (0: none) */
+static int body(struct zp_bootvol *v, const zp_u32 *nb, zp_u32 hdrblk, zp_u32 size, zp_src src, void *u,
+                unsigned char *buf, zp_u32 *ptr, zp_u32 *first_ext, const char **why)
 {
-    static const char *dummy;
+    zp_u32 ndata = size / BS + (size % BS != 0), groups = ndata ? (ndata + HT - 1) / HT : 1, j, k = 0, next_ext = 0;
+    zp_u32 *ext = malloc(sizeof *ext * groups);
+    int rc = 0;
+    if (!ext)
+        return refuse(why, "out of memory", ZP_ENOMEM);
+    for (j = 0; j < ndata; j++) {
+        if (j && j % HT == 0)
+            ext[j / HT] = nb[k++];
+        ptr[j] = nb[k++];
+    }
+    for (j = 0; j < ndata && !rc; j++) {
+        zp_u32 n = size - j * BS < BS ? size - j * BS : BS;
+        memset(buf, 0, BS);
+        if (src(u, j * BS, buf, n) < 0)
+            rc = refuse(why, "a file for the boot partition could not be read", ZP_EIO);
+        else
+            rc = wr(v, ptr[j], buf, why);
+    }
+    for (j = groups; j-- > 1 && !rc;) {                     /* the extension blocks, last first */
+        zp_u32 n = ndata - j * HT < HT ? ndata - j * HT : HT, t;
+        memset(buf, 0, BS);
+        S(buf, 0, T_LIST);
+        S(buf, 1, ext[j]);
+        S(buf, L_HIGHSEQ, n);
+        for (t = 0; t < n; t++)
+            S(buf, 77 - t, ptr[j * HT + t]);
+        S(buf, L_PARENT, hdrblk);
+        S(buf, L_EXT, next_ext);
+        S(buf, L_SECTYPE, ST_FILE);
+        sum_set(buf, L_CHECKSUM);
+        rc = wr(v, ext[j], buf, why);
+        next_ext = ext[j];
+    }
+    free(ext);
+    *first_ext = next_ext;
+    return rc;
+}
+
+/* a file header's table, size and date (the rest of hdr as the caller set it) */
+static void file_header(unsigned char *hdr, zp_u32 size, const zp_u32 *ptr, zp_u32 first_ext, const zp_u32 date[3])
+{
+    zp_u32 ndata = size / BS + (size % BS != 0), n = ndata < HT ? ndata : HT, j;
+    for (j = 6; j < 6 + HT; j++)
+        S(hdr, j, 0);
+    S(hdr, L_HIGHSEQ, n);
+    S(hdr, L_FIRST, ndata ? ptr[0] : 0);
+    for (j = 0; j < n; j++)
+        S(hdr, 77 - j, ptr[j]);
+    S(hdr, L_BYTESIZE, size);
+    S(hdr, L_DAYS, date[0]);
+    S(hdr, L_DAYS + 1, date[1]);
+    S(hdr, L_DAYS + 2, date[2]);
+    S(hdr, L_EXT, first_ext);
+    S(hdr, L_SECTYPE, ST_FILE);
+}
+
+/* n blocks free in the bitmap and named by nothing, from the root upwards, then from the start (as FFS) */
+static int pick(struct zp_bootvol *v, zp_u32 *nb, zp_u32 n, const char **why)
+{
+    zp_u32 i, b;
+    if (v->nfree < n)
+        return refuse(why, "not enough free space on the boot partition", ZP_ENOSPC);
+    for (i = 0, b = v->root + 1; i < n; b++) {
+        if (b == v->f->nblocks)
+            b = v->f->reserved;
+        if (b == v->root)                                   /* round once: nfree said there are enough (never) */
+            return refuse(why, "not enough free space on the boot partition", ZP_ENOSPC);
+        if (!owned(v, b) && bm_free(v, b))
+            nb[i++] = b;
+    }
+    return 0;
+}
+
+/* the dirty bitmap blocks written, then a flush */
+static int bm_write(struct zp_bootvol *v, const unsigned char *dirty, const char **why)
+{
+    zp_u32 i;
+    int rc;
+    for (i = 0; i < v->nbm; i++)
+        if (dirty[i]) {
+            sum_set(v->bm + BS * i, 0);
+            if ((rc = wr(v, v->bmblk[i], v->bm + BS * i, why)) != 0)
+                return rc;
+        }
+    return flush(v, why);
+}
+
+/* blocks that nothing names any more, given back: in the bitmap and in the walk's record */
+static int give_back(struct zp_bootvol *v, const zp_u32 *blk, zp_u32 n, const char **why)
+{
+    unsigned char dirty[ZP_BOOT_BMPAGES];
+    zp_u32 i;
+    int rc;
+    memset(dirty, 0, sizeof dirty);
+    for (i = 0; i < n; i++) {
+        bm_give(v, blk[i], dirty);
+        v->own[blk[i] >> 3] &= (unsigned char)~(1u << (blk[i] & 7));
+    }
+    if ((rc = bm_write(v, dirty, why)) != 0)
+        return rc;
+    v->nfree += n;
+    return 0;
+}
+
+/* a new entry NAME in directory parent: a file of size bytes from src, or (isdir) an empty directory. *hdrout: its header */
+static int put_new(struct zp_bootvol *v, zp_u32 parent, const char *name, zp_u32 size, zp_src src, void *u,
+                   const zp_u32 date[3], int isdir, zp_u32 *hdrout, const char **why)
+{
     unsigned char *buf = 0, *hdr = 0, dirty[ZP_BOOT_BMPAGES];
-    zp_u32 *nb = 0, total, ndata, i, j, b, h, prev = 0, next, k, nl;
+    zp_u32 *nb = 0, *ptr = 0, total, ndata, i, b, h, prev = 0, next, nl = (zp_u32)strlen(name), first_ext = 0;
     int rc;
 
-    if (!why)
-        why = &dummy;
-    nl = (zp_u32)strlen(name);
-    if (!v->dir)
-        return refuse(why, "there is no Zenix directory", ZP_ENOENT);
     if (!nl || nl > NAMEMAX || strchr(name, '/') || strchr(name, ':'))
         return refuse(why, "a bad file name", ZP_EINVAL);
     if (size > ZP_BUNDLE_MAX + BS)
         return refuse(why, "a file too large", ZP_EINVAL);
     if (!v->f->write)
         return refuse(why, "the boot partition is not open for writing", ZP_EINVAL);
-    {
-        struct zp_bootfile bf;
-        rc = zp_boot_find(v, name, &bf, why);
-        zp_boot_file_free(&bf);
-        if (rc != ZP_ENOENT)
-            return rc ? rc : refuse(why, "the file is there already", ZP_EEXIST);
-    }
-    ndata = size / BS + (size % BS != 0);
-    total = zp_boot_blocks(size);
-    if (v->nfree < total)
-        return refuse(why, "not enough free space on the boot partition", ZP_ENOSPC);
+    ndata = isdir ? 0 : size / BS + (size % BS != 0);
+    total = isdir ? 1 : zp_boot_blocks(size);
     buf = malloc(BS);
     hdr = malloc(BS);
     nb = malloc(sizeof *nb * total);
-    if (!buf || !hdr || !nb) {
+    ptr = malloc(sizeof *ptr * (ndata ? ndata : 1));
+    if (!buf || !hdr || !nb || !ptr) {
         rc = refuse(why, "out of memory", ZP_ENOMEM);
         goto out;
     }
-    /* the blocks: free in the bitmap and named by nothing, from the root upwards, then from the start (as FFS) */
-    for (i = 0, b = v->root + 1; i < total; b++) {
-        if (b == v->f->nblocks)
-            b = v->f->reserved;
-        if (b == v->root) {                                 /* round once: nfree said there are enough (never) */
-            rc = refuse(why, "not enough free space on the boot partition", ZP_ENOSPC);
-            goto out;
-        }
-        if (!owned(v, b) && bm_free(v, b))
-            nb[i++] = b;
-    }
+    if ((rc = pick(v, nb, total, why)) != 0)
+        goto out;
     /* the hash chain's place: before the first entry with a larger block number (FFS keeps chains in block order) */
     h = name_hash(name, v->intl);
-    if ((rc = rd(v, v->dir, buf, why)) != 0)
+    if ((rc = rd(v, parent, buf, why)) != 0)
         goto out;
     for (next = L(buf, 6 + h); next && next < nb[0]; next = L(buf, L_CHAIN)) {
         prev = next;
-        if ((rc = header(v, next, T_HEADER, v->dir, buf, why)) != 0)
+        if ((rc = header(v, next, T_HEADER, parent, buf, why)) != 0)
             goto out;
     }
     /* 1. the data, the extension blocks, the header: in free blocks, seen by nothing yet */
-    k = 1;                                                  /* nb[0] the header; data and extensions follow in order */
-    {
-        zp_u32 *ptr = malloc(sizeof *ptr * (ndata ? ndata : 1)), *ext = 0, next_ext = 0;
-        zp_u32 groups = ndata ? (ndata + HT - 1) / HT : 1;
-        if (!ptr) {
-            rc = refuse(why, "out of memory", ZP_ENOMEM);
-            goto out;
-        }
-        ext = malloc(sizeof *ext * groups);
-        if (!ext) {
-            free(ptr);
-            rc = refuse(why, "out of memory", ZP_ENOMEM);
-            goto out;
-        }
-        for (j = 0; j < ndata; j++) {
-            if (j && j % HT == 0)
-                ext[j / HT] = nb[k++];
-            ptr[j] = nb[k++];
-        }
-        for (j = 0; j < ndata && !rc; j++) {
-            zp_u32 n = size - j * BS < BS ? size - j * BS : BS;
-            memset(buf, 0, BS);
-            if (src(u, j * BS, buf, n) < 0)
-                rc = refuse(why, "the update could not be read", ZP_EIO);
-            else
-                rc = wr(v, ptr[j], buf, why);
-        }
-        for (j = groups; j-- > 1 && !rc;) {                 /* the extension blocks, last first */
-            zp_u32 n = ndata - j * HT < HT ? ndata - j * HT : HT, t;
-            memset(buf, 0, BS);
-            S(buf, 0, T_LIST);
-            S(buf, 1, ext[j]);
-            S(buf, L_HIGHSEQ, n);
-            for (t = 0; t < n; t++)
-                S(buf, 77 - t, ptr[j * HT + t]);
-            S(buf, L_PARENT, nb[0]);
-            S(buf, L_EXT, next_ext);
-            S(buf, L_SECTYPE, ST_FILE);
-            sum_set(buf, L_CHECKSUM);
-            rc = wr(v, ext[j], buf, why);
-            next_ext = ext[j];
-        }
-        if (!rc) {
-            zp_u32 n = ndata < HT ? ndata : HT;
-            memset(hdr, 0, BS);
-            S(hdr, 0, T_HEADER);
-            S(hdr, 1, nb[0]);
-            S(hdr, L_HIGHSEQ, n);
-            S(hdr, L_FIRST, ndata ? ptr[0] : 0);
-            for (j = 0; j < n; j++)
-                S(hdr, 77 - j, ptr[j]);
-            S(hdr, L_PROTECT, 0);                           /* 0: read, write, execute, delete for everyone */
-            S(hdr, L_BYTESIZE, size);
-            S(hdr, L_DAYS, date[0]);
-            S(hdr, L_DAYS + 1, date[1]);
-            S(hdr, L_DAYS + 2, date[2]);
-            hdr[432] = (unsigned char)nl;
-            memcpy(hdr + 433, name, nl);
-            S(hdr, L_CHAIN, next);
-            S(hdr, L_PARENT, v->dir);
-            S(hdr, L_EXT, next_ext);
-            S(hdr, L_SECTYPE, ST_FILE);
-            sum_set(hdr, L_CHECKSUM);
-            rc = wr(v, nb[0], hdr, why);
-        }
-        free(ptr);
-        free(ext);
-        if (rc)
-            goto out;
-    }
-    if ((rc = flush(v, why)) != 0)
+    if (!isdir && (rc = body(v, nb + 1, nb[0], size, src, u, buf, ptr, &first_ext, why)) != 0)
+        goto out;
+    memset(hdr, 0, BS);
+    S(hdr, 0, T_HEADER);
+    S(hdr, 1, nb[0]);
+    if (isdir) {
+        S(hdr, L_DAYS, date[0]);
+        S(hdr, L_DAYS + 1, date[1]);
+        S(hdr, L_DAYS + 2, date[2]);
+        S(hdr, L_SECTYPE, ST_USERDIR);
+    } else
+        file_header(hdr, size, ptr, first_ext, date);
+    S(hdr, L_PROTECT, 0);                                   /* 0: read, write, execute, delete for everyone */
+    hdr[432] = (unsigned char)nl;
+    memcpy(hdr + 433, name, nl);
+    S(hdr, L_CHAIN, next);
+    S(hdr, L_PARENT, parent);
+    sum_set(hdr, L_CHECKSUM);
+    if ((rc = wr(v, nb[0], hdr, why)) != 0 || (rc = flush(v, why)) != 0)
         goto out;
     /* 2. the bitmap: those blocks in use */
     memset(dirty, 0, sizeof dirty);
@@ -693,25 +734,19 @@ int zp_boot_create(struct zp_bootvol *v, const char *name, zp_u32 size, zp_src s
         for (b = v->f->reserved; b < v->f->nblocks; b++)
             if (!owned(v, b) && !bm_free(v, b))
                 bm_give(v, b, dirty);
-    for (i = 0; i < v->nbm; i++)
-        if (dirty[i]) {
-            sum_set(v->bm + BS * i, 0);
-            if ((rc = wr(v, v->bmblk[i], v->bm + BS * i, why)) != 0)
-                goto out;
-        }
-    if ((rc = flush(v, why)) != 0)
+    if ((rc = bm_write(v, dirty, why)) != 0)
         goto out;
-    /* 3. the one write that makes the file appear: the directory's hash slot, or the chain's previous entry */
-    if ((rc = rd(v, prev ? prev : v->dir, buf, why)) != 0)
+    /* 3. the one write that makes the entry appear: the directory's hash slot, or the chain's previous entry */
+    if ((rc = rd(v, prev ? prev : parent, buf, why)) != 0)
         goto out;
-    if (L(buf, 0) != T_HEADER || L(buf, 1) != (prev ? prev : v->dir) || !sum_ok(buf) ||
-        L(buf, prev ? L_CHAIN : 6 + h) != next) {
+    if (L(buf, 0) != T_HEADER || L(buf, 1) != (prev ? prev : parent == v->root ? 0 : parent) || !sum_ok(buf) ||
+        L(buf, prev ? L_CHAIN : 6 + h) != next) {           /* (the root block's own number is 0) */
         rc = refuse(why, "the directory changed while the file was written", ZP_EIO);
         goto out;
     }
     S(buf, prev ? L_CHAIN : 6 + h, nb[0]);
     sum_set(buf, L_CHECKSUM);
-    if ((rc = wr(v, prev ? prev : v->dir, buf, why)) != 0 || (rc = flush(v, why)) != 0)
+    if ((rc = wr(v, prev ? prev : parent, buf, why)) != 0 || (rc = flush(v, why)) != 0)
         goto out;
     if (v->links)
         v->nfree -= total;
@@ -719,8 +754,249 @@ int zp_boot_create(struct zp_bootvol *v, const char *name, zp_u32 size, zp_src s
         v->nfree = v->nfree - total + v->nleak;
         v->nleak = 0;
     }
+    if (hdrout)
+        *hdrout = nb[0];
     rc = 0;
 out:
+    free(ptr);
+    free(nb);
+    free(hdr);
+    free(buf);
+    return rc;
+}
+
+int zp_boot_create(struct zp_bootvol *v, const char *name, zp_u32 size, zp_src src, void *u, const zp_u32 date[3],
+                   const char **why)
+{
+    static const char *dummy;
+    struct zp_bootfile bf;
+    int rc;
+    if (!why)
+        why = &dummy;
+    if (!v->dir)
+        return refuse(why, "there is no Zenix directory", ZP_ENOENT);
+    rc = zp_boot_find(v, name, &bf, why);
+    zp_boot_file_free(&bf);
+    if (rc != ZP_ENOENT)
+        return rc ? rc : refuse(why, "the file is there already", ZP_EEXIST);
+    return put_new(v, v->dir, name, size, src, u, date, 0, 0, why);
+}
+
+int zp_boot_cd(struct zp_bootvol *v, const char *name, const char **why)
+{
+    static const char *dummy;
+    unsigned char *buf;
+    zp_u32 b;
+    int rc;
+    if (!why)
+        why = &dummy;
+    if (!name || !name[0]) {
+        v->dir = v->root;
+        return 0;
+    }
+    v->dir = 0;
+    buf = malloc(BS);
+    if (!buf)
+        return refuse(why, "out of memory", ZP_ENOMEM);
+    if ((rc = rd(v, v->root, buf, why)) != 0)
+        goto out;
+    rc = refuse(why, "no such directory", ZP_ENOENT);
+    for (b = L(buf, 6 + name_hash(name, v->intl)); b; b = L(buf, L_CHAIN)) {
+        if ((rc = header(v, b, T_HEADER, v->root, buf, why)) != 0)
+            goto out;
+        rc = refuse(why, "no such directory", ZP_ENOENT);
+        if (!name_is(buf, name, v->intl))
+            continue;
+        if (L(buf, L_SECTYPE) != ST_USERDIR)
+            rc = refuse(why, "a file where a directory is wanted", ZP_EINVAL);
+        else {
+            v->dir = b;
+            rc = 0;
+        }
+        break;
+    }
+out:
+    free(buf);
+    return rc;
+}
+
+int zp_boot_mkdir(struct zp_bootvol *v, const char *name, const zp_u32 date[3], const char **why)
+{
+    static const char *dummy;
+    struct zp_bootfile bf;
+    zp_u32 blk = 0;
+    int rc;
+    if (!why)
+        why = &dummy;
+    if ((rc = zp_boot_cd(v, name, why)) != ZP_ENOENT)
+        return rc ? rc : refuse(why, "the directory is there already", ZP_EEXIST);
+    v->dir = v->root;                                       /* no file of that name either */
+    rc = zp_boot_find(v, name, &bf, why);
+    zp_boot_file_free(&bf);
+    if (rc != ZP_ENOENT) {
+        v->dir = 0;
+        return rc ? rc : refuse(why, "a file where a directory is wanted", ZP_EINVAL);
+    }
+    rc = put_new(v, v->root, name, 0, 0, 0, date, 1, &blk, why);
+    v->dir = rc ? 0 : blk;
+    return rc;
+}
+
+/* a file's header and extension blocks (the caller has its data blocks): into out, *n of them */
+static int meta_blocks(struct zp_bootvol *v, zp_u32 hdrblk, unsigned char *buf, zp_u32 *out, zp_u32 max, zp_u32 *n,
+                       const char **why)
+{
+    zp_u32 ext, steps = 0;
+    int rc;
+    *n = 0;
+    out[(*n)++] = hdrblk;
+    if ((rc = header(v, hdrblk, T_HEADER, v->dir, buf, why)) != 0)
+        return rc;
+    for (ext = L(buf, L_EXT); ext; ext = L(buf, L_EXT)) {
+        if (*n == max || ++steps > v->f->nblocks)
+            return refuse(why, "a damaged extension chain", ZP_EINVAL);
+        out[(*n)++] = ext;
+        if ((rc = header(v, ext, T_LIST, hdrblk, buf, why)) != 0)
+            return rc;
+    }
+    return 0;
+}
+
+int zp_boot_delete(struct zp_bootvol *v, const char *name, const char **why)
+{
+    static const char *dummy;
+    struct zp_bootfile bf;
+    unsigned char *buf = 0;
+    zp_u32 *gone = 0, nmeta = 0, h, b, prev = 0, chain, at;
+    int rc;
+    if (!why)
+        why = &dummy;
+    if (!v->f->write)
+        return refuse(why, "the boot partition is not open for writing", ZP_EINVAL);
+    if ((rc = zp_boot_find(v, name, &bf, why)) != 0)
+        return rc;
+    buf = malloc(BS);
+    gone = malloc(sizeof *gone * (bf.nblk + bf.nblk / HT + 2));
+    if (!buf || !gone) {
+        rc = refuse(why, "out of memory", ZP_ENOMEM);
+        goto out;
+    }
+    if ((rc = meta_blocks(v, bf.header, buf, gone, bf.nblk / HT + 2, &nmeta, why)) != 0)
+        goto out;
+    if ((rc = header(v, bf.header, T_HEADER, v->dir, buf, why)) != 0)
+        goto out;
+    chain = L(buf, L_CHAIN);
+    /* its place in the chain: the directory's slot, or the entry before it */
+    h = name_hash(name, v->intl);
+    if ((rc = rd(v, v->dir, buf, why)) != 0)
+        goto out;
+    for (b = L(buf, 6 + h); b && b != bf.header; b = L(buf, L_CHAIN)) {
+        prev = b;
+        if ((rc = header(v, b, T_HEADER, v->dir, buf, why)) != 0)
+            goto out;
+    }
+    if (!b) {
+        rc = refuse(why, "the file is not in its hash chain", ZP_EINVAL);
+        goto out;
+    }
+    /* the one write that makes it disappear; then its blocks are named by nothing and given back */
+    at = prev ? prev : v->dir;
+    if ((rc = rd(v, at, buf, why)) != 0)
+        goto out;
+    if (L(buf, 0) != T_HEADER || L(buf, 1) != (at == v->root ? 0 : at) || !sum_ok(buf) || L(buf, prev ? L_CHAIN : 6 + h) != bf.header) {
+        rc = refuse(why, "the directory changed while the file was deleted", ZP_EIO);
+        goto out;
+    }
+    S(buf, prev ? L_CHAIN : 6 + h, chain);
+    sum_set(buf, L_CHECKSUM);
+    if ((rc = wr(v, at, buf, why)) != 0 || (rc = flush(v, why)) != 0)
+        goto out;
+    memcpy(gone + nmeta, bf.blk, sizeof *gone * bf.nblk);
+    rc = give_back(v, gone, nmeta + bf.nblk, why);
+out:
+    zp_boot_file_free(&bf);
+    free(gone);
+    free(buf);
+    return rc;
+}
+
+int zp_boot_replace(struct zp_bootvol *v, const char *name, zp_u32 size, zp_src src, void *u, const zp_u32 date[3],
+                    const char **why)
+{
+    static const char *dummy;
+    struct zp_bootfile bf;
+    unsigned char *buf = 0, *hdr = 0, dirty[ZP_BOOT_BMPAGES];
+    zp_u32 *nb = 0, *ptr = 0, *gone = 0, total, ndata, i, nmeta = 0, first_ext = 0;
+    int rc;
+    if (!why)
+        why = &dummy;
+    if (!v->dir)
+        return refuse(why, "there is no Zenix directory", ZP_ENOENT);
+    rc = zp_boot_find(v, name, &bf, why);
+    if (rc == ZP_ENOENT)
+        return zp_boot_create(v, name, size, src, u, date, why);
+    if (rc)
+        return rc;
+    if (!v->f->write) {
+        rc = refuse(why, "the boot partition is not open for writing", ZP_EINVAL);
+        goto out;
+    }
+    if (size > ZP_BUNDLE_MAX + BS) {
+        rc = refuse(why, "a file too large", ZP_EINVAL);
+        goto out;
+    }
+    ndata = size / BS + (size % BS != 0);
+    total = zp_boot_blocks(size) - 1;                       /* the header stays where it is */
+    buf = malloc(BS);
+    hdr = malloc(BS);
+    nb = malloc(sizeof *nb * (total ? total : 1));
+    ptr = malloc(sizeof *ptr * (ndata ? ndata : 1));
+    gone = malloc(sizeof *gone * (bf.nblk + bf.nblk / HT + 2));
+    if (!buf || !hdr || !nb || !ptr || !gone) {
+        rc = refuse(why, "out of memory", ZP_ENOMEM);
+        goto out;
+    }
+    if ((rc = meta_blocks(v, bf.header, buf, gone, bf.nblk / HT + 2, &nmeta, why)) != 0 ||
+        (rc = pick(v, nb, total, why)) != 0)
+        goto out;
+    /* 1. the new data and extension blocks, in free blocks seen by nothing */
+    if ((rc = body(v, nb, bf.header, size, src, u, buf, ptr, &first_ext, why)) != 0 || (rc = flush(v, why)) != 0)
+        goto out;
+    /* 2. the bitmap: those blocks in use */
+    memset(dirty, 0, sizeof dirty);
+    for (i = 0; i < total; i++) {
+        bm_take(v, nb[i], dirty);
+        v->own[nb[i] >> 3] |= (unsigned char)(1u << (nb[i] & 7));
+    }
+    if (v->nleak && !v->links)                              /* a cut write's leftovers, as put_new gives them back */
+        for (i = v->f->reserved; i < v->f->nblocks; i++)
+            if (!owned(v, i) && !bm_free(v, i))
+                bm_give(v, i, dirty);
+    if ((rc = bm_write(v, dirty, why)) != 0)
+        goto out;
+    v->nfree -= total;
+    if (!v->links) {
+        v->nfree += v->nleak;
+        v->nleak = 0;
+    }
+    /* 3. the one write: the header anew in its own place (its name, chain, parent, protection and comment kept) */
+    if ((rc = header(v, bf.header, T_HEADER, v->dir, hdr, why)) != 0)
+        goto out;
+    if (!name_is(hdr, name, v->intl) || L(hdr, L_SECTYPE) != ST_FILE) {
+        rc = refuse(why, "the file changed while it was written", ZP_EIO);
+        goto out;
+    }
+    file_header(hdr, size, ptr, first_ext, date);
+    sum_set(hdr, L_CHECKSUM);
+    if ((rc = wr(v, bf.header, hdr, why)) != 0 || (rc = flush(v, why)) != 0)
+        goto out;
+    /* 4. the old data and extension blocks, named by nothing now, given back (the header is the new file's) */
+    memcpy(gone + nmeta, bf.blk, sizeof *gone * bf.nblk);
+    rc = give_back(v, gone + 1, nmeta - 1 + bf.nblk, why);
+out:
+    zp_boot_file_free(&bf);
+    free(gone);
+    free(ptr);
     free(nb);
     free(hdr);
     free(buf);

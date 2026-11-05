@@ -232,3 +232,13 @@ zp_u32 zp_boot_blocks(zp_u32 size);
 typedef int (*zp_src)(void *u, zp_u32 off, unsigned char *buf, zp_u32 n);
 int zp_boot_create(struct zp_bootvol *v, const char *name, zp_u32 size, zp_src src, void *u, const zp_u32 date[3],
                    const char **why);
+/* (zinstall's kept start-up partition, DESIGN D35 3b) the directory the calls above use: "" the root, else NAME in the
+ * root; 0, ZP_ENOENT (v->dir 0 then), or a refusal */
+int zp_boot_cd(struct zp_bootvol *v, const char *name, const char **why);
+/* a new empty directory NAME in the root, then the one the calls use: 0, ZP_EEXIST, ZP_ENOSPC, or a refusal */
+int zp_boot_mkdir(struct zp_bootvol *v, const char *name, const zp_u32 date[3], const char **why);
+/* DIR/NAME made anew from src (created if it is not there): the old file or the new one after a cut. 0, or a refusal */
+int zp_boot_replace(struct zp_bootvol *v, const char *name, zp_u32 size, zp_src src, void *u, const zp_u32 date[3],
+                    const char **why);
+/* DIR/NAME taken out (one write), its blocks given back: 0, ZP_ENOENT, or a refusal */
+int zp_boot_delete(struct zp_bootvol *v, const char *name, const char **why);
