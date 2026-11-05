@@ -738,8 +738,10 @@ a Zenix implementation), as built; the files and the way to update them are in `
 - **Section 9's table, as built:** `SetMode` raw is `cfmakeraw` (no echo, no signals: ^C and ^Z arrive as keys,
   as upstream's Ctrl-C..F signals become keys); `ACTION_WAIT_CHAR` and `Wait()` are `poll` on the input descriptor,
   with upstream's timeouts (40 ms for the rest of an escape sequence); `CSI 0 q` is `TIOCGWINSZ` (80 x 24 if it
-  fails, as upstream); a `BPTR` is a descriptor, 0 meaning descriptor 0 for the input and 1 for the output. No
-  `SIGWINCH` and no resize events (the console never changes size).
+  fails, as upstream); a `BPTR` is a descriptor, 0 meaning descriptor 0 for the input and 1 for the output.
+  Resize events since 2026-11-05: `SIGWINCH` (a terminal window's pty, D38's `term`) is noted by the library's
+  handler and becomes upstream's `TE_RESIZE` with the size read again (ports/tui/README); the console never changes
+  size.
 - **Decided here (conservatively, for the main session to confirm):**
   - `CTerm` is 1 on Zenix: upstream's CTerm path is the ANSI one (the colours as they are, `ESC [ ? 25 h/l` for the
     cursor, the last cell drawn: the console's wrap is deferred, it does not scroll). Upstream's plain-console path

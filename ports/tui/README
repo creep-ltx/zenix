@@ -28,8 +28,11 @@ zenix/     Zenix's layer (GPL-2.0-only), kept apart so the copy can be refreshed
 
 On Zenix the toolkit's public fields say: CTerm 1 (the console takes the ANSI colours as they are, 256 and 24-bit ones
 as the nearest of its 16, and ESC [ ? 25 h/l for the cursor: upstream's CTerm path), UTF8 1 (since the console's
-UTF-8, DESIGN D28), CellW and CellH 0. No mouse, no pastes, no resize events (the console never changes size), no
-second screen (closing clears it). TuiSignal answers bit 8 (AmigaOS's SIGF_DOS, where upstream's console packets come
+UTF-8, DESIGN D28), CellW and CellH 0. No mouse, no pastes, no second screen (closing clears it). Resize events: a terminal window
+(Zenix Desktop's term, a pty) changes size and sends SIGWINCH; the library's handler notes it (a handler the program
+had is called too) and ends a wait, and the next TuiWait, TuiPoll or TuiKeyWaiting reads the size again and gives
+TE_RESIZE, which the programs answer with TuiResized and a redraw (the AmigaOS layer's Wait answers the terminal's bit
+for it). The text console never changes size. TuiSignal answers bit 8 (AmigaOS's SIGF_DOS, where upstream's console packets come
 back) and notes the terminal's input descriptor (tui_zenix_tsig, tui_zenix_tfd): the AmigaOS layer's Wait
 (ports/common/dos.c, Ahiru's main loop) polls that descriptor for the bit; a program with a poll loop of its own polls
 descriptor 0 and calls TuiPoll. TuiWait's extra signals are descriptors (tui_zenix_sigfd names the one behind each

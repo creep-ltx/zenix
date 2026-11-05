@@ -8,8 +8,12 @@
  *  - the keys: raw mode by termios (cfmakeraw: no echo, no signals, so ^C and ^Z come as keys, as Ctrl-C..F do from
  *    upstream's signals), and poll on the input descriptor for every wait, with the timeouts upstream has (40 ms for
  *    the rest of an escape sequence);
- *  - the size: TIOCGWINSZ (the console's 80 x 32 PAL, 80 x 25 NTSC), else 80 x 24 as upstream; the console never
- *    changes size, so there are no resize events (no SIGWINCH);
+ *  - the size: TIOCGWINSZ (the console's 80 x 32 PAL, 80 x 25 NTSC), else 80 x 24 as upstream. A terminal window
+ *    (Zenix Desktop's term, a pty) changes size and sends SIGWINCH: the library's handler only notes it (it ends a
+ *    wait: poll is never restarted; with SA_RESTART a write goes on); the next wait or poll reads the size again and
+ *    gives TE_RESIZE, upstream's event for
+ *    CTerm's resize, which the programs answer with TuiResized and a redraw. A handler the program had is called
+ *    too. The text console never changes size, so it never sends one;
  *  - a BPTR given to TuiOpen, TuiOpenIO and TuiPossible is a handle: the descriptor + 1, as the AmigaOS layer of the
  *    owner's programs gives them (ports/common: 0 stays "none"); 0 for the input is descriptor 0 and 0 for the
  *    output descriptor 1 (upstream: Input() and Output()); inside, the toolkit keeps the descriptors;
@@ -31,6 +35,8 @@
 #define Utf8Base tui_zenix_Utf8Base     /* the library's own: Maki defines a Utf8Base of its own (one program) */
 #endif
 #include <errno.h>
+#include <signal.h>
+#include <string.h>
 #include <poll.h>
 #include <termios.h>
 #include <sys/ioctl.h>
@@ -91,6 +97,29 @@ typedef struct {
 ULONG tui_zenix_tsig = 1UL << 8;
 int tui_zenix_tfd = -1;
 
+/* SIGWINCH: noted, and the program's own handler (if it had one) called; the waits look at the note */
+volatile int tui_zenix_winch;
+static void (*zoldwinch)(int);
+static int zwinchset;
+static void zonwinch(int sig)
+{
+    tui_zenix_winch = 1;
+    if (zoldwinch && zoldwinch != SIG_IGN && zoldwinch != SIG_DFL) zoldwinch(sig);
+}
+static void zwinchon(void)
+{
+    struct sigaction a, o;
+    if (zwinchset) return;
+    memset(&a, 0, sizeof(a));
+    a.sa_handler = zonwinch;
+    a.sa_flags = SA_RESTART;            /* a write to the terminal goes on (a cut one would lose the rest of a screen);
+                                         * a wait (poll, SYS_evwait) is never restarted: it ends, the size read now */
+    if (sigaction(SIGWINCH, &a, &o) == 0) {
+        zoldwinch = o.sa_handler;
+        zwinchset = 1;
+    }
+}
+
 static int zraw(Priv *p)
 {
     struct termios t = ((ZPriv *)p)->saved;
@@ -130,6 +159,17 @@ static void zasksize(Priv *p)
     p->pub.Cols = cols;
 }
 
+/* a SIGWINCH came: the size again; TE_RESIZE when it changed (upstream's setsize) */
+static void zwinch(Priv *p)
+{
+    struct winsize ws;
+    if (!tui_zenix_winch) return;
+    tui_zenix_winch = 0;
+    if ((ioctl((int)p->tout, TIOCGWINSZ, &ws) == 0 || ioctl((int)p->tin, TIOCGWINSZ, &ws) == 0) &&
+        ws.ws_row >= 3 && ws.ws_col >= 10)
+        setsize(p, ws.ws_row, ws.ws_col);
+}
+
 /* input on the console within ms (-1: no limit): 1 yes, 0 no, -1 a signal came (its handler ran). The descriptors
  * behind the signal bits in extra are waited on too (tui_zenix_sigfd): those with data (or their end) into *got. */
 static int zwaitx(Priv *p, int ms, ULONG extra, ULONG *got)
@@ -149,6 +189,7 @@ static int zwaitx(Priv *p, int ms, ULONG extra, ULONG *got)
             f[n].revents = 0;
             bit[n++] = 1UL << i;
         }
+    if (tui_zenix_winch) return -1;     /* a resize came before the wait: TuiWait and TuiPoll give it now */
     r = poll(f, (nfds_t)n, ms);
     if (r < 0) {
         if (errno == EINTR) return -1;
@@ -190,6 +231,7 @@ static int zreadsome(Priv *p)
 static void zreadnow(Priv *p)
 {
     int guard = 16;
+    zwinch(p);
     while (guard-- && zwaitin(p, 0) > 0) {
         if (!zreadsome(p)) break;
         parse(p, 0);
@@ -243,7 +285,9 @@ struct Tui *TuiOpenIO(BPTR in, BPTR out)
         return NULL;
     }
     zmodes_on(p);
+    zwinchon();
     zasksize(p);
+    tui_zenix_winch = 0;
     if (!gridalloc(p)) {
         zmodes_off(p);
         zcooked(p);
@@ -308,6 +352,7 @@ void TuiResume(struct Tui *t)
     p->tsusp = 0;
     zmodes_on(p);
     zasksize(p);
+    tui_zenix_winch = 0;
     gridalloc(p);
     TuiRedraw(t);
 }
@@ -336,6 +381,10 @@ LONG TuiWait(struct Tui *t, TuiEv *e, LONG us, ULONG extra, ULONG *got)
             zreadnow(p);
             if (p->evh != p->evt || p->ended) continue;
             break;
+        }
+        if (r < 0 && tui_zenix_winch) {    /* SIGWINCH: TE_RESIZE (when the size changed), else wait on */
+            zwinch(p);
+            continue;
         }
         if (r < 0 || (r == 0 && !p->ended && us > 0)) break;   /* a signal, or the time is up */
     }

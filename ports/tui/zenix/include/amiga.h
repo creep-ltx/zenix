@@ -9,6 +9,7 @@
  * Every header the upstream file includes (exec/..., dos/..., proto/...) is this one. */
 #ifndef ZENIX_TUI_AMIGA_H
 #define ZENIX_TUI_AMIGA_H
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -43,7 +44,21 @@ typedef const char *CONST_STRPTR;
 static inline APTR AllocVec(ULONG n, ULONG flags) { return flags & MEMF_CLEAR ? calloc(1, n) : malloc(n); }
 static inline void FreeVec(APTR p) { free(p); }
 static inline void CopyMem(const void *s, void *d, ULONG n) { memmove(d, s, n); }
-static inline LONG Write(BPTR fd, const void *b, LONG n) { return (LONG)write((int)fd, b, (size_t)n); }
+/* all of it: a write to a pty that waited for room and was cut by a signal's handler gives back what went (upstream
+ * never writes the rest: a screen cut inside an escape sequence) */
+static inline LONG Write(BPTR fd, const void *b, LONG n)
+{
+    LONG d = 0;
+    while (d < n) {
+        ssize_t k = write((int)fd, (const char *)b + d, (size_t)(n - d));
+        if (k <= 0) {
+            if (k < 0 && errno == EINTR) continue;
+            return d ? d : (LONG)k;
+        }
+        d += (LONG)k;
+    }
+    return d;
+}
 static inline void CurrentTime(ULONG *secs, ULONG *mics)
 {
     struct timeval tv;

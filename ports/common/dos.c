@@ -1138,10 +1138,11 @@ LONG Execute(CONST_STRPTR cmd, BPTR in, BPTR out)
 /* the descriptor behind the text-UI library's signal (TuiSignal's bit: its terminal), set by ports/tui/zenix */
 extern ULONG tui_zenix_tsig;
 extern int tui_zenix_tfd;
+extern volatile int tui_zenix_winch;    /* a SIGWINCH the library has not answered yet */
 
 /* the signals that came of those asked for: the terminal's (TuiSignal's) when it has input, a reply port's when its
  * read has data (tui_zenix_sigfd); waits until one does. Ctrl-C never comes (^C is a key in raw mode). A signal
- * handler that ran ends the wait with nothing. */
+ * handler that ran ends the wait with nothing; a SIGWINCH with the terminal's signal (the library's TE_RESIZE). */
 ULONG Wait(ULONG signals)
 {
     struct pollfd f[9];
@@ -1162,8 +1163,11 @@ ULONG Wait(ULONG signals)
         }
     if (!n)
         return 0;                       /* nothing that could ever come */
+    /* a resize (SIGWINCH), before the wait or ending it: the terminal's signal, so TuiPoll gives TE_RESIZE */
+    if ((signals & tui_zenix_tsig) && tui_zenix_winch)
+        return tui_zenix_tsig;
     if (poll(f, (nfds_t)n, -1) <= 0)
-        return 0;
+        return (signals & tui_zenix_tsig) && tui_zenix_winch ? tui_zenix_tsig : 0;
     for (i = 0; i < n; i++)
         if (f[i].revents) got |= bit[i];
     return got;

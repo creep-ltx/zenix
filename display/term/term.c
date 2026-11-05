@@ -334,8 +334,8 @@ int main(int argc, char **argv)
     m_write("\033[H\033[2J", 7);
     present();
     /* the size the window manager gives before the program starts: zdesk keeps a window inside the screen, so 80
-     * columns and a frame become 78 or 79; a program that read 80 and drew 80 into them (full-screen programs here
-     * do not follow SIGWINCH) wrapped its line ends into the next rows (ctop's stray digits, "ru40ing", 2026-11-05).
+     * columns and a frame become 78 or 79; a program that read 80 and drew 80 into them before its first SIGWINCH
+     * wrapped its line ends into the next rows (ctop's stray digits, "ru40ing", 2026-11-05).
      * Up to half a second for the window to be shown (without a manager it is shown as asked) */
     for (unsigned t0 = sys_ticks(); (int)(sys_ticks() - t0) < 50; ) {
         struct dpyev e;
