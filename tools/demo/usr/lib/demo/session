@@ -1,5 +1,5 @@
 # The demo floppy's desktop session (DESIGN D25 revision 3, 7.3): dlogin starts it for guest by itself at boot
 # (/etc/dlogin: autologin), as "/bin/sh /usr/lib/demo/session". The welcome in a terminal window, then the desktop,
 # which takes that window over (zdesk ends the session when it ends: Log out).
-term -r 21 -e sh -c 'cat /home/guest/WELCOME; read x' &
+term -r 20 -c 64 -p 104,20 -e sh -c 'cat /home/guest/WELCOME; read x' &
 /bin/zdesk

@@ -7,12 +7,18 @@
 #   h   the HD disk in an HD drive (22 sectors a track), the same
 #   c   the DD disk on an A1200 with 2 MB of chip RAM only: refused on the screen (red, the reason) and the serial port
 #   x   a damaged DD disk (bytes changed in the middle of the packed stream): refused, the reason named
-# usage: demo-test.sh [d h c x]   (all by default). Screenshots in ZENIX_OUT.
+#   y   the bootblock's track check: a DD disk whose bootblock expects HD tracks (offset 1016 = 11264, the checksum
+#       made right) in the DD drive: the whole screen yellow (what the HD disk shows in a drive Kickstart runs as DD,
+#       a Gotek on the owner's A1200, 2026-11-05)
+#   t   a term window's program starts with the size the window got (the full test image, zdesk from the serial
+#       shell): 80 columns and a frame do not fit the screen, zdesk gives 78 or 79, and the program must see that
+#       (ctop drew 80 into them, its line ends wrapping into stray digits: "ru40ing", 2026-11-05)
+# usage: demo-test.sh [d h c x y t]   (all by default). Screenshots in ZENIX_OUT.
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
 OUT=${ZENIX_OUT:-/tmp/zenix-demo-test}; mkdir -p "$OUT"
 export ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenix-demo-serial}
-PARTS=${*:-d h c x}
+PARTS=${*:-d h c x y t}
 make -s BUILD=$BD $BD/zenix-demo.adf $BD/zenix-demo-hd.adf > "$OUT/build.log" 2>&1 || { echo "FAIL build"; tail "$OUT/build.log"; exit 1; }
 grep -h "adf:" "$OUT/build.log" | sed 's/^/  /'
 pass=1
@@ -71,6 +77,44 @@ PY
     boot x fsuae/demo/demo.fs-uae "$OUT/bad.adf" "$OUT/x.txt" $BD/zenix-demo.adf 400
     want "a damaged disk: refused, the reason on the serial port" "$OUT/x.serial.txt" "^demo: The packed system on this disk is damaged: "
     grep -aq "^Zenix - 68020" "$OUT/x.serial.txt" && no "... and Zenix did not start" || ok "... and Zenix did not start";;
+esac
+case " $PARTS " in *" y "*)
+    python3 - "$BD/zenix-demo.adf" "$OUT/yellow.adf" <<'PY'
+import struct, sys
+d = bytearray(open(sys.argv[1], "rb").read())
+d[1016:1020] = struct.pack(">I", 11264)
+d[4:8] = bytes(4)
+s = 0
+for (v,) in struct.iter_unpack(">I", bytes(d[:1024])):
+    s += v
+    if s > 0xFFFFFFFF: s = (s & 0xFFFFFFFF) + 1
+d[4:8] = struct.pack(">I", 0xFFFFFFFF - s)
+open(sys.argv[2], "wb").write(d)
+PY
+    printf 'sleep 25\nshot tracks\n' > "$OUT/y.txt"
+    boot y fsuae/demo/demo.fs-uae "$OUT/yellow.adf" "$OUT/y.txt" $BD/zenix-demo.adf 120
+    python3 -c 'import sys; from PIL import Image; i = Image.open(sys.argv[1]).convert("RGB"); w, h = i.size; p = i.getpixel((w // 3, h // 2)); sys.exit(0 if p[0] > 180 and p[1] > 180 and p[2] < 90 else 1)' "$OUT/y-tracks.png" &&
+        ok "a disk whose tracks are not the drive's: the bootblock's yellow screen" || no "a disk whose tracks are not the drive's: the bootblock's yellow screen"
+    grep -aq "^demo:" "$OUT/y.serial.txt" && no "... and the stage 2 did not run" || ok "... and the stage 2 did not run";;
+esac
+case " $PARTS " in *" t "*)
+    make -s BUILD=$BD $BD/zenix.adf $BD/zenix.hdf >/dev/null 2>&1
+    B=$OUT/t-build; rm -rf "$B"; mkdir -p "$B"; cp $BD/zenix.adf $BD/zenix.hdf "$B/"
+    cat > "$OUT/t.txt" <<'EOS'
+wait zenix:/# 120
+sleep 1
+send zdesk > /tmp/z.log 2>&1 &\r
+sleep 4
+send term -e sh -c 'termtest size > /tmp/sz' &\r
+sleep 6
+send term -c 60 -r 10 -e sh -c 'termtest size > /tmp/sz3' &\r
+sleep 6
+send cat /tmp/sz /tmp/sz3; echo size-done\r
+wait (?m)^size-done 60
+EOS
+    ZENIX_SERIAL=${ZENIX_SERIAL}-t ZENIX_BUILD=$B tools/run-test.sh fsuae/a1200-020-fast.fs-uae 120 "$OUT/t.txt" 2>&1 | tr -d '\r' > "$OUT/t.log"
+    grep -aqE "^termtest size: rows 2[0-9] columns 7[89]$" "$OUT/t.log" && ok "term: an 80-column window the screen shrinks: its program starts with the columns it got" || { no "term: the program's size at its start"; grep -a "termtest size" "$OUT/t.log"; }
+    grep -aqx "termtest size: rows 10 columns 60" "$OUT/t.log" && ok "term -c 60 -r 10: the program sees 10 rows, 60 columns" || no "term -c 60 -r 10";;
 esac
 rm -rf "$OUT"/*-build
 exit $((1 - pass))

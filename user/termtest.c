@@ -761,6 +761,11 @@ int main(int argc, char **argv)
         t[n++] = '\r';
         return sys_coninput(atoi(argv[2]), CONI_TEXT, t, n) != (int)n;
     }
+    if (argc > 1 && !strcmp(argv[1], "size")) {           /* the terminal's size as a program sees it at its start */
+        int ti = sys_ttyinfo();
+        dprintf(1, "termtest size: rows %d columns %d\n", ti > 0 ? ti >> 16 : -1, ti > 0 ? ti & 0xFFFF : -1);
+        return ti > 0 ? 0 : 1;
+    }
     if (argc > 1 && !strcmp(argv[1], "conops")) return conops();
     if (argc > 1 && !strcmp(argv[1], "rawkeys")) return rawkeys();
     if (argc > 1 && !strcmp(argv[1], "text")) return text();

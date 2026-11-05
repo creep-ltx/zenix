@@ -5,7 +5,7 @@ NAME
 
 SYNOPSIS
     termtest [columns|colours|scroll|pcfont [FILE]|rules TTY]
-    termtest [conops|rawkeys|text|readline|readraw N|grab FILE|depth N]
+    termtest [conops|rawkeys|text|readline|readraw N|grab FILE|depth N|size]
     termtest screen TTY TEXT SECS [TYPE]
 
 DESCRIPTION
@@ -15,6 +15,10 @@ DESCRIPTION
     switches the terminal to raw mode and shows each key you press as the
     escape code or byte received (arrows, function keys, Delete). Press q to
     quit. A development tool.
+
+    termtest size prints the terminal's rows and columns as a program sees
+    them ("termtest size: rows R columns C"; tools/demo-test.sh: a term
+    window's program starts with the size the window got).
 
     The other pages are for the screenshot tests (tools/colour-test.sh):
     termtest columns: rows 1-7 number the 80 columns in binary (a lit
