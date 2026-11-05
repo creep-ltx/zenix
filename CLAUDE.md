@@ -6,15 +6,11 @@ you touch: `docs/architecture.md`, its design note (`docs/dNN-*.md`), and before
 `docs/frozen-interfaces.md` and `docs/claims.md`. What the owner approved: `docs/decisions.md`. Open audit items: the
 newest `docs/audit-*.md`.
 
-## The owner
-- Not a programmer: explain in plain words, make the technical calls yourself, ask only about what Zenix should *be*.
-- Often on the phone. Short status lines, no walls of text.
-- Owns one Amiga: an A1200 with a PiStorm32-lite (Emu68 on a CM4) and a Gotek. **That machine is the first test machine;
-  real Amiga hardware is the ultimate target (owner, 2026-10-24): nothing in the base may depend on Emu68 or the Pi, and
-  speed is judged on real 68k CPUs (today a stock 14 MHz 68EC020), not Emu68's JIT. The minimum requirements
-  are not decided yet (ROADMAP, open questions).** Order audit fixes by what
-  matters on it first. Zenix runs on it since 2026-10-23; real-hardware time is scarce, so every build sent there must be
-  ready for it.
+## Target hardware
+- Real Amiga hardware is the target: nothing in the base may depend on Emu68 or the Pi, and speed is judged on real
+  68k CPUs (the stock A1200's 14 MHz 68EC020 first), never on Emu68's JIT or an emulator. The test machines and the
+  minimum are below. Real-hardware test time is scarce, so a build sent to a real machine must be ready for it.
+- Explain results in plain words and keep status reports short.
 
 ## Speed and size: the golden path (owner, 2026-10-26, for the whole system, not only the kernel)
 Zenix must **feel snappy**, like AmigaOS on low-powered machines: a key, a command, a window answers at once. And it
@@ -49,8 +45,6 @@ must **take little**: disk, RAM, floppy. Where the two pull apart, take the midd
   tight, so none for small changes the tests cover).
 - **Text console = Unix/Linux style (owner 2026-10-23):** ten virtual consoles on Amiga+F1..F10, each with its own login
   prompt; never desktop features in the text console.
-- **The owner's own goal** (Claude in a terminal on Zenix on the A1200) sets the order of work but is not Zenix's
-  purpose: never present it as Zenix's main goal in the docs.
 - **The demo floppy (D25):** the desktop edition is approved (owner 2026-11-04, D25 revision 3 Part 1, built in its
   section 10's order); the text edition (Part 2) stays postponed (owner 2026-10-28).
 

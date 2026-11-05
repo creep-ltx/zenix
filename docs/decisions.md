@@ -53,8 +53,7 @@ changed since the audit closed (D10, the boot menu and reboot, D12/cu, awk, G1/G
 findings fixed, tested and merged; then start D13 without waiting for the owner:
 review the design note (an independent review, fixes, a second look), then build stage 1 step by step in FS-UAE. The
 A1200 measurements (note section 8) wait until the owner is home; nothing is written to the owner's card meanwhile.
-**The owner's own goal (2026-10-24): Claude in a terminal on Zenix on the A1200.** It sets the order of the work, but it
-is the owner's goal, not Zenix's purpose (owner, 2026-10-24): never present it as Zenix's main goal in the docs. Approved now: a serial terminal program (Zenix to the PC over the null-modem cable, from
+**Terminal use from the A1200 (2026-10-24).** Approved: a serial terminal program (Zenix to the PC over the null-modem cable, from
 the weekend of 2026-10-31); then the same over the network; then a console good enough for Claude Code's screen
 (colours, stand-ins for its Unicode symbols).
 Only the owner lifts the halt; a session never decides on its own that it is over. Unfinished work stays
