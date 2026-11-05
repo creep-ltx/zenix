@@ -298,7 +298,7 @@ probe_img() {   # probe_img NAME [INTERFACES-TEXT]: the image, the script, the r
     fi
     cat > $OUT/probe-$nm.sh <<EOS
 for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
-    dmesg | grep -q 'no card for /sbin/net/plipbox\|netd stops\|eth1: no card for /sbin/net/ne2000' && break
+    dmesg | grep -q 'card probe done\|netd stops' && break
     sleep 1
 done
 for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
@@ -332,18 +332,16 @@ part_a() {
     local rc=$? k=$OUT/a-k.txt ok
     [ $rc = 0 ] || { echo "FAIL a: the run (exit $rc)"; tail -3 $OUT/a.log; pass=0; }
     probe_get a
-    ok=0; grep -aq 'netd: eth0: no stanza names genet: looking for its card (DHCP if there is one)' $k &&
-        grep -aq 'netd: eth0: no card for /sbin/net/genet' $k && grep -aq 'netd: eth0: no stanza names a2065: looking for its card' $k &&
-        grep -aq 'netd: eth0: /sbin/net/a2065 found a card: up with DHCP (no stanza in /etc/network/interfaces names it)' $k &&
-        grep -aq 'netd: eth1: no stanza names ne2000' $k && grep -aq 'netd: eth1: no card for /sbin/net/ne2000' $k &&
-        grep -aq 'netd: eth1: no card for /sbin/net/plipbox' $k && ok=1
-    check "a: no /etc/network/interfaces: netd looks for each card in turn, the kernel log says what it found" $ok "$(grep -a 'netd:\|net: ' $k | tail -16)"
+    ok=0; grep -aq 'netd: eth0: /sbin/net/a2065 found a card: up with DHCP (no stanza in /etc/network/interfaces names it)' $k &&
+        grep -aq 'netd: card probe done: found a2065; no card for genet, ne2000, plipbox' $k &&
+        ! grep -aq 'looking for its card\|started /sbin/net/genet\|started /sbin/net/ne2000\|started /sbin/net/plipbox\|^genet: \|^ne2000: \|^plipbox: ' $k && ok=1
+    check "a: no /etc/network/interfaces: netd looks for each card in turn, quietly; the log has the card found and the probe's one line" $ok "$(grep -a 'netd:\|net: ' $k | tail -16)"
     ok=0; grep -aq '^eth0: flags=<UP,BROADCAST,RUNNING,DEFAULT,DHCP>' $OUT/a-ifc.txt && grep -aq 'inet 10.0.2.15  netmask 255.255.255.0  gateway 10.0.2.2' $OUT/a-ifc.txt &&
         ! grep -aq '^eth1' $OUT/a-ifc.txt && grep -aq '2 received, 0% packet loss' $OUT/a-ping.txt && ok=1
     check "a: the A2065 found: eth0 by DHCP (10.0.2.15), ping 10.0.2.2; no eth1" $ok "$(cat $OUT/a-ifc.txt $OUT/a-ping.txt)"
-    ok=0; [ "$(grep -ac 'started /sbin/net/genet\|started /sbin/net/ne2000\|started /sbin/net/plipbox' $k)" = 3 ] &&
+    ok=0; [ "$(grep -ac 'card probe done' $k)" = 1 ] && ! grep -aq 'genet\|ne2000\|plipbox' $OUT/a-ps2.txt &&
         grep -aq ' netd$' $OUT/a-ps2.txt && ! grep -aq 'netd stops' $k && ok=1
-    check "a: the drivers that found nothing were started once each, not again; netd stays" $ok "$(grep -a 'started /sbin/net' $k; cat $OUT/a-ps2.txt)"
+    check "a: one probe; the drivers that found nothing are not running (not started again); netd stays" $ok "$(grep -a 'card probe\|started /sbin/net' $k; cat $OUT/a-ps2.txt)"
     e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-a.log 2>&1 && echo "PASS the host's e2fsck finds the root clean (a)" || { echo "FAIL e2fsck (a)"; pass=0; }
 }
 part_s() {
@@ -352,7 +350,7 @@ part_s() {
     local rc=$? k=$OUT/s-k.txt ok
     [ $rc = 0 ] || { echo "FAIL s: the run (exit $rc)"; tail -3 $OUT/s.log; pass=0; }
     probe_get s
-    ok=0; grep -aq 'netd: no network card found and none configured: netd stops (it starts again when a program needs the network)' $k &&
+    ok=0; grep -aq 'netd: no network card found (no card for genet, a2065, ne2000, plipbox) and none configured: netd stops (it starts again when a program needs the network)' $k &&
         grep -aqE 'svc: net: netd \(pid [0-9]+\) stopped' $k && ! grep -aq ' netd$\|/sbin/net' $OUT/s-ps.txt &&
         ! grep -aq 'found a card' $k && ok=1
     check "s: no file, no card: the probe finds nothing, netd says so and stops (not running afterwards)" $ok "$(grep -a 'netd\|svc: net' $k | tail -10; cat $OUT/s-ps.txt)"
@@ -371,9 +369,8 @@ part_c() {
     ok=0; grep -aq '^eth0: flags=<UP,BROADCAST,RUNNING,DEFAULT>  mtu 1500' $OUT/c-ifc.txt && grep -aq 'inet 10.0.2.15  netmask 255.255.255.0' $OUT/c-ifc.txt &&
         grep -aq '2 received, 0% packet loss' $OUT/c-ping.txt && ok=1
     check "c: the A2065's stanza (static) is kept: eth0 10.0.2.15 without DHCP, ping 10.0.2.2" $ok "$(cat $OUT/c-ifc.txt $OUT/c-ping.txt)"
-    ok=0; ! grep -aq 'names a2065\|names plipbox\|/sbin/net/plipbox' $k && grep -aq 'netd: eth1: no stanza names ne2000' $k &&
-        grep -aq 'netd: eth1: no card for /sbin/net/ne2000' $k && ok=1
-    check "c: not looked for: the A2065 (its stanza) and the plipbox (noprobe); the ne2000 was (eth1, no card)" $ok "$(grep -a 'netd:\|net: ' $k | tail -12)"
+    ok=0; ! grep -aq 'a2065;\|found a2065\|plipbox' $k && grep -aq 'netd: card probe done: no card for .*ne2000' $k && ok=1
+    check "c: not looked for: the A2065 (its stanza) and the plipbox (noprobe); the ne2000 was (no card: the probe's line)" $ok "$(grep -a 'netd:\|net: ' $k | tail -12)"
     e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-c.log 2>&1 && echo "PASS the host's e2fsck finds the root clean (c)" || { echo "FAIL e2fsck (c)"; pass=0; }
 }
 

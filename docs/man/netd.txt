@@ -31,7 +31,8 @@ DESCRIPTION
     owns it and nobody else may write it) and brings up the interfaces
     with an "auto" line, then looks for the cards no stanza names (each
     shipped driver in turn, as ethN with DHCP; ifconfig(8), CARDS FOUND
-    BY THEMSELVES; the kernel log says what it found); ifup reads them
+    BY THEMSELVES; quietly: one line in the kernel log says what it
+    found); ifup reads them
     again. SLIP opens /dev/ttyS0
     without ever waiting on it: what does not fit the port's send ring
     waits in netd's own queue. SLIP has no checksum of its own, so netd
@@ -87,10 +88,12 @@ FILES
 
 NOTES
     No IPv6, no firewall, no raw IP sockets (SOCK_RAW: "protocol not
-    supported"); ICMP sockets send echo requests only. netd runs at
-    nice 0 (not -10 as the disk servers): a flood from the network
-    cannot starve the shells. Its log lines go to the kernel log, and
-    so do its drivers'. Drivers are polled (no interrupts yet); no ARP
+    supported"); ICMP sockets send echo requests only. netd runs at nice 0
+    (not -10 as the disk servers): a flood from the network cannot starve
+    the shells. Its log lines go to the kernel log, and so do its drivers'
+    (but those of a card probe's driver that has not found its card). The
+    kernel log is also copied to the serial port, so a serial console
+    shows these lines too. Drivers are polled (no interrupts yet); no ARP
     probe of a DHCP address.
 
 SEE ALSO

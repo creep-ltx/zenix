@@ -57,8 +57,8 @@ for kind in d h; do
     want "$what: init runs, the demo's motd shows" "$S" "Zenix demo disk - everything runs from memory"
     want "$what: dlogin starts the display server on console 1" "$S" "display: console 1 handed to"
     want "$what: guest is logged in on the desktop by itself (dlogin's autologin)" "$S" "^dlogin: guest (uid 1001) logged in: Desktop"
-    want "$what: no card: netd looked for one by itself (the A2065's driver found none)" "$S" "netd: eth0: no card for /sbin/net/a2065"
-    want "$what: ... and stopped again, its memory given back" "$S" "netd: no network card found and none configured: netd stops"
+    want "$what: no card: netd looked for one by itself, quietly, and stopped again (its memory given back): one line" "$S" "netd: no network card found (no card for genet, a2065, ne2000"
+    grep -aq "looking for its card\|started /sbin/net/\|^genet: \|^a2065: \|^ne2000: \|^plipbox: " "$S" && no "$what: the probe's drivers said nothing on the serial port (a quiet console)" || ok "$what: the probe's drivers said nothing on the serial port (a quiet console)"
     grep -aq "session ended\|could not start\|not found\|no window" "$S" && no "$what: the session runs (no errors on the serial port)" || ok "$what: the session runs (no errors on the serial port)"
     [ -f "$OUT/$kind-loading.png" ] && [ -f "$OUT/$kind-desktop.png" ] && ok "$what: screenshots of the loading bar and the desktop" || no "$what: screenshots"
     [ "$(sha256sum < "$OUT/$kind-build/$(basename "$adf")")" = "$sum" ] && ok "$what: the ADF is unchanged after the boot" || no "$what: the ADF changed"
@@ -125,15 +125,14 @@ esac
 case " $PARTS " in *" n "*)
     B=$OUT/n-build; rm -rf "$B"; mkdir -p "$B"; cp $BD/zenix-demo.adf "$B/"
     sed '/^\[fs-uae\]/a network_card = a2065' fsuae/demo/demo.fs-uae > "$OUT/n.fs-uae"
-    printf 'wait demo: the Zenix demo disk.s loader 120\nwait (?m)netd: eth0: DHCP gave 300\nsleep 5\n' > "$OUT/n.txt"
+    printf 'wait demo: the Zenix demo disk.s loader 120\nwait (?m)netd: eth0: DHCP gave 300\nwait (?m)netd: card probe done 120\nsleep 2\n' > "$OUT/n.txt"
     # a network namespace of its own: FS-UAE's slirp answers DHCP itself and reaches nothing outside
     ZENIX_SERIAL=${ZENIX_SERIAL}-n ZENIX_BUILD=$B unshare -rn tools/run-test.sh "$OUT/n.fs-uae" 400 "$OUT/n.txt" 2>&1 | tr -d '\r' > "$OUT/n.log"
-    want "network: no interfaces file: netd tried genet first, which found nothing" "$OUT/n.log" "netd: eth0: no card for /sbin/net/genet"
     want "network: ... the A2065's driver found the board: up with DHCP, as the kernel log says" "$OUT/n.log" "netd: eth0: /sbin/net/a2065 found a card: up with DHCP"
     want "network: ... DHCP gave it 10.0.2.15" "$OUT/n.log" "netd: eth0: DHCP gave 10.0.2.15"
-    want "network: ... the ne2000 driver was tried as eth1 and found nothing" "$OUT/n.log" "netd: eth1: no card for /sbin/net/ne2000"
+    want "network: ... the probe's one line: the A2065 found, nothing for genet and ne2000 (the floppy has no plipbox driver)" "$OUT/n.log" "netd: card probe done: found a2065; no card for genet, ne2000"
     grep -aq "netd stops" "$OUT/n.log" && no "network: netd stays (it serves eth0)" || ok "network: netd stays (it serves eth0)"
-    [ "$(grep -ac 'started /sbin/net/genet' "$OUT/n.log")" -le 1 ] && ok "network: genet was started once, not again" || no "network: genet started more than once";;
+    [ "$(grep -ac 'card probe done' "$OUT/n.log")" = 1 ] && ! grep -aq 'started /sbin/net/genet' "$OUT/n.log" && ok "network: one probe, its drivers quiet" || no "network: the probe ran more than once, or a driver it tried was logged";;
 esac
 rm -rf "$OUT"/*-build
 exit $((1 - pass))

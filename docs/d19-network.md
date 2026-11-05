@@ -469,14 +469,24 @@ old address (`tcp_netif_ip_addr_changed`); programs see `ECONNABORTED`.
   (whatever its method or auto line: a configured card keeps its configuration) and no `noprobe` line names, one at a
   time, as the first free `ethN` with DHCP, when `/sbin/net/NAME` exists. The drivers find their hardware already
   (the hardware table, the PC Card's status bit, the plipbox's answer within 0.7 s) and end with the reason when it is
-  not there; a probe's driver that ends before it attaches is forgotten (`netd: eth0: no card for /sbin/net/NAME`),
-  never started again, and the next driver is tried; one that attaches is an interface as a stanza's, restarted the
-  same way (`netd: eth0: /sbin/net/a2065 found a card: up with DHCP (no stanza in /etc/network/interfaces names
-  it)`). A file netd may not use (not root's alone) means no probe either. Only netd's children may call `SYS_drv`, so
+  not there; a probe's driver that ends before it attaches is forgotten, never started again, and the next driver is
+  tried; one that attaches is an interface as a stanza's, restarted the same way (`netd: eth0: /sbin/net/a2065 found a
+  card: up with DHCP (no stanza in /etc/network/interfaces names it)`). **Quiet** (2026-11-05: on a machine without a
+  card the probe's lines came on the serial console a few seconds after the login prompt, mixed into it): as a
+  Linux distribution boots with a quiet console and drivers that find no device say nothing, a probe's driver gets the
+  driver line word `probe` (every shipped driver takes it) and says nothing until its hardware is there (then all of
+  its lines, as always: the found card's details stay in the log); netd writes no `started` or `ended` line for it
+  while it has not attached, and the probe ends with
+  one line, `netd: card probe done: found a2065; no card for genet, ne2000, plipbox` (none when netd is about to stop:
+  its line names them, below). A stanza naming a driver shows the driver's reasons as before. The kernel log itself
+  still goes to the serial port as well (`kputc`: every byte of it); keeping a service's lines off the serial port
+  would be a kernel change, not made (the kernel's size is tight), so the few lines left (the kernel's `svc: net:
+  started` and `stopped`, the kernel's `drv:` claim and release lines of the ne2000 and plipbox drivers, netd's
+  `serving net` and its one probe line) still reach a serial console. A file netd may not use (not root's alone) means no probe either. Only netd's children may call `SYS_drv`, so
   the probe is netd's: nobody else can look at a card.
 - **The memory comes back (`NETIFREQ_BOOT`):** `ifup -a --boot` asks UP with op 4. When the probe is done, netd decides
   once: no interface but the loopback, no driver, and no socket but ifup's own, and it stops with status 0 (`netd: no
-  network card found and none configured: netd stops ...`; D11's clean stop, not counted as an end), so the stock
+  network card found (no card for genet, a2065, ne2000, plipbox) and none configured: netd stops ...`; D11's clean stop, not counted as an end), so the stock
   A1200 without a network still gives the ~100 KB back (7.2), at the cost of loading netd and the four drivers once at
   boot. Any later socket call starts it again on demand, and that netd stays. Tests that check the loopback alone turn
   the probe off with a file holding `noprobe` (no auto line: no netd at boot), as the machine's owner can.

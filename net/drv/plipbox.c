@@ -26,8 +26,13 @@ static void pb_log(struct pb *b, const char *fmt, ...);
 
 #include "plipbox-core.c"
 
+/* "probe" in the driver line: netd's card probe (D19 6.3) started this driver for a card nobody configured; until the
+ * card is there the driver says nothing (a machine without it hears nothing of it, as a Linux driver that finds no
+ * device), then everything as always */
+static int quiet;
 static void pb_log(struct pb *b, const char *fmt, ...)
 {
+    if (quiet) return;
     char t[160];
     va_list ap;
     va_start(ap, fmt);
@@ -110,6 +115,8 @@ int main(int argc, char **argv)
             adopt = 0;
         } else if (!strcmp(argv[i], "noburst"))
             b.burst = 0;
+        else if (!strcmp(argv[i], "probe"))
+            quiet = 1;
         else
             pb_log(&b, "unknown word in the driver line: %s (ignored)", argv[i]);
     }
@@ -121,6 +128,7 @@ int main(int argc, char **argv)
     int r = sys_drv(DRV_QUIESCE, (u32)claim, (u32)&qz);
     if (r < 0) { pb_log(&b, "the quiesce program was refused (%d)", r); return 1; }
     if (pb_start(&b, adopt)) return 1;
+    quiet = 0;                                  /* the box answered */
     pb_log(&b, "plipbox found (%s sends), MAC %02x:%02x:%02x:%02x:%02x:%02x%s", b.burst ? "burst" : "handshaked",
            b.mac[0], b.mac[1], b.mac[2], b.mac[3], b.mac[4], b.mac[5], adopt ? " (the box's own)" : "");
     r = drv_attach(&q, b.ifn, b.mac, 1500, 8, DRVA_LINK, claim, 0, 0);

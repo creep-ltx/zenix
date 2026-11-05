@@ -50,6 +50,12 @@ OPTIONS
     noselftest     no loopback self-test (if it fails on a chip that
                    works anyway)
 
+PROBE
+    The word "probe" (netd gives it when its card probe starts the
+    driver for a card no stanza names, ifconfig(8) CARDS FOUND BY
+    THEMSELVES): nothing is said until the hardware is there, so a
+    machine without it hears nothing of this driver.
+
 DIAGNOSTICS
     In the kernel log (dmesg), as "genet: IFACE: ...": "no GENET in
     the hardware table" (not a Pi 4 or CM4 under Emu68: it ends, and

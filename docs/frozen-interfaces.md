@@ -169,6 +169,8 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   quiesce steps only bytes at 0xBFE101, 0xBFE301, and `DRVS_RMW` of bits 0-2 at 0xBFD000, 0xBFD200; CIA-A's FLG
   interrupt on while claimed); `/sbin/net/plipbox` in `NETDRVS` and its driver line words `mac=XX:XX:XX:XX:XX:XX` and
   `noburst`.
+  Since the quiet card probe (2026-11-05, D19 6.3): the driver line word `probe`, taken by every shipped driver
+  (genet, a2065, ne2000, plipbox; netd's card probe gives it): nothing is logged until the hardware is there.
 - **D20 (telnet's console, step 1, 2026-10-27):** `SYS_console`'s op word `op | (fd + 1) << 8` (0 above the op: no
   descriptor, only `CON_COLOURS` and D28's `CON_UFONT`; ops are 1-255; D24's ops 5-7 take a descriptor too); `CON_FONT` 2 (a2 PSF1 data, a3 its size; a2 0 drops it; PSF1 mode 0, height 8,
   2,052 bytes; meaning "8-bit mode: each byte one glyph of this font, no UTF-8 while loaded"), `CON_RULES` 3 (a2 bits,

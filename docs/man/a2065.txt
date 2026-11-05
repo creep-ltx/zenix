@@ -32,6 +32,12 @@ DESCRIPTION
     10.0.2.2, the name server 10.0.2.3), so the tests run the Ethernet
     path in the emulator (tools/eth-test.sh).
 
+PROBE
+    The word "probe" (netd gives it when its card probe starts the
+    driver for a card no stanza names, ifconfig(8) CARDS FOUND BY
+    THEMSELVES): nothing is said until the hardware is there, so a
+    machine without it hears nothing of this driver.
+
 DIAGNOSTICS
     In the kernel log (dmesg), as "a2065: IFACE: ...": no A2065 in the
     board list; the claim refused (another driver has the board); "the

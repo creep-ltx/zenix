@@ -94,18 +94,23 @@ DESCRIPTION
             driver a2065
 
 CARDS FOUND BY THEMSELVES
-    At its start and at every ifup -a, netd tries each shipped driver
-    that no stanza names (genet, a2065, ne2000, plipbox, in that order,
-    one at a time) as the next free ethN with DHCP. A driver that finds
-    no card says why in dmesg and ends; netd writes "netd: eth0: no
-    card for /sbin/net/NAME" and does not start it again. One that
-    finds its card is an interface as if a stanza named it: "netd:
-    eth0: /sbin/net/a2065 found a card: up with DHCP (no stanza in
-    /etc/network/interfaces names it)". A card a stanza names keeps its
-    stanza (a static address, its own name); write one for a fixed
-    address. Looking costs a moment of the driver's start each (the
-    plipbox's about 0.7 s); a file with no "auto" line starts no netd
-    at boot at all, and "noprobe" alone turns the looking off.
+    At its start and at every ifup -a, netd tries each shipped driver that
+    no stanza names (genet, a2065, ne2000, plipbox, in that order, one at
+    a time) as the next free ethN with DHCP. The looking is quiet, as on a
+    Linux system: a driver that finds no card ends without a word (netd
+    gives it the word "probe": it says nothing until its card is there)
+    and is not started again. One that finds its card is an interface as
+    if a stanza named it: "netd: eth0: /sbin/net/a2065 found a card: up
+    with DHCP (no stanza in /etc/network/interfaces names it)". The kernel
+    log gets one line when the looking is done ("netd: card probe done:
+    found a2065; no card for genet, ne2000, plipbox"), or, when nothing
+    was found and netd stops, that line names them. A stanza that names a
+    driver shows the driver's own reasons for not finding a card in dmesg.
+    A card a stanza names keeps its stanza (a static address, its own
+    name); write one for a fixed address. Looking costs a moment of the
+    driver's start each (the plipbox's about 0.7 s); a file with no "auto"
+    line starts no netd at boot at all, and "noprobe" alone turns the
+    looking off.
 
 EXIT STATUS
     0 if everything asked was done; 1 if something was not (said on

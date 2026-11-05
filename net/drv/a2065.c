@@ -66,8 +66,13 @@ static unsigned npend;
 static void csr_w(unsigned r, unsigned short v) { *rap = (unsigned short)r; *rdp = v; }
 static unsigned short csr_r(unsigned r) { *rap = (unsigned short)r; return *rdp; }
 static volatile unsigned short *w16(unsigned off) { return (volatile unsigned short *)(ram + off); }
+/* "probe" in the driver line: netd's card probe (D19 6.3) started this driver for a card nobody configured; until the
+ * card is there the driver says nothing (a machine without it hears nothing of it, as a Linux driver that finds no
+ * device), then everything as always */
+static int quiet;
 static void say(const char *fmt, u32 a, u32 b)
 {
+    if (quiet) return;
     char t[160], l[200];
     snprintf(t, sizeof t, fmt, a, b);
     snprintf(l, sizeof l, "a2065: %s: %s", ifn, t);
@@ -194,8 +199,10 @@ int main(int argc, char **argv)
     unsigned char mac[6];
     if (argc < 2) { dprintf(1, "usage: a2065 IFACE\n"); return 2; }
     ifn = argv[1];
+    for (int i = 2; i < argc; i++) if (!strcmp(argv[i], "probe")) quiet = 1;
     const struct hwboard *bd = drv_board(drv_hwinfo(), 0x202, 112);    /* Commodore A2065 */
     if (!bd) { say("no A2065 board in the hardware table", 0, 0); return 1; }
+    quiet = 0;
     int claim = sys_drv(DRV_CLAIM, bd->addr, 0);
     if (claim < 0) { say("the claim of the board at %x was refused (%d)", bd->addr, (u32)claim); return 1; }
     rdp = (volatile unsigned short *)(bd->addr + LANCE_RDP);

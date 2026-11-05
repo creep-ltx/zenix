@@ -42,8 +42,13 @@ static void gn_wr(struct genet *g, u32 off, u32 v)
 static u32 gn_ticks(void) { return sys_ticks(); }
 static void gn_sleep(u32 t) { sys_sleep(t); }
 static unsigned char *gn_mem(u32 a) { return (unsigned char *)a; }
+/* "probe" in the driver line: netd's card probe (D19 6.3) started this driver for a card nobody configured; until the
+ * card is there the driver says nothing (a machine without it hears nothing of it, as a Linux driver that finds no
+ * device), then everything as always */
+static int quiet;
 static void gn_log(struct genet *g, const char *fmt, ...)
 {
+    if (quiet) return;
     char t[160];
     va_list ap;
     va_start(ap, fmt);
@@ -152,6 +157,7 @@ int main(int argc, char **argv)
         if (!strcmp(argv[i], "cache=kernel")) force = 1;
         else if (!strcmp(argv[i], "cache=user")) force = 2;
         else if (!strcmp(argv[i], "noselftest")) selftest = 0;
+        else if (!strcmp(argv[i], "probe")) quiet = 1;
         else gn_log(&g, "unknown word in the driver line: %s (ignored)", argv[i]);
     }
     const struct hwinfo *h = drv_hwinfo();
@@ -159,6 +165,7 @@ int main(int argc, char **argv)
         gn_log(&g, "no GENET in the hardware table (this is not a Pi 4 or CM4 under Emu68)");
         return 1;
     }
+    quiet = 0;                                  /* the hardware table has one: from here everything is said */
     int claim = sys_drv(DRV_CLAIM, h->genet, 0);
     if (claim < 0) { gn_log(&g, "the claim of the GENET at %x was refused (%d)", h->genet, claim); return 1; }
     g.base = h->genet;

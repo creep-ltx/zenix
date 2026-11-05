@@ -138,7 +138,7 @@ EOS
 
 part_l() {
     cat > $OUT/remote.sh <<'EOS'
-i=0; while ! dmesg | grep -q 'no card for /sbin/net/plipbox' && [ $i -lt 30 ]; do sleep 1; i=$((i+1)); done    # the card probe's drivers gone (D19 6.3)
+i=0; while ! dmesg | grep -q 'card probe done\|netd stops' && [ $i -lt 30 ]; do sleep 1; i=$((i+1)); done    # the card probe's drivers gone (D19 6.3)
 free > /tmp/l-free0.txt
 /sbin/wasabid 2> /tmp/wd.log &
 sleep 8

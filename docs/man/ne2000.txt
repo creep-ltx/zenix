@@ -39,6 +39,12 @@ DESCRIPTION
     driver sets it up again and carries on. A different card: the
     driver ends, and netd starts it for the new one.
 
+PROBE
+    The word "probe" (netd gives it when its card probe starts the
+    driver for a card no stanza names, ifconfig(8) CARDS FOUND BY
+    THEMSELVES): nothing is said until the hardware is there, so a
+    machine without it hears nothing of this driver.
+
 DIAGNOSTICS
     In the kernel log (dmesg), as "ne2000: IFACE: ...":
     "no PC Card slot (this is not an A600 or A1200)";

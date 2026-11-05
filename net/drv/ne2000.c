@@ -18,8 +18,13 @@ static unsigned short ne_rw(u32 a) { return *(volatile unsigned short *)a; }
 static void ne_ww(u32 a, unsigned short v) { *(volatile unsigned short *)a = v; }
 static u32 ne_ticks(void) { return sys_ticks(); }
 static void ne_sleep(u32 t) { sys_sleep(t); }
+/* "probe" in the driver line: netd's card probe (D19 6.3) started this driver for a card nobody configured; until the
+ * card is there the driver says nothing (a machine without it hears nothing of it, as a Linux driver that finds no
+ * device), then everything as always */
+static int quiet;
 static void ne_log(struct ne *n, const char *fmt, ...)
 {
+    if (quiet) return;
     char t[160];
     va_list ap;
     va_start(ap, fmt);
@@ -100,7 +105,9 @@ int main(int argc, char **argv)
 {
     n.ifn = argc >= 2 ? argv[1] : "?";
     if (argc < 2) { dprintf(1, "usage: ne2000 IFACE\n"); return 2; }
-    for (int i = 2; i < argc; i++) ne_log(&n, "unknown word in the driver line: %s (ignored)", argv[i]);
+    for (int i = 2; i < argc; i++)
+        if (!strcmp(argv[i], "probe")) quiet = 1;
+        else ne_log(&n, "unknown word in the driver line: %s (ignored)", argv[i]);
     claim = sys_drv(DRV_CLAIM, DRV_PCMCIA, 0);
     if (claim == -ENODEV) { ne_log(&n, "no PC Card slot (this is not an A600 or A1200)"); return 1; }
     if (claim == -EADDRINUSE) {
@@ -109,6 +116,7 @@ int main(int argc, char **argv)
     }
     if (claim < 0) { ne_log(&n, "the claim of the PC Card slot was refused (%d)", claim); return 1; }
     if (!ne_card_in()) { ne_log(&n, "no card in the PC Card slot"); return 1; }
+    quiet = 0;                                  /* a card is in: what it is (or why not a network card) is said */
     if (ne_bring_up(&n)) return 1;
     if (set_quiesce(1) < 0) { ne_card_off(&n); return 1; }
     ne_link_poll(&n, 1);

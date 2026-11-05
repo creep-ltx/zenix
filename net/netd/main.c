@@ -170,6 +170,7 @@ static struct drv {
     u32 win, start_at;                  /* the 60 s window; when to start it again (0: not waiting) */
 } drvs[NDRV];
 static volatile int child_ended;
+static int probe_spawning;              /* drv_up is starting a card probe's driver (quiet: see drv_spawn) */
 static int stop_idle;                   /* NETIFREQ_BOOT: decide once the probe is done: stop if nothing is left to serve */
 static u32 ifset_sock, boot_sock;       /* the socket of the request being served; of the NETIFREQ_BOOT (ifup's own) */
 static void on_child(int sig) { (void)sig; child_ended = 1; }
@@ -200,6 +201,12 @@ static int drv_spawn(struct drv *d)
         while (*w && *w != ' ') w++;
     }
     argv[n] = 0;
+    /* a card probe's driver (D19 6.3) that has not found its card yet gets the word "probe": it says nothing until the
+     * card is there (a quiet console, as a Linux driver that finds no device says nothing); netd's own lines about it
+     * wait too. A stanza naming the driver shows its reasons as always */
+    int quiet = probe_spawning || (d->probe && !d->attached);
+    if (quiet && n < 7) argv[n++] = "probe";
+    argv[n] = 0;
     if (sys_pipe(p) < 0) return -EMFILE;
     int io[3] = { p[0], 1, 2 };                 /* its output is netd's: the kernel log */
     int pid = sys_spawn(path, argv, io);
@@ -210,7 +217,7 @@ static int drv_spawn(struct drv *d)
     d->rung = 0;
     d->h = -1;
     d->start_at = 0;
-    dprintf(1, "net: %s: started %s (pid %d)\n", d->cfg.name, path, pid);
+    if (!quiet) dprintf(1, "net: %s: started %s (pid %d)\n", d->cfg.name, path, pid);
     return 0;
 }
 /* ifup of a stanza with a driver: its process starts; the interface appears when it attaches */
@@ -246,7 +253,14 @@ static const char *const probe_drv[] = NETD_PROBE_DRIVERS;
 #define NPROBE ((int)(sizeof probe_drv / sizeof probe_drv[0]))
 static int probe_at = NPROBE;           /* the next driver to try; NPROBE: no probe going on */
 static int probe_busy;                  /* a probe's driver is running and has not attached yet */
+static char probe_none[48], probe_got[48];  /* the drivers this probe found no card for, and a card for; ", " between */
+static void probe_note(char *b, u32 n, const char *drv)
+{
+    u32 l = strlen(b);
+    if (l + strlen(drv) + 3 < n) snprintf(b + l, n - l, "%s%s", l ? ", " : "", drv);
+}
 static void probe_next(void);
+static int idle_cond(void);
 /* SIGCHLD came: which drivers ended (the handler only sets the flag, D19 2.3) */
 static void drv_reap(void)
 {
@@ -256,7 +270,8 @@ static void drv_reap(void)
         if (!d->used || !d->pid) continue;
         int st = sys_waitnb(d->pid);
         if (st == -2) continue;
-        dprintf(1, "net: %s: /sbin/net/%s (pid %d) ended, status %d\n", d->cfg.name, d->cfg.driver, d->pid, st);
+        if (!d->probe || d->attached || d->stopping)
+            dprintf(1, "net: %s: /sbin/net/%s (pid %d) ended, status %d\n", d->cfg.name, d->cfg.driver, d->pid, st);
         d->pid = 0;
         if (d->h >= 0) netd_drv_gone(d->h);
         d->h = -1;
@@ -267,8 +282,8 @@ static void drv_reap(void)
             d->used = 0;
             continue;
         }
-        if (d->probe && !d->attached) {         /* the probe found no card for it (the driver said why): next one */
-            dprintf(1, "netd: %s: no card for /sbin/net/%s\n", d->cfg.name, d->cfg.driver);
+        if (d->probe && !d->attached) {         /* the probe found no card for it: noted for the probe's one line */
+            probe_note(probe_none, sizeof probe_none, d->cfg.driver);
             d->used = 0;
             probe_next();
             continue;
@@ -342,6 +357,7 @@ static long do_attach(struct umsg *m)
         dprintf(1, "netd: %s: /sbin/net/%s found a card: up with DHCP (no stanza in /etc/network/interfaces names it)\n",
                 d->cfg.name, d->cfg.driver);
         d->attached = 1;
+        probe_note(probe_got, sizeof probe_got, d->cfg.driver);
         probe_next();
     }
     d->attached = 1;
@@ -456,31 +472,44 @@ static void probe_next(void)
         c.is_auto = 1;
         c.method = NETD_INET_DHCP;
         strcpy(c.driver, dn);
+        probe_spawning = 1;
         long r = drv_up(&c);
+        probe_spawning = 0;
         if (r < 0) { dprintf(1, "netd: %s: the card probe could not start %s: %s\n", c.name, path, zstrerror((int)r)); continue; }
         struct drv *d = drv_named(c.name);
         if (d) d->probe = 1;
-        dprintf(1, "netd: %s: no stanza names %s: looking for its card (DHCP if there is one)\n", c.name, dn);
         probe_busy = 1;
         return;
     }
+    /* the probe is done: one line in the log (when netd is about to stop for want of anything to serve, its line says
+     * it instead) */
+    if ((probe_got[0] || probe_none[0]) && !idle_cond())
+        dprintf(1, "netd: card probe done: %s%s%s%s%s\n", probe_got[0] ? "found " : "", probe_got,
+                probe_got[0] && probe_none[0] ? "; " : "", probe_none[0] ? "no card for " : "", probe_none);
 }
 static void probe_start(void)
 {
     if (ifs_state == -EACCES || probe_busy || probe_at < NPROBE) return;    /* a file netd may not use: no guessing */
     probe_at = 0;
+    probe_none[0] = 0;
     probe_next();
 }
 /* NETIFREQ_BOOT, decided once when the probe is done: stop if there is nothing to serve: no interface but the
  * loopback, no driver, no socket but ifup's own (it closes it after the answer) */
-static int idle_now(void)
+static int idle_cond(void)
 {
     struct netd_ifinfo f;
-    if (!stop_idle || probe_busy || probe_at < NPROBE) return 0;
-    stop_idle = 0;
+    if (!stop_idle) return 0;
     for (int i = 0; i < NDRV; i++) if (drvs[i].used) return 0;
     for (int i = 0; netd_if_info(i, &f) == 0; i++) if (strcmp(f.name, "lo")) return 0;
     return !netd_nsockets(NAME_IDX(boot_sock), NAME_GEN(boot_sock));
+}
+static int idle_now(void)
+{
+    if (!stop_idle || probe_busy || probe_at < NPROBE) return 0;
+    int r = idle_cond();
+    stop_idle = 0;
+    return r;
 }
 
 /* ifup: the stanza of name ("": every "auto" one); an interface already up is no error for "" */
@@ -782,7 +811,8 @@ int main(void)
         unsigned long ms = netd_turn();
         if (child_ended) drv_reap();
         if (idle_now()) {                       /* a clean stop: the next socket call starts netd again (D11) */
-            dprintf(1, "netd: no network card found and none configured: netd stops (it starts again when a program needs the network)\n");
+            dprintf(1, "netd: no network card found%s%s%s and none configured: netd stops (it starts again when a program "
+                    "needs the network)\n", probe_none[0] ? " (no card for " : "", probe_none, probe_none[0] ? ")" : "");
             return 0;
         }
         u32 dn = drv_starts();
