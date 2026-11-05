@@ -45,6 +45,22 @@ static int pb_wait(struct pb *b, int want, const char *stage)
     }
 }
 
+/* Inside a handshaked frame: was the driver away for about the box's own wait (500 ms) since the last look? Then
+ * the box may have given up on this transfer and, SEL still up, taken the lines' level as a new command and answered
+ * it: BUSY toggles again, the bytes read are the pull-ups' (found in the model, a frame of the right size with a byte
+ * of 0xFF in it, which nothing on the line would catch). Looked at every PB_GAPWORDS words and at the frame's end: a
+ * system call per 128 bytes, not per byte */
+static int pb_gap(struct pb *b, u32 *last)
+{
+    u32 t = pb_ticks();
+    if ((u32)(t - *last) >= PB_GAP) {
+        b->stage = "the frame's bytes (the driver was away as long as the box waits: not trusted)";
+        return -ETIMEDOUT;
+    }
+    *last = t;
+    return 0;
+}
+
 /* every transfer's end: the data lines the box's again, SEL and POUT down in one write (as the quiesce program) */
 static void pb_end(void)
 {
@@ -184,7 +200,10 @@ int pb_send(struct pb *b, unsigned len)
         r = pb_wait(b, 1, "the last answer");
     } else {
         const unsigned char *q = p;
+        u32 last = b->t0;
         for (unsigned i = 0; i <= words; i++) {         /* the size word, then the frame */
+            if (!(i % PB_GAPWORDS) && (r = pb_gap(b, &last)))
+                goto out;
             if ((r = pb_wait(b, 1, i ? "the frame's bytes" : "the command's answer")))
                 goto out;
             pb_wr(PB_DATA, *q++);
@@ -194,7 +213,8 @@ int pb_send(struct pb *b, unsigned len)
             pb_wr(PB_DATA, *q++);
             pb_bclr(PB_CTRL, PB_POUT);
         }
-        r = pb_wait(b, 1, "the last answer");
+        if (!(r = pb_wait(b, 1, "the last answer")))
+            r = pb_gap(b, &last);
     }
 out:
     pb_end();
@@ -239,7 +259,10 @@ int pb_recv(struct pb *b, unsigned char *buf, unsigned max, unsigned *len)
         r = -EMSGSIZE;
         goto out;
     }
+    u32 last = b->t0;
     for (unsigned i = 0; i < (n + 1) / 2; i++) {
+        if (!(i % PB_GAPWORDS) && (r = pb_gap(b, &last)))
+            goto out;
         if ((r = pb_wait(b, 0, "the frame's bytes")))
             goto out;
         *buf++ = pb_rd(PB_DATA);
@@ -249,6 +272,8 @@ int pb_recv(struct pb *b, unsigned char *buf, unsigned max, unsigned *len)
         *buf++ = pb_rd(PB_DATA);
         pb_bset(PB_CTRL, PB_POUT);
     }
+    if ((r = pb_gap(b, &last)))
+        goto out;
     *len = n;
 out:
     pb_end();

@@ -167,6 +167,13 @@ value and makes a receive only when the count differs (as plipbox.device clears 
   (the model counts it). The window is a few instructions long, so it needs a process kept away for half a second
   exactly there; the driver logs "a receive was cut between its size bytes: ... switch the box off and on" when its
   wait for the size's low byte fails, and the link goes down. A box switched off and on is found again (section 6).
+- **A driver away for half a second inside a frame** (found 2026-11-05 by the model's gap test once the line's timing
+  changed): the box gives up on a wait after 500 ms and, with SEL still up and POUT low, takes the lines' level (the
+  pull-ups' 0xFF) as a new, unknown command and answers it, so BUSY moves again and a driver that comes back reads on:
+  a frame of the right size with 0xFF bytes in it, which nothing on the line catches. Inside every handshaked frame
+  (receives and `noburst` sends) the driver looks at the kernel's tick every 64 words and at the frame's end
+  (`pb_gap`, a system call per 128 bytes); 30 ticks or more since the last look and the frame is dropped ("the
+  driver was away as long as the box waits: not trusted"). Bursts need none: the box has no deadline inside them.
 - **Frames from the box:** a size above 1,514 (or above the buffer) is refused before its bytes (the box ends its side
   when SEL drops); shorter than a header: dropped; a size of 0: an empty answer, counted; an online request: the online
   frame sent; a loopback frame (the box's test modes): sent back; everything counted (netd's `rx_bad`, `tx_err`).
@@ -206,7 +213,8 @@ model's burst figure matches. Real numbers come from the A1200 (section 9).
   answer at its end, the box freed at once); a size of 3,000 and a 9-byte frame from the box; the box gone in a receive
   and in a burst send (link down after 3, back restarted: link up, the same MAC); a box restarted unseen; no free
   buffer (the request waits); the loopback frame; the end and the quiesce program as the kernel checks it; the box's
-  burst receive as AmigaOS does it, with and without gaps (section 5).
+  burst receive as AmigaOS does it, with and without gaps (section 5); one gap of 0.6 or 1.2 s at 248 places of a
+  receive and a handshaked send (the frame lost or whole, never wrong).
 - **In FS-UAE, `tools/eth-test.sh l`**: FS-UAE has no plipbox. Nothing on the port: "nothing answers on the parallel
   port: BUSY stays high (no plipbox, or it is off)" and status 1, five times, then netd gives it up; the port claimed and
   released with its 3 quiesce steps each time; no fault, no eth0, `ping 127.0.0.1` answers; 200 sectors of the boot floppy

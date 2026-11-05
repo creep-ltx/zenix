@@ -44,6 +44,9 @@
 #define PB_KEEPALIVE    500             /* ticks (5 s) without a transfer before an online frame is sent anyway */
 #define PB_DOWNAFTER    3               /* transfers failed in a row before the link is down */
 #define PB_RETRY        200             /* ticks (2 s) between looks for a box that stopped answering */
+#define PB_GAP          30              /* ticks: away this long between two looks at the clock inside a frame, the
+                                         * box may have given up (its own 500 ms per wait): the frame is not trusted */
+#define PB_GAPWORDS     64              /* words of a frame between two looks at the clock */
 
 /* plipbox.device's own address (amiga/src/device.c), used when the box gives none */
 #define PB_DEFMAC       { 0x1a, 0x11, 0xaf, 0xa0, 0x47, 0x11 }

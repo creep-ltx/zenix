@@ -38,6 +38,8 @@ static struct {
     double gap_p;                       /* probability of a gap before an access */
     uint64_t gap_max, gap_min;
     unsigned long gaps;
+    unsigned long gap_once_at;          /* >0: one gap of gap_once ns before this access (the count of accesses) */
+    uint64_t gap_once;
     uint64_t rng;
     /* the CIAs */
     uint8_t prb, ddrb, pra, ddra;
@@ -335,6 +337,7 @@ static void m_tick(void)                /* one access's time, a gap before it no
         M.t += M.gap_min + m_rnd(M.gap_max - M.gap_min + 1);
         M.gaps++;
     }
+    if (M.gap_once_at && M.accesses + 1 == M.gap_once_at) { M.t += M.gap_once; M.gap_once_at = 0; }
     M.t += (uint64_t)(M_E + M.cpu);
     M.accesses++;
     m_box(M.t);
