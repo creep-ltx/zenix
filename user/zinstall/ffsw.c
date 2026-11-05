@@ -17,7 +17,7 @@
 #define BMPER (32u * 127u)              /* blocks one bitmap block covers */
 
 static const struct ffsw_io *io;
-static unsigned nblocks, root, nextb, nbm;
+static unsigned nblocks, root, nextb, nbm, nbx;     /* nbx: bitmap extension blocks, after the bitmap blocks */
 static unsigned day, minute;
 static const char *err;
 static unsigned char *bm;               /* the bitmap blocks (nbm * 512) as bytes, set bit = free */
@@ -94,14 +94,16 @@ int ffsw_begin(const struct ffsw_io *in, unsigned blocks, const char *name, unsi
         unsigned rel = b - 2, k = rel / BMPER, j = rel % BMPER, at = k * 512 + 4 + (j / 32) * 4;
         bm[at + 3 - (j % 32) / 8] |= (unsigned char)(1u << ((j % 32) % 8));
     }
+    nbx = nbm > 25 ? (nbm - 25 + 126) / 127 : 0;      /* the root names 25 bitmap blocks, an extension block 127 more */
     bit_clear(root);
-    for (unsigned i = 0; i < nbm; i++) bit_clear(root + 1 + i);
-    nextb = root + 1 + nbm;
+    for (unsigned i = 0; i < nbm + nbx; i++) bit_clear(root + 1 + i);
+    nextb = root + 1 + nbm + nbx;
     memset(rootL, 0, sizeof rootL);
     rootL[0] = T_HEADER;
     rootL[3] = HT;
     rootL[LONGS - 50] = 0xFFFFFFFFu;
-    for (unsigned i = 0; i < nbm; i++) rootL[LONGS - 49 + i] = root + 1 + i;
+    for (unsigned i = 0; i < nbm && i < 25; i++) rootL[LONGS - 49 + i] = root + 1 + i;
+    if (nbx) rootL[LONGS - 24] = root + 1 + nbm;
     set_date(rootL, LONGS - 23);
     set_name(rootL, name);
     set_date(rootL, LONGS - 10);
@@ -269,6 +271,13 @@ int ffsw_end(void)
         s = 0u - s;
         b[0] = (unsigned char)(s >> 24); b[1] = (unsigned char)(s >> 16); b[2] = (unsigned char)(s >> 8); b[3] = (unsigned char)s;
         if (io->wr(io->ctx, root + 1 + i, 1, b)) { fail("cannot write the boot partition"); return -1; }
+    }
+    for (unsigned x = 0; x < nbx; x++) {                 /* the extension blocks: 127 bitmap blocks' numbers, then the next one's */
+        static unsigned XL[LONGS];
+        memset(XL, 0, sizeof XL);
+        for (unsigned j = 0; j < 127 && 25 + x * 127 + j < nbm; j++) XL[j] = root + 1 + 25 + x * 127 + j;
+        XL[LONGS - 1] = x + 1 < nbx ? root + 1 + nbm + x + 1 : 0;
+        if (wlongs(root + 1 + nbm + x, XL)) { fail("cannot write the boot partition"); return -1; }
     }
     rootL[5] = 0;
     unsigned s = 0;

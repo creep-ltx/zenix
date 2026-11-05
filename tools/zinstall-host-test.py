@@ -35,7 +35,7 @@ T = tempfile.mkdtemp(prefix="zinstall-", dir=os.environ.get("ZENIX_OUT") or None
 BIN = os.path.join(T, "zinstall-host")
 r = subprocess.run(["gcc", "-g", "-O1", "-std=gnu11", "-DZHOST", "-Wall", "-Wextra", "-Wno-unused-parameter", "-fsanitize=address,undefined",
                     "-fno-sanitize-recover=undefined", "-o", BIN, "tools/host/zinstall-host.c", "user/zinstall/table.c",
-                    "user/zinstall/ffsw.c", "user/sha256.c"], cwd=ROOT, capture_output=True, text=True)
+                    "user/zinstall/ffsw.c", "user/zinstall/bootkeep.c", "user/zpkg/bootfs.c", "user/sha256.c"], cwd=ROOT, capture_output=True, text=True)
 if r.returncode:
     print("FAIL build", r.stderr)
     sys.exit(1)
@@ -1183,6 +1183,210 @@ try:
     else:
         print("SKIPPED the owner's card's tables (ZENIX_TEST_CARD not set)")
 
+    # ---- set it up yourself (D35 3b): every role on an existing partition, kept or formatted ----
+    def ffs_files(path, start, sectors, leaks_ok=False):
+        """the files of the FFS volume at start (tools/ffsread.py: a reader of its own), and amitools' xdfscan's verdict
+        (with leaks_ok its only complaints may be blocks in use that nothing names, as a cut leaves them)"""
+        sys.path.insert(0, HERE)
+        import ffsread
+        import re
+        with open(path, "rb") as f:
+            f.seek(start * 512)
+            data = f.read(sectors * 512)
+        prob, leaks, fl = ffsread.check_volume(data)
+        ok = True
+        if shutil.which("xdfscan"):
+            vol = path + ".vol.hdf"
+            open(vol, "wb").write(data)
+            x = subprocess.run(["xdfscan", "-v", vol], capture_output=True, text=True)
+            errs = [ln for ln in x.stdout.split("\n") if "ERROR" in ln or "WARN" in ln]
+            ok = x.returncode == 0 and "NOK" not in x.stdout and not errs
+            if not ok and leaks_ok and errs:
+                ok = True
+                for ln in errs:
+                    m = re.search(r"Invalid bitmap allocation .* got=([0-9a-f]{8}) expect=([0-9a-f]{8})", ln)
+                    if not m or int(m.group(1), 16) & ~int(m.group(2), 16):
+                        ok = False
+            if not ok:
+                print("xdfscan:", x.stdout[:600])
+            os.unlink(vol)
+        return prob, leaks, {k: v[1] for k, v in fl.items()}, ok
+
+    def img_owner(p, home_ext2=False, boot_mb=128):
+        """laid out like the owner's PiStorm card: p1 FAT32, p2 0x76 with BOOT (FFS, its boot menu) and SH0 (PFS3),
+        p3 0x83 1 GB (active, as tools/mkdualcard.sh leaves it), p4 0x83 4 GB"""
+        cb = 128 * 64
+        fat = (2048, 64 * MB)
+        cont = (fat[0] + fat[1], (2 + boot_mb // 4 + 16) * cb)
+        p3 = (cont[0] + cont[1], 1024 * MB)
+        p4 = (p3[0] + p3[1], 4096 * MB)
+        mkimg(p, p4[0] + p4[1])
+        vol = p + ".boot"
+        files = {"S/Startup-Sequence": b"SYS:bootmenu\n", "S/BootMenu.conf": b"timeout 5\ndefault 1\nAmigaOS = partition SH0\nZenix = run SYS:zenixboot\n",
+                 "bootmenu": os.urandom(14000), "zenixboot": os.urandom(50000), "Zenix/zenix": os.urandom(160000),
+                 "Zenix/state": b"zenixboot-state 1\nversion 7\nphase trial\nend\n", "Zenix/zenix.old": os.urandom(150000), "Work/notes": os.urandom(2000)}
+        args = []
+        for i, (k, v) in enumerate(files.items()):
+            fp = "%s.f%d" % (p, i)
+            open(fp, "wb").write(v)
+            args.append("%s=%s" % (fp, k))
+        subprocess.run([sys.executable, os.path.join(HERE, "mkffs.py"), vol, "%dM" % boot_mb, "BOOT", *args], check=True, capture_output=True)
+        with open(p, "r+b") as f:
+            mbr(f, [(0, 0x0C, *fat), (0, 0x76, *cont), (0x80, 0x83, *p3), (0, 0x83, *p4)])
+            fill(f, fat[0], fat[1], "fat")
+            Rdb(f, cont[0], cont[1] // cb, 128, 64, [("BOOT", 2, 1 + boot_mb // 4, FFS, 1, 5), ("SH0", 2 + boot_mb // 4, 1 + boot_mb // 4 + 16, PFS3, 1, 0)],
+                rdbhi=16383, locyl=2)
+            f.seek((cont[0] + 2 * cb) * 512)
+            f.write(open(vol, "rb").read())
+            fill(f, cont[0] + (2 + boot_mb // 4) * cb, 16 * cb, "sh0")
+            fill(f, p3[0], p3[1], "p3")
+            if not home_ext2:
+                fill(f, p4[0], p4[1], "p4")
+        if home_ext2:
+            h = p + ".home"
+            os.makedirs(h + ".d/anna", exist_ok=True)
+            open(h + ".d/anna/letter", "w").write("kept\n")
+            subprocess.run(["mke2fs", "-q", "-t", "ext2", "-b", "1024", "-N", "4096", "-d", h + ".d", "-F", h, "64M"], check=True)
+            subprocess.run(["dd", "if=" + h, "of=" + p, "bs=512", "seek=%d" % p4[0], "conv=notrunc,sparse", "status=none"], check=True)
+            os.unlink(h)
+            shutil.rmtree(h + ".d")
+        os.unlink(vol)
+        for i in range(len(files)):
+            os.unlink("%s.f%d" % (p, i))
+        return {"FAT": fat, "BOOT": (cont[0] + 2 * cb, boot_mb * MB), "SH0": (cont[0] + (2 + boot_mb // 4) * cb, 16 * cb), "p3": p3, "p4": p4,
+                "rdb": (cont[0], 2 * cb), "files": files}
+
+    def manual(img, boot, root, home, **e):
+        r = run("manual", img, boot, root, home, **e)
+        return r, r.stdout
+
+    p = os.path.join(T, "owner.img")
+    L = img_owner(p)
+    r = run("list", p)
+    devs = {l.split()[1]: l for l in r.stdout.splitlines() if l.startswith("part ")}
+    check("the owner's card: read as FAT, 0x76, BOOT, SH0, two 0x83 (ide0p1..p6)", sorted(devs) == ["ide0p%d" % i for i in range(1, 7)] and
+          "label=BOOT" in devs["ide0p3"] and "label=SH0" in devs["ide0p4"], r.stdout)
+    before = p + ".before"
+    cp(p, before)
+    for role, spec, want in (("root", "format:ide0p1", "FAT"), ("root", "format:ide0p2", "Amiga table"), ("home", "keep:ide0p2", "Amiga table"),
+                             ("boot", "format:ide0p5", "PC partition"), ("boot", "keep:SH0", "not an AmigaDOS FFS"), ("root", "keep:ide0p5", "no ext2"),
+                             ("root", "format:BOOT", None)):
+        args = {"boot": "none", "root": "format:ide0p5", "home": "none"}
+        args[role] = spec
+        if role == "root" and spec == "format:BOOT":
+            args["boot"] = "keep:BOOT"
+            rr, o = manual(p, args["boot"], args["root"], args["home"], ZI_PLAN_ONLY=1)
+            check("refused: one partition with two roles", rr.returncode == 1 and "two roles" in o, o)
+            continue
+        rr, o = manual(p, args["boot"], args["root"], args["home"], ZI_PLAN_ONLY=1)
+        check("the owner's card: %s %s refused (%s)" % (role, spec, want), rr.returncode == 1 and "refused" in o and want in o, o)
+    check("  nothing written by the refusals", changed_sectors(before, p) == [])
+    rr, o = manual(p, "none", "format:ide0p6", "none", ZI_PLAN_ONLY=1)
+    check("another root marked (p3 active) and not chosen: refused", rr.returncode == 1 and "would stay the root" in o, o)
+    rr, o = manual(p, "none", "format:ide0p6", "keep:ide0p5", ZI_PLAN_ONLY=1)
+    check("  allowed when it is chosen as /home (then its mark goes): but p3 holds no filesystem to keep", rr.returncode == 1 and "no ext2" in o, o)
+    rr, o = manual(p, "none", "format:ide0p6", "format:ide0p5", ZI_PLAN_ONLY=1)
+    check("  allowed when it is chosen as /home to format", rr.returncode == 0 and "w1 0" in o and "w2 0" in o, o)
+    rr2, o2 = manual(p, "none", "format:ide0p6", "format:ide0p5", ZI_BUSY="%d:%d" % L["p4"], ZI_PLAN_ONLY=1)
+    check("a mounted partition is refused", rr2.returncode == 1 and "in use" in o2, o2)
+    cp(before, p)
+
+    # the owner's case: BOOT kept, p3 ZenixFS, p4 formatted
+    rr, o = manual(p, "keep:BOOT", "format:ide0p5:zfs", "format:ide0p6")
+    check("the owner's case: BOOT kept, root p3 ZenixFS, /home p4: done", rr.returncode == 0 and "done" in o and "zenixfs 1" in o, o)
+    check("  only the MBR sector is written to the tables (p3's active flag off, then on)",
+          [l for l in o.splitlines() if l.startswith("w1") or l.startswith("w2")] == ["w1 0", "w2 0"], o)
+    check("  bootkeep saw the old zenixboot, Zenix/, the kernel, the menu running zenixboot, two old files",
+          "look zb=1 same=0 dir=1 kern=1 starts=1 nold=2 old=state, zenix.old" in o, o)
+    ch = changed_sectors(before, p)
+    bad = within(ch, [L["BOOT"], (L["p3"][0], 128), (L["p4"][0], 128)], [0])
+    check("  nothing outside BOOT, the two filesystems and sector 0 changed (FAT, SH0, the RDB the same)", ch and not bad, str(bad[:8]))
+    t = read_table(p)
+    check("  the table whole; p3 active, p4 not; types still 0x83", not isinstance(t, str) and ("slot2", L["p3"][0], L["p3"][1], 0x83, 0x80, 0) in t and
+          ("slot3", L["p4"][0], L["p4"][1], 0x83, 0, 0) in t, str(t))
+    prob, leaks, fl, xok = ffs_files(p, *L["BOOT"])
+    check("  BOOT valid (ffsread, xdfscan), no leak", not prob and not leaks and xok, (prob, leaks))
+    kb = bytes((i * 2654435761 >> 24) & 0xFF for i in range(172000))
+    zb = bytes((i * 7 + 3) & 0xFF for i in range(53000))
+    check("  BOOT: zenixboot and Zenix/zenix the new ones; state and zenix.old gone", fl.get("zenixboot") == zb and fl.get("Zenix/zenix") == kb and
+          "Zenix/state" not in fl and "Zenix/zenix.old" not in fl)
+    check("  BOOT: the menu, the Startup-Sequence, bootmenu and the other files untouched",
+          all(fl.get(k) == L["files"][k] for k in ("S/Startup-Sequence", "S/BootMenu.conf", "bootmenu", "Work/notes")))
+
+    # keep /home with its files
+    p = os.path.join(T, "owner2.img")
+    L = img_owner(p, home_ext2=True)
+    cp(p, before)
+    rr, o = manual(p, "keep:BOOT", "format:ide0p5", "keep:ide0p6")
+    ch = changed_sectors(before, p)
+    check("keep /home: done, /home's filesystem byte-identical", rr.returncode == 0 and "done" in o and not [s for s in ch if L["p4"][0] <= s < L["p4"][0] + L["p4"][1]], o)
+    check("  the plan says ext2 for both", "zenixfs 0 homefs 0" in o, o)
+    rr, o = manual(p, "keep:BOOT", "keep:ide0p6", "none", ZI_PLAN_ONLY=1)
+    check("  the kept ext2 p4 as the root, p3 (marked) not chosen: refused, it would stay the root", rr.returncode == 1 and "would stay the root" in o, o)
+    rr, o = manual(p, "keep:BOOT", "keep:ide0p6", "format:ide0p5", ZI_PLAN_ONLY=1)
+    check("  root kept on p4 with p3 as /home: allowed", rr.returncode == 0 and "role root keep ide0p6" in o, o)
+
+    # a start-up partition kept again: the same zenixboot is left as it is
+    p = os.path.join(T, "owner.img")
+    rr, o = manual(p, "keep:BOOT", "format:ide0p5:zfs", "format:ide0p6", ZI_PLAN_ONLY=1)
+    check("the same install again: the zenixboot there is the same (not written), no old files", "same=1" in o and "nold=0" in o, o)
+
+    # an RDB disk set up by hand: BOOT formatted (a new start-up partition with the menu), DH1 the root, no /home
+    p = os.path.join(T, "rdbm.hdf")
+    parts = img_rdb_big_cyl(p)
+    cp(p, before)
+    rr, o = manual(p, "format:BOOT", "format:DH1", "none")
+    check("RDB disk: BOOT formatted, DH1 the root (ext2), no /home: done", rr.returncode == 0 and "done" in o, o)
+    check("  the menu's default: DH0, which the disk started (BOOT itself chosen); priority above the highest",
+          "aos DH0" in o and "pri 1 " in o, o)
+    t = read_table(p)
+    tb = {x[0]: x for x in t} if not isinstance(t, str) else {}
+    check("  the table: BOOT DOS\\1 bootable pri 1; DH1 ext2, bootable and not mounted by AmigaOS; DH0 as it was",
+          tb.get("BOOT", (0,) * 6)[3:] == (FFS, 1, 1) and tb.get("DH1", (0,) * 6)[3:5] == (EXT2, 3) and tb.get("DH0", (0,) * 6)[3:] == (PFS3, 1, 0), str(t))
+    ch = changed_sectors(before, p)
+    bad = within(ch, [parts[0][1:], (parts[2][1], 128)], [3, 4, 5])
+    check("  only BOOT, DH1's first sectors and their PART blocks changed", not bad, str(bad[:8]))
+    prob, leaks, fl, xok = ffs_files(p, *parts[0][1:])
+    check("  BOOT is a new FFS volume with the kernel (xdfscan)", not prob and xok and "Zenix/zenix" in fl, prob)
+    # a big start-up partition formatted: ffsw's bitmap extension block
+    p = os.path.join(T, "bigboot.img")
+    L = img_owner(p, boot_mb=200)
+    rr, o = manual(p, "format:BOOT", "format:ide0p5", "format:ide0p6")
+    prob, leaks, fl, xok = ffs_files(p, *L["BOOT"])
+    check("a 200 MB start-up partition formatted: a valid volume with a bitmap extension block (xdfscan)",
+          rr.returncode == 0 and not prob and not leaks and xok and "Zenix/zenix" in fl, (o, prob))
+    rr, o = manual(p, "format:SH0", "format:ide0p5", "none", ZI_PLAN_ONLY=1)
+    check("  the menu then offers what the disk starts (SH0 chosen: nothing), BOOT kept out", rr.returncode == 0, o)
+
+    # a damaged table: nothing offered
+    p = os.path.join(T, "owner3.img")
+    L = img_owner(p)
+    with open(p, "r+b") as f:
+        f.seek((L["rdb"][0] + 3) * 512 + 100)
+        f.write(b"\x01")
+    rr, o = manual(p, "keep:BOOT", "format:ide0p5", "none", ZI_PLAN_ONLY=1)
+    rr2, o2 = manual(p, "none", "format:ide0p5", "none", ZI_PLAN_ONLY=1)
+    check("a damaged RDB inside the 0x76: every role refused, also on the 0x83 entries", rr.returncode == 1 and rr2.returncode == 1 and "refused" in o2, o + o2)
+
+    # a cut at each table write and at points between: the table whole, the rest unchanged, BOOT a valid volume
+    p = os.path.join(T, "owner4.img")
+    L = img_owner(p)
+    cp(p, before)
+    total = int([l for l in manual(p, "keep:BOOT", "format:ide0p5", "format:ide0p6")[1].splitlines() if l.startswith("done")][0].split()[1])
+    badcuts = []
+    for c in sorted({0, 1, 2, 3, 100, 300, 500, total - 2, total - 1}):
+        cp(before, p)
+        rr, o = manual(p, "keep:BOOT", "format:ide0p5", "format:ide0p6", ZI_CUT=c)
+        t = read_table(p)
+        prob, leaks, fl, xok = ffs_files(p, *L["BOOT"], leaks_ok=True)
+        ch = changed_sectors(before, p)
+        bad = within(ch, [L["BOOT"], (L["p3"][0], 128), (L["p4"][0], 128)], [0])
+        if rr.returncode != 99 or isinstance(t, str) or prob or bad or not xok or fl.get("S/BootMenu.conf") != L["files"]["S/BootMenu.conf"] or \
+                fl.get("Zenix/zenix") not in (L["files"]["Zenix/zenix"], kb):
+            badcuts.append((c, rr.returncode, t if isinstance(t, str) else "", prob[:2], bad[:3]))
+    check("a cut at any of 9 points of the owner's case (of %d writes): the table whole, the old kernel or the new, nothing else changed" % total,
+          not badcuts, str(badcuts[:3]))
+
     # ---- the fuzzer ----
     rounds = sys.argv[1] if len(sys.argv) > 1 else "300000"
     imgs = []
@@ -1194,6 +1398,9 @@ try:
     q = os.path.join(T, "f6.hdf")
     img_rdb_free(q)
     run("install", q, 1)
+    imgs.append(q)
+    q = os.path.join(T, "f7.img")             # the owner's card's kind (set it up yourself)
+    img_owner(q)
     imgs.append(q)
     r = run("fuzz", 1, rounds, *imgs)
     print(r.stdout.strip())

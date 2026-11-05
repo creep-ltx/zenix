@@ -11,7 +11,7 @@ struct ffsw_io {
 typedef int (*ffsw_src)(void *ctx, unsigned char *buf, unsigned n);       /* exactly n bytes: 0, else an error */
 
 #define FFSW_MAXFILES 12
-#define FFSW_MAXBLOCKS (25u * 4064u)    /* 25 bitmap blocks in the root; no extension blocks here */
+#define FFSW_MAXBLOCKS ((25u + 2u * 127u) * 4064u)  /* 25 bitmap blocks in the root, two extension blocks: about 550 MB (as user/zpkg/bootfs.c) */
 
 int ffsw_begin(const struct ffsw_io *io, unsigned blocks, const char *name, unsigned days, unsigned mins);
 int ffsw_mkdir(const char *name);       /* a directory in the root: 0, or -1 */

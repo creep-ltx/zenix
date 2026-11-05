@@ -829,6 +829,92 @@ def part_boot(out, core):
     open(os.path.join(d, "big"), "wb").write(os.urandom(70000))
     rc, o = run(core, "bootcreate", p, "DOS1", BUN, os.path.join(d, "big"))
     ok("not enough space: refused, nothing written", rc != 0 and "-28" in o and open(p, "rb").read() == before, o)
+    part_boot_keep(d, core)
+
+
+def part_boot_keep(d, core):
+    """zinstall's kept start-up partition (DESIGN D35 3b): a directory made, files in the root, a file replaced in place
+    of its header, files deleted; each judged by the reader of the test's own and xdfscan; a cut before every write"""
+    env = dict(os.environ, SOURCE_DATE_EPOCH="1761600000")
+    for intl in (False, True):
+        dt = "DOS3" if intl else "DOS1"
+        src = {"S/Startup-Sequence": b"SYS:bootmenu\n", "S/BootMenu.conf": b"timeout 5\nZenix = run SYS:zenixboot\n",
+               "zenixboot": os.urandom(40000), "Zenix/zenix": os.urandom(100000), "Zenix/state": b"zenixboot-state 1\nend\n",
+               "Zenix/zenix.old": os.urandom(90000), "Zenix/zenix-update.zup": os.urandom(5000), "Work/keep": os.urandom(3000)}
+        files = []
+        for i, (path, data) in enumerate(src.items()):
+            fp = os.path.join(d, "k%d" % i)
+            open(fp, "wb").write(data)
+            files.append("%s=%s" % (fp, path))
+        img = os.path.join(d, "keep-%s.img" % dt)
+        rc, msg = run(sys.executable, os.path.join(TOOLS, "mkffs.py"), img, "128M", "BOOT", *(["--intl"] if intl else []), *files, env=env)
+        if rc:
+            ok("keep %s: mkffs.py" % dt, False, msg)
+            continue
+        nzb, nk = os.urandom(53000), os.urandom(172000)
+        open(os.path.join(d, "nzb"), "wb").write(nzb)
+        open(os.path.join(d, "nk"), "wb").write(nk)
+        before = open(img, "rb").read()
+        rc1, o1 = run(core, "bootput", img, dt, "-", "zenixboot", os.path.join(d, "nzb"))
+        rc2, o2 = run(core, "bootput", img, dt, "Zenix", "zenix", os.path.join(d, "nk"))
+        outs = [run(core, "bootdel", img, dt, "Zenix", n) for n in ("state", "zenix.old", "zenix-update.zup")]
+        new = open(img, "rb").read()
+        prob, leaks, fl = Judge(new, intl).check()
+        ok("keep %s: zenixboot (in the root) and Zenix/zenix replaced, three files deleted" % dt,
+           rc1 == 0 and rc2 == 0 and all(r == 0 for r, _ in outs), (o1, o2, outs))
+        ok("keep %s: the volume after it: the judge, no leak, xdfscan" % dt, not prob and not leaks and xdfscan_ok(img), (prob, leaks))
+        ok("keep %s: the new files read back, the deleted are gone, the rest as it was" % dt,
+           fl.get("zenixboot", (0, None))[1] == nzb and fl.get("Zenix/zenix", (0, None))[1] == nk and
+           not any(("Zenix/" + n) in fl for n in ("state", "zenix.old", "zenix-update.zup")) and
+           all(fl.get(p_, (0, None))[1] == c for p_, c in src.items() if p_ in ("S/Startup-Sequence", "S/BootMenu.conf", "Work/keep")))
+        _, _, fb = Judge(before, intl).check()
+        ok("keep %s: a replaced file keeps its header block (the one write that makes it the new one)" % dt,
+           fb["zenixboot"][0] == fl["zenixboot"][0] and fb["Zenix/zenix"][0] == fl["Zenix/zenix"][0])
+        rc, o = run(core, "bootdel", img, dt, "Zenix", "state")
+        ok("keep %s: deleting a file that is not there: ENOENT, nothing written" % dt, rc != 0 and "-2:" in o and open(img, "rb").read() == new, o)
+        rc, o = run(core, "bootmkdir", img, dt, "Zenix")
+        ok("keep %s: a directory that is there: EEXIST" % dt, rc != 0 and "-17" in o, o)
+        rc, o = run(core, "bootmkdir", img, dt, "zenixboot")
+        ok("keep %s: a directory where a file is: refused, nothing written" % dt, rc != 0 and open(img, "rb").read() == new, o)
+        # no Zenix folder yet: made, then the kernel created in it
+        img2 = os.path.join(d, "nodir-%s.img" % dt)
+        run(sys.executable, os.path.join(TOOLS, "mkffs.py"), img2, "2M", "BOOT", *(["--intl"] if intl else []), files[0], files[1], env=env)
+        rc1, o1 = run(core, "bootmkdir", img2, dt, "Zenix")
+        rc2, o2 = run(core, "bootput", img2, dt, "Zenix", "zenix", os.path.join(d, "nk"))
+        rc3, o3 = run(core, "bootput", img2, dt, "-", "zenixboot", os.path.join(d, "nzb"))
+        prob, leaks, fl = Judge(open(img2, "rb").read(), intl).check()
+        ok("keep %s: Zenix/ made in a volume without one, the kernel in it, zenixboot in the root" % dt,
+           rc1 == 0 and rc2 == 0 and rc3 == 0 and not prob and not leaks and fl.get("Zenix/zenix", (0, None))[1] == nk and
+           fl.get("zenixboot", (0, None))[1] == nzb and xdfscan_ok(img2), (o1, o2, o3, prob, leaks))
+        # a cut before every write: the old file or the new one, whole; a valid volume; the next run finishes, leaks given back
+        for what, args in (("replace", ["bootput", dt, "Zenix", "zenix", os.path.join(d, "nk")]),
+                           ("delete", ["bootdel", dt, "Zenix", "zenix.old"]), ("mkdir", ["bootmkdir", dt, "Fresh"])):
+            bad, total = [], None
+            for cut in range(1, 400):
+                c = os.path.join(d, "kcut.img")
+                open(c, "wb").write(before)
+                rc, o = run(core, args[0], c, *args[1:], str(cut))
+                if rc == 0:
+                    total = cut - 1
+                    break
+                prob, leaks, fl = Judge(open(c, "rb").read(), intl).check()
+                if what == "replace":
+                    good = fl.get("Zenix/zenix", (0, None))[1] in (src["Zenix/zenix"], nk)
+                elif what == "delete":
+                    good = fl.get("Zenix/zenix.old", (0, None))[1] in (src["Zenix/zenix.old"], None)
+                else:
+                    good = True
+                if rc != 3 or prob or not good:
+                    bad.append((cut, o, prob[:2], good))
+                    continue
+                rc2, o2 = run(core, args[0], c, *args[1:])
+                prob, leaks2, fl = Judge(open(c, "rb").read(), intl).check()
+                done = (fl.get("Zenix/zenix", (0, None))[1] == nk if what == "replace" else
+                        "Zenix/zenix.old" not in fl if what == "delete" else rc2 == 0 or "-17" in o2)
+                if prob or not done or (rc2 == 0 and leaks2 and what != "delete"):
+                    bad.append((cut, "again", o2, prob[:2], leaks2))
+            ok("keep %s: %s: a cut before each of the %s writes leaves a valid volume with the old or the new file; the next "
+               "run finishes" % (dt, what, total), total is not None and total >= (2 if what == "delete" else 3) and not bad, bad[:3])
 
 
 # ---- the network part (inside a namespace) ----
