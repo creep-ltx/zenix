@@ -59,8 +59,8 @@ check(re.search(r"chip \d+%", c0) is not None and re.search(r"Tasks \d+, \d+ run
 m0 = col(r0, 0, 36)
 check(re.search(r"Chip: .* 1\.7M", m0) is not None and re.search(r"Used: .* \d+% \d", m0) is not None,
       "the mem box: chip memory's size (the kernel's boot log: 1,812 KB) and what is in use", m0)
-check(re.search(r"disks", m0) is not None and re.search(r"^│/ +\S+ +\d+% +8\.0M│$", m0, re.M) is not None,
-      "the disks: the root (/) with its meter, its use and its size (8 MB)", m0)
+check(re.search(r"disks", m0) is not None and re.search(r"^│/ +\S+ +\d+% +16M│$", m0, re.M) is not None,
+      "the disks: the root (/) with its meter, its use and its size (16 MB)", m0)
 check("no bsdsocket.library:" in m0 and "no network" in m0, "the net box while netd is not running: no network", m0)
 p0 = col(r0, 36, 80)
 check(re.search(r"Program:", p0) is not None and re.search(r"- ctop +0 run ", p0) is not None and
