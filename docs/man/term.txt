@@ -4,7 +4,7 @@ NAME
     term - the terminal window of Zenix Desktop
 
 SYNOPSIS
-    term [-r ROWS] [-e COMMAND [ARGUMENTS]]
+    term [-r ROWS] [-c COLUMNS] [-p X,Y] [-e COMMAND [ARGUMENTS]]
 
 DESCRIPTION
     A window on the desktop (zdesk(1)) with the user's shell ($SHELL, else
@@ -28,11 +28,19 @@ DESCRIPTION
     program ends.
 
 OPTIONS
-    -r ROWS     the rows at first
+    -r ROWS     the rows at first (4 to 29; 24)
+    -c COLUMNS  the columns at first (20 to 80; 80): a window that fits
+                beside the desktop's icons (the demo floppy's welcome)
+    -p X,Y      where the window's frame goes, in pixels (else zdesk's
+                choice); zdesk keeps it inside the screen
     -e COMMAND  run COMMAND instead of a shell (the rest of the line are
                 its arguments)
 
 NOTES
     At most 80 columns: the console's cell model keeps rows of 80. A wide
     character draws in one cell. No mouse selection and no clipboard yet;
-    the bell is silent.
+    the bell is silent. The program starts once the window is shown, with
+    the size it really got (80 columns and a frame do not fit the 640-pixel
+    screen: zdesk makes it 78 or 79); a later resize is told by SIGWINCH,
+    which the full-screen programs here (Ahiru, Sumi, ctop) do not follow
+    yet.

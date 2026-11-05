@@ -47,6 +47,22 @@ DESCRIPTION
     supervisor loads each part from there. zine says so first
     ("NAME is overlaid: N later parts ..."). zine refuses a program
     when its file and its hunks together need more memory than is free.
+    A program may also send packets to its file's handler itself (as
+    crunchers do through the overlay file): ZINE answers reading,
+    writing, seeking, closing and flushing.
+
+    dos.library's Execute runs nothing (ZINE has no shell): it answers
+    "done" and the output names the command. An Assign command
+    ("Assign LIBS: Ram:", also as "C:Assign" or "Ram:Assign") ZINE does
+    itself: up to 8 names of up to 3 directories each.
+
+    A program may write files to RAM:, read them back, load and delete
+    them; they live in its own memory and are gone afterwards, as is
+    everything it writes elsewhere. Its own files are read-only.
+    OpenLibrary of a library ZINE does not have loads it from LIBS:
+    (at the start the program's LIBS directory, its own directory and
+    RAM:), as demos that carry their own library do. audio.device
+    gives out the four channels but plays nothing itself.
 
     ZINE is being built (DESIGN D29): real demos run in FS-UAE.
 

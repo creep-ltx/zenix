@@ -28,7 +28,9 @@ DESCRIPTION
     A user whose password field is empty is not asked for a password. With -f
     the password is not asked at all. With -s (root only) PROGRAM runs instead
     of the user's shell, set up the same way: dlogin(8) starts a desktop
-    session as login -f -s /bin/zdesk NAME. On console 1 only, a user named in
+    session as login -f -s /bin/zdesk NAME. PROGRAM may carry arguments,
+    split at spaces (at most 7 words in 127 bytes): -s "/bin/sh FILE" runs a
+    session script. On console 1 only, a user named in
     /etc/autologin is logged in without asking; the images that Zenix ships
     contain /etc/autologin with "root", so console 1 starts straight in a root
     shell while the other consoles ask. Remove that file to get a login prompt

@@ -1,0 +1,2 @@
+# /etc/fstab of the demo floppy: nothing to mount. The root is the RAM disk the floppy was unpacked into (ram0);
+# the floppy itself has no filesystem (DESIGN D25 revision 3, 6.1).

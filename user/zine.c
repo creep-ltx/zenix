@@ -194,9 +194,12 @@ int main(int argc, char **argv)
                 "hunks (%u KB) need more than the %u KB free\n", name, len >> 10, hunks >> 10, avail >> 10);
         return 1;
     }
-    if (inf.ovl)
+    if (inf.ovl && inf.nodes)
         dprintf(1, "ZINE: %s is overlaid: %u later parts (%u KB together, the largest %u KB), loaded from memory "
                 "when it asks for them\n", name, inf.nodes, (inf.node_all + 1023) >> 10, (inf.node_max + 1023) >> 10);
+    else if (inf.ovl)                   /* a cruncher's data container (Spaceballs' Peek): d29 16.7 */
+        dprintf(1, "ZINE: %s keeps %u KB of data after its overlay table and reads it itself through its overlay "
+                "file, from memory\n", name, (len - inf.end + 1023) >> 10);
     /* the volume (5.6): the program's directory, its plain files (not its subdirectories yet), when they fit (at
      * most 500 files, 16 MB and half the free fast RAM); else the program alone */
     char dir[256];

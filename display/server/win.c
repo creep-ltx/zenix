@@ -21,6 +21,8 @@ int norder;
 struct dpystyle style;
 int focus = -1;
 int dragging;
+static int dkeep = -1;                  /* a window moved whole: its kept copy stays for the drag (its inside's source) */
+u32 nmoves, tmoves;
 static u16 next_id = 1;
 
 /* ---- geometry ---- */
@@ -363,7 +365,7 @@ static void after(const struct rect *d)
     drag_show();
     for (int i = 0; i < NWIN; i++) {    /* whole on the screen again: the copy goes */
         struct win *w = &wins[i];
-        if (w->id && w->back.p && shown(w) && whole(w, &w->vis))
+        if (w->id && w->back.p && shown(w) && whole(w, &w->vis) && i != dkeep)
             bm_free(&w->back);
         if (w->id && shown(w) && whole(w, &w->vis))
             w->simple = 0;              /* a new try at keeping a copy next time */
@@ -460,6 +462,8 @@ void win_close(int s)
         focus = -1;
     if (dragging == s + 1)
         dragging = 0;
+    if (dkeep == s)
+        dkeep = -1;
     bm_free(&w->back);
     free(w->menu);
     w->menu = 0;
@@ -828,6 +832,24 @@ void win_drag(int s, int mode, int px, int py)
     struct win *w = &wins[s];
     if (dragging || !shown(w))
         return;
+    if (!(mode & DRAG_OUTLINE)) {
+        /* the whole window: drawn off the screen and shown once a pass (draw.c, shadow_*); a move takes its inside
+         * from its kept copy, kept for the whole drag. No chip RAM for either: an outline */
+        if (!shadow_begin())
+            mode |= DRAG_OUTLINE;
+        else if ((mode & 15) == DRAG_MOVE) {
+            if (!w->back.p && whole(w, &w->vis)) {
+                win_inside(w, &oin[s]);
+                keep(s);
+            }
+            if (w->back.p)
+                dkeep = s;
+            else {
+                shadow_end();           /* no copy (the budget, or simple refresh): its program would draw every step */
+                mode |= DRAG_OUTLINE;
+            }
+        }
+    }
     dragging = s + 1;
     dmode = mode;
     dpx = px; dpy = py;
@@ -864,12 +886,22 @@ void win_drag_event(int x, int y, int up)
             if (!up)
                 outline();
         }
-    } else if (nx != w->fx || ny != w->fy || nw != w->iw || nh != w->ih)
+    } else if (nx != w->fx || ny != w->fy || nw != w->iw || nh != w->ih) {
+        u32 t0 = sys_hrtime();
         win_place(s, nx, ny, nw, nh);
+        blit_idle();                    /* (its time: until the last blit ended) */
+        tmoves += sys_hrtime() - t0;
+        nmoves++;
+    }
     if (up) {
         dragging = 0;
         if (dmode & DRAG_OUTLINE)
             win_place(s, nx, ny, nw, nh);
+        if (dkeep == s) {               /* whole where it ended: the copy goes */
+            dkeep = -1;
+            if (w->back.p && shown(w) && whole(w, &w->vis))
+                bm_free(&w->back);
+        }
         ev_wm(EV_WM_DRAGEND, w->id, 0, 0, w->fx, w->fy, w->iw, w->ih);
     }
 }

@@ -39,7 +39,9 @@
 #define DPY_STAT        14  /* a[0] u32[6] (the client's memory): blits started, pixels drawn (a rectangle once for all
                              * its planes), glyphs drawn, DPY_DRAW batches, damage painted (a change of the windows),
                              * copies onto the screen; a[1] 1: then counted from 0 again. The tests' measure of what
-                             * an action costs */
+                             * an action costs. a[1] 2: a[0] is u32[12], six more: a whole window's drag moves, their
+                             * E-clock ticks, shows of the drawn screen onto the one on view (a whole drag draws off
+                             * the screen), their ticks, the ticks waited for the beam, shows that missed its rule */
 /* the window manager's (only after DPY_WM_HELLO; one window manager at a time) */
 #define DPY_WM_HELLO    32  /* become the window manager -> 0, -EBUSY (another one), -EPERM (not the session's user) */
 #define DPY_WM_STYLE    33  /* a[0] struct dpystyle *: frames from now on (and the screen's palette) */

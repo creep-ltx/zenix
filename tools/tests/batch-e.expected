@@ -51,9 +51,9 @@ txt
 2
 0
 expr-st=1
-found /tmp/batch-e.t/pb/myecho
+found
 timeout-found
-xargs-found x
+xargs-found
 a
 b
 c

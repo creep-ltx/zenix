@@ -119,13 +119,14 @@ struct zstate {
     u32 lib[4];                         /* exec, graphics, dos, intuition bases (ZINE_LIB_*) */
     u32 proc, seglist;
     u32 out_fh, in_fh;                  /* the file handles (BPTRs) */
+    u32 hport;                          /* every file handle's fh_Type: the handler port that answers packets */
     u32 ioerr;
     u8 blitter;
     u32 mmu[9];                         /* 040/060 (zb_mmu_save): which were read (bit 0 TC, ITT0/1, DTT0/1, URP, SRP;
                                          * bit 1 the 060's PCR), then their values in that order */
 };
 extern struct zstate Z;
-extern u32 zr_how, zr_code, zr_ret6, zr_callpc;   /* set by the stubs in blobs.S on the way out */
+extern u32 zr_how, zr_code, zr_ret6, zr_callpc, zr_d1;   /* set by the stubs in blobs.S on the way out */
 
 /* blobs.S */
 void zb_setvbr(u32 v);
@@ -146,6 +147,8 @@ void zb_back(void) __attribute__((noreturn));
 void zb_stop(u32 how, u32 why) __attribute__((noreturn));
 void zb_libs_init(void);
 u32 zb_out(const char *s, u32 n);
+int zb_say_text(const char *pre, u32 p, const char *post);
+u32 c_TypeOfMem(u32 a);                 /* blob.c: the memory attributes of a, 0 outside the program's memory */
 u32 zb_cia_irq(int c, u32 icr);
 void zb_screen_frame(void);
 void zb_screen_report(void);
@@ -163,5 +166,25 @@ struct zh_info;
 int zb_ovl_root(u32 ent, const u8 *f, const struct zh_info *inf, const struct zh_seg *work, u32 seg,
                 const char *name);
 void zx_FreeMem(u32 p, u32 size);
+/* libraries from files, the exec calls that build them, semaphores, audio.device (blibload.c; d29 16.8) */
+u32 zb_libcall(u32 fn, u32 a6, u32 d0, u32 a0, u32 d1, u32 a1);    /* blobs.S: d2-d7/a2-a6 kept */
+u32 zb_lib_open(const char *name, u32 version);
+void zb_lib_close(u32 lib);
+int zb_lib_flush(void);                 /* AllocMem short of memory: unused libraries expunged; 1 when one went */
+/* blibs.c: 1 when name is a file (of the volume or RAM:), assigns followed; where gets the path it was found as */
+int zb_file_exists(const char *name, char *where, u32 max);
+u32 c_LoadSeg(const char *name, u32 tab, u32 fh);
+u32 c_UnLoadSeg(u32 seg);
+u32 c_FindName(struct zlist *l, const char *name);
+void c_Enqueue(struct zlist *l, struct znode *n);
+void c_Remove(struct znode *n);
+void zb_io_done(u8 *io);
+extern u32 zb_audio_base;
+u32 zb_audio_open(u8 *io, u32 unit, u32 flags);
+void zb_audio_close(u8 *io);
+void zb_audio_beginio(u8 *io);
+void zb_audio_abort(u8 *io);
+int zb_audio_pending(u8 *io);
+void zb_audio_init(u32 base);
 void *zmemset(void *d, int c, u32 n);
 void *zmemcpy(void *d, const void *s, u32 n);

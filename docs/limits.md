@@ -223,8 +223,8 @@ pointers.
   mode, any of them off its raw mode (with `ICANON` the C library edits the line: erase, kill, ^D, at most 511
   characters; ^Z and ^\ are bytes there, only ^C signals in raw mode); `VMIN` 1 and `VTIME` 0 only (else `EINVAL`);
   the other bits (`ICRNL`, `IXON`, `OPOST`, the speeds ...) are kept and answered back but change nothing: in raw mode
-  Return is `\r`; `tcgetattr` answers what the process set last (cooked at its start); no `SIGWINCH`; `TIOCGWINSZ`
-  is the console's size. Processes: `posix_spawn`'s file actions only for the child's descriptors 0-2 (others
+  Return is `\r`; `tcgetattr` answers what the process set last (cooked at its start); `TIOCGWINSZ` is the
+  terminal's size (a console's never changes; a pty's does, with `SIGWINCH`). Processes: `posix_spawn`'s file actions only for the child's descriptors 0-2 (others
   `EINVAL`), at most 8 opens; `envp` set around the spawn; only `POSIX_SPAWN_SETPGROUP` (done right after the spawn);
   `waitpid` for one pid or any (-1; 0 and other groups `EINVAL`), a status as the shell's `$?` (`WIFSIGNALED` never
   true: a program a signal ended shows 128 + the signal as its exit status); `system` ignores `SIGINT` and `SIGQUIT`

@@ -1,0 +1,4 @@
+wait zenix:/# 90
+sleep 1
+send sh /tests/box.sh\r
+wait (?m)^box-done 300

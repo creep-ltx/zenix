@@ -8,7 +8,7 @@
 #include "zvol.h"
 
 struct zstate Z;
-u32 zr_how, zr_code, zr_ret6, zr_callpc;
+u32 zr_how, zr_code, zr_ret6, zr_callpc, zr_d1;
 u32 zb_stack_top;
 
 void *zmemset(void *d, int c, u32 n)
@@ -559,6 +559,11 @@ void zb_back(void)
                 b->lvo = (u32)l - slot;
             }
         }
+        /* a dos call's first argument (d1) is a name or a command in most of them: shown when it reads as text, so
+         * the report says what the program wanted (16.7) */
+        if (b->lib == 2 && zr_d1 >= 0x1000 && c_TypeOfMem(zr_d1) &&
+            *(const u8 *)zr_d1 >= 32 && *(const u8 *)zr_d1 < 127)
+            zb_say_text("ZINE: the call's first argument (d1) reads \"", zr_d1, "\"\n");
     }
     all_off();
     COPCON = 0;
@@ -692,7 +697,23 @@ _Static_assert(sizeof(struct zint) == ZO_Interrupt_SIZEOF, "Interrupt");
 
 void c_Alert(u32 code);
 
+static u32 alloc(u32 size, u32 attrs);
+static u8 flushing;
+/* AllocMem: when nothing fits, unused libraries loaded from files are expunged first and it is tried again, as
+ * AmigaOS's low-memory flush does (blibload.c, d29 16.8) */
 u32 zx_AllocMem(u32 size, u32 attrs)
+{
+    u32 r = alloc(size, attrs);
+    if (!r && size && !flushing) {
+        flushing = 1;
+        if (zb_lib_flush())
+            r = alloc(size, attrs);
+        flushing = 0;
+    }
+    return r;
+}
+
+static u32 alloc(u32 size, u32 attrs)
 {
     u32 n = (size + 7) & ~7u, req = attrs & MEMF_REQ;
     if (!size || n < size)

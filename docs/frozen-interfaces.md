@@ -114,13 +114,18 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   their key and action names.
 - **D38, the A1200's first findings (branch desk, 2026-11-04):** `DPY_WM_MOUSE` 47 (a[0] the acceleration, as
   `CON_MOUSE`), `DPY_STAT` 14 (a[0] six counters: blits, pixels, glyphs, batches, damage painted, copies onto the
-  screen; a[1] bit 0 resets), a `WK_BAR` window of a width asked (0: the screen's, as before); `/etc/zdesk/mouse`
+  screen; a[1] bit 0 resets; bit 1 (2026-11-05): twelve, six more after them: a whole drag's moves and their E-clock
+  ticks, shows of the drawn screen and their ticks, ticks waited for the beam, shows late for it), a `WK_BAR` window of a width asked (0: the screen's, as before); `/etc/zdesk/mouse`
   (`acceleration none|low|high`); `struct uzine_info`'s `machine` at offset 28 (`UZINE_INFO_MACHINE` 32 bytes or
   more; `UZI_EMU68` 1: the 68k is Emu68's) and its attn's 68060 bit (0x80) set by the kernel on a CPU with a PCR.
 - **D38 revision 3 (dlogin, branch desk, 2026-11-04):** `DPY_SESSION` 13 (root's client and root's caller only, on the
   grabbed console, else -EBUSY; a[0] the uid, at most 65535: clients of other non-root uids are dropped), `DPY_WM_BYE` 46 (the manager leaves the role);
   `/etc/console`'s `login text|graphical`; `/etc/dlogin` (`session LABEL = PROGRAM`, PROGRAM an absolute path or
   `text`, at most 4; `theme NAME`); `login -s PROGRAM` (root only, after `-f`).
+- **D25 revision 3 (the demo floppy, branch demo, 2026-11-05):** `/etc/dlogin`'s `autologin NAME SESSION` (SESSION a
+  label of its `session` lines; never root; once while `/tmp/.dlogin-autologin` does not exist); `login -s PROGRAM`'s
+  PROGRAM may carry arguments split at spaces (at most 7 words in 127 bytes). Not frozen: the demo disk's layout and
+  table (`boot/demounpack.h`, only its own loader reads it).
 - **D27 steps 0-1 (the C library, block 3, 2026-10-29):** the error numbers `EDOM` 33, `EOVERFLOW` 75, `EILSEQ` 84 (and
   `ENOTSUP` as a second name of `EOPNOTSUPP` 95); the C library bakes the system-call, error and signal numbers and
   `O_*` flags into every program built on it (DESIGN D27 section 6: already frozen, nothing new beyond the three).

@@ -32,8 +32,21 @@ DESCRIPTION
     title bar beside its title, the title's cells, the gadgets after;
     a copy of whole 16-pixel words is one blit of every plane, the
     blitter's B to D). Its counters of blits, pixels, glyphs, batches,
-    damage painted and copies onto the screen (DPY_STAT; dpytest's stat)
-    are how the tests check what an action costs.
+    damage painted and copies onto the screen, and a whole drag's moves,
+    shows and their times (DPY_STAT; dpytest's stat) are how the tests
+    check what an action costs.
+
+    Drags run in the server: an outline (XOR lines, the window moved once
+    at the release) or the whole window. A whole window's drag draws into
+    a second screen in chip RAM (80 KB at 4 planes, for the drag only)
+    and shows what changed once a pass, at most one move a pass whatever
+    the mouse did meanwhile: one copy of whole words, started where the
+    raster can neither overtake it nor come round to meet it before it
+    ends, so every frame shows the window whole at one place. A part the
+    move uncovered that a program draws itself (the desktop, a simple
+    refresh window) is shown when that program has drawn it, or after
+    60 ms. Without the chip RAM for the second screen the drag is an
+    outline.
 
     Without a window manager new windows are placed one below the other, a
     click raises and focuses a window, its title bar drags its outline and

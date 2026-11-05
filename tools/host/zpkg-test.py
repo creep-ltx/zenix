@@ -617,6 +617,23 @@ def part_boot(out, core):
         rc, o = run(core, "boot", img, dt)
         ok("%s: the walk accepts it (free blocks counted, no leak)" % dt, rc == 0 and o.split()[2] == "0", o)
         orig = open(img, "rb").read()
+        # a 128 MB boot partition (the PiStorm card's BOOT, 2026-11-04): 65 bitmap blocks, so one bitmap extension block
+        big = os.path.join(d, "big-%s.img" % dt)
+        rc, msg = run(sys.executable, os.path.join(TOOLS, "mkffs.py"), big, "128M", "BOOT", *(["--intl"] if intl else []),
+                      "%s=Zenix/zenix" % os.path.join(d, "kern"), env=env)
+        bm = bytearray(open(big, "rb").read()) if not rc else bytearray()
+        broot = (2 + len(bm) // BS - 1) // 2 if bm else 0
+        ok("%s: mkffs.py makes a 128 MB volume with a bitmap extension block" % dt, not rc and lget(bm, broot, 104) != 0, msg)
+        rc, o = run(core, "boot", big, dt)
+        ok("%s: 128 MB: the walk accepts it" % dt, rc == 0, o)
+        bdata = os.urandom(70000)
+        open(os.path.join(d, "bigbun"), "wb").write(bdata)
+        rc, o = run(core, "bootcreate", big, dt, BUN, os.path.join(d, "bigbun"))
+        bm = bytearray(open(big, "rb").read())
+        prob, leaks, bfl = Judge(bm, intl).check()
+        ok("%s: 128 MB: a new file written, the volume valid (AmigaOS's rules, xdftool)" % dt,
+           rc == 0 and not prob and not leaks and "Zenix/" + BUN in bfl and xdfscan_ok(big), (o, prob, leaks))
+        os.remove(big)
 
         bundle, sig = os.urandom(45000), os.urandom(80)       # 88 data blocks: a header and an extension block
         open(os.path.join(d, "bundle"), "wb").write(bundle)

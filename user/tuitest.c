@@ -8,6 +8,9 @@
  * terminal is the shell's again, then printed: "ok NAME" or "FAIL NAME: got ...", the events read, and a last line
  * counting them. */
 #include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <sys/ioctl.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -144,8 +147,88 @@ static const char *keyname(int k)
     return b;
 }
 
-int main(void)
+/* the child on a pty (tuitest _winch): the pty's foreground, the library opened on it; "ready", then the first
+ * event within 5 s: "resize:ROWSxCOLS" (after TuiResized) or what came instead */
+static int winch_child(void)
 {
+    TuiEv e;
+    sys_setfg(sys_getpid());            /* SIGWINCH comes to the pty's foreground */
+    struct Tui *t = TuiOpenIO(1, 2);
+    if (!t) {
+        printf("no-tui\n");
+        return 1;
+    }
+    printf("ready-%dx%d\n", (int)t->Rows, (int)t->Cols);
+    fflush(stdout);
+    long r = TuiWait(t, &e, 5000000, 0, NULL);
+    int rows = t->Rows, cols = t->Cols, grid = r == 1 && e.type == TE_RESIZE ? (int)TuiResized(t) : -1;
+    TuiClose(t);
+    if (r == 1 && e.type == TE_RESIZE)
+        printf("resize:%dx%d:%d\n", rows, cols, grid);
+    else
+        printf("event:%ld:%d\n", r, (int)e.type);
+    fflush(stdout);
+    return 0;
+}
+
+/* read the master until NEEDLE (at most 5 s) */
+static char wgot[4096];
+static int wuntil(int m, const char *needle)
+{
+    size_t n = strlen(wgot);
+    for (int i = 0; i < 500; i++) {
+        if (strstr(wgot, needle))
+            return 1;
+        struct pollfd p = { m, POLLIN, 0 };
+        if (poll(&p, 1, 10) <= 0)
+            continue;
+        if (n >= sizeof wgot - 1)
+            n = 0;
+        ssize_t k = read(m, wgot + n, sizeof wgot - 1 - n);
+        if (k <= 0)
+            return 0;
+        n += (size_t)k;
+        wgot[n] = 0;
+    }
+    return strstr(wgot, needle) != NULL;
+}
+
+/* a terminal window's resize (Zenix Desktop's term: a pty whose size changes, SIGWINCH to its foreground): the
+ * program gets TE_RESIZE with the new size, and TuiResized sizes the grid to it */
+static void winch_check(const char *self)
+{
+    int m = posix_openpt(O_RDWR);
+    const char *n = m >= 0 ? ptsname(m) : NULL;
+    int s = n ? open(n, O_RDWR) : -1;
+    if (s < 0) {
+        check("SIGWINCH on a pty: the pty", 0, "no pty");
+        return;
+    }
+    char *av[3] = { (char *)self, "_winch", 0 };
+    int io[3] = { s, s, s };
+    int pid = sys_spawn(self, av, io);
+    close(s);
+    wgot[0] = 0;
+    int ok = pid > 0 && wuntil(m, "ready-24x80");
+    check("SIGWINCH on a pty: the program opened at the pty's size", ok, wgot);
+    struct winsize w = { 20, 60, 0, 0 };
+    ioctl(m, TIOCSWINSZ, &w);
+    ok = ok && wuntil(m, "resize:20x60:1");
+    char b[80];
+    const char *e = strstr(wgot, "resize:");
+    if (!e) e = strstr(wgot, "event:");
+    snprintf(b, sizeof b, "%.20s", e ? e : "nothing");
+    check("SIGWINCH on a pty: TE_RESIZE with the new size, the grid resized", ok, b);
+    if (pid > 0)
+        sys_wait(pid);
+    close(m);
+}
+
+int main(int argc, char **argv)
+{
+    const char *self = argc > 0 && argv[0][0] == '/' ? argv[0] : "/tests/tuitest";
+    if (argc > 1 && !strcmp(argv[1], "_winch"))
+        return winch_child();
     int ti = sys_ttyinfo(), rows = ti >> 16, cols = ti & 0xFFFF, fd[2];
     TuiEv e;
 
@@ -310,6 +393,7 @@ int main(void)
     int again = tui_open() != 0;
     if (again) tui_close();
     unsigned m3 = mymem();
+    winch_check(self);
     printf("\ntuitest: the results\n%.*s", (int)rlen, res ? res : "");   /* a line of their own after the clear */
     printf("memory: %u bytes while open, %u after, %s%u after a second open and close\n", m1 - m0, m2 - m0,
            again ? "" : "no second open, ", m3 - m0);

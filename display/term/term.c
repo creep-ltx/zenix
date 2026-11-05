@@ -266,21 +266,30 @@ static void menu(const struct dpyev *e)
 int main(int argc, char **argv)
 {
     char **cmd = 0;
+    int px = -1, py = -1;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-e") && i + 1 < argc) { cmd = &argv[i + 1]; break; }
         if (!strcmp(argv[i], "-r") && i + 1 < argc) { rows = atoi(argv[++i]); continue; }
-        dprintf(2, "usage: term [-r ROWS] [-e COMMAND [ARGUMENTS]]\n");
+        if (!strcmp(argv[i], "-c") && i + 1 < argc) { cols = atoi(argv[++i]); continue; }
+        if (!strcmp(argv[i], "-p") && i + 1 < argc && strchr(argv[i + 1], ',')) {
+            px = atoi(argv[++i]); py = atoi(strchr(argv[i], ',') + 1);
+            if (px < 0 || py < 0) px = py = -1;
+            continue;
+        }
+        dprintf(2, "usage: term [-r ROWS] [-c COLUMNS] [-p X,Y] [-e COMMAND [ARGUMENTS]]\n");
         return 2;
     }
     if (rows < 4) rows = 4;
     if (rows > 29) rows = 29;
+    if (cols < 20) cols = 20;
+    if (cols > 80) cols = 80;
     int r = dpy_open("term");
     if (r < 0) {
         dprintf(2, "term: the display: %s\n", zstrerror(r) ? zstrerror(r) : "not reachable");
         return 1;
     }
     int s = -1;
-    struct winsize ws = { (unsigned short)rows, 80, 0, 0 };
+    struct winsize ws = { (unsigned short)rows, (unsigned short)cols, 0, 0 };
     m = posix_openpt(O_RDWR | O_NONBLOCK);
     if (m >= 0 && ptsname(m))
         s = sys_open(ptsname(m), O_RDWR);
@@ -297,19 +306,12 @@ int main(int argc, char **argv)
         dprintf(2, "term: %s: not found\n", av[0]);
         return 1;
     }
-    setenv("TERM", "xterm-16color", 1);
-    int io[3] = { s, s, s };
-    int pid = sys_spawn(path, av, io);
-    sys_close(s);
-    if (pid < 0) {
-        dprintf(2, "term: %s: %s\n", path, zwhy("cannot start"));
-        return 1;
-    }
     struct dpywin d;
     memset(&d, 0, sizeof d);
     d.kind = WK_NORMAL;
-    d.x = d.y = -1;
-    d.w = 640;
+    d.x = (short)px;                    /* -1: the window manager's choice */
+    d.y = (short)py;
+    d.w = (unsigned short)(cols * 8);
     d.h = (unsigned short)(rows * 8);
     d.minw = 20 * 8;                    /* 20 to 80 columns (the console's model: rows of 80), 4 to 29 rows */
     d.maxw = 640;
@@ -328,8 +330,29 @@ int main(int argc, char **argv)
     dpy_menu(win, menus, sizeof menus - 1);
     colours();
     m_rows(rows);
+    m_setcols(cols);
     m_write("\033[H\033[2J", 7);
     present();
+    /* the size the window manager gives before the program starts: zdesk keeps a window inside the screen, so 80
+     * columns and a frame become 78 or 79; a program that read 80 and drew 80 into them before its first SIGWINCH
+     * wrapped its line ends into the next rows (ctop's stray digits, "ru40ing", 2026-11-05).
+     * Up to half a second for the window to be shown (without a manager it is shown as asked) */
+    for (unsigned t0 = sys_ticks(); (int)(sys_ticks() - t0) < 50; ) {
+        struct dpyev e;
+        int got = dpy_next(&e, 5);
+        if (got < 0) break;
+        if (!got) continue;
+        if (e.type == EV_RESIZE) resize(e.w, e.h);
+        else if (e.type == EV_EXPOSE) break;
+    }
+    setenv("TERM", "xterm-16color", 1);
+    int io[3] = { s, s, s };
+    int pid = sys_spawn(path, av, io);
+    sys_close(s);
+    if (pid < 0) {
+        dprintf(2, "term: %s: %s\n", path, zwhy("cannot start"));
+        return 1;
+    }
     static char buf[2048];              /* a pty's whole output ring at once */
     unsigned last_read = 0;
     for (;;) {

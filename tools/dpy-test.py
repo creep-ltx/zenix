@@ -8,6 +8,10 @@ tools/colour-test.py columns found ("x0 x1 yc h": an Amiga pixel is (x1 - x0 + 1
   dpy-test.py same A B GEOM [-x X,Y,W,H]... [-in X,Y,W,H]
                                          every Amiga pixel of shot B as in shot A (a tolerance of 40), outside the
                                          -x rectangles; with -in: also some pixel inside that rectangle differs
+  dpy-test.py whole SHOT GEOM RGB W H    the pixels of colour RGB form one rectangle of W x H: its box H lines tall
+                                         and W pixels wide within 2 (the screenshot's scaling blurs the sides), at
+                                         least 98% of it that colour - a window's inside whole at one place (W 0: only
+                                         its place and size printed)
   dpy-test.py title SHOT GEOM X0 X1 Y    the title bar's lines Y+2 .. Y+9: columns X0 .. X1-1 (the gap after a
                                          gadget) one colour, and the 12 columns after X1 hold another (the title)
 Prints what it found and exits 1 on a failure."""
@@ -74,7 +78,28 @@ def title(a):
     return 0 if near and other else 1
 
 
+def whole(a):
+    P = load(a[0], a[1])
+    want, w, h = rgb12(a[2]), int(a[3]), int(a[4])
+    xs, ys, n = [], [], 0
+    for y in range(256):
+        for x in range(640):
+            if all(abs(p - q) <= 40 for p, q in zip(P(x, y), want)):
+                xs.append(x)
+                ys.append(y)
+                n += 1
+    if not n:
+        print("whole: no pixel of that colour")
+        return 1
+    x0, y0, x1, y1 = min(xs), min(ys), max(xs) + 1, max(ys) + 1
+    fill = n / ((x1 - x0) * (y1 - y0))
+    print(f"whole: at {x0},{y0} {x1 - x0}x{y1 - y0} ({fill:.0%} of it the colour)")
+    return 0 if abs(x1 - x0 - w) <= 2 and y1 - y0 == h and fill >= 0.98 else 1
+
+
 def main(a):
+    if a[0] == "whole":
+        return whole(a[1:])
     if a[0] == "same":
         return same(a[1:])
     if a[0] == "title":

@@ -4,8 +4,11 @@
 # (LC_ALL=C); the two outputs must be identical.
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
+# ZENIX_BOX=1 (tools/box-test.sh): the image's everyday commands are the box's links (DESIGN D25 revision 3, 10 step 1)
+MKBOX=${ZENIX_BOX:+BOX=1}
 make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
-rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
+rm -f $BD/zenix.hdf; make -s BUILD=$BD $MKBOX $BD/zenix.hdf >/dev/null 2>&1
+if [ -n "$MKBOX" ]; then [ "$(debugfs -R "stat /bin/ls" $BD/zenix.hdf 2>/dev/null | grep -o 'Links: [0-9]*')" = "Links: 65" ] || { echo "FAIL: the image's /bin/ls is not the box (65 links)"; exit 1; }; fi
 OUT=${ZENIX_OUT:-/tmp/zenix-cmds}; mkdir -p $OUT
 # GNU ls and grep with their built-in colours (the colour lines compare bytes; DESIGN D14)
 ( cd rootfs/home/t && env -u LS_COLORS -u GREP_COLORS -u GREP_COLOR LC_ALL=C bash ../../tests/cmds.sh "$PWD" > $OUT/expected.txt 2>&1 )

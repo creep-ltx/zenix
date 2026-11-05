@@ -5,6 +5,7 @@
 #include "blob.h"
 #include "zvol.h"
 #include "hunk.h"
+#include "zpath.h"
 
 /* ---- lists (exec/lists.h) ---- */
 static u32 cia_base[2];                 /* ZINE's ciaa.resource and ciab.resource (below) */
@@ -229,13 +230,9 @@ u32 c_OpenLibrary(const char *name, u32 version)
             l->opencnt++;
             return (u32)l;
         }
-    if (name) {                         /* named in the program's output (zine shows it) */
-        static const char msg[] = "ZINE: no library ";
-        zb_out(msg, sizeof msg - 1);
-        zb_out(name, slen(name));
-        zb_out("\n", 1);
-    }
-    return 0;                           /* a library ZINE has not: 0, as AmigaOS answers when it has none */
+    /* one a program added or ZINE loaded from LIBS: (blibload.c, 16.8); else named in the program's output and 0,
+     * as AmigaOS answers when it has none */
+    return name ? zb_lib_open(name, version) : 0;
 }
 
 /* exec's TaggedOpenLibrary (3.0, -810): a library by its OLTAG number: 1 graphics, 3 intuition, 4 dos (the NDK 3.2's
@@ -254,8 +251,13 @@ u32 c_OldOpenLibrary(const char *name) { return c_OpenLibrary(name, 0); }    /* 
 
 void c_CloseLibrary(struct zlib *l)
 {
-    if (l && l->opencnt)
-        l->opencnt--;
+    for (int i = 0; i < 4; i++)
+        if (l && (u32)l == Z.lib[i]) {
+            if (l->opencnt)
+                l->opencnt--;
+            return;
+        }
+    zb_lib_close((u32)l);               /* its own Close vector (blibload.c) */
 }
 
 static u32 slen(const char *s);
@@ -266,12 +268,15 @@ u32 c_OpenResource(const char *name)
         return cia_base[0];
     if (name && streq(name, "ciab.resource"))
         return cia_base[1];
+    u32 r = name ? c_FindName((struct zlist *)(ZEXEC + ZO_ExecBase_ResourceList), name) : 0;
+    if (r)
+        return r;                       /* one a program added (AddResource) */
     if (name) {
         zb_out(msg, sizeof msg - 1);
         zb_out(name, slen(name));
         zb_out("\n", 1);
     }
-    return 0;                           /* the resources come with build step 4 */
+    return 0;
 }
 
 /* no devices in the first version (5.5): the request's io_Error and the answer are IOERR_OPENFAIL */
@@ -295,6 +300,8 @@ u32 c_OpenDevice(const char *name, u32 unit, u8 *io, u32 flags)
         }
         return 0;
     }
+    if (name && streq(name, "audio.device"))
+        return zb_audio_open(io, unit, flags);  /* blibload.c: its channels allocated, nothing played (16.8) */
     if (name) {
         zb_out(msg, sizeof msg - 1);
         zb_out(name, slen(name));
@@ -309,7 +316,8 @@ u32 c_OpenDevice(const char *name, u32 unit, u8 *io, u32 flags)
 
 void c_CloseDevice(u8 *io)
 {
-    (void)io;
+    if (io && *(u32 *)(io + ZO_IORequest_io_Device) == zb_audio_base)
+        zb_audio_close(io);
 }
 
 u32 c_SetFunction(u8 *lib, s32 off, u32 fn)
@@ -497,7 +505,7 @@ u32 c_SetIoErr(u32 e)
  * opened to be written takes the bytes and keeps none (owner answer 3: what a program writes is gone afterwards),
  * as does NIL:. A FileHandle (44 bytes) is given, its fh_Args the slot here. ---- */
 #define NFILES 16
-static struct { u8 used, sink; u32 ent, pos, fh; } files[NFILES];
+static struct { u8 used, sink, ram; u32 ent, pos, fh; } files[NFILES];     /* ram: a RAM: file's index + 1 */
 #define MODE_OLDFILE 1005
 #define MODE_NEWFILE 1006
 #define MODE_READWRITE 1004
@@ -513,17 +521,156 @@ static int slot_of(u32 fh)
     return -1;
 }
 
-/* a FileHandle on volume entry ent (or a sink): its BPTR, or 0 and IoErr */
-static u32 fh_new(u32 ent, int sink)
+/* ---- ZINE's RAM: and the assigns (docs/d29-zine.md 16.8). A program may write files to RAM: and read them back,
+ * load them (LoadSeg, OpenLibrary) and delete them; they live in its own memory (AllocMem) and are gone with the
+ * session (owner answer 3). Files written anywhere else take the bytes and keep none, as before. Names compare without
+ * case; a RAM: name is the whole path after "RAM:" (no directories). The assigns are zpath.h's: Open, LoadSeg,
+ * DeleteFile and OpenLibrary follow them. ---- */
+static void say3(const char *a, const char *b, const char *c);
+#define NRAM 32
+#define ZPATH 200                       /* bytes of a path with its assigns followed */
+static struct { char *name; u32 nlen, buf, cap, size, open; } ramf[NRAM];   /* name 0: the slot is free */
+static struct za_table assigns;
+
+static int ram_find(const char *n)
+{
+    for (int i = 0; i < NRAM; i++)
+        if (ramf[i].name && zv_same(n, slen(n), ramf[i].name))
+            return i;
+    return -1;
+}
+
+/* a new, empty RAM: file: its index, or -1 and IoErr */
+static int ram_new(const char *n)
+{
+    u32 l = slen(n);
+    if (!l || l > ZV_NAMEMAX) {
+        Z.ioerr = l ? 210 : 212;        /* ERROR_INVALID_COMPONENT_NAME, ERROR_OBJECT_WRONG_TYPE (RAM: itself) */
+        return -1;
+    }
+    for (int i = 0; i < NRAM; i++)
+        if (!ramf[i].name) {
+            char *m = (char *)zx_AllocMem(l + 1, MEMF_PUBLIC);
+            if (!m)
+                break;
+            zmemcpy(m, n, l + 1);
+            ramf[i].name = m, ramf[i].nlen = l, ramf[i].buf = ramf[i].cap = ramf[i].size = ramf[i].open = 0;
+            return i;
+        }
+    say3("ZINE: RAM: is full (ZINE keeps 32 files there, in the program's memory): no room for ", n, "\n");
+    Z.ioerr = 221;                      /* ERROR_DISK_FULL */
+    return -1;
+}
+
+static void ram_free(int r)
+{
+    if (ramf[r].buf)
+        zx_FreeMem(ramf[r].buf, ramf[r].cap);
+    zx_FreeMem((u32)ramf[r].name, ramf[r].nlen + 1);
+    ramf[r].name = 0;
+}
+
+/* n bytes at pos of RAM: file r, the file grown as needed: n, or -1 and IoErr */
+static u32 ram_write(int r, u32 pos, const char *s, u32 n)
+{
+    u32 end = pos + n;
+    if (end < pos) {
+        Z.ioerr = 221;
+        return (u32)-1;
+    }
+    if (end > ramf[r].cap) {
+        u32 cap = ramf[r].cap * 2 > end ? ramf[r].cap * 2 : end;
+        cap = (cap + 4095) & ~4095u;
+        u32 nb = cap > end ? zx_AllocMem(cap, MEMF_PUBLIC) : 0;
+        if (!nb)                        /* overflowed, or no room for the doubled size: just what is needed */
+            nb = zx_AllocMem(cap = end, MEMF_PUBLIC);
+        if (!nb) {
+            say3("ZINE: RAM: is full (no memory left in the program's): ", ramf[r].name, " not written\n");
+            Z.ioerr = 221;              /* ERROR_DISK_FULL */
+            return (u32)-1;
+        }
+        if (ramf[r].buf) {
+            zmemcpy((void *)nb, (const void *)ramf[r].buf, ramf[r].size);
+            zx_FreeMem(ramf[r].buf, ramf[r].cap);
+        }
+        ramf[r].buf = nb, ramf[r].cap = cap;
+    }
+    zmemcpy((u8 *)ramf[r].buf + pos, s, n);
+    if (end > ramf[r].size)
+        ramf[r].size = end;
+    return n;
+}
+
+/* where a path names a file now: 1 a RAM: file (*r), 2 a volume entry (*ent: a file or a directory), 0 none, with
+ * *nodev 1 when every path it stands for lies on a device ZINE has not (NIL:, DH0:) */
+static char hit[ZPATH];                 /* the path locate found its file as */
+static int locate(const char *name, u32 *ent, int *r, int *nodev)
+{
+    int dev = 0, seen = 0;
+    *nodev = 0;
+    for (u32 i = 0; za_expand(&assigns, name, i, hit, sizeof hit); i++) {
+        seen = 1;
+        const char *rn = za_ram(hit);
+        if (rn) {
+            dev = 1;
+            if ((*r = ram_find(rn)) >= 0)
+                return 1;
+            continue;
+        }
+        int e = zv_find((const void *)Z.a.vol, 0, hit, ent);
+        if (e != -ZE_NODEV)
+            dev = 1;
+        if (!e)
+            return 2;
+    }
+    *nodev = seen && !dev;
+    return 0;
+}
+
+/* a file's bytes for loading: 0 and *f, *size, *ent (~0 for a RAM: file), or -ZE_NOENT */
+static int file_bytes(const char *name, const zu8 **f, u32 *size, u32 *ent)
+{
+    int r, nodev;
+    int w = locate(name, ent, &r, &nodev);
+    if (w == 1) {
+        *f = (const zu8 *)ramf[r].buf, *size = ramf[r].size, *ent = ~0u;
+        return *size ? 0 : -ZE_NOENT;
+    }
+    if (w == 2 && !zv_ent((const void *)Z.a.vol, *ent)->dir) {
+        const struct zv_ent *e = zv_ent((const void *)Z.a.vol, *ent);
+        *f = (const zu8 *)Z.a.vol + e->off, *size = e->size;
+        return 0;
+    }
+    return -ZE_NOENT;
+}
+
+int zb_file_exists(const char *name, char *where, u32 max)
+{
+    const zu8 *f;
+    u32 size, ent;
+    if (file_bytes(name, &f, &size, &ent))
+        return 0;
+    u32 n = slen(hit) < max ? slen(hit) : max - 1;
+    zmemcpy(where, hit, n);
+    where[n] = 0;
+    return 1;
+}
+
+/* a FileHandle on volume entry ent, a RAM: file (ram its index + 1) or a sink: its BPTR, or 0 and IoErr */
+static u32 fh_new(u32 ent, int sink, int ram)
 {
     for (int i = 0; i < NFILES; i++)
         if (!files[i].used) {
             u32 fh = zx_AllocMem(44, 1 << 16);
             if (!fh)
                 break;
-            files[i].used = 1, files[i].sink = (u8)sink, files[i].ent = ent, files[i].pos = 0, files[i].fh = fh;
-            *(u32 *)(fh + 36) = (u32)i; /* fh_Args */
+            files[i].used = 1, files[i].sink = (u8)sink, files[i].ram = (u8)ram, files[i].ent = ent;
+            files[i].pos = 0, files[i].fh = fh;
+            if (ram)
+                ramf[ram - 1].open++;
+            *(u32 *)(fh + 36) = (u32)i; /* fh_Args: what a packet's dp_Arg1 names (packet() below) */
             *(u32 *)(fh + 24) = (u32)-1;
+            *(u32 *)(fh + 8) = Z.hport; /* fh_Type: the port a program may send its packets to */
             return fh >> 2;
         }
     Z.ioerr = 103;                      /* ERROR_NO_FREE_STORE */
@@ -532,7 +679,6 @@ static u32 fh_new(u32 ent, int sink)
 
 u32 c_Open(const char *name, s32 mode)
 {
-    const void *vol = (const void *)Z.a.vol;
     if (!name) {
         Z.ioerr = 205;                  /* ERROR_OBJECT_NOT_FOUND */
         return 0;
@@ -540,21 +686,32 @@ u32 c_Open(const char *name, s32 mode)
     if ((name[0] == '*' && !name[1]) || zv_same(name, 4, "CON:") || zv_same(name, 4, "RAW:"))
         return mode == MODE_OLDFILE ? Z.in_fh : Z.out_fh;
     u32 ent = 0;
-    int sink = 0;
-    int e = zv_find(vol, 0, name, &ent);
-    if (e == -ZE_NODEV)
-        sink = 1;                       /* NIL: and the like */
-    else if (mode == MODE_NEWFILE)
-        sink = 1;
-    else if (e || zv_ent(vol, ent)->dir) {
-        static const char msg[] = "ZINE: no file ";
-        zb_out(msg, sizeof msg - 1);
-        zb_out(name, slen(name));
-        zb_out("\n", 1);
-        Z.ioerr = e ? 205 : 212;        /* ERROR_OBJECT_NOT_FOUND, ERROR_OBJECT_WRONG_TYPE */
-        return 0;
+    int r = -1, nodev = 0;
+    int w = locate(name, &ent, &r, &nodev);
+    if (mode == MODE_NEWFILE || (mode == MODE_READWRITE && !w)) {
+        char p[ZPATH];
+        const char *rn = za_expand(&assigns, name, 0, p, sizeof p) ? za_ram(p) : 0;
+        if (rn) {                       /* RAM: keeps what is written (a new file, or an old one emptied) */
+            if (w == 1 && mode == MODE_NEWFILE)
+                ramf[r].size = 0;
+            else if (w != 1 && (r = ram_new(rn)) < 0)
+                return 0;
+            return fh_new(0, 0, r + 1);
+        }
+        return fh_new(0, 1, 0);         /* elsewhere: the bytes go, nothing is kept (owner answer 3) */
     }
-    return fh_new(ent, sink);
+    if (w == 1)
+        return fh_new(0, 0, r + 1);
+    if (w == 2 && !zv_ent((const void *)Z.a.vol, ent)->dir)
+        return fh_new(ent, 0, 0);
+    if (!w && nodev)
+        return fh_new(0, 1, 0);         /* NIL: and the like */
+    static const char msg[] = "ZINE: no file ";
+    zb_out(msg, sizeof msg - 1);
+    zb_out(name, slen(name));
+    zb_out("\n", 1);
+    Z.ioerr = w ? 212 : 205;            /* ERROR_OBJECT_WRONG_TYPE, ERROR_OBJECT_NOT_FOUND */
+    return 0;
 }
 
 u32 c_Close(u32 fh)
@@ -562,9 +719,28 @@ u32 c_Close(u32 fh)
     int i = slot_of(fh);
     if (i < 0)
         return 1;
+    if (files[i].ram)
+        ramf[files[i].ram - 1].open--;
     zx_FreeMem(files[i].fh, 44);
     files[i].used = 0;
     return 1;
+}
+
+/* the bytes of slot i's file and its size */
+static const u8 *slot_data(int i, u32 *size)
+{
+    if (files[i].sink) {
+        *size = 0;
+        return 0;
+    }
+    if (files[i].ram) {
+        *size = ramf[files[i].ram - 1].size;
+        return (const u8 *)ramf[files[i].ram - 1].buf;
+    }
+    const void *vol = (const void *)Z.a.vol;
+    const struct zv_ent *en = zv_ent(vol, files[i].ent);
+    *size = en->size;
+    return (const u8 *)vol + en->off;
 }
 
 u32 c_Read(u32 fh, char *buf, s32 n)
@@ -576,12 +752,11 @@ u32 c_Read(u32 fh, char *buf, s32 n)
         Z.ioerr = 114;
         return (u32)-1;
     }
-    if (files[i].sink)
-        return 0;
-    const void *vol = (const void *)Z.a.vol;
-    const struct zv_ent *en = zv_ent(vol, files[i].ent);
-    u32 left = en->size > files[i].pos ? en->size - files[i].pos : 0, k = (u32)n < left ? (u32)n : left;
-    zmemcpy(buf, (const u8 *)vol + en->off + files[i].pos, k);
+    u32 size;
+    const u8 *d = slot_data(i, &size);
+    u32 left = size > files[i].pos ? size - files[i].pos : 0, k = (u32)n < left ? (u32)n : left;
+    if (k)
+        zmemcpy(buf, d + files[i].pos, k);
     files[i].pos += k;
     return k;
 }
@@ -593,7 +768,8 @@ s32 c_Seek(u32 fh, s32 pos, s32 mode)
         Z.ioerr = 114;
         return -1;
     }
-    u32 size = files[i].sink ? 0 : zv_ent((const void *)Z.a.vol, files[i].ent)->size;
+    u32 size;
+    slot_data(i, &size);
     s32 old = (s32)files[i].pos, base = mode < 0 ? 0 : mode > 0 ? (s32)size : old;   /* BEGINNING -1, END 1 */
     s32 np = base + pos;
     if (np < 0 || (u32)np > size) {
@@ -602,6 +778,37 @@ s32 c_Seek(u32 fh, s32 pos, s32 mode)
     }
     files[i].pos = (u32)np;
     return old;
+}
+
+/* dos DeleteFile (-72): a RAM: file goes (not while it is open: ERROR_OBJECT_IN_USE, as RAM: answers); the
+ * program's own files are read-only and other disks are not ZINE's to touch: refused, said in the output */
+u32 c_DeleteFile(const char *name)
+{
+    u32 ent = 0;
+    int r = -1, nodev = 0;
+    int w = name ? locate(name, &ent, &r, &nodev) : 0;
+    if (w == 1) {
+        if (ramf[r].open) {
+            Z.ioerr = 202;              /* ERROR_OBJECT_IN_USE */
+            return 0;
+        }
+        ram_free(r);
+        return (u32)-1;
+    }
+    if (w == 2) {
+        say3("ZINE: ", Z.blk->name, " asked to delete ");
+        say3(name, ", one of its own files: they are read-only under ZINE, nothing deleted\n", "");
+        Z.ioerr = 214;                  /* ERROR_DISK_WRITE_PROTECTED */
+        return 0;
+    }
+    if (nodev) {
+        say3("ZINE: ", Z.blk->name, " asked to delete ");
+        say3(name, ", on a disk ZINE does not give it: nothing deleted\n", "");
+        Z.ioerr = 218;                  /* ERROR_DEVICE_NOT_MOUNTED */
+        return 0;
+    }
+    Z.ioerr = 205;                      /* ERROR_OBJECT_NOT_FOUND */
+    return 0;
 }
 
 /* ---- LoadSeg and overlays (docs/d29-zine.md 16.6; the Guru Book 17.1.76, 19.3.2.2, 22.2.10; the AmigaDOS Manual's
@@ -668,7 +875,7 @@ int zb_ovl_root(u32 ent, const u8 *f, const struct zh_info *inf, const struct zh
     u32 tabn = inf->tabsize + 1, osz = inf->ovl_words * 4;     /* tabsize <= ZH_MAXTAB: no wrap */
     u32 tab = zx_AllocMem(tabn * 4, MEMF_PUBLIC | MEMF_CLEAR);
     u32 ov = tab ? zx_AllocMem(osz, MEMF_PUBLIC) : 0;
-    u32 fh = ov ? fh_new(ent, 0) : 0;
+    u32 fh = ov ? fh_new(ent, 0, 0) : 0;
     if (!fh) {
         if (ov)
             zx_FreeMem(ov, osz);
@@ -698,10 +905,11 @@ int zb_ovl_root(u32 ent, const u8 *f, const struct zh_info *inf, const struct zh
 u32 c_LoadSeg(const char *name, u32 tab, u32 fh)
 {
     const void *vol = (const void *)Z.a.vol;
-    u32 ent = 0, start = 0;
+    u32 ent = 0, start = 0, fsize = 0;
+    const zu8 *f = 0;
     int i = -1, k = 0;
-    if (name) {
-        if (zv_find(vol, 0, name, &ent) || zv_ent(vol, ent)->dir) {
+    if (name) {                         /* a file of the volume or of RAM: (16.8), assigns followed */
+        if (file_bytes(name, &f, &fsize, &ent)) {
             say3("ZINE: no file ", name, "\n");
             Z.ioerr = 205;              /* ERROR_OBJECT_NOT_FOUND */
             return 0;
@@ -716,13 +924,13 @@ u32 c_LoadSeg(const char *name, u32 tab, u32 fh)
             return 0;
         }
         ent = files[i].ent, start = files[i].pos;
+        const struct zv_ent *e = zv_ent(vol, ent);
+        f = (const zu8 *)vol + e->off, fsize = e->size;
     }
     const char *who = name ? name : Z.blk->name;
-    const struct zv_ent *e = zv_ent(vol, ent);
-    const zu8 *f = (const zu8 *)vol + e->off;
     struct zh_info inf;
     char msg[160];
-    if (name ? zh_check(f, e->size, who, &inf, msg, sizeof msg) : zh_node(f, e->size, start, who, &inf, msg, sizeof msg)) {
+    if (name ? zh_check(f, fsize, who, &inf, msg, sizeof msg) : zh_node(f, fsize, start, who, &inf, msg, sizeof msg)) {
         say3("ZINE: ", msg, "");
         if (!name)
             say_at(" (the overlay part at byte ", start, ")");
@@ -733,9 +941,16 @@ u32 c_LoadSeg(const char *name, u32 tab, u32 fh)
     u32 wsize = inf.nhunks * sizeof(struct zh_seg) + 8, seg = 0;
     struct zh_seg *work = (struct zh_seg *)zx_AllocMem(wsize, MEMF_PUBLIC);
     struct zh_ops ops = { zb_hunk_alloc, zb_hunk_free, 0 };
-    int r = !work ? -ZE_NOMEM : name ? zh_load(f, e->size, &inf, &ops, work, &seg)
+    if (name && inf.ovl && ent == ~0u) {    /* the overlay handle is a volume file's: not one of RAM: */
+        say3("ZINE: ", name, " is overlaid: ZINE loads overlaid programs from the program's own files, not from RAM:\n");
+        if (work)
+            zx_FreeMem((u32)work, wsize);
+        Z.ioerr = ERROR_FILE_NOT_OBJECT;
+        return 0;
+    }
+    int r = !work ? -ZE_NOMEM : name ? zh_load(f, fsize, &inf, &ops, work, &seg)
           : inf.first <= ovls[k].rootlast ? -ZE_NOEXEC       /* never over the root's own slots */
-          : zh_load_node(f, e->size, &inf, &ops, work, (zu8 *)ovls[k].tab, ovls[k].tabn, &seg);
+          : zh_load_node(f, fsize, &inf, &ops, work, (zu8 *)ovls[k].tab, ovls[k].tabn, &seg);
     if (!r && name && inf.ovl && zb_ovl_root(ent, f, &inf, work, seg, name)) {
         unload(seg);
         if (work)
@@ -774,8 +989,15 @@ u32 c_UnLoadSeg(u32 seg)
 u32 c_Write(u32 fh, const char *buf, s32 n)
 {
     int fs = slot_of(fh);
-    if (fs >= 0 && n >= 0)
+    if (fs >= 0 && n >= 0) {
+        if (files[fs].ram) {            /* RAM: keeps it (16.8) */
+            u32 k = ram_write(files[fs].ram - 1, files[fs].pos, buf, (u32)n);
+            if (k != (u32)-1)
+                files[fs].pos += k;
+            return k;
+        }
         return files[fs].sink ? (u32)n : (u32)-1;     /* a written file keeps nothing; the program's files are read-only */
+    }
     if (fh != Z.out_fh || n < 0) {
         Z.ioerr = 114;                  /* ERROR_OBJECT_WRONG_TYPE: not a handle ZINE gave */
         return (u32)-1;
@@ -784,6 +1006,63 @@ u32 c_Write(u32 fh, const char *buf, s32 n)
 }
 
 
+
+/* a program's text (a command, a name) in the output: at most 100 bytes, up to its 0, from the program's own memory
+ * only; a byte outside the printable ones as '?'. 0 when p is no text ZINE can read (outside the program's memory) */
+int zb_say_text(const char *pre, u32 p, const char *post)
+{
+    if (!p || !c_TypeOfMem(p))
+        return 0;
+    zb_out(pre, slen(pre));
+    const u8 *t = (const u8 *)p;
+    u32 n = 0;
+    for (; n < 100 && t[n] && c_TypeOfMem(p + n); n++) {
+        char c = t[n] >= 32 && t[n] < 127 ? (char)t[n] : t[n] >= 160 ? (char)t[n] : '?';
+        zb_out(&c, 1);
+    }
+    if (n == 100 && t[n])
+        zb_out("...", 3);
+    zb_out(post, slen(post));
+    return 1;
+}
+
+/* dos Execute (-222; docs/d29-zine.md 16.7, 16.8): ZINE has no shell, so no command runs. Demos Execute side jobs
+ * ("run >nil: player", "assign", "setpatch", "stack") and go on whatever happens, or quit when Execute fails, so it
+ * answers DOSTRUE (done) and the program's output names the command. An Assign ZINE does itself (zpath.h): the
+ * assigns are what Open, LoadSeg, DeleteFile and OpenLibrary follow. */
+u32 c_Execute(u32 cmd, u32 in, u32 out)
+{
+    (void)out;
+    say3("ZINE: ", Z.blk->name, " asked dos Execute to run ");
+    if (!zb_say_text("\"", cmd, "\""))
+        say3("no text it could read", "", "");
+    if (in && (!cmd || !*(const u8 *)cmd))
+        say3(" (its commands from a file)", "", "");
+    struct za_cmd ac;
+    int a = 0;
+    if (cmd && c_TypeOfMem(cmd)) {
+        u32 n = 0;                      /* the text within the program's memory only */
+        while (n < 512 && c_TypeOfMem(cmd + n) && ((const u8 *)cmd)[n])
+            n++;
+        a = za_parse((const char *)cmd, n, &ac);
+    }
+    if (a > 0 && !za_apply(&assigns, &ac)) {
+        say3(": done by ZINE itself (", ac.name, ":");
+        if (!ac.n)
+            say3(" removed)\n", "", "");
+        else {
+            say3(ac.add ? " also " : " is now ", "", "");
+            for (u32 i = 0; i < ac.n; i++)
+                say3(i ? ", " : "", ac.dir[i], "");
+            say3(")\n", "", "");
+        }
+    } else if (a)
+        say3(a > 0 ? ": an Assign ZINE has no room for (8 names, 3 directories each), answered as done\n"
+                   : ": an Assign ZINE does not do (it does NAME: DIR..., ADD and REMOVE), answered as done\n", "", "");
+    else
+        say3(": not run (ZINE has no shell), answered as done\n", "", "");
+    return (u32)-1;
+}
 
 u32 c_PutStr(const char *s)
 {
@@ -1230,8 +1509,8 @@ void zb_screen_frame(void)
 }
 
 /* ---- exec's message ports (the RKRM autodocs; offsets: MsgPort 34 bytes, mp_SigBit 15, mp_SigTask 16, mp_MsgList
- * 20): nothing in ZINE sends a program a message, so GetMsg finds none, and WaitPort on an empty port waits for a
- * signal nothing can send (stopped, as Wait) ---- */
+ * 20, mp_Flags 14): PutMsg puts the message on the port and signals its task (PA_SIGNAL); WaitPort on an empty port
+ * waits for a signal nothing can send (stopped, as Wait). The one port ZINE answers is its handler port (below). ---- */
 #define MP_SigBit 15
 #define MP_SigTask 16
 #define MP_MsgList 20
@@ -1245,7 +1524,87 @@ static void initport(u8 *mp)
 }
 
 u32 c_GetMsg(u8 *mp) { return mp ? c_RemHead((struct zlist *)(mp + MP_MsgList)) : 0; }
-void c_PutMsg(u8 *mp, struct znode *m) { if (mp && m) c_AddTail((struct zlist *)(mp + MP_MsgList), m); }
+static void port_put(u8 *mp, struct znode *m, u8 type)
+{
+    ((u8 *)m)[8] = type;                /* ln_Type */
+    c_AddTail((struct zlist *)(mp + MP_MsgList), m);
+    if (*(u32 *)(mp + MP_SigTask) == Z.proc && !(mp[14] & 3) && mp[MP_SigBit] < 32)    /* PA_SIGNAL */
+        TASK(tc_SigRecvd, u32) |= 1u << mp[MP_SigBit];
+}
+
+/* ---- the handler port (docs/d29-zine.md 16.7): every file handle's fh_Type. ZINE has no handler process, but a
+ * program may talk to "its file's handler" itself, as dos does: a StandardPacket (its message's ln_Name the
+ * DosPacket: dp_Link 0, dp_Port 4, dp_Type 8, dp_Res1 12, dp_Res2 16, dp_Arg1.. 20; dos/dosextens.h, NDK 3.2) put
+ * on fh_Type, dp_Arg1 the handle's fh_Arg1 (fh_Args). Spaceballs' Peek reads its packed data that way through its
+ * overlay handle. PutMsg to this port answers at once, as the handler would: the action done by the dos call that
+ * does it (Read, Write, Seek, Close), dp_Res1 and dp_Res2 set, dp_Port made this port and the message put on the
+ * reply port the packet named (with its signal). An action ZINE does not know answers DOSFALSE and
+ * ERROR_ACTION_NOT_KNOWN, named in the output (the first 4 times). ---- */
+#define ACTION_FLUSH 27
+#define ACTION_READ 82
+#define ACTION_WRITE 87
+#define ACTION_END 1007
+#define ACTION_SEEK 1008
+#define FH_IN 0x100u                    /* the fh_Args of Input() and Output() (files[] are 0-15) */
+#define FH_OUT 0x101u
+static u8 unknown_actions;
+
+static u32 fh_of_arg(u32 a)
+{
+    return a == FH_IN ? Z.in_fh : a == FH_OUT ? Z.out_fh : a < NFILES && files[a].used ? files[a].fh >> 2 : 0;
+}
+
+static void packet(struct znode *m)
+{
+    u32 *p = *(u32 **)((u8 *)m + 10);   /* ln_Name: the DosPacket */
+    if (c_TypeOfMem((u32)p) == 0 || ((u32)p & 1))
+        return;                         /* not a packet: nothing to answer, nowhere to reply */
+    u32 fh = fh_of_arg(p[5]), r1, r2 = 0;
+    Z.ioerr = 0;
+    switch ((s32)p[2]) {
+    case ACTION_READ:
+        r1 = c_Read(fh, (char *)p[6], (s32)p[7]);
+        break;
+    case ACTION_WRITE:
+        r1 = c_Write(fh, (const char *)p[6], (s32)p[7]);
+        break;
+    case ACTION_SEEK:
+        r1 = (u32)c_Seek(fh, (s32)p[6], (s32)p[7]);
+        break;
+    case ACTION_END:
+        r1 = c_Close(fh) ? (u32)-1 : 0;
+        break;
+    case ACTION_FLUSH:
+        r1 = (u32)-1;                   /* DOSTRUE: nothing is buffered */
+        break;
+    default:
+        r1 = 0;
+        Z.ioerr = 209;                  /* ERROR_ACTION_NOT_KNOWN */
+        if (unknown_actions < 4) {
+            unknown_actions++;
+            say_at("ZINE: a packet of type ", p[2], " sent to a file's handler, which ZINE does not know: answered "
+                   "with an error\n");
+        }
+    }
+    if (r1 == (u32)-1 || !r1)
+        r2 = Z.ioerr;
+    p[3] = r1;
+    p[4] = r2;
+    u8 *rp = (u8 *)p[1];
+    p[1] = Z.hport;
+    if (rp && c_TypeOfMem((u32)rp))
+        port_put(rp, m, 7);             /* NT_REPLYMSG */
+}
+
+void c_PutMsg(u8 *mp, struct znode *m)
+{
+    if (!mp || !m)
+        return;
+    if ((u32)mp == Z.hport)
+        packet(m);
+    else
+        port_put(mp, m, 5);             /* NT_MESSAGE */
+}
 void c_ReplyMsg(u32 m) { (void)m; }
 u32 c_WaitPort(u8 *mp)
 {
@@ -1347,14 +1706,18 @@ F(OpenWindowTagList); F(OpenWindow); F(CloseWindow); F(ModifyIDCMP); F(SetPointe
 F(LoadRGB32); F(SetRGB32); F(OpenScreenTagList); F(OpenScreen); F(CloseScreen); F(ScreenToFront);
 F(LoadView); F(WaitTOF); F(WaitBlit); F(OwnBlitter); F(DisownBlitter); F(VBeamPos); F(SetRGB4); F(LoadRGB4);
 F(Output); F(Input); F(Write); F(Read); F(PutStr); F(VPrintf); F(VFPrintf); F(FPuts); F(FPutC); F(Flush); F(IoErr);
-F(SetIoErr); F(Delay); F(CloseWorkBench); F(OpenWorkBench); F(rts);
+F(SetIoErr); F(Delay); F(Execute); F(CloseWorkBench); F(OpenWorkBench); F(rts);
+F(InitStruct); F(MakeLibrary); F(MakeFunctions); F(FindResident); F(InitResident); F(AddLibrary); F(RemLibrary);
+F(SumLibrary); F(AddResource); F(InitSemaphore); F(ObtainSemaphore); F(ReleaseSemaphore); F(AttemptSemaphore);
+F(DeleteFile); F(AudioBeginIO); F(AudioAbortIO);
 X(Supervisor); X(Disable); X(Enable); X(Forbid); X(Permit); X(SetSR); X(GetCC); X(CacheClearU); X(ColdReboot); X(Exit);
 
 /* the offsets: the RKRM's Function Offset Reference (V37), the pools and ColdReboot from the NDK 3.2's exec_lib.fd */
 static const u16 exec_lvo[] = { 30, 108, 114, 120, 126, 132, 138, 144, 162, 168, 174, 198, 204, 210, 216, 234, 240,
     246, 252, 258, 264, 270, 276, 294, 300, 306, 318, 324, 330, 336, 408, 414, 420, 444, 450, 498, 522, 528, 534, 552,
     624, 630, 636, 642, 648, 684, 690, 696, 702, 708, 714, 726, 732, 810, 366, 372, 378, 384, 666, 672, 456, 462, 468,
-    474, 480, 180 };
+    474, 480, 180,
+    78, 84, 90, 96, 102, 396, 402, 426, 486, 558, 564, 570, 576, 678, 720 };
 static void (*const exec_fn[])(void) = { zx_Supervisor, zs_Alert, zs_rts, zx_Disable, zx_Enable, zx_Forbid,
     zx_Permit, zx_SetSR, zs_SetIntVector, zs_AddIntServer, zs_RemIntServer, zs_AllocMem, zs_AllocAbs, zs_FreeMem,
     zs_AvailMem, zs_Insert, zs_AddHead, zs_AddTail, zs_Remove, zs_RemHead, zs_RemTail, zs_Enqueue, zs_FindName,
@@ -1364,16 +1727,19 @@ static void (*const exec_fn[])(void) = { zx_Supervisor, zs_Alert, zs_rts, zx_Dis
     zs_AllocVec, zs_FreeVec, zs_CreatePool, zs_DeletePool, zs_AllocPooled, zs_FreePooled, zx_ColdReboot,
     zs_StackSwap, zs_TaggedOpenLibrary, zs_PutMsg, zs_GetMsg, zs_ReplyMsg, zs_WaitPort, zs_CreateMsgPort,
     zs_DeleteMsgPort, zs_DoIO, zs_SendIO, zs_CheckIO, zs_WaitIO, zs_AbortIO,
-    zs_Cause };
+    zs_Cause,
+    zs_InitStruct, zs_MakeLibrary, zs_MakeFunctions, zs_FindResident, zs_InitResident, zs_AddLibrary, zs_RemLibrary,
+    zs_SumLibrary, zs_AddResource, zs_InitSemaphore, zs_ObtainSemaphore, zs_ReleaseSemaphore, zs_AttemptSemaphore,
+    zs_ObtainSemaphore, zs_AttemptSemaphore };
 static const u16 gfx_lvo[] = { 192, 222, 228, 270, 288, 384, 456, 462, 390, 492, 498, 918, 924, 882, 852, 198 };
 static void (*const gfx_fn[])(void) = { zs_LoadRGB4, zs_LoadView, zs_WaitBlit, zs_WaitTOF, zs_SetRGB4, zs_VBeamPos,
     zs_OwnBlitter, zs_DisownBlitter, zs_InitBitMap, zs_AllocRaster, zs_FreeRaster, zs_AllocBitMap, zs_FreeBitMap,
     zs_LoadRGB32, zs_SetRGB32, zs_InitRastPort };
 static const u16 dos_lvo[] = { 42, 48, 54, 60, 132, 144, 198, 312, 342, 354, 360, 462, 948, 954, 30, 36, 66, 150,
-    156 };
+    156, 222, 72 };
 static void (*const dos_fn[])(void) = { zs_Read, zs_Write, zs_Input, zs_Output, zs_IoErr, zx_Exit, zs_Delay,
     zs_FPutC, zs_FPuts, zs_VFPrintf, zs_Flush, zs_SetIoErr, zs_PutStr, zs_VPrintf, zs_Open, zs_Close, zs_Seek,
-    zs_LoadSeg, zs_UnLoadSeg };
+    zs_LoadSeg, zs_UnLoadSeg, zs_Execute, zs_DeleteFile };
 static const u16 int_lvo[] = { 78, 210, 612, 198, 66, 252, 246, 606, 204, 72, 150, 270, 60, 300 };
 static void (*const int_fn[])(void) = { zs_CloseWorkBench, zs_OpenWorkBench, zs_OpenScreenTagList, zs_OpenScreen,
     zs_CloseScreen, zs_ScreenToFront, zs_SetPointer, zs_OpenWindowTagList, zs_OpenWindow, zs_CloseWindow,
@@ -1443,9 +1809,9 @@ static void tv_now(u32 *tv)
     tv[1] = (t % hz()) * (1000000u / hz());
 }
 
-static void io_done(u8 *io)
+/* a request done: replied to its port (unless quick) with the io_Error its command set */
+void zb_io_done(u8 *io)
 {
-    io[31] = 0;
     io[8] = 7;                          /* ln_Type NT_REPLYMSG */
     if (io[30] & IOF_QUICK)
         return;
@@ -1478,7 +1844,7 @@ static int timer_step(void)
         ;
     u8 *io = treq[best];
     treq[best] = 0;
-    io_done(io);
+    zb_io_done(io);
     return 1;
 }
 
@@ -1487,6 +1853,7 @@ void c_TimerBeginIO(u8 *io)
     u16 cmd = *(u16 *)(io + 28);
     u32 *tv = (u32 *)(io + 32);
     io[8] = 5;                          /* NT_MESSAGE: in progress */
+    io[31] = 0;
     if (cmd == TR_ADDREQUEST) {
         u32 n = tv[0] * hz() + (tv[1] * hz() + 999999u) / 1000000u;
         for (int i = 0; i < NTREQ; i++)
@@ -1497,7 +1864,7 @@ void c_TimerBeginIO(u8 *io)
                 return;
             }
         io[31] = (u8)-1;                /* no room: IOERR_OPENFAIL as the nearest refusal */
-        io_done(io);
+        zb_io_done(io);
         return;
     }
     if (cmd == TR_GETSYSTIME)
@@ -1505,10 +1872,10 @@ void c_TimerBeginIO(u8 *io)
     else if (cmd != TR_SETSYSTIME) {
         io[31] = (u8)-3;                /* IOERR_NOCMD */
         if (!(io[30] & IOF_QUICK))
-            io_done(io);
+            zb_io_done(io);
         return;
     }
-    io_done(io);
+    zb_io_done(io);
 }
 
 void c_TimerAbortIO(u8 *io)
@@ -1516,13 +1883,13 @@ void c_TimerAbortIO(u8 *io)
     int i = pending(io);
     if (i >= 0) {
         treq[i] = 0;
-        io_done(io);
+        zb_io_done(io);
         io[31] = (u8)-2;                /* IOERR_ABORTED */
     }
 }
 
 /* exec's I/O calls for every device ZINE has (timer.device only) */
-u32 c_CheckIO(u8 *io) { return io && pending(io) < 0 ? (u32)io : 0; }
+u32 c_CheckIO(u8 *io) { return io && pending(io) < 0 && !zb_audio_pending(io) ? (u32)io : 0; }
 s32 c_WaitIO(u8 *io)
 {
     if (!io)
@@ -1539,9 +1906,11 @@ void c_SendIO(u8 *io)
     io[30] = 0;
     if (*(u32 *)(io + 20) == timer_base)
         c_TimerBeginIO(io);
+    else if (*(u32 *)(io + 20) == zb_audio_base && zb_audio_base)
+        zb_audio_beginio(io);
     else {
         io[31] = (u8)-1;
-        io_done(io);
+        zb_io_done(io);
     }
 }
 s32 c_DoIO(u8 *io)
@@ -1549,11 +1918,19 @@ s32 c_DoIO(u8 *io)
     io[30] = IOF_QUICK;
     if (*(u32 *)(io + 20) == timer_base)
         c_TimerBeginIO(io);
+    else if (*(u32 *)(io + 20) == zb_audio_base && zb_audio_base)
+        zb_audio_beginio(io);
     else
         io[31] = (u8)-1;
     return c_WaitIO(io);
 }
-void c_AbortIO(u8 *io) { if (io && *(u32 *)(io + 20) == timer_base) c_TimerAbortIO(io); }
+void c_AbortIO(u8 *io)
+{
+    if (io && *(u32 *)(io + 20) == timer_base)
+        c_TimerAbortIO(io);
+    else if (io && *(u32 *)(io + 20) == zb_audio_base && zb_audio_base)
+        zb_audio_abort(io);
+}
 
 void c_AddTime(u32 *d, const u32 *s2)
 {
@@ -1687,6 +2064,7 @@ void zb_libs_init(void)
 {
     struct zine_blk *b = Z.blk;
     area = Z.lib[0];                    /* zb_prepare left the area's start there */
+    za_init(&assigns);                  /* LIBS: as ZINE starts it (16.8) */
     /* the libraries other than exec: in the ZINE block (fast RAM) */
     static void (*const *const fns[4])(void) = { exec_fn, gfx_fn, dos_fn, int_fn };
     static const u16 *const lvos[4] = { exec_lvo, gfx_lvo, dos_lvo, int_lvo };
@@ -1715,6 +2093,21 @@ void zb_libs_init(void)
         l->version = 40;
         l->idstring = (char *)idstr;
         timer_base = base;
+    }
+    {   /* audio.device (blibload.c, 16.8): Open, Close, Expunge, the reserved one, BeginIO, AbortIO */
+        static const u16 alvo[] = { 6, 12, 18, 24, 30, 36 };
+        static void (*const afn[])(void) = { zs_rts, zs_rts, zs_rts, zs_rts, zs_AudioBeginIO, zs_AudioAbortIO };
+        static const char aname[] = "audio.device";
+        u32 base = take(6 * 6 + 34) + 6 * 6;
+        zb_jumptable(base, 6, alvo, afn, 6);
+        struct zlib *l = (struct zlib *)base;
+        l->node.type = 3;               /* NT_DEVICE */
+        l->node.name = (char *)aname;
+        l->negsize = 36;
+        l->possize = 34;
+        l->version = 40;
+        l->idstring = (char *)idstr;
+        zb_audio_init(base);
     }
     extern u32 zb_tracing;
     if (zb_tracing) {                   /* the trace build: the bases, so the trace's slots can be named */
@@ -1829,6 +2222,13 @@ void zb_libs_init(void)
     *(u32 *)(pr + ZO_Process_pr_WindowPtr) = 0xFFFFFFFFu;
     u32 out = take(ZO_FileHandle_SIZEOF), in = take(ZO_FileHandle_SIZEOF);
     Z.out_fh = out >> 2, Z.in_fh = in >> 2;
+    u8 *hp = (u8 *)take(MP_SIZEOF);     /* the handler port (16.7): no task to signal, PA_IGNORE */
+    newlist((struct zlist *)(hp + MP_MsgList), NT_MESSAGE);
+    hp[8] = NT_MSGPORT;
+    hp[14] = 2;
+    Z.hport = (u32)hp;
+    *(u32 *)(out + ZO_FileHandle_fh_Type) = Z.hport, *(u32 *)(out + ZO_FileHandle_fh_Args) = FH_OUT;
+    *(u32 *)(in + ZO_FileHandle_fh_Type) = Z.hport, *(u32 *)(in + ZO_FileHandle_fh_Args) = FH_IN;
     *(u32 *)(pr + ZO_Process_pr_COS) = Z.out_fh;
     *(u32 *)(pr + ZO_Process_pr_CIS) = Z.in_fh;
     u32 cli = take(64);

@@ -112,10 +112,12 @@ static void command(char *line)
         return;
     }
     if (!strcmp(w[0], "stat")) {       /* the server's counters since the last stat, then from 0 */
-        u32 st[6] = { 0, 0, 0, 0, 0, 0 };
-        int r = dpy_call(DPY_STAT, (u32)st, 1, 0, 0);
-        say("dpytest: stat %s blits %u pixels %u glyphs %u draws %u paints %u copies %u (%d)\n", n > 1 ? w[1] : "-",
-            st[0], st[1], st[2], st[3], st[4], st[5], r);
+        u32 st[12];
+        memset(st, 0, sizeof st);
+        int r = dpy_call(DPY_STAT, (u32)st, 3, 0, 0);
+        say("dpytest: stat %s blits %u pixels %u glyphs %u draws %u paints %u copies %u moves %u movet %u shows %u "
+            "showt %u waitt %u late %u (%d)\n", n > 1 ? w[1] : "-", st[0], st[1], st[2], st[3], st[4], st[5], st[6],
+            st[7], st[8], st[9], st[10], st[11], r);
         return;
     }
     if (!strcmp(w[0], "wm")) { say("dpytest: wm %d\n", dpy_call(DPY_WM_HELLO, 0, 0, 0, 0)); return; }

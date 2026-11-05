@@ -86,7 +86,7 @@ are fixed at once. Two independent design reviews for deep core changes, one for
 **The real-world benchmark (owner 2026-11-04: "having the mounted Amiga partitions give a better real world value"):**
 `time ls -laR /` on the A1200 with the 1260, the owner's AmigaOS partitions mounted (/mnt/dh0 PFS3 1 GB, /mnt/dh2
 PFS3 8 GB), to /dev/null and on the screen, in the text console and in zdesk's term. First figures (release
-2026110403, measured): /dev/null 4.36 s; text console 12.8 s; term 2 min 51.8 s.
+2026110403, measured): /dev/null 4.36 s; text console 12.8 s; term 2 min 51.8 s. PiStorm (Emu68, not a real-Amiga speed), the fresh ZenixFS SD root without Amiga partitions, release 2026110404 (owner's photos 2026-11-04): /dev/null 0.08-0.12 s, text console 1.37 s, term 0.32 s (release 2026110403 on the old SD card: console 1.95 s, term 44.8 s).
 
 **Real-hardware findings waiting (the A1200 with the 1260, 2026-11-04), fixed next:** the 040/060 data cache on for fast
 RAM through the transparent translation registers, chip RAM uncached (done 2026-11-04, D37: 4.23 s -> 0.95 s on the 1260; boot log was: "data cache off"; `ls -laR /` of 506
@@ -94,7 +94,7 @@ lines took 4.26 s, 9.64 s on the screen with the serial cable in: measured; buil
 D37, docs/d37-data-cache.md: not yet on the 1260); the serial console drops input on long
 lines and Zmodem through it stalls at 3 KB; once anything was typed over serial the console's serial copy waits for the 115200-baud port and caps the screen at about 11.5 KB/s (`ls -laR /` on the screen 3.2 s, 0.95 s to /dev/null, the 1260): a cable that stops listening must not slow the screen, and root needs a command to switch the copy off; netd should start a card it finds with DHCP without /etc/network/interfaces;
 the installer asks for a package server; `zpkg -Sl` lines within 80 columns, "newer/older installed", zenix-tests and
-zpkg-new kept out of a user's list; halt, poweroff and shutdown (done 2026-11-04); the plipbox at 47 KB/s on the 1260 against about 114 KB/s documented (the wait between frames); diskd's note about the RDB chain on the installed card (with the installer helper).
+zpkg-new kept out of a user's list; halt, poweroff and shutdown (done 2026-11-04); ZINE: dos.library Execute (done 2026-11-04: answered as done, the command named; d29 16.7); zdesk: dragging a window tears and flickers on the A1200 (owner 2026-11-05, the demo floppy: the moved window's contents shown at two places mid-move, "drag whole"): move at most once a frame, the copy timed to the beam (after the raster passes, or in the vertical blank) in the blitter's safe direction, so every frame shows the window whole at one place, as Workbench's outline drag never tears (done 2026-11-05 in FS-UAE: drawn off the screen, shown timed to the beam, d38-desktop.md; with it the text-UI programs follow a terminal window's resize); zpkg: when the boot partition is refused and /bin/zpkg-new is newer, say "run zpkg-new -Syu" (owner 2026-11-04: the old zpkg only said BOOT could not be checked); ZINE: a write to any path (T:, ENV:, the program's folder, SYS:) kept in memory for the session like RAM:'s and read back from there, never written to a disk (owner 2026-11-04: "not all demos write to the same location"); Latex's Ltx-Snigelsaft plays with its SID music on the A1200 (owner 2026-11-04, release 2026110407: RAM: files, Assign, playsid.library loaded from RAM:, d29 16.8); done 2026-11-04 in FS-UAE with a library of ZINE's own: RAM: files, Assign, libraries from LIBS:, DeleteFile, audio.device's channels, d29 16.8; the demo itself still to run on the A1200) and Peek's packets to its overlay handle (done 2026-11-04, runs in FS-UAE); Tab completion lists whole paths (`cd /mnt/sh0/Demos/<Tab>` shows /mnt/sh0/Demos/Latex/ ... where bash shows Latex/); zine from a term window on the desktop (owner 2026-11-04; refused for now: ZINE's way back restores the text display, not displayd's, a D38 change; meanwhile a text console, d29 16.7); the installer's manual layout: any existing partition chosen as start-up, root or /home, each kept or formatted (owner 2026-11-04; the PiStorm card with FAT32, a 0x76 holding BOOT and Share, ext2 root, ext2 home: today it is not recognised); the plipbox at 47 KB/s on the 1260 against about 114 KB/s documented (the wait between frames); diskd's note about the RDB chain on the installed card (with the installer helper).
 
 1. **Foundations finished (the week of 2026-10-26):** D13 shared code; the shell's memory fix; the colour console;
    the self-updates. Audit.
@@ -105,7 +105,7 @@ zpkg-new kept out of a user's list; halt, poweroff and shutdown (done 2026-11-04
    properly"): modern, small and constant-time, e.g. BearSSL (MIT) for TLS and Dropbear's client (MIT) for SSH, with
    Ed25519/X25519/ChaCha20 (fast without an FPU or AES hardware) and a real random source; it also signs `zpkg`'s
    packages; then `ssh` (a proper client, keys, known hosts) and HTTPS for `wget`; `zpkg` with its repository on the
-   owner's NAS. A security audit. Then (postponed by the owner on 2026-10-28, design D25 ready) **the Zenix demo floppy**
+   owner's NAS. A security audit. Then (postponed by the owner on 2026-10-28; its desktop edition approved 2026-11-04, block 5) **the Zenix demo floppy**
    (owner 2026-10-25, in the spirit of the 1999 QNX demo disk): one 880 KB Amiga floppy that boots into Zenix with the
    network, `telnet` and a web-page fetcher, to hand to anyone; a second edition with the desktop in block 5. The model (owner 2026-10-26): KolibriOS, a
    desktop, network and programs on one 1.44 MB floppy; as there, the programs are packed on the disk and unpacked
@@ -133,7 +133,12 @@ zpkg-new kept out of a user's list; halt, poweroff and shutdown (done 2026-11-04
    window manager / desktop a program of its own that can be swapped; the floating desktop is the first, an i3-style
    tiling one a second choice, others possible. Then the rest: the display server; a terminal window, workspaces with the i3-style bar, the mouse; the file view,
    viewers, preferences; TrueType fonts (owner 2026-10-26; rendered once per size into bitmap fonts and cached, so a
-   68020 without an FPU pays only once; also usable by the console); the demo floppy's desktop edition. Audit.
+   68020 without an FPU pays only once; also usable by the console). **The demo floppy's desktop edition** (owner
+   2026-11-04: "We have a desktop. Now can we have a demo disk that boots into the desktop? ONE adf. With ahiru, Sumi,
+   ctop, preferably."; docs/d25-demo-floppy.md revision 3, Part 1: one DD ADF, the whole disk unpacked into memory at
+   boot, for the minimum's 4 MB of fast RAM) comes **next in block 5, after the desktop's real-hardware findings**,
+   ahead of the file view, viewers, preferences and TrueType, in its section 10's order (the box, the stage 2 loader,
+   `make demo`, the session, the keyboard, the network found by itself, `demo-test.sh`, the owner's A1200). Audit.
 6. **Sound and hardware:** a Paula server, `play`, a MOD player; optional memory protection on CPUs with an MMU; USB,
    RTG, faster IDE, CD. Audit.
 7. **Zenix builds itself, and fun:** assembler, C compiler, `make`, debugger, Lua; games and demos on Zenix. A full

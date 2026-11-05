@@ -64,6 +64,7 @@ spot-checked against the code that day.
 | [zup](man/zup.txt) | install the root half of an update (`/sbin/zup`, DESIGN D15); one package at a time for zpkg (`-f`, `-r`, D22) |
 | [zpkg](man/zpkg.txt) | the package manager: `-Syu`, `-S`, `-R`, `-Q`, `-U`, signed lists and packages over HTTP; writes a system update onto the boot partition itself (DESIGN D22) |
 | [zpkg-new](man/zpkg-new.txt) | zpkg in a live package of its own, for a system whose zpkg cannot write system updates (2026103000): `zpkg-new -Syu` once (D22 4.5) |
+| [demo](man/demo.txt) | not a command: the demo floppy (DD and HD): what is on it, how it loads, what it never writes (DESIGN D25) |
 | [random](man/random.txt) | not a command: `/dev/random` and `/dev/urandom`, the kernel's random numbers, and the seed file (DESIGN D19) |
 | [rescue](man/rescue.txt) | not a command: what to do when the disk check at boot cannot repair the root (the four choices boot offers, step by step) |
 | [fatd](man/fatd.txt) | not a command: a FAT mount's server (`/sbin/fatd`, DESIGN D30), started by the kernel for `mount -t fat`; its manual is mount's |
