@@ -1036,7 +1036,7 @@ $(BUILD)/zine-trace.elf: $(ZTBLOBOBJS) link/user.ld
 $(BUILD)/zine-trace.blob: $(BUILD)/zine-trace.elf tools/mkzexe.py tools/mkzblob.py
 	tools/mkzexe.py $< $@.zx
 	python3 tools/mkzblob.py $@.zx $@
-ZINETESTS := zexit zhello ztake zcrash zbadcall zalloc zscreen zmmu zfpu zovl zpkt zlibs zwrite zcase
+ZINETESTS := zexit zhello ztake zcrash zbadcall zalloc zscreen zmmu zfpu zovl zpkt zlibs zwrite zcase zexec zpart
 # the null blob (step 2's tests): the pause and the resume with nothing in between (user/zine/nullblob.S)
 $(BUILD)/zb-nullblob.o: user/zine/nullblob.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
