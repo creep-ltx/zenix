@@ -36,13 +36,24 @@ DESCRIPTION
     shows and their times (DPY_STAT; dpytest's stat) are how the tests
     check what an action costs.
 
-    Drags run in the server: an outline (XOR lines, the window moved once
-    at the release) or the whole window. A whole window's drag draws into
-    a second screen in chip RAM (80 KB at 4 planes, for the drag only)
-    and shows what changed once a pass, at most one move a pass whatever
-    the mouse did meanwhile: one copy of whole words, started where the
-    raster can neither overtake it nor come round to meet it before it
-    ends, so every frame shows the window whole at one place. A part the
+    Drags run in the server. On AGA a move is done by the chips: the
+    window is lifted into the second playfield (dual playfield, 4 + 4
+    planes) and each move rewrites a few Copper words, in a list the
+    Copper takes at the top of a frame, so it moves at the frame rate on
+    any CPU, never torn, with no blit; on the drop it is drawn back into
+    the screen. It takes chip RAM for the drag only: (the window's width
+    in bytes + 88) x 4 planes x its height (about 81 KB for 400 x 140).
+    Pen 0 is transparent in a playfield: a window using pen 0 has those
+    pixels shown in an unused pen of pen 0's colour (one using all 16
+    pens, a resize, OCS/ECS or no chip RAM: the ways below, as the frame
+    style's drag setting says). Otherwise an outline (XOR lines, the
+    window moved once at the release) or the whole window. A whole
+    window's drag draws into a second screen in chip RAM (80 KB at 4
+    planes, for the drag only) and shows what changed once a pass, at
+    most one move a pass whatever the mouse did meanwhile: one copy of
+    whole words, started where the raster can neither overtake it nor
+    come round to meet it before it ends, so every frame shows the
+    window whole at one place. A part the
     move uncovered that a program draws itself (the desktop, a simple
     refresh window) is shown when that program has drawn it, or after
     60 ms. Without the chip RAM for the second screen the drag is an

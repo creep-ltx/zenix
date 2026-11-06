@@ -45,7 +45,8 @@ int bm_alloc(struct bm *b, int w, int h, int depth);
 extern int shadowing;           /* a whole window's drag: scr is a drawn screen, shown once a pass (D38 6.3) */
 int shadow_begin(void);         /* 1: drawing goes to the drawn screen from now on; 0: no chip RAM for it */
 void shadow_show(void);         /* what changed onto the screen on view, timed to the beam */
-void shadow_end(void);          /* shown, freed: drawing on the screen on view again */   /* chip RAM, 0 or -ENOMEM; a kept copy (b->kept) counted */
+void shadow_end(void);
+int dpy_beam(void);             /* the display line the beam is on (0 the screen's first) */          /* shown, freed: drawing on the screen on view again */   /* chip RAM, 0 or -ENOMEM; a kept copy (b->kept) counted */
 void bm_free(struct bm *b);
 
 /* rectangles and regions */
@@ -77,6 +78,7 @@ struct win {
     struct rect clip;           /* the client's O_CLIP, inside-relative (x1 0: none) */
     char *menu;                 /* DPY_MENU's text (malloc'd), 0 none */
     u16 nmenu;
+    u8 lifted;                  /* in playfield 2 for the chips' drag: not shown on the screen's planes */
 };
 extern struct win wins[NWIN];
 extern u16 order[NWIN];         /* slots, back to front */
@@ -110,4 +112,10 @@ void ev_wm(int type, int win, int code, int arg, int x, int y, int w, int h);
 extern int wm_cl;               /* the window manager's client slot, -1 none */
 const u8 *dpy_image(int id, int cl, struct bm **img);         /* an image (cl's, or any: -1) and its mask (0: none) */
 void kick(void);                /* drain the kernel's ring now (a drag's loop) */
-extern int drag_moved;          /* the pointer moved during a drag: one move a pass of the main loop */
+extern int drag_moved;
+/* displayd.c: the chips' drag (D38 "Dragging with the chips"): a window's bitmap b in playfield 2 (AGA) */
+int hw_ok(void);                /* AGA, 4 planes, the blitter ours */
+void hw_show(const struct bm *b, const u8 *zero, int x, int y, int pen);  /* at (x, y), from the next frame; pen: pen 0's
+                                 * stand-in in b (-1 none) */
+void hw_off(void);              /* playfield 2 off, in effect on return */
+void hw_wait(void);             /* the last change in effect */          /* the pointer moved during a drag: one move a pass of the main loop */

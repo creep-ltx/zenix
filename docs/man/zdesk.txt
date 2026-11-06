@@ -79,8 +79,9 @@ THEMES
     barcurbg, bardim, clock, iconfg, labelbg, ik, if, ia, iw, id, winbg,
     winfg, btn, btnfg, menubg, menufg, selbg, selfg); gadget close|min|zoom
     left|right OFFSET followed by its picture, rows starting with | (. no
-    pixel, 0-9 a-f a pen); menus click|hold|both; drag outline|whole|auto;
-    bar left|middle|right MODULE....
+    pixel, 0-9 a-f a pen); menus click|hold|both; drag outline|whole|auto
+    (on AGA a move is always the chips' drag when it can be; drag picks
+    the resize and the fallback); bar left|middle|right MODULE....
 
 NOTES
     The clock is UTC (Zenix has no time zones yet). Files on the desktop

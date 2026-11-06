@@ -5,6 +5,7 @@
  * "dpytest: ..." on its standard output:
  *   win NAME W H PEN   a window of W x H pixels, filled with PEN, its name in the top left in pen 7 on PEN
  *   text NAME X Y S    the text S at X, Y (pen 1 on 2)
+ *   hole NAME X Y W H  a rectangle of pen 0 inside the window, drawn with it from now on (the chips' drag test)
  *   move NAME X Y      (the window manager's) the frame's top left at X, Y
  *   size NAME W H      (the window manager's) the inside W x H
  *   raise NAME | lower NAME | focus NAME | hide NAME | show NAME | close NAME
@@ -25,7 +26,7 @@
 typedef unsigned short u16;
 
 #define NW 8
-static struct { char name[16]; int id, pen, w, h; } ws[NW];
+static struct { char name[16]; int id, pen, w, h, hx, hy, hw, hh; } ws[NW];
 static char evlog[2048];
 static u32 nev;
 
@@ -50,6 +51,8 @@ static void paint(int i, int x, int y, int w, int h)
     dpy_clip(ws[i].id, x, y, w, h);
     dpy_fill(ws[i].id, 0, 0, ws[i].w, ws[i].h, ws[i].pen);
     dpy_text(ws[i].id, 0, 0, 7, ws[i].pen, 0, ws[i].name, (int)strlen(ws[i].name));
+    if (ws[i].hw)
+        dpy_fill(ws[i].id, ws[i].hx, ws[i].hy, ws[i].hw, ws[i].hh, 0);
     dpy_clip(ws[i].id, 0, 0, 0, 0);
     dpy_flush();
 }
@@ -139,6 +142,9 @@ static void command(char *line)
     if (!strcmp(w[0], "text") && n >= 5) {
         dpy_text(id, atoi(w[2]), atoi(w[3]), 1, 2, 0, w[4], (int)strlen(w[4]));
         r = dpy_flush();
+    } else if (!strcmp(w[0], "hole") && n >= 6) {
+        ws[i].hx = atoi(w[2]); ws[i].hy = atoi(w[3]); ws[i].hw = atoi(w[4]); ws[i].hh = atoi(w[5]);
+        paint(i, 0, 0, ws[i].w, ws[i].h);
     } else if (!strcmp(w[0], "move") && n >= 4) {
         struct dpyinfo in;
         dpy_info(id, &in);

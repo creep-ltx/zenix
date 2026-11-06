@@ -10,7 +10,9 @@
 #    at two places: a taller or wider box, or a hole);
 #  - the screen outside A's frame is the desktop, B or the bar: no copy of A's pen anywhere else;
 #  - the server's own check of every show against the beam (DPY_STAT's late) is 0.
-# And after it: A where the drag ended, every part of B and the desktop as before. Printed: the drag's cost per move
+# Held still before the drop, A shows where the drop leaves it (on AGA the chips' drag shows it in playfield 2 until
+# the drop: D38 "Dragging with the chips"), and a pen-0 patch in A over B shows pen 0's colour (playfield 2's pen 0 is
+# transparent). And after it: A where the drag ended, every part of B and the desktop as before. Printed: the drag's cost per move
 # (blits, pixels, copies onto the screen, the E-clock time of a move and of a show, the time waited for the beam;
 # emulator figures, not the real machine's).
 cd "$(dirname "$0")/.." || exit 1
@@ -45,6 +47,8 @@ sleep 3
 send echo info A >> /tmp/c; echo info B >> /tmp/c\r
 sleep 2
 shot pre
+send echo hole A 8 32 16 8 >> /tmp/c\r
+sleep 2
 send : > /tmp/m.sh\r
 sleep 1
 send echo 'gcontest mouse 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1' >> /tmp/m.sh\r
@@ -59,7 +63,7 @@ send echo 'gcontest mouse 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 
 sleep 1
 send echo 'gcontest mouse 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1 2,1,1' >> /tmp/m.sh\r
 sleep 1
-send echo 'gcontest mouse 0,0,0; echo drag-done-$((1+1))' >> /tmp/m.sh\r
+send echo 'gcontest mouse 2,0,1 2,0,1 2,0,1; echo drag-held-$((1+1)); sleep 4; gcontest mouse 0,0,0; echo drag-done-$((1+1))' >> /tmp/m.sh\r
 sleep 1
 send gcontest mouse -128,-128,0 -128,-128,0 78,36,0 0,0,1\r
 sleep 2
@@ -69,6 +73,9 @@ send sh /tmp/m.sh &\r
 EOS
 for i in $(seq 1 $NSHOT); do echo "shot d$i"; echo "sleep 0.2"; done
 cat <<'EOS'
+wait drag-held-2 120
+sleep 1
+shot held
 wait drag-done-2 120
 sleep 2
 send echo stat d1 >> /tmp/c\r
@@ -111,6 +118,15 @@ python3 tools/dpy-test.py whole "$OUT/z-post.png" "$OUT/geom" D54 "$rw" "$rh" > 
 read -r px py < <(sed -n 's/.* at \([0-9]*\),\([0-9]*\) .*/\1 \2/p' "$OUT/wp")
 [ "$r" = 0 ] && [ -n "$py" ] && [ $((px - ex - 1)) -ge 0 ] && [ $((px - ex - 1)) -le 1 ] && [ "$py" = $((ey + 12)) ]
 check "after the drag A is whole where it ended ($(cat "$OUT/wp"))" $?
+# the button still held at the end: the window shows where the drop then puts it (no jump when it is let go; the
+# chips' drag shows it in playfield 2 until the drop)
+python3 tools/dpy-test.py whole "$OUT/z-held.png" "$OUT/geom" D54 "$rw" "$rh" > "$OUT/wh"; r=$?
+[ "$r" = 0 ] && [ "$(sed -n 's/.* at \([0-9]*,[0-9]*\) .*/\1/p' "$OUT/wh")" = "$px,$py" ]
+check "held before the drop A is where the drop leaves it ($(cat "$OUT/wh"))" $?
+# A's pen-0 hole over B (playfield 2's pen 0 is transparent: the chips' drag gives it another pen of pen 0's colour)
+[ -n "$px" ] && [ $((px + 12)) -lt $((bx + 300)) ] && [ $((py + 36)) -lt $((by + 12 + 100)) ] &&
+    python3 tools/dpy-test.py px "$OUT/z-held.png" "$OUT/geom" "$((px + 12)),$((py + 36)),344" > "$OUT/hole"
+check "A's pen-0 pixels over B show pen 0's colour while dragged ($(cat "$OUT/hole" 2>/dev/null))" $?
 stat() { grep -a -o "dpytest: stat $1 [^(]*([-0-9]*)" "$L" | head -1; }
 field() { stat "$1" | sed -n "s/.* $2 \([0-9]*\).*/\1/p"; }
 late=$(field d1 late)

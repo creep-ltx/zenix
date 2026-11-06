@@ -369,7 +369,7 @@ static void dirty_add(const struct rect *r)
 }
 static int frame_lines(void) { return scr.h > 200 ? 312 : 262; }
 /* the display line the beam is on (0 the screen's first; negative above it, in the border and the vertical blank) */
-static int beam(void)
+int dpy_beam(void)
 {
     u16 a, b, c;
     do {
@@ -417,7 +417,7 @@ static int beam_wait(int lo, int len)
     int L = frame_lines();
     u32 t0 = sys_hrtime();
     for (int n = 0;; n++) {
-        int d = ((beam() - lo) % L + L) % L;
+        int d = ((dpy_beam() - lo) % L + L) % L;
         if (d < len)
             return 1;
         if (!(n & 15) && sys_hrtime() - t0 > 42000u)    /* (the clock's call is slower than a line now and then) */
@@ -509,7 +509,7 @@ void shadow_show(void)
         u32 t0 = sys_hrtime();
         int ok = beam_wait(lo, len);
         u32 t1 = sys_hrtime();
-        int b0 = beam();
+        int b0 = dpy_beam();
         blit_block(&scr, r.x0, r.y0, &shown, &r, 0);
         blit_idle();
         u32 t2 = sys_hrtime();

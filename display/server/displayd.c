@@ -17,7 +17,9 @@ int wm_cl = -1;
 static int port, gfd = -1, confd = -1, persist, grabbed, grabbed_con;
 u32 ndraws;
 static u16 *copl;                       /* the Copper list (chip RAM) */
-static int cop_col;                     /* the index of COLOR00's value in it */
+static int cop_col, cop_col2;           /* the index of COLOR00's value in it; of playfield 2's first (AGA) */
+static u16 *dyn[2], *cop_jmp;           /* the Copper list's changing part, two of them; COP2LCL's value */
+static int dyn_cur;                     /* the one the Copper is told to use */
 static u16 *spr;                        /* the pointer: sprite 0 */
 static int ptx, pty;                    /* the pointer, from the kernel */
 static u16 btns;                        /* its buttons (GQ_*BUTTON) */
@@ -190,11 +192,128 @@ static void default_style(void)
     u32 zi[7];
     style.drag = sys3(93, 0, (u32)zi, sizeof zi) == 0 && (zi[2] & 0x88) ? 0 : DRAG_OUTLINE;
 }
+static int pf2_pen = -1;                /* a lifted window's stand-in for pen 0 (D38 "Dragging with the chips") */
 static void set_palette(void)
 {
     for (int i = 0; i < (1 << scr.depth); i++)
         copl[cop_col + 2 * i + 1] = style.palette[i] & 0xFFF;
+    if (cop_col2)
+        for (int i = 0; i < 16; i++)
+            copl[cop_col2 + 2 * i + 1] = style.palette[i == pf2_pen ? 0 : i] & 0xFFF;
 }
+
+/* ---- the Copper list's changing part (D38 "Dragging with the chips") ----
+ * dyn_build writes the list for the screen alone (lift 0) or with a lifted window in playfield 2: its bitmap's first
+ * line of plane 0 at lift->p, a plane's line lift->bpr bytes (the window's bytes, then 88 zero bytes), placed with
+ * its column 0 at screen column hx (a multiple of 8) and its line 0 at hy, lift->h lines; zero: 88 zero bytes. */
+static const struct bm *lift;
+static int hx, hy;
+static const u8 *zero88;
+static void dyn_build(u16 *c, int on)
+{
+#define MOVE(r, v) do { *c++ = (u16)(r); *c++ = (u16)(v); } while (0)
+    int depth = scr.depth, f3 = aga;
+    if (!on) {
+        MOVE(0x100, 0x8200 | depth << 12);  /* BPLCON0: hires */
+        MOVE(0x102, 0);
+        MOVE(0x104, 0x0024);                /* BPLCON2: the sprites in front of the planes */
+        MOVE(0x108, scr.stride - scr.bpr);
+        MOVE(0x10A, scr.stride - scr.bpr);
+        MOVE(0x092, f3 ? 0x38 : 0x3C);      /* the console's fetch window (kernel/gfx.c) */
+        MOVE(0x094, f3 ? 0xC0 : 0xD4);
+        for (int k = 0; k < depth; k++) {
+            u32 p = (u32)scr.p + (u32)k * scr.bpr;
+            MOVE(0x0E0 + 4 * k, p >> 16);
+            MOVE(0x0E2 + 4 * k, p);
+        }
+    } else {
+        /* playfield 2 placed: the pointer in 64-pixel steps (8-byte aligned for the 64-bit fetch), BPLCON1's delay the
+         * rest. One more fetch unit on the left (DDFSTRT $28): the first unit lies left of the display window */
+        int sft = hx & 63;
+        const u8 *p2 = lift->p - 8 * (((hx - sft) >> 6) + 1);
+        int d = sft * 2;                    /* the delay in 35 ns steps: bits 2-5 to 4-7, 0-1 to 12-13, 6-7 to 14-15 */
+        MOVE(0x100, 0x8610);                /* BPLCON0: hires, dual playfield, 8 planes */
+        MOVE(0x102, (d & 0x3C) << 2 | (d & 3) << 12 | (d & 0xC0) << 8);
+        MOVE(0x104, 0x0064);                /* BPLCON2: playfield 2 in front, the sprites in front of both */
+        MOVE(0x108, scr.stride - 88);
+        MOVE(0x10A, (u16)-88);
+        MOVE(0x092, 0x28);
+        MOVE(0x094, 0xC0);
+        for (int k = 0; k < 4; k++) {
+            u32 p = (u32)scr.p + (u32)k * scr.bpr - 8, z = (u32)zero88;
+            MOVE(0x0E0 + 8 * k, p >> 16);   /* playfield 1: planes 1, 3, 5, 7 */
+            MOVE(0x0E2 + 8 * k, p);
+            MOVE(0x0E4 + 8 * k, z >> 16);   /* playfield 2: 2, 4, 6, 8, the zero line until the window */
+            MOVE(0x0E6 + 8 * k, z);
+        }
+        int wrapped = 0;
+        for (int e = 0; e < 2; e++) {
+            int y = e ? hy + lift->h : hy;
+            if (y >= scr.h)
+                break;
+            int v = DIW_V + y - 1;          /* the line above: after its fetch, before the next one's */
+            if (v >= 256 && !wrapped) {
+                *c++ = 0xFFDF; *c++ = 0xFFFE;
+                wrapped = 1;
+            }
+            *c++ = (u16)((v & 0xFF) << 8 | 0xD9);
+            *c++ = 0xFFFE;
+            for (int k = 0; k < 4; k++) {
+                u32 p = e ? (u32)zero88 : (u32)p2 + (u32)k * lift->bpr;
+                MOVE(0x0E4 + 8 * k, p >> 16);
+                MOVE(0x0E6 + 8 * k, p);
+            }
+            MOVE(0x10A, e ? (u16)-88 : (u16)(lift->stride - 88));
+        }
+    }
+    *c++ = 0xFFFF;
+    *c++ = 0xFFFE;
+#undef MOVE
+}
+/* the other list written, then the one word that names it: the Copper takes it at the top of the next frame. Before
+ * writing again the frame after the last change must have begun (the Copper may still run the old list until then) */
+static u32 flip_t;
+static int flip_line = -1;
+static void dyn_settle(void)
+{
+    if (flip_line < 0)
+        return;
+    int L = scr.h > 200 ? 312 : 262;
+    u32 need = (u32)(L - flip_line + 3) * 46u;     /* lines of 64 us in E-clock ticks (709,379 Hz PAL, 715,909 NTSC) */
+    while ((u32)(sys_hrtime() - flip_t) < need)
+        ;
+    flip_line = -1;
+}
+static void dyn_flip(int on)
+{
+    dyn_settle();
+    u16 *n = dyn[dyn_cur ^ 1];
+    dyn_build(n, on);
+    flip_line = dpy_beam() + DIW_V;
+    flip_t = sys_hrtime();
+    *cop_jmp = (u16)(u32)n;
+    dyn_cur ^= 1;
+}
+int hw_ok(void) { return aga && use_blit && cop_col2 && scr.depth == 4; }
+void hw_show(const struct bm *b, const u8 *zero, int x, int y, int pen)
+{
+    if (pen != pf2_pen) {
+        pf2_pen = pen;
+        set_palette();
+    }
+    lift = b;
+    zero88 = zero;
+    hx = x;
+    hy = y;
+    dyn_flip(1);
+}
+void hw_off(void)
+{
+    dyn_flip(0);
+    dyn_settle();                       /* in use now: the window's bitmap may go */
+    lift = 0;
+}
+void hw_wait(void) { dyn_settle(); }
 
 /* the pointer, 16 x 16 lores pixels: o the outline (colour 17), w the fill (18) */
 static const char *const arrow[16] = {
@@ -259,41 +378,52 @@ static int screen_up(int con)
     chip_used = 0;                      /* the screen is not a kept copy */
     grabbed = 1;
     font_init(topaz);
+    /* the fixed part of the Copper list; the part that changes (the planes, and playfield 2 while a window is dragged
+     * by the chips) is one of two lists in dynmem, jumped to with COP2LC and COPJMP2 (D38 "Dragging with the chips") */
+    u16 *dm = sys_memalloc_chip(1024 + 512);
+    if (!dm) {
+        sys_close(gfd);
+        gfd = -1;
+        sys_close(confd);
+        sys_memfree(mem);
+        bm_free(&scr);
+        return -ENOMEM;
+    }
+    dyn[0] = (u16 *)(((u32)dm + 511) & ~511u);  /* an aligned 512-byte block never crosses 64 KB: one word flips */
+    dyn[1] = dyn[0] + 128;
     u16 *c = copl;
     int f3 = aga;
 #define MOVE(r, v) do { *c++ = (u16)(r); *c++ = (u16)(v); } while (0)
     if (aga) {
         MOVE(0x1FC, f3 ? 3 : 0);        /* FMODE: 64-bit bitplane fetch, 16-pixel sprites (gcon.c's contract) */
-        MOVE(0x106, 0x0C00);            /* BPLCON3 */
+        MOVE(0x106, 0x1400);            /* BPLCON3: bank 0, playfield 2's colours from 32 (PF2OF) */
         MOVE(0x10C, 0x0011);            /* BPLCON4: the sprites' colours 16-31 */
     }
-    MOVE(0x100, 0x8200 | depth << 12);  /* BPLCON0: hires */
-    MOVE(0x102, 0);
-    MOVE(0x104, 0x0024);                /* BPLCON2: the sprites in front of the planes */
-    MOVE(0x108, scr.stride - scr.bpr);
-    MOVE(0x10A, scr.stride - scr.bpr);
-    MOVE(0x092, f3 ? 0x38 : 0x3C);      /* the console's fetch window (kernel/gfx.c) */
-    MOVE(0x094, f3 ? 0xC0 : 0xD4);
     cop_col = (int)(c - copl);
     for (int i = 0; i < (1 << depth); i++)
         MOVE(0x180 + 2 * i, 0);
     MOVE(0x1A2, 0x000);                 /* the pointer: black outline, white face */
     MOVE(0x1A4, 0xFFF);
     MOVE(0x1A6, 0x888);
+    if (aga) {                          /* playfield 2's colours (32-47): bank 1 */
+        MOVE(0x106, 0x3400);
+        cop_col2 = (int)(c - copl);
+        for (int i = 0; i < 16; i++)
+            MOVE(0x180 + 2 * i, 0);
+        MOVE(0x106, 0x1400);
+    }
     MOVE(0x120, (u32)spr >> 16);
     MOVE(0x122, (u32)spr);
     for (int i = 1; i < 8; i++) {
         MOVE(0x120 + 4 * i, (u32)nul >> 16);
         MOVE(0x122 + 4 * i, (u32)nul);
     }
-    for (int k = 0; k < depth; k++) {
-        u32 p = (u32)scr.p + (u32)k * scr.bpr;
-        MOVE(0x0E0 + 4 * k, p >> 16);
-        MOVE(0x0E2 + 4 * k, p);
-    }
-    *c++ = 0xFFFF;
-    *c++ = 0xFFFE;
+    MOVE(0x084, (u32)dyn[0] >> 16);     /* COP2LC: the list in use; the low word is the one a change writes */
+    cop_jmp = c + 1;
+    MOVE(0x086, (u32)dyn[0]);
+    MOVE(0x08A, 0);                     /* COPJMP2 */
 #undef MOVE
+    dyn_build(dyn[0], 0);
     set_palette();
     ptx = g.width / 2;
     pty = g.height / 2;

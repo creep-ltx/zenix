@@ -24,6 +24,7 @@ int dragging;
 static int dkeep = -1;                  /* a window moved whole: its kept copy stays for the drag (its inside's source) */
 u32 nmoves, tmoves;
 static u16 next_id = 1;
+static void lift_end(void);
 
 /* ---- geometry ---- */
 static int framed(const struct win *w) { return w->kind != WK_BAR && w->kind != WK_DESKTOP; }
@@ -64,7 +65,7 @@ static void bounds(const struct win *w, struct rect *b)
     b->x1 = (s16)(b->x1 + sw(w));
     b->y1 = (s16)(b->y1 + sw(w));
 }
-static int shown(const struct win *w) { return w->id && (w->state & WST_SHOWN); }
+static int shown(const struct win *w) { return w->id && (w->state & WST_SHOWN) && !w->lifted; }
 struct win *win_get(int id)
 {
     for (int i = 0; i < NWIN; i++)
@@ -464,6 +465,8 @@ void win_close(int s)
         dragging = 0;
     if (dkeep == s)
         dkeep = -1;
+    if (w->lifted)
+        lift_end();                     /* its place was painted when it was lifted: nothing to paint */
     bm_free(&w->back);
     free(w->menu);
     w->menu = 0;
@@ -814,6 +817,156 @@ bad:
     }
 }
 
+/* ---- the chips' drag (D38 "Dragging with the chips"): the window lifted into AGA's playfield 2, its bitmap placed
+ * by the Copper each move, no blit; painted back into the screen's planes on the drop ---- */
+static struct bm lb;                    /* the lifted window: plane 0 of line 0; a plane's line: its bytes, 88 zero bytes */
+static u8 *lmem;                        /* lb's chip RAM: 88 zero bytes (the zero line), then the lines */
+static int loff, lwb, lpen = -1;             /* the frame's left edge in its bitmap (0..7); pen 0's stand-in, -1 none */
+static int hw;                          /* the drag is the chips' */
+static u32 lrow(int y, int k) { return (u32)y * lb.stride + (u32)k * lb.bpr; }
+/* the pens of the pixels in r (lb's coordinates): bit v for pen v; only bit 0 when pen0only */
+static u16 lpens(const struct rect *r, int pen0only)
+{
+    u16 used = 0;
+    int l0 = r->x0 >> 5, l1 = (r->x1 - 1) >> 5;
+    u32 m0 = 0xFFFFFFFFu >> (r->x0 & 31), m1 = 0xFFFFFFFFu << (31 - ((r->x1 - 1) & 31));
+    for (int y = r->y0; y < r->y1; y++) {
+        const u32 *p = (const u32 *)(lb.p + lrow(y, 0)), *q = (const u32 *)(lb.p + lrow(y, 1)),
+                  *t = (const u32 *)(lb.p + lrow(y, 2)), *u = (const u32 *)(lb.p + lrow(y, 3));
+        for (int i = l0; i <= l1; i++) {
+            u32 m = (i == l0 ? m0 : ~0u) & (i == l1 ? m1 : ~0u), a = p[i], b = q[i], c = t[i], d = u[i];
+            if (pen0only) {
+                if (~(a | b | c | d) & m)
+                    return 1;
+                continue;
+            }
+            u32 ab[4] = { ~a & ~b, a & ~b, ~a & b, a & b }, cd[4] = { ~c & ~d & m, c & ~d & m, ~c & d & m, c & d & m };
+            for (int v = 0; v < 16; v++)
+                if (!(used >> v & 1) && (ab[v & 3] & cd[v >> 2]))
+                    used |= (u16)(1 << v);
+            if (used == 0xFFFF)
+                return used;
+        }
+    }
+    return used;
+}
+/* pen 0's pixels in r become pen x (playfield 2's pen 0 is transparent; x's playfield-2 colour is pen 0's) */
+static void lremap(const struct rect *r, int x)
+{
+    int l0 = r->x0 >> 5, l1 = (r->x1 - 1) >> 5;
+    u32 m0 = 0xFFFFFFFFu >> (r->x0 & 31), m1 = 0xFFFFFFFFu << (31 - ((r->x1 - 1) & 31));
+    for (int y = r->y0; y < r->y1; y++) {
+        u32 *pl[4];
+        for (int k = 0; k < 4; k++)
+            pl[k] = (u32 *)(lb.p + lrow(y, k));
+        for (int i = l0; i <= l1; i++) {
+            u32 z = ~(pl[0][i] | pl[1][i] | pl[2][i] | pl[3][i]) & (i == l0 ? m0 : ~0u) & (i == l1 ? m1 : ~0u);
+            for (int k = 0; k < 4; k++)
+                if (x >> k & 1)
+                    pl[k][i] |= z;
+        }
+    }
+}
+static void lift_end(void)
+{
+    if (!lmem)
+        return;
+    hw_off();
+    blit_idle();
+    sys_memfree(lmem);
+    lmem = 0;
+    hw = 0;
+}
+/* 1: the window is in playfield 2, its place painted under it; 0: not possible (the caller drags the old way) */
+static int lift_start(int s)
+{
+    struct win *w = &wins[s];
+    if (!hw_ok() || shadowing || !shown(w) || w->kind == WK_DESKTOP || lmem)
+        return 0;
+    if (!w->back.p) {                   /* its inside's source while lifted and at the drop */
+        if (!whole(w, &w->vis))
+            return 0;
+        win_inside(w, &oin[s]);
+        if (!keep(s))
+            return 0;
+    }
+    struct rect b;
+    bounds(w, &b);
+    loff = b.x0 & 7;
+    int wb = (loff + b.x1 - b.x0 + 63) >> 6 << 3, h = b.y1 - b.y0;
+    u32 S = (u32)wb + 88, n = 88 + S * 4 * (u32)h;
+    u8 *m = sys_memalloc_chip(n + 8);
+    if (!m)
+        return 0;
+    u8 *base = (u8 *)(((u32)m + 7) & ~7u);
+    memset(base, 0, 88);
+    lb = (struct bm){ base + 88, (u16)(S * 8), (u16)h, (u16)S, 4, S * 4, 0 };
+    struct rect all = { 0, 0, (s16)lb.w, (s16)h };
+    struct bm save = scr;
+    scr = lb;
+    bm_fill(&scr, &all, 0);             /* the zero bytes around the window: transparent */
+    scr.w = (u16)(wb * 8);
+    s16 fx = w->fx, fy = w->fy;
+    w->fx = (s16)loff;
+    w->fy = 0;
+    all.x1 = (s16)scr.w;
+    frame_paint(w, &all);
+    struct rect in, o[3];
+    win_inside(w, &in);
+    bm_copy(&w->back, 0, 0, &scr, &in);
+    int no = outer(w, o);
+    w->fx = fx;
+    w->fy = fy;
+    lb = scr;
+    scr = save;
+    blit_idle();
+    lpen = -1;
+    int p0 = 0;
+    for (int i = 0; i < no && !p0; i++)
+        p0 = lpens(&o[i], 1);
+    if (p0) {                           /* pen 0 in it: a pen it does not use stands in */
+        u16 used = 0;
+        for (int i = 0; i < no; i++)
+            used |= lpens(&o[i], 0);
+        for (int v = 1; v < 16 && lpen < 0; v++)
+            if (!(used >> v & 1))
+                lpen = v;
+        if (lpen < 0) {
+            sys_memfree(m);
+            return 0;
+        }
+        for (int i = 0; i < no; i++)
+            lremap(&o[i], lpen);
+    }
+    lmem = m;
+    lwb = wb;
+    hw_show(&lb, base, b.x0 - loff, b.y0, lpen);
+    hw_wait();                          /* shown in playfield 2 (the same picture where it is): now its place is painted */
+    before();
+    w->lifted = 1;
+    after(&b);
+    dkeep = s;
+    hw = 1;
+    return 1;
+}
+/* the drop: the window painted at (x, y) under playfield 2, which shows it there; then playfield 2 off */
+static void lift_drop(int s, int x, int y)
+{
+    struct win *w = &wins[s];
+    hw_show(&lb, lmem ? (const u8 *)(((u32)lmem + 7) & ~7u) : 0, x - loff, y, lpen);
+    w->fx = (s16)x;
+    w->fy = (s16)y;
+    w->placed = 1;
+    struct rect d;
+    bounds(w, &d);
+    hw_wait();
+    before();
+    w->lifted = 0;
+    after(&d);
+    blit_idle();
+    lift_end();
+}
+
 /* ---- drags run in the server (D38 3.3): an outline (XOR) or the whole window, until the button is let go ---- */
 static int dmode, dpx, dpy, dx0, dy0, dw0, dh0, ox, oy, ow, oh, odrawn;
 static void outline(void)
@@ -832,7 +985,9 @@ void win_drag(int s, int mode, int px, int py)
     struct win *w = &wins[s];
     if (dragging || !shown(w))
         return;
-    if (!(mode & DRAG_OUTLINE)) {
+    if ((mode & 15) == DRAG_MOVE && lift_start(s))
+        mode = DRAG_MOVE;               /* the chips' drag: the frame style's choice is the fallback's */
+    else if (!(mode & DRAG_OUTLINE)) {
         /* the whole window: drawn off the screen and shown once a pass (draw.c, shadow_*); a move takes its inside
          * from its kept copy, kept for the whole drag. No chip RAM for either: an outline */
         if (!shadow_begin())
@@ -878,6 +1033,32 @@ void win_drag_event(int x, int y, int up)
     }
     if (ny < 0) ny = 0;
     if (ny > scr.h - 8) ny = scr.h - 8;
+    if (hw) {                           /* playfield 2's pointer stays inside its bitmap's zero bytes */
+        if (nx - loff < 64 - lwb * 8)
+            nx = 64 - lwb * 8 + loff;
+        if (nx > scr.w - 8)
+            nx = ((scr.w - 8 + bl(w)) & ~7) - bl(w);
+        if (up) {
+            dragging = 0;
+            lift_drop(s, nx, ny);
+            if (dkeep == s) {
+                dkeep = -1;
+                if (w->back.p && shown(w) && whole(w, &w->vis))
+                    bm_free(&w->back);
+            }
+            ev_wm(EV_WM_DRAGEND, w->id, 0, 0, w->fx, w->fy, w->iw, w->ih);
+            return;
+        }
+        if (nx != ox || ny != oy) {
+            u32 t0 = sys_hrtime();
+            hw_show(&lb, (const u8 *)(((u32)lmem + 7) & ~7u), nx - loff, ny, lpen);
+            tmoves += sys_hrtime() - t0;
+            nmoves++;
+            ox = nx;
+            oy = ny;
+        }
+        return;
+    }
     if (dmode & DRAG_OUTLINE) {
         if (nx != ox || ny != oy || nw != ow || nh != oh || up) {
             if (odrawn)

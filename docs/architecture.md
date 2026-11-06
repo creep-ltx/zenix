@@ -1481,7 +1481,8 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   and showing it are copies; the copies' budget is 256 KB, past it a window is simple refresh (cleared, EV_EXPOSE).
   Every change paints only its damage, back to front, each pixel once. The blitter fills, inverts and copies while
   the console is shown; while it is not (GEV_RELEASE) the CPU does, and text is always the CPU's, a byte a plane as
-  the console's. Drags run in the server: an outline (XOR) or the whole window, until the button is let go.
+  the console's. Drags run in the server: an outline (XOR) or the whole window, until the button is let go; on AGA a move lifts the
+  window into playfield 2 (dual playfield) and moves it with the Copper alone (D38 "Dragging with the chips").
   Without a window manager windows are placed one below the other, a click raises and focuses, the title bar drags
   the outline, the close gadget sends EV_CLOSE. It ends when its last client has gone (`-persist`: never), and the
   console is text again. **libdisplay** (`display/lib/libdisplay.c`, `display/display.h`, linked into each client:

@@ -503,3 +503,59 @@ FS-UAE, not yet on the A1200):
   answer for CTerm on AmigaOS; the AmigaOS layer's `Wait()` answers the terminal's bit for it. `tuitest` checks it on
   a pty.
 
+
+## Dragging with the chips (2026-11-06, branch hwdrag)
+
+The owner on the PiStorm A1200 with the demo floppy, after the tear-free drag above: "Dragging windows is painfully
+slow and I can not go public like that." Copying a window costs blitter time in proportion to its size, every move;
+the goal is a drag that feels instant on the stock A1200 (68EC020 at 14 MHz, the floor), with no tearing. So the
+window is moved by the display hardware, not copied.
+
+**The design (AGA):**
+- **On drag start the window is lifted into playfield 2** (AGA's dual playfield: 4 + 4 planes in hires, playfield 2
+  in front). Its picture (frame, shadow and inside) is drawn once into a bitmap of its own in chip RAM, every line of
+  every plane followed by 88 zero bytes: the display fetches 88 bytes a plane a line (below), so the bytes around the
+  window always read as zero, which playfield 2 shows as transparent. From then on the window is "not shown" for the
+  painter: the area it covered is painted once (the desktop, icons and windows behind it) under playfield 2, so no
+  pixel visibly changes. Its program's drawing meanwhile goes to its kept copy.
+- **Each move rewrites a few Copper words; no blit.** Vertical place: the Copper waits for the line above the window
+  and points the even planes (BPL2/4/6/8PT) at the bitmap, with BPL2MOD the bitmap's line minus 88; under the window it
+  points them at 88 zero bytes with BPL2MOD -88 (the same zero line every line). Horizontal place, the window always
+  on an 8-pixel step (D38 3.2): the pointer moves in 64-pixel steps (the 64-bit fetch needs 8-byte aligned pointers)
+  and BPLCON1's playfield-2 delay the rest, 0..56 hires pixels. The delay needs one more fetch unit on the left: the
+  fetch starts at DDFSTRT $28 (one 64-pixel unit before the usual $38), so 11 units a line, and playfield 1 (the
+  desktop) has its pointers 8 bytes earlier and its modulo 8 less, so it shows exactly as before.
+- **Never torn:** the part of the Copper list that changes is double-buffered. The fixed part ends with
+  `COP2LC = list; COPJMP2`; a move writes the list not in use, then changes one word (COP2LCL; both lists in one
+  aligned 512-byte block, so the high word is the same). The Copper reads that word at the top of a frame, so every
+  frame shows the window wholly at its old place or wholly at its new one. A move waits, if it must, until the frame
+  after the last change has begun (one move a frame at most).
+- **Colours:** playfield 2 takes colours 32..47 (BPLCON3's PF2OF = 32, bank 1; the pointer's sprite colours stay at
+  16..31), loaded with the same 16 colours. Pen 0 of a playfield is transparent, so a window with pixels in pen 0 has
+  them re-coloured in its lifted copy to a pen it does not use, whose playfield-2 colour is pen 0's. A window that uses
+  all 16 pens (and pen 0) is dragged the old way.
+- **While dragged it is in front of everything** but the pointer, the bar too (playfield 2 is in front of the whole
+  screen), and its own program's drawing shows at the drop (it goes to the kept copy meanwhile).
+- **On drop:** the window is placed at the new spot (painted under playfield 2, which shows the same picture there),
+  then the Copper turns playfield 2 off at the next frame, and the bitmap is freed.
+
+**The cost:** chip RAM while dragging: (window bytes + 88) x 4 planes x lines, rounded to 8 bytes: a 400 x 140
+window about 81 KB, the screen's own 80 KB being the old drag's cost. Display DMA while dragging: 8 planes at the
+64-bit fetch, 11 units a line, 88 of a line's 227 slots (40 without), a few more slots taken from the CPU on a
+chip-only machine for the drag's length. At the start: the window drawn into its bitmap once (a few blits), the area
+it leaves painted once; a pen-0 check of its pixels by the CPU (the full count of pens only when pen 0 is used).
+Each move: one of the two lists written (about 37 Copper instructions), one word flipped, no blits, no pixels.
+
+**Fallbacks:** OCS/ECS (no 8 planes), a resize, no chip RAM for the bitmap, a window with no kept copy (simple
+refresh, partly hidden), or all 16 pens used: the earlier ways (the outline, or the whole window drawn off the screen
+and shown timed to the beam), as the frame style's `drag` setting says. On AGA a move is always the chips' drag when
+it can be: the `drag` setting now chooses only the fallback and the resize.
+
+**Measured** (`tools/drag-test.sh`, FS-UAE's stock A1200 with 4 MB fast, the same 400 x 140 window over another
+dragged for about five seconds; emulator figures, not the real machine's): the tear-free drag of 2026-11-05 took per
+move 87.9 blits, 68,119 pixels, 75.8 ms drawing and 2.8 shows of 6.2 ms (120 moves); the chips' drag takes 0.46 ms of
+the server's time a move (writing the list, and any wait for the frame), and for the whole drag 52 blits (lifting and
+dropping) against 10,549: 0 of 14 screenshots torn, held before the drop the window shows exactly where the drop leaves
+it, and a pen-0 patch dragged over another window shows pen 0's colour. The moves are as many as the mouse gives (one a
+frame at most), on any CPU. displayd grew by 3,418 bytes of code (43,312 -> 46,730). Verified in FS-UAE, not yet on
+the A1200.
