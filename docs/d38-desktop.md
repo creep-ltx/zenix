@@ -622,3 +622,132 @@ pixel those after the drop at the place they show (`dpy-test.py moved`; the poin
 may be a blend of its neighbours, as the screenshot's scaling samples a moved picture at another phase: a title bar
 shifted by 2 pixels against the body is caught, tried on an altered screenshot). If the A1200
 shows the step when the window is held still mid-drag, it is the chips', not the camera's: say so.
+
+## Screen modes: hires and hires interlaced (2026-11-06, branch modes)
+
+The owner (2026-11-06): "We need to be able to select screen modes... at least PAL hires and interlaced." Section 6.1
+planned 640 x 512 as "a later setting"; this is it. Built on branch modes; the kernel is unchanged (its text console
+keeps its mode: the desktop's screen is displayd's own Copper list after `CON_GRAB`).
+
+**The modes and the setting.** `/etc/zdesk/screen`, one line `mode hires|hires-lace|auto` (no file, no line or
+`auto`: hires, the mode that never flickers):
+
+| Mode | PAL | NTSC | Lines a field | Chip RAM, the screen (AGA 4 planes / OCS-ECS 3) |
+|---|---|---|---|---|
+| `hires` | 640 x 256 | 640 x 200 | all | 80 KB / 60 KB (PAL), 63 / 47 (NTSC) |
+| `hires-lace` | 640 x 512 | 640 x 400 | every other | 160 KB / 120 KB (PAL), 125 / 94 (NTSC) |
+
+PAL or NTSC is never chosen: displayd builds on the console's height, which the kernel set at boot from the Agnus/Alice
+id (256 or 200 lines; CLAUDE.md's rule), and interlace doubles it. displayd reads the file when it starts (also for
+dlogin's screen: the file is in zdesk's folder because it is the desktop's setting, and displayd is the one program
+that acts on it).
+
+**Changed while the desktop runs: `DPY_MODE`** (protocol request 15, any client of the desktop's session; the answer
+is the mode now). displayd allocates the new screen (refused with -ENOMEM, the screen as it was, when chip RAM is
+short by the rule below), tells every client `EV_SCREEN` (event 10: the new width and height, the mode; libdisplay's
+`dpy_w` and `dpy_h` follow it), gives up the kept copies (they are copies of the old look; the programs draw again on
+`EV_EXPOSE`), gives the desktop's window the new size (`EV_RESIZE`), shortens a window taller than the room (in its
+steps, `EV_RESIZE`), keeps every framed window on the new screen by the rule of "Windows stay on the screen", paints
+all of it into the new screen while the old one is still shown, then points the Copper at it (one frame) and frees
+the old one. Refused with -EBUSY during a drag or while another console is shown. `DPYM_ASK` only asks. dpytest's
+`mode` command drives it in the tests.
+
+**Test, Use, Save, Cancel (the owner 2026-11-06: "test/use/save/cancel options", AmigaOS's preferences editors).** The
+preferences program (the next step) maps them onto the file and the request:
+- **Test:** `DPY_MODE` with the chosen mode; the file is not written. The program remembers the mode it found
+  (`DPYM_ASK`) for Cancel.
+- **Use:** the same request (if Test did not already make it), the file not written: the mode lasts until displayd
+  ends (the session's Log out, or the next boot under dlogin), as AmigaOS's Use lasts until the reboot.
+- **Save:** the request, and the line written to `/etc/zdesk/screen` (root's file: the program asks for root's
+  rights as `passwd` does, or writes the user's `~/.config/zdesk/screen` once displayd reads one; today the one file).
+- **Cancel:** `DPY_MODE` with the remembered mode (nothing if it never changed), the file untouched.
+A failed request (-ENOMEM, -EBUSY) is shown and the mode stays; the program never writes the file for a mode that
+failed.
+
+**The text console the same way (designed here, not built: the coordinator schedules it).** Today `/etc/console`
+(colours, font, login) is read by init at every start and applied with `CON_COLOURS` and the font's load; there is no
+mode. A live mode and font switch for Test/Use/Cancel needs one kernel call, `SYS_console` `CON_MODE` (root; the
+console's lines: hires or interlaced, and the font: Topaz or a PSF/ZCF already loaded), doing what `gfx_init` does for
+the size: the kernel's screen allocated again (40-160 KB, or 320 KB for 16 colours interlaced), its Copper list's
+plane pointers, modulos and BPLCON0's LACE (two field lists, the same line-312 wait as here), `trows` (32 or 64 PAL,
+25 or 50 NTSC: `TROWS_MAX` and the cells' grids grow to 64 rows, 3 x 64 x 80 = 15 KB a console instead of 7.5 KB, the
+ten consoles' grids allocated as they are shown), every console's text drawn again, and `SIGWINCH` to each console's
+foreground group. An estimate of its size: 1.0-1.5 KB of kernel code (the lists and the re-allocation; the drawing is
+there already) and 7.5 KB of data a used console for the taller grids, against `tools/ksize-budget`'s 92 bytes left
+today: the budget must grow first, which is the owner's call. `/etc/console` would gain `mode hires|hires-lace|auto`,
+Save writing it; Test, Use and Cancel the call.
+
+**Interlace on the chips (HRM "Interlaced bitplanes"; AGA the same).** BPLCON0's LACE bit (2): the display alternates a
+long field (313 lines PAL, 263 NTSC) and a short one (312, 262), each showing every other line. The planes are
+interleaved, so the screen in memory is simply 512 lines; each field fetches one line in two: the modulos grow by one
+whole line of all planes (`stride`), and the short field's plane pointers start one line (`stride` bytes) further in
+(the long field shows lines 0, 2, 4..., HRM figure 2-1). So there are two Copper lists, one a field:
+- **Which list runs is kept right by the Copper itself**, with no interrupt and no LOF read: each field's list ends
+  with `COP1LC = the long field's list`, then waits for line 312 (PAL; 262 NTSC) and there writes `COP1LC = the short
+  field's list`. Only a long field has that line, so after a long field the short list runs next, after a short one
+  the long list. A start out of step (the kernel's `gfx_hand` points COP1LC at one list) is right after one field.
+  (AmigaOS points the two lists at each other and re-checks LOF in the vertical blank, aos31-study/graphics-and-layers;
+  the line-312 wait needs neither.)
+- **The fixed part** (palette, sprites, FMODE) is written twice (`set_palette` writes both); each copy ends with its
+  field's `COP2LC` and `COPJMP2`. **The changing part** (planes, and playfield 2 while dragged by the chips) is four
+  lists: two (the double buffer of "Dragging with the chips") for each field, in one aligned 1 KB block, and a change
+  writes both fields' new lists, then flips the two `COP2LCL` words. 512 bytes more chip RAM than hires.
+
+**The pointer.** Sprite DMA fetches a sprite line on the frame's lines, so in both fields the same picture is shown at
+the same place: the 16-line arrow covers 32 lace lines, the same size on the glass as in hires (as AmigaOS's pointer in
+an interlaced screen without its own laced pointer image). The kernel's pointer stays in frame lines (0..255 PAL, 0..199
+NTSC: the kernel unchanged); displayd doubles the vertical: screen line = 2 x the kernel's. **The hot spot** (the
+arrow's tip, its first line) is then on lines 0, 2, ... 510; the last line, 511, is under the tip's second half, so a
+click at the bottom edge hits line 510, which every window and the desktop include. **The mouse's speed:** a count is
+one frame line, two lace lines: the pointer moves as far on the glass as in hires (the acceleration of
+`/etc/zdesk/mouse` the same).
+
+**The drag in playfield 2 (AGA, "Dragging with the chips"), in interlace.** The lifted window's bitmap is one picture
+of its lines; each field shows its half: in a field's list the window starts at the first screen line at or below the
+window's top with the field's parity (line `y` is on frame line `y / 2` of field `y & 1`), at that line of the bitmap,
+and playfield 2's modulo grows by one bitmap line (two lines a fetch, less the 88). Its end and the zero line likewise.
+So both fields' pointers are written at every move, and the frame shows the window wholly at its old or its new place
+in each field (a move written between the two fields of one frame shows in the second only: never a torn field, at
+worst one field (20 ms) of the window at the old place on alternate lines, as any interlaced picture changing).
+
+**The whole window's drag off the screen (OCS/ECS, and the fallbacks).** Its show is timed to the beam in frame
+lines: a band of screen lines `y0..y1` is on frame lines `y0 / 2 .. (y1 + 1) / 2` of each field, a frame line of the
+band holds two screen lines to copy. The second screen is 160 KB (120 OCS/ECS) instead of 80; without it the drag is
+the outline, as before.
+
+**The blitter's height.** BLTSIZE holds at most 1,024 lines, and a copy of every plane at once (interleaved) is lines x
+planes: 512 x 4 = 2,048 for a whole lace screen. Such a block is done in pieces of at most 1,024 (from the bottom when
+it copies descending), in hires too (where the screen's 1,024 fitted exactly).
+
+**Chip RAM, and what falls back.** Interlace costs: the screen twice (+80 KB AGA, +60 OCS/ECS), the whole drag's second
+screen twice when it runs (160 KB), the chips' drag bitmap the window's lines (a window as tall on the glass has twice
+the lines: a 400 x 280 lace window about 162 KB while dragged), and a window as tall on the glass keeps a copy twice the
+size. The kept copies' budget stays 256 KB (past it simple refresh, as before), so fewer windows are smart refresh.
+On the minimum (2 MB chip RAM, 4 MB fast) that leaves well over 1.5 MB of chip RAM. **The fallback:** displayd takes
+interlace only when the chip RAM free at its start is at least the lace screen plus 512 KB (the drags, the copies,
+sound, ZINE, disk buffers); else, and when the screen's allocation fails, it starts in hires and says why on its
+standard error (the serial log): "displayd: interlace needs N KB of chip RAM, M KB free: hires". On a 2 MB chip-only
+A1200 that is about 1.1 MB free with one login: interlace fits there too (best effort, as the rest).
+
+**Text, fonts and the clients.** The same 8 x 8 Topaz and supplement: in 512 lines a line of text is half as tall on
+the glass, and twice as many fit (64 rows on the screen), as on Workbench at 640 x 512 with Topaz 8. A taller font
+(8 x 16, or Topaz 11 from a file) is a theme's choice once the server loads fonts (TrueType later, section 5), not
+this step. The screen's size reaches the clients in `DPY_HELLO`'s answer (`dpy_w`, `dpy_h`), as before; zdesk had
+640 x 256 written in (its placing, zoom, the desktop window, the bar; also wrong on NTSC's 200 lines) and now uses
+`dpy_w` and `dpy_h`. `term`'s rows grow from 4..29 to 4..32 where the screen is taller: the console's cell model has
+32 rows (`TROWS_MAX` in kernel.h, the kernel's); a terminal taller than 32 rows needs that model bigger, a later step.
+Icons and gadgets are the same pictures: half as tall on the glass in interlace.
+
+**Flicker.** Interlace on a 15 kHz monitor or a TV flickers (each line is lit 25 times a second on PAL, 30 NTSC),
+worst on a thin horizontal line or a one-line pattern. Through a flicker fixer or a scandoubler (the Indivision AGA,
+an RGB-to-HDMI) both fields are woven into one steady picture. Which the owner uses is not assumed: hires stays the
+default, and the themes' one-pixel lines are as they are (a theme for interlace on a TV would use two-line lines).
+
+**Not in this step:** the text console's mode (above: designed, not built); the preferences program; a user's own
+`~/.config/zdesk/screen`; super-hires (1280 wide), productivity, RTG; a laced pointer image (to the line).
+
+**Tests (FS-UAE):** `tools/lace-test.sh`: the desktop in `hires-lace` on the stock A1200 with 4 MB fast (screenshots of
+the desktop, a term, the pointer at the bottom edge, `DPY_MODE` to hires and back, checked pixel by pixel against
+the places the server reports), PAL and NTSC (FS-UAE's NTSC A1200: 640 x 400 and 640 x 200); `drag-test lace`: the
+whole drag test (the chips' drag held mid-way, the edges, the 16-pen drag drawn off the screen) on the interlaced
+screen.
