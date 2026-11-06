@@ -90,6 +90,8 @@ are fixed at once. Two independent design reviews for deep core changes, one for
 PFS3 8 GB), to /dev/null and on the screen, in the text console and in zdesk's term. First figures (release
 2026110403, measured): /dev/null 4.36 s; text console 12.8 s; term 2 min 51.8 s. PiStorm (Emu68, not a real-Amiga speed), the fresh ZenixFS SD root without Amiga partitions, release 2026110404 (owner's photos 2026-11-04): /dev/null 0.08-0.12 s, text console 1.37 s, term 0.32 s (release 2026110403 on the old SD card: console 1.95 s, term 44.8 s).
 
+**ZINE, open (2026-11-06):** the program's volume is named "ZINE", not after its folder as d29 5.6 says, so a demo that opens `<its disk's name>:data/...` fails.
+
 **Real-hardware findings waiting (the A1200 with the 1260, 2026-11-04), fixed next:** the 040/060 data cache on for fast
 RAM through the transparent translation registers, chip RAM uncached (done 2026-11-04, D37: 4.23 s -> 0.95 s on the 1260; boot log was: "data cache off"; `ls -laR /` of 506
 lines took 4.26 s, 9.64 s on the screen with the serial cable in: measured; built on branch cache 2026-11-04, DESIGN
