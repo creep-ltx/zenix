@@ -45,6 +45,32 @@ static int pb_wait(struct pb *b, int want, const char *stage)
     }
 }
 
+/* Inside a handshaked frame: was the driver away for about the box's own wait (500 ms) since the last look? Then
+ * the box may have given up on this transfer and, SEL still up, taken the lines' level as a new command and answered
+ * it: BUSY toggles again, the bytes read are the pull-ups' (found in the model, a frame of the right size with a byte
+ * of 0xFF in it, which nothing on the line would catch). Looked at every PB_GAPWORDS words and at the frame's end: a
+ * system call per 128 bytes, not per byte */
+static int pb_gap(struct pb *b, u32 *last)
+{
+    u32 t = pb_ticks();
+    if ((u32)(t - *last) >= PB_GAP) {
+        b->stage = "the frame's bytes (the driver was away as long as the box waits: not trusted)";
+        return -ETIMEDOUT;
+    }
+    *last = t;
+    return 0;
+}
+
+/* CIA-B's port A as it is now with SEL up and POUT down: the POUT edges of a handshaked frame (every byte answered,
+ * so no edge can be missed) are then one write each instead of a bset's read and write (one CIA access a byte
+ * fewer: a receive of 1,514 bytes 11.1 -> 9.0 ms on the model). The serial port's bits 3-7 are
+ * written back as read: nothing else in Zenix writes this register while the driver holds the port (D39 4, the
+ * rule), and its input bits (DSR, CTS, CD) only take the latch, which nobody drives. BUSY (an input) reads back 0 */
+static unsigned char pb_ctrl_lo(void)
+{
+    return (unsigned char)((pb_rd(PB_CTRL) & ~((1u << PB_POUT) | (1u << PB_BUSY))) | 1u << PB_SEL);
+}
+
 /* every transfer's end: the data lines the box's again, SEL and POUT down in one write (as the quiesce program) */
 static void pb_end(void)
 {
@@ -171,7 +197,9 @@ int pb_send(struct pb *b, unsigned len)
         if ((r = pb_wait(b, 1, "the burst's start")))
             goto out;
         const unsigned char *q = p + 2;
-        for (unsigned i = 0; i < words; i++) {          /* the box samples the byte at each edge of POUT */
+        for (unsigned i = 0; i < words; i++) {          /* the box samples the byte at each edge of POUT; bset and
+                                                         * bclr (3 accesses a byte, as plipbox.device): the box's
+                                                         * burst loop was never tried at 2 */
             pb_wr(PB_DATA, *q++);
             pb_bset(PB_CTRL, PB_POUT);
             pb_wr(PB_DATA, *q++);
@@ -184,17 +212,26 @@ int pb_send(struct pb *b, unsigned len)
         r = pb_wait(b, 1, "the last answer");
     } else {
         const unsigned char *q = p;
+        unsigned char lo = pb_ctrl_lo(), hi = lo | 1u << PB_POUT;
+        u32 last = b->t0;
         for (unsigned i = 0; i <= words; i++) {         /* the size word, then the frame */
+            if (!(i % PB_GAPWORDS) && (r = pb_gap(b, &last)))
+                goto out;
             if ((r = pb_wait(b, 1, i ? "the frame's bytes" : "the command's answer")))
                 goto out;
             pb_wr(PB_DATA, *q++);
-            pb_bset(PB_CTRL, PB_POUT);
+            pb_wr(PB_CTRL, hi);
             if ((r = pb_wait(b, 0, i ? "the frame's bytes" : "the size")))
                 goto out;
             pb_wr(PB_DATA, *q++);
-            pb_bclr(PB_CTRL, PB_POUT);
+            pb_wr(PB_CTRL, lo);
         }
-        r = pb_wait(b, 1, "the last answer");
+        if (!(r = pb_wait(b, 1, "the last answer")))
+            r = pb_gap(b, &last);
+    }
+    if (!r && len > PB_HDR) {
+        b->tx_n++;
+        b->tx_ticks += pb_ticks() - b->t0;
     }
 out:
     pb_end();
@@ -239,17 +276,27 @@ int pb_recv(struct pb *b, unsigned char *buf, unsigned max, unsigned *len)
         r = -EMSGSIZE;
         goto out;
     }
+    unsigned char lo = pb_ctrl_lo(), hi = lo | 1u << PB_POUT;
+    u32 last = b->t0;
     for (unsigned i = 0; i < (n + 1) / 2; i++) {
+        if (!(i % PB_GAPWORDS) && (r = pb_gap(b, &last)))
+            goto out;
         if ((r = pb_wait(b, 0, "the frame's bytes")))
             goto out;
         *buf++ = pb_rd(PB_DATA);
-        pb_bclr(PB_CTRL, PB_POUT);
+        pb_wr(PB_CTRL, lo);
         if ((r = pb_wait(b, 1, "the frame's bytes")))
             goto out;
         *buf++ = pb_rd(PB_DATA);
-        pb_bset(PB_CTRL, PB_POUT);
+        pb_wr(PB_CTRL, hi);
     }
+    if ((r = pb_gap(b, &last)))
+        goto out;
     *len = n;
+    if (n > PB_HDR) {
+        b->rx_n++;
+        b->rx_ticks += pb_ticks() - b->t0;
+    }
 out:
     pb_end();
     return r;
@@ -339,6 +386,28 @@ void pb_keepalive(struct pb *b)
         pb_result(b, pb_magic(b, PB_MAGIC_ONLINE), "the keepalive");
 }
 
+/* after the driver's sleep of ticks: was a request waiting when it woke? (each such wait was up to ticks too long) */
+void pb_woke(struct pb *b, int ticks)
+{
+    if (!ticks || b->down)
+        return;
+    b->naps++;
+    long a = pb_acks();
+    if (a >= 0 && (u32)a != b->acks)
+        b->late++;
+}
+
+/* the line's figures, at the driver's end (D39 13: what the A1200 says about where a transfer's time goes) */
+void pb_report(struct pb *b)
+{
+    pb_log(b, "frames in %lu, %lu.%lu ms each on the line; out %lu, %lu.%lu ms each; %lu sleeps, %lu of them with a "
+           "frame waiting at the end", (unsigned long)b->rx_n, (unsigned long)(b->rx_n ? b->rx_ticks * 10 / b->rx_n : 0),
+           (unsigned long)(b->rx_n ? b->rx_ticks * 100 / b->rx_n % 10 : 0), (unsigned long)b->tx_n,
+           (unsigned long)(b->tx_n ? b->tx_ticks * 10 / b->tx_n : 0),
+           (unsigned long)(b->tx_n ? b->tx_ticks * 100 / b->tx_n % 10 : 0), (unsigned long)b->naps,
+           (unsigned long)b->late);
+}
+
 /* the end: the box told (best effort: it drops the network's frames until the next online frame), the port left */
 void pb_stop(struct pb *b)
 {
@@ -379,6 +448,13 @@ static int pb_frame(struct pb *b, unsigned char *f, unsigned len)
         return 0;
     }
     return 1;
+}
+
+/* the driver's wait before its next turn (drv_wait's ticks): none after a turn that moved something, then the next
+ * tick twice, then every second tick; every PB_RETRY / 20 ticks while the link is down */
+int pb_idle_ticks(const struct pb *b, int idle)
+{
+    return b->down ? 10 : idle > 2 ? 2 : idle ? 1 : 0;
 }
 
 /* the box's requests taken, at most max frames given to the sink -> frames given, or -errno (DRV_PARACK refused) */

@@ -361,20 +361,85 @@ static int mac_ok(const unsigned char *m)
     return !zero && !ff && !(m[0] & 1);
 }
 
-/* ne.c's PROM read: 32 bytes in byte mode, each address byte doubled on a 16-bit card; -> 0, or -ENODEV */
-static int prom_read(struct ne *n)
+/* ne.c's PROM read: 32 bytes in byte mode, each address byte doubled on a 16-bit card; -> 0, or -ENODEV (not
+ * doubled) */
+static int prom_once(struct ne *n, unsigned char m[6])
 {
     unsigned char prom[32];
     wr(n, E_DCR, DCR_BYTE);
     dma_setup(n, 0, 32, CR_RD_READ);
     for (int i = 0; i < 32; i++) prom[i] = ne_rb(PC_IO + n->io + NE_DATA);
     ack(n, ISR_RDC);
+    for (int i = 0; i < 6; i++) m[i] = prom[2 * i];
     for (int i = 0; i < 32; i += 2)
-        if (prom[i] != prom[i + 1]) {
-            ne_log(n, "the PROM's bytes are not doubled: an 8-bit NE1000 card (not supported)");
-            return -ENODEV;
+        if (prom[i] != prom[i + 1]) return -ENODEV;
+    return 0;
+}
+/* one read of the MAC address: the AX88x90's at 0x400 in its memory, a DP8390 card's from its PROM */
+static int mac_once(struct ne *n, unsigned char m[6])
+{
+    if (!n->ax) return prom_once(n, m);
+    mem_read(n, 0x400, m, 6);
+    return 0;
+}
+/* a MAC address a card would have: usable (not 0, not broadcast, not multicast) and fewer than two 0xFF bytes (the
+ * real FA411 once read ff:ff:ff:ff:36:8b, 2026-11-04, and its address on the next start: the read came too early) */
+static int mac_likely(const unsigned char *m)
+{
+    int ff = 0;
+    for (int i = 0; i < 6; i++) ff += m[i] == 0xFF;
+    return mac_ok(m) && ff < 2;
+}
+/* "xx:xx:xx:xx:xx:xx" into t (18 bytes) */
+static void mac_str(char *t, const unsigned char *m)
+{
+    static const char hex[] = "0123456789abcdef";
+    for (int i = 0; i < 6; i++) {
+        t[3 * i] = hex[m[i] >> 4];
+        t[3 * i + 1] = hex[m[i] & 15];
+        t[3 * i + 2] = i < 5 ? ':' : 0;
+    }
+}
+/* the MAC address read until two reads in a row agree and look like an address, NE_MACTRIES times at most, with
+ * NE_MACSETTLE ticks between tries; what was read is said when it took more than one try. Two reads that agree on an
+ * unlikely address every time are taken (a card may really have one; ne_probe still refuses an unusable one).
+ * -> 0, or -ENODEV (a DP8390 card whose PROM is not doubled: an 8-bit NE1000) */
+static int mac_read(struct ne *n)
+{
+    unsigned char a[6], b[6];
+    char ta[18], tb[18];
+    int stable = 0, single = 0, ne1000 = 0;
+    for (int t = 0; t < NE_MACTRIES; t++) {
+        if (t) ne_sleep(NE_MACSETTLE);
+        int ra = mac_once(n, a), rb = mac_once(n, b);
+        int same = !memcmp(a, b, 6);
+        if (ra && rb && same) {         /* the same undoubled PROM twice: an NE1000, not a bad read */
+            ne1000 = 1;
+            break;
         }
-    for (int i = 0; i < 6; i++) n->mac[i] = prom[2 * i];
+        single += ra || rb;
+        if (same && !ra && !rb) {
+            stable++;
+            if (mac_likely(a) || stable == NE_MACTRIES) {
+                memcpy(n->mac, a, 6);
+                if (t) {
+                    mac_str(ta, a);
+                    if (mac_likely(a)) ne_log(n, "the MAC address read right on try %d of %d: %s", t + 1, NE_MACTRIES, ta);
+                    else ne_log(n, "the MAC address reads %s on all %d tries: taken as the card's", ta, NE_MACTRIES);
+                }
+                return 0;
+            }
+        }
+        mac_str(ta, a);
+        mac_str(tb, b);
+        ne_log(n, "the MAC address read as %s and %s (try %d of %d%s)", ta, tb, t + 1, NE_MACTRIES,
+               !same ? ": the two reads differ" : ra || rb ? ": the PROM's bytes not doubled" : ": not a likely address");
+    }
+    if (!n->ax && (single || ne1000)) {
+        ne_log(n, "the PROM's bytes are not doubled: an 8-bit NE1000 card (not supported)");
+        return -ENODEV;
+    }
+    memcpy(n->mac, a, 6);               /* ne_probe says it is not usable */
     return 0;
 }
 
@@ -395,7 +460,7 @@ static int probe_as(struct ne *n, int quiet)
     ack(n, 0xFF);
     wr(n, E_RCR, RCR_MON | (n->ax ? RCR_AX_INTT : 0));
     wr(n, E_TCR, TCR_LB);
-    if (!n->ax && prom_read(n)) return -ENODEV;
+    if (!n->ax && mac_read(n)) return -ENODEV;
     wr(n, E_DCR, DCR_WORD);
     /* the frame memory answers in word mode (FreeBSD's AX88x90 probe; every NE2000 has it at 0x4000) */
     if (mem_write(n, NE_MEM0 << 8, (const unsigned char *)pattern, 32)) return -ENODEV;
@@ -408,7 +473,7 @@ static int probe_as(struct ne *n, int quiet)
     if (n->ax) {
         n->ax = rd(n, AX_TEST) ? 2 : 1;
         if (n->ax == 2) wr(n, AX_GPIO, 0x10);           /* the AX88790's internal PHY */
-        mem_read(n, 0x400, n->mac, 6);                  /* the MAC address, at 0x400 in its memory */
+        (void)mac_read(n);                              /* the MAC address, at 0x400 in its memory */
         n->phy = find_phy(n);
         if (n->phy < 0) {                               /* the PHY may be powered down: the CCSR bit (axnet_cs) */
             ne_wb(PC_ATTR + n->cis.cor + CCR_CCSR, CCSR_PWRDWN);

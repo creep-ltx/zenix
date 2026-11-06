@@ -71,6 +71,22 @@ An event then wakes exactly that process. Without idea 1, a small list of waiter
 **Public source:** the CIA timers are in the *Hardware Reference Manual* (appendix on the 8520 CIA) and the CIA data
 sheets listed in `manuals/INDEX.md`.
 
+**The smallest version, measured (2026-11-05, for ctop's 0 %: a real-hardware finding):** the tick's sample instead of
+the E-clock at every switch, as Unix's first `ps` did: `sched_tick()` already runs at every 100 Hz tick for whichever
+process the tick cut into (pid 0 included), so one line at its top, `current->cpu += (u32)tick;`, charges that tick to
+it (pid 0's slot is the idle count). One `u32 cpu` at the end of `struct proc` and one at the end of `struct uproc`
+(frozen: it only grows, `UPROC_FIRST` stays 32; a program built before it passes the old size and gets the old
+bytes), filled in `SYS_procinfo` (`u->cpu = p->cpu;`). Built and measured on branch hw1105, then taken out: **code +18
+bytes** (proc.o +6, syscall.o +12), **RAM +128 bytes** (proc's bss: 4 bytes in each of the 32 slots), **the mount
+tests' floppy 812 -> 796 bytes left, under the 800 rule by 4**; proc's bss budget line 21,500 -> 21,600. So it needs
+the main session (kernel.h, the floppy's room: the RAM disk or another part 4 bytes smaller) and the owner's yes.
+**ctop's side then** (`ports/ctop/zenix/cu.c`): `cu_cpumeasure` takes each process's `cpu` and the idle slot's, keeps
+the last values by pid, and gives each task its share of the ticks since the last call (`CuShare`), idle = pid 0's
+share; `cu_cpuexact()` stays 0 (sampled at 100 Hz: a process that runs between ticks is not seen, one that is cut by
+every tick is seen too much: right on average over ctop's 1-2 s refresh); `cu_cpufreq` 100 makes TIME+ the ticks as
+time. A program built with the new `uproc` sets `cpu` to 0xFFFFFFFF before the call: still that afterwards, an older
+kernel, "not known" as today. `ps` could add a TIME column the same way.
+
 ## 5. Shorter stretches with interrupts off
 **Today:** `schedule()` scans all process slots for sleepers with interrupts masked, and all of `proc_exit` runs with
 interrupts off.

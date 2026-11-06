@@ -44,6 +44,9 @@
 #define PB_KEEPALIVE    500             /* ticks (5 s) without a transfer before an online frame is sent anyway */
 #define PB_DOWNAFTER    3               /* transfers failed in a row before the link is down */
 #define PB_RETRY        200             /* ticks (2 s) between looks for a box that stopped answering */
+#define PB_GAP          30              /* ticks: away this long between two looks at the clock inside a frame, the
+                                         * box may have given up (its own 500 ms per wait): the frame is not trusted */
+#define PB_GAPWORDS     64              /* words of a frame between two looks at the clock */
 
 /* plipbox.device's own address (amiga/src/device.c), used when the box gives none */
 #define PB_DEFMAC       { 0x1a, 0x11, 0xaf, 0xa0, 0x47, 0x11 }
@@ -61,6 +64,9 @@ struct pb {
     const char *stage;                  /* where the last transfer failed */
     unsigned nlog;                      /* error lines logged (the first 8, then every 256th) */
     u32 tx_ok, tx_err, rx_ok, rx_bad, rx_drop, rx_empty, online_asks, loops;
+    u32 rx_n, rx_ticks, tx_n, tx_ticks;  /* frames of more than a header each way and their ticks on the line (the
+                                         * ticks' sum over many frames is their time, whatever a frame's own) */
+    u32 naps, late;                     /* the driver's sleeps; those after which a request was waiting */
     unsigned char tx[PB_BUF];           /* a frame to send: its size word, then the frame (pb_send's buffer) */
 };
 

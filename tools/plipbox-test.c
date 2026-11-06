@@ -288,6 +288,40 @@ int main(void)
               burst ? "burst" : "handshaked", lt, lr, wedged ? " (a receive cut between its size bytes: the box switched off and on)" : "");
     }
 
+    /* ---- 4b. one long gap (0.6 s, longer than the box waits) at each place of a receive and a handshaked send:
+     * the box gives up, and with SEL still up takes the lines' level as a new command and answers it, so BUSY moves
+     * again; the frame must be lost, never wrong ---- */
+    {
+        unsigned wrongs = 0, delivered = 0, places = 0, outwrong = 0;
+        for (int dir = 0; dir < 4; dir++) {
+            for (unsigned at = 20; at < 6000; at += 97) {
+                machine(1, 400 + at + (uint64_t)dir, 0);
+                b.burst = 0;
+                start(1);
+                struct mframe f;
+                mkframe(&f, 1001);
+                unsigned g0 = ngot, o0 = (unsigned)M.out_total;
+                M.gap_once = dir < 2 ? 600000000ull : 1200000000ull;  /* 1.2 s: past the box's wait for SEL too */
+                M.gap_once_at = M.accesses + at;
+                if (!(dir & 1)) {
+                    m_net_in(f.d, f.len);
+                    m_idle(100000);
+                    pb_poll(&b, &sink, NB);
+                    if (ngot > g0) { delivered++; if (!same(&got[g0], &f)) wrongs++; }
+                } else {
+                    memcpy(b.tx + 2, f.d, f.len);
+                    if (!pb_send(&b, f.len)) delivered++;
+                    m_idle(1500000000ull);      /* whatever the box does with the rest */
+                    for (unsigned k = o0; k < M.out_total; k++) if (!same_out(&M.out[k % 2048], &f)) outwrong++;
+                }
+                M.gap_once_at = 0;
+                places++;
+            }
+        }
+        CHECK(!wrongs && !outwrong, "one gap of 0.6 or 1.2 s at %u places of a receive and a handshaked send: the frame lost or whole, never "
+              "wrong (%u wrong in, %u wrong out, %u of them went through)", places, wrongs, outwrong, delivered);
+    }
+
     /* ---- 5. the frame times on the model's clock (E-clock bound; the box's ENC28J60 time included) ---- */
     {
         machine(1, 50, 0);
