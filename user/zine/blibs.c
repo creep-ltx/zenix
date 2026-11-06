@@ -490,8 +490,9 @@ static void out_put(void *u, u32 c)
     zb_out(&ch, 1);
 }
 
-u32 c_Output(void) { return Z.out_fh; }
-u32 c_Input(void) { return Z.in_fh; }
+/* a command Execute runs (16.11) may have its own: Z.cur_in, Z.cur_out (0: the console's) */
+u32 c_Output(void) { return Z.cur_out ? Z.cur_out : Z.out_fh; }
+u32 c_Input(void) { return Z.cur_in ? Z.cur_in : Z.in_fh; }
 u32 c_IoErr(void) { return Z.ioerr; }
 
 u32 c_SetIoErr(u32 e)
@@ -1093,26 +1094,198 @@ int zb_say_text(const char *pre, u32 p, const char *post)
     return 1;
 }
 
-/* dos Execute (-222; docs/d29-zine.md 16.7, 16.8): ZINE has no shell, so no command runs. Demos Execute side jobs
- * ("run >nil: player", "assign", "setpatch", "stack") and go on whatever happens, or quit when Execute fails, so it
- * answers DOSTRUE (done) and the program's output names the command. An Assign ZINE does itself (zpath.h): the
- * assigns are what Open, LoadSeg, DeleteFile and OpenLibrary follow. */
-u32 c_Execute(u32 cmd, u32 in, u32 out)
+/* ---- dos Execute (-222; docs/d29-zine.md 16.7, 16.8, 16.11). ZINE has no shell. A command that names a program
+ * file (the program's folder and its subfolders, C:, the assigns; any case) is run for real, on the same task as the
+ * Shell would (synchronously, also after "run": ZINE runs one task): loaded, its arguments in a0/d0, its own stack
+ * (a "$STACK:" cookie in the file, else the CLI's default), pr_CLI's fields its own, its Input() and Output() the
+ * redirections, unloaded after; Execute answers DOSTRUE and the return code is IoErr() and cli_ReturnCode (cli_Result2
+ * the command's IoErr). An Assign ZINE does itself (zpath.h). A command of AmigaOS's Shell or C: (zx_known) is not run
+ * and answered as done (demos Execute side jobs: "run >nil: setpatch", "stack"); a name that is no file: DOSFALSE and
+ * ERROR_OBJECT_NOT_FOUND, as the autodoc's "successful in finding and starting the specified program". ---- */
+#define ZX_DEPTH 8                      /* commands running inside one another at once */
+#define ZX_STACKMIN 8192u               /* ZINE's own calls run on the program's stack too */
+#define ZX_STACKMAX (1u << 20)
+u32 zb_segsp, zb_depth;                 /* blobs.S: the stack of the innermost command's caller; commands running */
+u32 zb_runseg(u32 pc, u32 usp, u32 d0, u32 a0, u32 a3);    /* blobs.S: d0 the command's return code */
+extern const u8 zb_segret[];
+static const char *cur_name;            /* the program now running (the one whose Execute is answered) */
+
+static void say_n(const char *t, u32 n)     /* n bytes of a text in the program's memory, at most 100 */
 {
-    (void)out;
-    say3("ZINE: ", Z.blk->name, " asked dos Execute to run ");
-    if (!zb_say_text("\"", cmd, "\""))
-        say3("no text it could read", "", "");
-    if (in && (!cmd || !*(const u8 *)cmd))
-        say3(" (its commands from a file)", "", "");
-    struct za_cmd ac;
-    int a = 0;
-    if (cmd && c_TypeOfMem(cmd)) {
-        u32 n = 0;                      /* the text within the program's memory only */
-        while (n < 512 && c_TypeOfMem(cmd + n) && ((const u8 *)cmd)[n])
-            n++;
-        a = za_parse((const char *)cmd, n, &ac);
+    for (u32 i = 0; i < n && i < 100; i++) {
+        u8 b = (u8)t[i];
+        char c = b >= 32 && b < 127 ? (char)b : b >= 160 ? (char)b : '?';
+        zb_out(&c, 1);
     }
+    if (n > 100)
+        zb_out("...", 3);
+}
+
+/* a "$STACK:n" cookie in the program's file (the form later Shells read): n bytes, else 0 */
+static u32 stack_cookie(const zu8 *f, u32 n)
+{
+    static const char k[] = "$STACK:";
+    for (u32 i = 0; i + 8 <= n; i++) {
+        u32 j = 0;
+        while (j < 7 && f[i + j] == (zu8)k[j])
+            j++;
+        if (j < 7)
+            continue;
+        u32 v = 0, d = 0;
+        for (i += 7; i < n && d < 8 && f[i] >= '0' && f[i] <= '9'; i++, d++)
+            v = v * 10 + (f[i] - '0');
+        return d ? v : 0;
+    }
+    return 0;
+}
+
+/* the process's fields a command gets its own of, saved and put back around it */
+static const u16 pofs[] = { ZO_Process_pr_Task + ZO_Task_tc_SPLower, ZO_Process_pr_Task + ZO_Task_tc_SPUpper,
+    ZO_Process_pr_Task + ZO_Task_tc_SPReg, ZO_Process_pr_StackSize, ZO_Process_pr_StackBase, ZO_Process_pr_ReturnAddr,
+    ZO_Process_pr_Arguments, ZO_Process_pr_CIS, ZO_Process_pr_COS };
+static const u8 cofs[] = { ZO_CommandLineInterface_cli_Module, ZO_CommandLineInterface_cli_CommandName,
+    ZO_CommandLineInterface_cli_CurrentInput, ZO_CommandLineInterface_cli_CurrentOutput };
+#define NPOFS (sizeof pofs / sizeof pofs[0])
+#define NCOFS (sizeof cofs / sizeof cofs[0])
+
+/* the program file c names, run (found as where): DOSTRUE with its return code in *rc, or DOSFALSE (said) */
+static u32 run_file(const struct zx_cmd *c, const char *line, const char *where, u32 out, u32 *rc)
+{
+    const zu8 *f;
+    u32 fsize, ent;
+    u8 *pr = (u8 *)Z.proc;
+    u32 cli = *(u32 *)(pr + ZO_Process_pr_CLI) << 2;
+    u32 size = file_bytes(where, &f, &fsize, &ent) ? 0 : stack_cookie(f, fsize);
+    if (!size)
+        size = *(u32 *)(cli + ZO_CommandLineInterface_cli_DefaultStack) * 4;
+    size = size < ZX_STACKMIN ? ZX_STACKMIN : size > ZX_STACKMAX ? ZX_STACKMAX : (size + 3) & ~3u;
+    u32 seg = c_LoadSeg(where, 0, 0);   /* says why when it cannot */
+    if (!seg)
+        return 0;
+    u32 fin = 0, fout = 0;
+    if (c->in[0] && !(fin = c_Open(c->in, MODE_OLDFILE)))
+        say3("ZINE: the command's input ", c->in, " cannot be opened\n");
+    else if (c->out[0] && !(fout = c_Open(c->out, c->append ? MODE_READWRITE : MODE_NEWFILE)))
+        say3("ZINE: the command's output ", c->out, " cannot be opened\n");
+    u32 sp = (!c->in[0] || fin) && (!c->out[0] || fout) ? zx_AllocMem(size, MEMF_PUBLIC) : 0;
+    u32 blk = sp ? zx_AllocMem(256 + c->arglen + 2, MEMF_PUBLIC | MEMF_CLEAR) : 0;
+    if (!blk) {
+        if (sp)
+            zx_FreeMem(sp, size);
+        if ((!c->in[0] || fin) && (!c->out[0] || fout))
+            say_at("ZINE: no memory for the command's stack of ", size, " bytes\n");
+        if (fin)
+            c_Close(fin);
+        if (fout)
+            c_Close(fout);
+        c_UnLoadSeg(seg);
+        Z.ioerr = 103;                  /* ERROR_NO_FREE_STORE */
+        return 0;
+    }
+    if (fout && c->append)
+        c_Seek(fout, 0, 1);             /* ">>": at the end (OFFSET_END) */
+    u8 *bs = (u8 *)blk;                 /* the command's name as a BSTR, then its arguments ending in "\n" */
+    u32 nl = slen(c->name) > 255 ? 255 : slen(c->name);
+    bs[0] = (u8)nl;
+    zmemcpy(bs + 1, c->name, nl);
+    char *args = (char *)blk + 256;
+    zmemcpy(args, line + c->args, c->arglen);
+    args[c->arglen] = '\n';
+    u32 sv[NPOFS + NCOFS + 4];
+    for (u32 i = 0; i < NPOFS; i++)
+        sv[i] = *(u32 *)(pr + pofs[i]);
+    for (u32 i = 0; i < NCOFS; i++)
+        sv[NPOFS + i] = *(u32 *)(cli + cofs[i]);
+    sv[NPOFS + NCOFS] = Z.cur_in, sv[NPOFS + NCOFS + 1] = Z.cur_out;
+    u32 cin = fin ? fin : c_Input(), cout = fout ? fout : out ? out : c_Output();
+    Z.cur_in = cin == Z.in_fh ? 0 : cin, Z.cur_out = cout == Z.out_fh ? 0 : cout;
+    /* PROGDIR: the command's own folder while it runs (where's part before its name) */
+    int pi = -1;
+    for (int i = 0; i < ZA_MAX; i++)
+        if (assigns.a[i].name[0] && zv_same(assigns.a[i].name, slen(assigns.a[i].name), "PROGDIR"))
+            pi = i;
+    struct za_assign old;
+    if (pi >= 0)
+        zmemcpy(&old, &assigns.a[pi], sizeof old);
+    char dir[ZA_PATHMAX + 1];
+    u32 dl = 0;
+    for (u32 i = 0; where[i]; i++)
+        if (where[i] == '/' || where[i] == ':')
+            dl = where[i] == ':' ? i + 1 : i;
+    if (dl > ZA_PATHMAX)
+        dl = 0;
+    zmemcpy(dir, dl ? where : "SYS:", dl ? dl : 5);
+    dir[dl ? dl : 4] = 0;
+    const char *dp = dir;
+    if (za_set(&assigns, "PROGDIR", 7, &dp, 1, 0))
+        say3("ZINE: no room for PROGDIR: as the command's folder (ZINE keeps 8 assigns): it stays ", Z.blk->name,
+             "'s\n");
+    u32 usp = sp + size - 8;
+    ((u32 *)usp)[0] = (u32)zb_segret;   /* the command's rts comes back here; 4(sp) the stack's size */
+    ((u32 *)usp)[1] = size;
+    *(u32 *)(pr + pofs[0]) = sp, *(u32 *)(pr + pofs[1]) = sp + size, *(u32 *)(pr + pofs[2]) = usp;
+    *(u32 *)(pr + ZO_Process_pr_StackSize) = size;
+    *(u32 *)(pr + ZO_Process_pr_StackBase) = (sp + size) >> 2;
+    *(u32 *)(pr + ZO_Process_pr_ReturnAddr) = usp + 4;
+    *(u32 *)(pr + ZO_Process_pr_Arguments) = (u32)args;
+    *(u32 *)(pr + ZO_Process_pr_CIS) = cin, *(u32 *)(pr + ZO_Process_pr_COS) = cout;
+    *(u32 *)(cli + ZO_CommandLineInterface_cli_Module) = seg;
+    *(u32 *)(cli + ZO_CommandLineInterface_cli_CommandName) = blk >> 2;
+    *(u32 *)(cli + ZO_CommandLineInterface_cli_CurrentInput) = cin;
+    *(u32 *)(cli + ZO_CommandLineInterface_cli_CurrentOutput) = cout;
+    const char *caller = cur_name;
+    cur_name = c->name;
+    u32 osp = zb_segsp;
+    Z.ioerr = 0;
+    zb_depth++;
+    *rc = zb_runseg((seg << 2) + 4, usp, c->arglen + 1, (u32)args, seg << 2);
+    zb_depth--;
+    zb_segsp = osp;
+    cur_name = caller;
+    u32 res2 = Z.ioerr;
+    for (u32 i = 0; i < NPOFS; i++)
+        *(u32 *)(pr + pofs[i]) = sv[i];
+    for (u32 i = 0; i < NCOFS; i++)
+        *(u32 *)(cli + cofs[i]) = sv[NPOFS + i];
+    Z.cur_in = sv[NPOFS + NCOFS], Z.cur_out = sv[NPOFS + NCOFS + 1];
+    if (pi >= 0)
+        zmemcpy(&assigns.a[pi], &old, sizeof old);
+    else
+        za_set(&assigns, "PROGDIR", 7, 0, 0, 0);
+    c_UnLoadSeg(seg);
+    zx_FreeMem(sp, size);
+    zx_FreeMem(blk, 256 + c->arglen + 2);
+    if (fin)
+        c_Close(fin);
+    if (fout)
+        c_Close(fout);
+    *(u32 *)(cli + ZO_CommandLineInterface_cli_ReturnCode) = *rc;
+    *(u32 *)(cli + ZO_CommandLineInterface_cli_Result2) = res2;
+    Z.ioerr = *rc;
+    return (u32)-1;
+}
+
+/* one line of an Execute: DOSTRUE (done, run, or answered as done) or DOSFALSE; *stop when the rest is not run,
+ * *next where the next line starts */
+static u32 exec_line(const char *line, u32 n, u32 out, int *stop, u32 *next)
+{
+    struct zx_cmd c;
+    int r = zx_parse(line, n, &c);
+    *next = c.next ? c.next : n;
+    u32 ln = c.next && line[c.next - 1] == '\n' ? c.next - 1 : c.next;
+    if (!r)
+        return (u32)-1;                 /* blanks, a comment */
+    say3("ZINE: ", cur_name, " asked dos Execute to run \"");
+    say_n(line, ln);
+    say3("\"", "", "");
+    if (r < 0) {
+        say3(": a name or file longer than 95 bytes, or a < or > with no file: answered as failed\n", "", "");
+        Z.ioerr = 120;                  /* ERROR_LINE_TOO_LONG */
+        *stop = 1;
+        return 0;
+    }
+    struct za_cmd ac;
+    int a = za_parse(line + c.at, ln - c.at, &ac);
     if (a > 0 && !za_apply(&assigns, &ac)) {
         say3(": done by ZINE itself (", ac.name, ":");
         if (!ac.n)
@@ -1123,16 +1296,90 @@ u32 c_Execute(u32 cmd, u32 in, u32 out)
                 say3(i ? ", " : "", ac.dir[i], "");
             say3(")\n", "", "");
         }
-    } else if (a)
+        return (u32)-1;
+    }
+    if (a) {
         say3(a > 0 ? ": an Assign ZINE has no room for (8 names, 3 directories each), answered as done\n"
                    : ": an Assign ZINE does not do (it does NAME: DIR..., ADD and REMOVE), answered as done\n", "", "");
-    else
+        return (u32)-1;
+    }
+    if (zx_known(c.name)) {
         say3(": not run (ZINE has no shell), answered as done\n", "", "");
+        return (u32)-1;
+    }
+    char where[ZPATH];
+    int found = zb_file_exists(c.name, where, sizeof where);
+    int sep = 0;
+    for (const char *s = c.name; *s; s++)
+        sep |= *s == ':' || *s == '/';
+    if (!found && !sep) {               /* a plain name: the current folder (the program's), then C: */
+        char p[ZPATH];
+        zmemcpy(p, "C:", 2);
+        zmemcpy(p + 2, c.name, slen(c.name) + 1);
+        found = zb_file_exists(p, where, sizeof where);
+    }
+    if (!found) {
+        say3(": no program ", c.name, sep ? " (a Shell says \"" : " in its folder or C: (a Shell says \"");
+        say3(c.name, ": Unknown command\"), answered as failed\n", "");
+        Z.ioerr = 205;                  /* ERROR_OBJECT_NOT_FOUND */
+        *stop = 1;
+        return 0;
+    }
+    if (zb_depth >= ZX_DEPTH) {
+        say3(": ZINE runs at most 8 commands inside one another, answered as failed\n", "", "");
+        Z.ioerr = 103;
+        *stop = 1;
+        return 0;
+    }
+    say3(": runs ", where, c.run ? " (after run, but to its end before the program goes on: ZINE runs one task)\n"
+                                 : "\n");
+    u32 rc = 0;
+    if (!run_file(&c, line, where, out, &rc)) {
+        say3("ZINE: ", c.name, " not started: answered as failed\n");
+        *stop = 1;
+        return 0;
+    }
+    say3("ZINE: the command ", c.name, " ended with return code ");
+    say_at("", rc, "; ");
+    say3(cur_name, " goes on\n", "");
+    if ((s32)rc >= (s32)*(u32 *)((*(u32 *)((u8 *)Z.proc + ZO_Process_pr_CLI) << 2) + ZO_CommandLineInterface_cli_FailLevel))
+        *stop = 1;                      /* as the Shell: a return code at the fail level ends the commands */
     return (u32)-1;
+}
+
+u32 c_Execute(u32 cmd, u32 in, u32 out)
+{
+    if (!cur_name)
+        cur_name = Z.blk->name;
+    u32 n = 0;                          /* the text within the program's memory only */
+    if (cmd && c_TypeOfMem(cmd))
+        while (n < 512 && c_TypeOfMem(cmd + n) && ((const u8 *)cmd)[n])
+            n++;
+    if (!n) {
+        say3("ZINE: ", cur_name, " asked dos Execute to run ");
+        if (!zb_say_text("\"", cmd, "\""))
+            say3("no text it could read", "", "");
+        if (in)
+            say3(" (its commands from a file)", "", "");
+        say3(": not run (ZINE has no shell), answered as done\n", "", "");
+        return (u32)-1;
+    }
+    u32 ok = (u32)-1;
+    int stop = 0;
+    for (u32 at = 0; at < n && !stop;) {
+        u32 next;
+        ok = exec_line((const char *)cmd + at, n - at, out, &stop, &next);
+        at += next;
+    }
+    if (in && !stop)
+        say3("ZINE: ", cur_name, "'s Execute names a file to read more commands from: not read (ZINE has no shell)\n");
+    return ok;
 }
 
 u32 c_PutStr(const char *s)
 {
+    if (Z.cur_out)                      /* a command's redirected output (16.11) */
+        return c_Write(Z.cur_out, s, (s32)slen(s)) == (u32)-1 ? (u32)-1 : 0;
     zb_out(s, slen(s));
     return 0;
 }
@@ -1148,20 +1395,36 @@ u32 c_FPutC(u32 fh, u32 c)
     return c_Write(fh, &ch, 1) == (u32)-1 ? (u32)-1 : (c & 0xFF);
 }
 
-u32 c_VPrintf(const char *f, const u8 *argv)
+struct fput { u32 fh, n, err; };
+static void file_put(void *u, u32 c)
 {
-    u32 before = Z.blk->outlen + Z.blk->outlost;
-    fmt(f, argv, out_put, 0);
-    return Z.blk->outlen + Z.blk->outlost - before;
+    struct fput *p = (struct fput *)u;
+    char ch = (char)c;
+    if (c_Write(p->fh, &ch, 1) == (u32)-1)
+        p->err = 1;
+    else
+        p->n++;
 }
 
 u32 c_VFPrintf(u32 fh, const char *f, const u8 *argv)
 {
-    if (fh != Z.out_fh) {
+    if (fh == Z.out_fh) {
+        u32 before = Z.blk->outlen + Z.blk->outlost;
+        fmt(f, argv, out_put, 0);
+        return Z.blk->outlen + Z.blk->outlost - before;
+    }
+    if (slot_of(fh) < 0) {
         Z.ioerr = 114;
         return (u32)-1;
     }
-    return c_VPrintf(f, argv);
+    struct fput p = { fh, 0, 0 };       /* one of ZINE's files (a command's redirected output, 16.11) */
+    fmt(f, argv, file_put, &p);
+    return p.err ? (u32)-1 : p.n;
+}
+
+u32 c_VPrintf(const char *f, const u8 *argv)
+{
+    return c_VFPrintf(c_Output(), f, argv);
 }
 
 u32 c_Flush(u32 fh) { (void)fh; return 1; }

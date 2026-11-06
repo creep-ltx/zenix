@@ -1454,6 +1454,67 @@ of two spellings meeting. Not yet: `XYLOP96.exe` itself, on the owner's A1200.
 
 Sizes (the 68020-60 build): `/bin/zine` 31,796 -> 33,108 bytes (the walk); the blob 47,480 -> 47,476 bytes (the exact-first lookup in, the clash check out); the kernel unchanged.
 
+### 16.11 Execute runs a command that names a program file (2026-11-06, branch zexec)
+
+Found on the owner's A1200: Spaceballs' HOG (its folder "044 HOG (Spaceballs)", main program `Stor_Gris.exe`) is a demo
+made of separate programs named `1`, `2`, `3`, `4`, `45`, `5` ... `11` in its folder; the main program runs each with
+dos `Execute("1", ...)`. 16.7 answered every one "not run (ZINE has no shell), answered as done", so nothing played
+and the program ended with return code 1 after 0 s.
+
+**Built** (`blibs.c` `c_Execute`, `blobs.S` `zb_runseg`, `zpath.c` `zx_parse` and `zx_known` with a host test; *read*:
+the RKRM Includes and Autodocs' `Execute` and `Exit`, the AmigaDOS Manual's "Initial Environment in Assembler" and
+its redirection rule, the NDK 3.2's `dos/dosextens.h` for the CLI's fields):
+- **The line.** `[run] [<IN] [>OUT | >>OUT] NAME [<IN] [>OUT] ARGUMENTS` (`zx_parse`): a leading `run` taken off, the
+  redirections before the name or right after it (the AmigaDOS Manual: they "MUST come before" the arguments; a `>`
+  later is an argument), a quoted name, a `;` outside quotes a comment. Several lines run one after another; the rest
+  is not run after one that fails or returns at least `cli_FailLevel` (10), as the Shell does.
+- **Which commands run.** An Assign stays ZINE's own (16.8). A command of AmigaOS 3.1's Shell or C: (`zx_known`: CD,
+  Echo, Stack, Wait, SetPatch, LoadWB, Mount ... about 70 names, by the name's last part) is not run and answered as
+  done, as before: these act on a Shell or a system ZINE does not have, and a demo's own copy of SetPatch would stop
+  at the first call ZINE lacks. Every other name is looked up as `Open` finds a file (the memory files of 16.9 first,
+  the volume with its subfolders, names without case as 16.10, the assigns followed); a name with no `:` or `/` in
+  the current folder (the program's) and then in `C:`. Found: it **runs for real**. Not found: "ZINE: NAME asked dos
+  Execute to run "x": no program x in its folder or C: (a Shell says "x: Unknown command"), answered as failed",
+  `DOSFALSE` and `ERROR_OBJECT_NOT_FOUND` (the autodoc: the answer says whether Execute "was successful in finding and
+  starting the specified program").
+- **How it runs** (`run_file`): `LoadSeg`, then on the same task as a Shell would run it, synchronously (after `run`
+  too, said: "after run, but to its end before the program goes on: ZINE runs one task"): a fresh stack of the size a
+  `$STACK:n` cookie in the file asks for (the form later Shells read), else the CLI's `cli_DefaultStack` (64 KB, the
+  main program's), at least 8 KB and at most 1 MB (ZINE's own calls run on it too); the return address on it and its
+  size at 4(sp); `a0` the argument line ending in `\n` (blanks at both ends off), `d0` its length; `a3` the segment
+  list's first link and `a6` ExecBase as `zb_go` gives the main program; the task's `tc_SPLower`/`tc_SPUpper`,
+  `pr_StackSize`, `pr_StackBase`, `pr_ReturnAddr`, `pr_Arguments`, `pr_CIS`/`pr_COS`, and `pr_CLI`'s `cli_Module`,
+  `cli_CommandName` (the name as given, a BSTR) and `cli_CurrentInput`/`cli_CurrentOutput` its own, put back after.
+  The current folder stays the main program's (a Shell's current folder does not change either); `PROGDIR:` is the
+  command's own folder while it runs (an assign ZINE sets and removes; with all 8 assigns taken it stays the main
+  program's, said). `Input()` and `Output()` are the redirections (`NIL:` keeps nothing, a file goes to the memory
+  files of 16.9, `>>` at its end), else Execute's output handle, else the caller's; `PutStr`, `VPrintf` and
+  `VFPrintf` follow them.
+- **The end.** The command's `rts` (`zb_segret`) or dos `Exit` (inside a command it ends only the command, as the
+  autodoc says for a program run under a CLI) comes back with its return code; the segments, the stack and the
+  redirections' handles are freed, Execute answers `DOSTRUE`, and the return code is `IoErr()` and the CLI's
+  `cli_ReturnCode`, `cli_Result2` the command's own `IoErr()` (where AmigaOS puts the return code for Execute's caller
+  the documents do not say; this is ZINE's choice). The output says "ZINE: the command 1 ended with return code 0;
+  Stor_Gris.exe goes on". Memory a command forgets to free is freed with the session, as before. The demo and its
+  parts share the hardware in turn, as on AmigaOS: a part that leaves an interrupt running into its own code after it
+  returns crashes there, as it would on AmigaOS once the Shell unloads it.
+- **Inside one another.** A command's own Execute works the same, 8 deep at most (the ninth is answered as failed
+  and the output says so). A crash or a call ZINE lacks inside a command ends the session as before.
+
+*Verified* in FS-UAE (`tools/zine-emu-test.sh`, A1200 68020 4 MB fast): `zexec` (`tools/tests/zine/zexec.S`) runs
+`zpart` (`zpart.S`, with a `$STACK:12000` cookie; every run checks `d0`, the `\n` at the line's end, 4(sp), the task's
+stack bounds and `cli_Module`): `zpart >NIL: one  "two words"  ` (its argument line read back from the file it wrote,
+its `Output()` line gone to `NIL:`, return code 5 as `IoErr()` and `cli_ReturnCode`); `parts/SECOND two` (a copy in
+the folder `Parts` as `Second`: reads `PROGDIR:here`, its own folder's, and shows `cli_CommandName`); `zpart nest`,
+which runs `run >NIL: zpart deep` (ends with `Exit(7)`: `IoErr()` 7 in the nested caller, return code 3); `zpart loop`
+(8 inside one another, the ninth refused once); `nosuchpart x` (`DOSFALSE`, 205); `stack 20000` (not run); `AvailMem`
+at the end as at the start, return code 0. On the PC (`tools/host/zine-test.sh` core): `zx_parse`'s forms, every
+prefix of a line, the limits, `zx_known`. Not yet: HOG itself, on the owner's A1200.
+
+Sizes (the 68020-60 build): the blob 42,112 -> 46,752 bytes (memory 47,476 -> 52,724: the parser and the command
+list 1.1 KB, the run 2.6 KB, the messages); `/bin/zine` and the kernel unchanged. Each command's Execute takes about
+1.4 KB of its caller's stack.
+
 ## 17. Questions for the owner (what ZINE should be)
 
 1. Owner answer 1 allowed "the Amiga's own console or through Wasabi". Typing into the console through Wasabi counts

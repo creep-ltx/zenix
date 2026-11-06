@@ -51,10 +51,19 @@ DESCRIPTION
     crunchers do through the overlay file): ZINE answers reading,
     writing, seeking, closing and flushing.
 
-    dos.library's Execute runs nothing (ZINE has no shell): it answers
-    "done" and the output names the command. An Assign command
-    ("Assign LIBS: Ram:", also as "C:Assign" or "Ram:Assign") ZINE does
-    itself: up to 8 names of up to 3 directories each.
+    dos.library's Execute runs a command that names a program file (in
+    the program's folder or a subfolder, C: or an assign; any case),
+    as demos made of separate programs need: loaded, given its
+    arguments, its own stack and the redirections (>NIL:, <file,
+    >>file), run to its end and unloaded; its return code is IoErr().
+    It runs on the same task: after "run" too, the program waits for
+    it (ZINE runs one task). A command run that way may run others, 8
+    inside one another at most. A command of AmigaOS's Shell or C:
+    (CD, Echo, Stack, SetPatch, LoadWB...) is not run: Execute answers
+    "done". A name that is no file answers "failed". The output names
+    each command and what was done. An Assign command ("Assign LIBS:
+    Ram:", also as "C:Assign" or "Ram:Assign") ZINE does itself: up to
+    8 names of up to 3 directories each.
 
     A program may write files on any path (RAM:, T:, ENV:, its own
     folder, SYS:, DH0:), read them back by that path, load and delete

@@ -296,3 +296,86 @@ int za_apply(struct za_table *t, const struct za_cmd *c)
         d[i] = c->dir[i];
     return za_set(t, c->name, len(c->name), d, c->remove ? 0 : c->n, c->add);
 }
+
+/* ---- Execute's command lines (zpath.h; docs/d29-zine.md 16.11) ---- */
+static int blank(char ch) { return ch == ' ' || ch == '\t'; }
+
+int zx_parse(const char *cmd, zu32 len_, struct zx_cmd *c)
+{
+    zu8 *z = (zu8 *)c;
+    for (zu32 i = 0; i < sizeof *c; i++)
+        z[i] = 0;
+    const char *end = cmd, *stop = cmd + len_;
+    while (end < stop && *end && *end != '\n')
+        end++;
+    c->next = (zu32)(end - cmd) + (end < stop && *end == '\n');
+    const char *e = cmd;                /* the command proper ends at a ';' outside quotes */
+    for (int q = 0; e < end && (q || *e != ';'); e++)
+        if (*e == '"')
+            q = !q;
+    end = e;
+    const char *p = cmd;
+    char w[ZA_PATHMAX + 1];
+    int named = 0;
+    for (;;) {
+        while (p < end && blank(*p))
+            p++;
+        if (p >= end)
+            break;
+        const char *s = p;
+        if (*p == '<' || *p == '>') {   /* a redirection: before the name, or right after it */
+            int out = *p == '>', app = out && p + 1 < end && p[1] == '>';
+            p += 1 + app;
+            int n = word(&p, end, w, sizeof w);
+            if (n < 0)
+                return -1;
+            if (!n)
+                return -1;              /* '>' with no file */
+            cpy(out ? c->out : c->in, w, (zu32)n);
+            if (out)
+                c->append = app;
+            continue;
+        }
+        if (named)
+            break;                      /* the arguments begin */
+        int n = word(&p, end, w, sizeof w);
+        if (n < 0)
+            return -1;
+        if (!c->run && same(w, (zu32)n, "RUN") && *s != '"') {
+            c->run = 1;
+            continue;
+        }
+        cpy(c->name, w, (zu32)n);
+        c->at = (zu32)(s - cmd);
+        named = 1;
+    }
+    if (!named)
+        return c->in[0] || c->out[0] ? -1 : 0;
+    const char *a = p, *b = end;
+    while (b > a && blank(b[-1]))
+        b--;
+    c->args = (zu32)(a - cmd), c->arglen = (zu32)(b - a);
+    return 1;
+}
+
+int zx_known(const char *name)
+{
+    /* AmigaOS 3.1's Shell commands and its C: directory (the AmigaDOS Manual's command list), and the common
+     * additions; Assign is ZINE's own (za_parse), Run is taken off before (zx_parse) */
+    static const char list[] =
+        "ADDBUFFERS\0ADDDATATYPES\0ALIAS\0ASK\0AVAIL\0BINDDRIVERS\0BREAK\0CD\0CHANGETASKPRI\0CONCLIP\0COPY\0CPU\0"
+        "DATE\0DELETE\0DIR\0DISKCHANGE\0ECHO\0ED\0EDIT\0ELSE\0ENDCLI\0ENDIF\0ENDSHELL\0ENDSKIP\0EVAL\0EXECUTE\0FAILAT\0"
+        "FAULT\0FILENOTE\0FORMAT\0GET\0GETENV\0ICONX\0IF\0INFO\0INSTALL\0IPREFS\0JOIN\0LAB\0LIST\0LOADRESOURCE\0LOADWB\0"
+        "LOCK\0MAKEDIR\0MAKELINK\0MOUNT\0NEWCLI\0NEWSHELL\0PATH\0PROMPT\0PROTECT\0QUIT\0RELABEL\0REMRAD\0RENAME\0"
+        "REQUESTCHOICE\0REQUESTFILE\0RESIDENT\0SEARCH\0SET\0SETCLOCK\0SETDATE\0SETENV\0SETFONT\0SETKEYBOARD\0SETPATCH\0"
+        "SKIP\0SORT\0STACK\0STATUS\0TYPE\0UNALIAS\0UNSET\0UNSETENV\0VERSION\0WAIT\0WHICH\0WHY\0";
+    const char *b = name;
+    for (const char *s = name; *s; s++)
+        if (*s == ':' || *s == '/')
+            b = s + 1;
+    zu32 n = len(b);
+    for (const char *l = list; *l; l += len(l) + 1)
+        if (same(b, n, l))
+            return 1;
+    return 0;
+}

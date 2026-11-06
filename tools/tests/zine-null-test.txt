@@ -51,6 +51,8 @@ send cmp /tests/zine/zexit /tmp/zwref/zexit && cmp /tests/zine/zhello /tmp/zwref
 wait zwdisk- 30
 send mkdir -p /tmp/zc/Data/Deep/Er /tmp/zc/LIBS; cp /tests/zine/zcase /tmp/zc/; cp /tests/zine/zexit /tmp/zc/Data/Deep/Er/zexit; cp /tests/zine/ztlib.hunk /tmp/zc/LIBS/ZT.Library; echo upper > /tmp/zc/Data/XYL.TP3; echo deeper > /tmp/zc/Data/Deep/Er/Mod.X; echo low > /tmp/zc/Data/clash; echo UP > /tmp/zc/Data/CLASH; zine /tmp/zc/zcase; echo zcase-rc=$?; cat /tmp/zc/Data/XYL.TP3; ls /tmp/zc/Data | tr '\n' ' '; echo zcase-""ls; rm -r /tmp/zc\r
 wait zcase-ls 90
+send mkdir -p /tmp/ze/Parts; cp /tests/zine/zexec /tests/zine/zpart /tmp/ze/; cp /tests/zine/zpart /tmp/ze/Parts/Second; echo sub > /tmp/ze/Parts/here; zine /tmp/ze/zexec; echo zexec-rc=$?; ls /tmp/ze /tmp/ze/Parts | tr '\n' ' '; echo zexec-""ls; rm -r /tmp/ze\r
+wait zexec-ls 120
 send rm -f /home/zbg; sh -c 'i=0; while [ $i -lt 400 ]; do echo $i >> /home/zbg; i=$((i+1)); done' & zine /tests/zine/ztake; wait; echo zbg=$(grep -c . /home/zbg) last=$(tail -1 /home/zbg)\r
 wait (?s)zbg=\d+.*?last=\d+\D 90
 send zine /tests/zine/zmmu; echo zmmu-rc=$?; zine /tests/zine/zfpu; echo zfpu-rc=$?\r
