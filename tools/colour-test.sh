@@ -199,7 +199,7 @@ for c in $SETS; do
         [ -f "$OUT/s$c-$s.png" ] || { echo "FAIL colours $c: no screenshot $s (see $OUT/s$c.serial.log)"; pass=0; continue 2; }
     done
     ref=""; [ ! -f "$OUT/edges1" ] || ref="$OUT/edges1"
-    ct columns "$OUT/s$c-columns.png" $ref > "$OUT/sgeom$c"; check "colours $c: all 80 columns after the switch ($(head -1 "$OUT/sgeom$c"))" $?
+    ct columns "$OUT/s$c-columns.png" $ref > "$OUT/sgeom$c"; rc=$?; check "colours $c: all 80 columns after the switch ($(head -1 "$OUT/sgeom$c"))" $rc
     ct palette "$OUT/s$c-colours.png" "$OUT/sgeom$c" $d; check "colours $c: termtest colours as $d planes show them" $?
     ct rows "$OUT/s$c-back.png" "$OUT/sgeom$c" $d; check "colours $c: scrolled back a page, every row keeps its colour" $?
     echo "$log" | grep -a "chip RAM free" | tail -1 | sed "s/^/  colours $c: /"

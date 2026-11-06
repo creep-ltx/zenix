@@ -559,3 +559,17 @@ dropping) against 10,549: 0 of 14 screenshots torn, held before the drop the win
 it, and a pen-0 patch dragged over another window shows pen 0's colour. The moves are as many as the mouse gives (one a
 frame at most), on any CPU. displayd grew by 3,418 bytes of code (43,312 -> 46,730). Verified in FS-UAE, not yet on
 the A1200.
+
+**On the A1200 (the owner, PiStorm, release 2026110602, 2026-11-06):** "man it's fast!!! Wow." But while dragging,
+left of the window on every line it covers, playfield 2 showed stripes of old pixels; after the drop all was right. The
+cause was the blitter, not the display: the window's bitmap (its bytes plus 88 a plane line) is cleared by one blit a
+plane, and BLTSIZE has 6 bits for the width (0 meaning 64 words). A window (with its frame and shadow) wider than
+about 320 pixels makes the bitmap's line wider than 64 words, so the width spilled into the height: only the first few
+words of each line were cleared; from about 260 to 320 pixels (exactly 64 words) all was cleared and one line more,
+past the bitmap's end into whatever chip RAM followed. FS-UAE's chip RAM starts at zero, so the
+uncleared padding read as zero there; a real Amiga's holds old pictures. Now a fill wider than 64 words is done in
+pieces of 64 (draw.c `blit_rect`), and every blit writes the width as `W & 63`. The DDFSTRT `$28`, the playfield-2
+delay and the modulos were right on the real chips (the window and the desktop around it showed true). `drag-test`
+now runs `gcontest dirty` first (the free chip RAM filled with 0xFF, as a real machine's holds data), and checks the
+whole screen held before the drop against the one after it: before the fix 33,307 pixels differed, after it none.
+displayd +150 bytes.

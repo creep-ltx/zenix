@@ -7,6 +7,7 @@ SYNOPSIS
     gcontest ack|late|noack [SECONDS [ACCEL]]
     gcontest keys CODE...
     gcontest mouse DX,DY,BUTTONS...
+    gcontest dirty
 
 DESCRIPTION
     A test program for DESIGN D38 step 2 (SYS_console CON_GRAB and
@@ -45,6 +46,12 @@ DESCRIPTION
     sets its buttons (bit 0 left, 1 right, 2 middle; held until the next
     record) through CON_INPUT's CONI_MOUSE, a record every 3 ticks. The
     desktop's tests drive it.
+
+    dirty fills every piece of free chip RAM it can get (up to 16 pieces,
+    512 KB down to 4 KB) with 0xFF and frees it again ("gcontest: dirty N
+    KB"). A real Amiga's chip RAM holds old pictures, FS-UAE's starts at
+    zero: after this, chip RAM a program forgets to clear shows on the
+    screen in the emulator too (tools/drag-test.sh).
 
 NOTES
     Root only. A second gcontest while one has the console is refused

@@ -85,7 +85,7 @@ L=$OUT/serial.txt; tr -d '\r' < "$OUT/d.serial.log" > "$L"
 for s in columns two moved raised shown scrolled closed text; do
     [ -f "$OUT/d-$s.png" ] || { echo "FAIL no screenshot $s (see $OUT/d.serial.log)"; exit 1; }
 done
-python3 tools/colour-test.py columns "$OUT/d-columns.png" > "$OUT/geom"; check "the text console's geometry ($(head -1 "$OUT/geom"))" $?
+python3 tools/colour-test.py columns "$OUT/d-columns.png" > "$OUT/geom"; rc=$?; check "the text console's geometry ($(head -1 "$OUT/geom"))" $rc
 px() { s=$1; shift; python3 tools/dpy-test.py px "$OUT/d-$s.png" "$OUT/geom" "$@"; }
 grep -q "^svc: display: started /sbin/displayd" "$L" && grep -q "^dpytest: open 0 screen 640x256 depth 4" "$L"
 check "dpytest starts displayd (the display service) and says hello: 640 x 256, 4 planes" $?
@@ -99,7 +99,7 @@ px scrolled 250,185,EEE 250,150,47B; check "scrolled 16 lines up (O_COPY), the f
 grep -q "^dpytest: bad -22 at 12" "$L"; check "a broken order is refused with its offset (12 bytes)" $?
 px closed 120,72,344 250,150,47B; check "B closed: the desktop where it was" $?
 [ "$(grep -c '^ev 5 A ' "$L")" = 1 ] && [ "$(grep -c '^ev 5 B ' "$L")" = 1 ]
-check "smart refresh: each program asked to draw once, when its window appeared ($(grep -c '^ev 5 ' "$L") EV_EXPOSE)" $?
+rc=$?; check "smart refresh: each program asked to draw once, when its window appeared ($(grep -c '^ev 5 ' "$L") EV_EXPOSE)" $rc
 grep -q "^svc: display: displayd (pid [0-9]*) stopped\|display: console 1 given back" "$L"; check "the last client gone: displayd ends, the console given back" $?
 px text 400,200,000; check "... and the console is text again" $?
 grep "^dpytest: time\|^dpytest: mem\|^chip RAM free\|^fast RAM free" "$L" | head -8

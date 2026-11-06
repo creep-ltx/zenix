@@ -14,7 +14,9 @@ typedef unsigned short u16;
  * trying a wrong one (0x900: refused, EINVAL). It ends after SECONDS (default 60) or at the q key, giving the console
  * back. `gcontest keys CODE...` types raw key
  * codes (hex) through CON_INPUT on descriptor 0, as the keyboard would (root); `gcontest mouse DX,DY,B ...` moves the
- * mouse and sets its buttons the same way (CONI_MOUSE). tools/gcon-test.sh runs it. */
+ * mouse and sets its buttons the same way (CONI_MOUSE); `gcontest dirty` fills the free chip RAM with 0xFF and gives
+ * it back, as a real Amiga's chip RAM holds old pictures where FS-UAE's is zero (tools/drag-test.sh: memory a program
+ * forgets to clear shows). tools/gcon-test.sh runs it. */
 
 static void say(const char *fmt, ...)
 {
@@ -70,14 +72,38 @@ static int mouse(int argc, char **argv)
     return 0;
 }
 
+/* every free piece of chip RAM it can get (up to 16, from 512 KB down to 4 KB) filled with 0xFF, then freed */
+static int dirty(void)
+{
+    void *m[16];
+    int n = 0;
+    u32 total = 0;
+    for (u32 sz = 512u << 10; sz >= 4096 && n < 16;) {
+        void *p = sys_memalloc_chip(sz);
+        if (!p) {
+            sz >>= 1;
+            continue;
+        }
+        memset(p, 0xFF, sz);
+        m[n++] = p;
+        total += sz;
+    }
+    while (n > 0)
+        sys_memfree(m[--n]);
+    say("gcontest: dirty %u KB\n", (unsigned)(total >> 10));
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
+    if (argc > 1 && !strcmp(argv[1], "dirty"))
+        return dirty();
     if (argc > 1 && !strcmp(argv[1], "keys"))
         return keys(argc, argv);
     if (argc > 1 && !strcmp(argv[1], "mouse"))
         return mouse(argc, argv);
     if (argc < 2 || (strcmp(argv[1], "ack") && strcmp(argv[1], "noack") && strcmp(argv[1], "late"))) {
-        dprintf(2, "usage: gcontest ack|late|noack [SECONDS [ACCEL]] | gcontest keys CODE... | gcontest mouse DX,DY,B...\n");
+        dprintf(2, "usage: gcontest ack|late|noack [SECONDS [ACCEL]] | gcontest keys CODE... | gcontest mouse DX,DY,B... | gcontest dirty\n");
         return 2;
     }
     int ack = !strcmp(argv[1], "ack"), late = !strcmp(argv[1], "late");

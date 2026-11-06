@@ -47,7 +47,7 @@ L=$OUT/serial.txt; tr -d '\r' < "$OUT/d.serial.log" > "$L"
 for s in columns greeter typed wrong desk back rootref textsession back2; do
     [ -f "$OUT/d-$s.png" ] || { echo "FAIL no screenshot $s (see $OUT/d.serial.log)"; exit 1; }
 done
-python3 tools/colour-test.py columns "$OUT/d-columns.png" > "$OUT/geom"; check "the text console's geometry ($(head -1 "$OUT/geom"))" $?
+python3 tools/colour-test.py columns "$OUT/d-columns.png" > "$OUT/geom"; rc=$?; check "the text console's geometry ($(head -1 "$OUT/geom"))" $rc
 px() { s=$1; shift; python3 tools/dpy-test.py px "$OUT/d-$s.png" "$OUT/geom" "$@"; }
 dt() { python3 tools/dpy-test.py "$@"; }
 # the box: 336 x 112 in the middle (152, 72); its message line at y 164; the clock top right

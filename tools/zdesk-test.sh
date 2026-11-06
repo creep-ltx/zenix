@@ -136,7 +136,7 @@ L=$OUT/serial.txt; tr -d '\r' < "$OUT/z.serial.log" > "$L"
 for s in columns wins dragged menuclick about aboutgone heldmenu twoterms typed ws2 before-logout text workbench platinum; do
     [ -f "$OUT/z-$s.png" ] || { echo "FAIL no screenshot $s (see $OUT/z.serial.log)"; exit 1; }
 done
-python3 tools/colour-test.py columns "$OUT/z-columns.png" > "$OUT/geom"; check "the text console's geometry ($(head -1 "$OUT/geom"))" $?
+python3 tools/colour-test.py columns "$OUT/z-columns.png" > "$OUT/geom"; rc=$?; check "the text console's geometry ($(head -1 "$OUT/geom"))" $rc
 px() { s=$1; shift; python3 tools/dpy-test.py px "$OUT/z-$s.png" "$OUT/geom" "$@"; }
 grep -q "^zdesk: running, theme flat, [0-9]* keys, 2 icons, drag outline" "$L"; check "zdesk runs: the flat theme, the keys, two icons, the outline drag on a 68020" $?
 px wins 300,5,112 400,200,344 100,25,BBC 150,37,47B 120,72,D54; check "the bar, the desktop, A and B placed below the bar, B active" $?

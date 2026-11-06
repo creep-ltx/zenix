@@ -76,7 +76,7 @@ L=$OUT/serial.txt; tr -d '\r' < "$OUT/g.serial.log" > "$L"
 for s in columns grabbed mouse console2 back corner odd givenback noack noackback; do
     [ -f "$OUT/g-$s.png" ] || { echo "FAIL no screenshot $s (see $OUT/g.serial.log)"; exit 1; }
 done
-python3 tools/colour-test.py columns "$OUT/g-columns.png" > "$OUT/geom"; check "the text console's geometry ($(head -1 "$OUT/geom"))" $?
+python3 tools/colour-test.py columns "$OUT/g-columns.png" > "$OUT/geom"; rc=$?; check "the text console's geometry ($(head -1 "$OUT/geom"))" $rc
 gt() { python3 tools/gcon-test.py "$@"; }
 grep -q "^gcontest: grabbed fd [0-9]* 640x256 depth 4 chips 1" "$L"; check "CON_GRAB: a descriptor, the screen 640 x 256, AGA" $?
 grep -q "display: console 1 handed to pid [0-9]* (gcontest)" "$L"; check "the kernel log says console 1 was handed over" $?

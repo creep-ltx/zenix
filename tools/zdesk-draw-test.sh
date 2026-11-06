@@ -143,7 +143,7 @@ L=$OUT/serial.txt; tr -d '\r' < "$OUT/z.serial.log" > "$L"
 for s in columns pre open h1 h2 closed raised term workbench platinum; do
     [ -f "$OUT/z-$s.png" ] || { echo "FAIL no screenshot $s (see $OUT/z.serial.log)"; exit 1; }
 done
-python3 tools/colour-test.py columns "$OUT/z-columns.png" > "$OUT/geom"; check "the text console's geometry ($(head -1 "$OUT/geom"))" $?
+python3 tools/colour-test.py columns "$OUT/z-columns.png" > "$OUT/geom"; rc=$?; check "the text console's geometry ($(head -1 "$OUT/geom"))" $rc
 dt() { python3 tools/dpy-test.py "$@"; }
 stat() { grep "^dpytest: stat $1 " "$L" | head -1; }
 field() { stat "$1" | sed -n "s/.* $2 \([0-9]*\).*/\1/p"; }
@@ -154,7 +154,7 @@ BAR=320,0,320,11
 dt same "$OUT/z-pre.png" "$OUT/z-open.png" "$OUT/geom" -x $BAR -x 0,0,64,11 -x "$((mx - 1)),$((my - 1)),$((mw + 2)),$((mh + 2))" -in "$mx,$my,$mw,$mh"
 check "the menu open over window A: only its own rectangle changed (the bar's Zenix title aside)" $?
 dt same "$OUT/z-pre.png" "$OUT/z-closed.png" "$OUT/geom" -x $BAR; check "the menu closed: the screen as before it, pixel for pixel" $?
-grep -q "^menudrawn=\([0-9]*\) menuat=\1$" "$L"; check "each menu drawn once while it was open ($(grep -o '^menudrawn=.*' "$L"))" $?
+grep -q "^menudrawn=\([0-9]*\) menuat=\1$" "$L"; rc=$?; check "each menu drawn once while it was open ($(grep -o '^menudrawn=.*' "$L"))" $rc
 i1=$((my + 2 + 10)); i2=$((my + 2 + 20))
 dt same "$OUT/z-h1.png" "$OUT/z-h2.png" "$OUT/geom" -x $BAR -x "$mx,$i1,$mw,10" -x "$mx,$i2,$mw,10"
 check "the highlight moved from item 2 to 3: every other item untouched" $?

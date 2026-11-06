@@ -164,6 +164,18 @@ static void dirty_add(const struct rect *r);
 static void blit_rect(struct bm *b, const struct rect *r, int plane, u8 mt)
 {
     int w0 = r->x0 >> 4, w1 = (r->x1 - 1) >> 4, W = w1 - w0 + 1, h = r->y1 - r->y0;
+    if (W > 64) {                       /* BLTSIZE's width is 6 bits (0: 64 words); wider (a lifted window's bitmap with
+                                         * its zero padding, D38 "Dragging with the chips") in pieces of 64 words. A
+                                         * wider width spilled into the height: the owner's A1200 of 2026-11-06 showed
+                                         * the uncleared padding as garbage beside a dragged window */
+        struct rect a = *r;
+        a.x1 = (s16)((w0 + 64) << 4);
+        blit_rect(b, &a, plane, mt);
+        a.x0 = a.x1;
+        a.x1 = r->x1;
+        blit_rect(b, &a, plane, mt);
+        return;
+    }
     u8 *p = b->p + (u32)r->y0 * b->stride + (u32)plane * b->bpr + (u32)w0 * 2;
     while (h > 0) {
         int k = h > 1024 ? 1024 : h;
@@ -176,7 +188,7 @@ static void blit_rect(struct bm *b, const struct rect *r, int plane, u8 mt)
         BLTCMOD = BLTDMOD = (u16)(b->stride - (u32)W * 2);
         bptr(0x048, p);
         bptr(0x054, p);
-        BLTSIZE = (u16)((k & 1023) << 6 | W);
+        BLTSIZE = (u16)((k & 1023) << 6 | (W & 63));
         nblits++;
         p += (u32)k * b->stride;
         h -= k;
@@ -273,7 +285,7 @@ static void blit_copy(struct bm *s, int sx, int sy, struct bm *d, const struct r
     bptr(0x04C, sp);
     bptr(0x048, dp);
     bptr(0x054, dp);
-    BLTSIZE = (u16)((h & 1023) << 6 | W);
+    BLTSIZE = (u16)((h & 1023) << 6 | (W & 63));
     nblits++;
 }
 /* every plane at once, unshifted: an interleaved bitmap's lines of all planes follow each other bpr apart, so the
@@ -317,7 +329,7 @@ static void blit_block(struct bm *s, int sx, int sy, struct bm *d, const struct 
     bptr(0x04C, sp);
     bptr(0x048, dp);
     bptr(0x054, dp);
-    BLTSIZE = (u16)((n & 1023) << 6 | W);
+    BLTSIZE = (u16)((n & 1023) << 6 | (W & 63));
     nblits++;
 }
 /* ---- a drawn screen and the one on view (a whole window's drag; D38 6.3, the owner's A1200 of 2026-11-05) ----
