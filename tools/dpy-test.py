@@ -24,8 +24,14 @@ tools/colour-test.py columns found ("x0 x1 yc h": an Amiga pixel is (x1 - x0 + 1
   dpy-test.py title SHOT GEOM X0 X1 Y    the title bar's lines Y+2 .. Y+9: columns X0 .. X1-1 (the gap after a
                                          gadget) one colour, and the 12 columns after X1 hold another (the title)
 Prints what it found and exits 1 on a failure."""
+import os
 import sys
 from PIL import Image
+
+LINES = int(os.environ.get("DPY_LINES", "256"))   # the screen's lines (512 interlaced)
+# DPY_FIELD 0 or 1: whole and moved look only at that field's lines of an interlaced screen (even or odd): a moving
+# picture is in one place in each field, but the screenshot weaves two fields, which may show two places
+FIELD = int(os.environ.get("DPY_FIELD", "-1"))
 
 
 def geometry(path):
@@ -60,7 +66,7 @@ def same(a):
             inside = rect(a[i + 1])
         i += 2
     bad, changed = [], 0
-    for y in range(256):
+    for y in range(LINES):
         for x in range(640):
             pa, pb = A(x, y), B(x, y)
             diff = any(abs(p - q) > 40 for p, q in zip(pa, pb))
@@ -79,11 +85,13 @@ def moved(a):
     x0, y0, x1, y1 = rect(a[3])
     nx, ny = (int(t) for t in a[4].split(","))
     dx, dy = (nx - x0 + 4) // 8 * 8, ny - y0       # the window moves in 8-pixel steps across
-    if not (0 <= x0 + dx and x1 + dx <= 640 and 0 <= y0 + dy and y1 + dy <= 256):
+    if not (0 <= x0 + dx and x1 + dx <= 640 and 0 <= y0 + dy and y1 + dy <= LINES):
         print("moved: not inside the screen")
         return 1
     bad = []
     for y in range(y0 + 1, y1 - 1):    # the outermost ring blurs into what is around it, different in A and B
+        if FIELD >= 0 and (y + dy) % 2 != FIELD:
+            continue
         for x in range(x0 + 1, x1 - 1):
             b, n = B(x + dx, y + dy), [A(x + u, y + v) for u in (-2, -1, 0, 1, 2) for v in (-1, 0, 1)]
             if any(c < min(q[k] for q in n) - 48 or c > max(q[k] for q in n) + 48 for k, c in enumerate(b)):
@@ -113,7 +121,9 @@ def whole(a):
     P = load(a[0], a[1])
     want, w, h = rgb12(a[2]), int(a[3]), int(a[4])
     xs, ys, n = [], [], 0
-    for y in range(256):
+    for y in range(LINES):
+        if FIELD >= 0 and y % 2 != FIELD:
+            continue
         for x in range(640):
             if all(abs(p - q) <= 40 for p, q in zip(P(x, y), want)):
                 xs.append(x)
@@ -123,6 +133,13 @@ def whole(a):
         print("whole: no pixel of that colour")
         return 1
     x0, y0, x1, y1 = min(xs), min(ys), max(xs) + 1, max(ys) + 1
+    if FIELD >= 0:                      # the field's lines: h is the box's height in all lines, within one either way
+        fill = n / ((x1 - x0) * ((y1 - y0 + 1) // 2))
+        print(f"whole: at {x0},{y0} {x1 - x0}x{y1 - y0} in field {FIELD} ({fill:.0%} of it the colour)")
+        tol = int(os.environ.get("DPY_TOL", "1"))
+        # (DPY_TOL over 1: the other field's lines blend in, a move's step across, 8 pixels, and 93% filled: the comb)
+        return 0 if abs(x1 - x0 - w) <= (2 if tol <= 1 else 8) and abs(y1 - y0 - h) <= tol and \
+            fill >= (0.98 if tol <= 1 else 0.93) else 1
     fill = n / ((x1 - x0) * (y1 - y0))
     print(f"whole: at {x0},{y0} {x1 - x0}x{y1 - y0} ({fill:.0%} of it the colour)")
     return 0 if abs(x1 - x0 - w) <= 2 and y1 - y0 == h and fill >= 0.98 else 1

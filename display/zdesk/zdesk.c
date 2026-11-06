@@ -100,13 +100,13 @@ static void place_new(struct zw *w, const struct dpyev *e)
 {
     static int casc;
     int iw = e->w, ih = e->h;
-    if (frame_w(iw) > 640) iw = 640 - th.st.left - th.st.right;
-    if (frame_h(ih) > 256 - bar_h) ih = 256 - bar_h - th.st.top - th.st.bottom;
+    if (frame_w(iw) > dpy_w) iw = dpy_w - th.st.left - th.st.right;
+    if (frame_h(ih) > dpy_h - bar_h) ih = dpy_h - bar_h - th.st.top - th.st.bottom;
     int x = e->x >= 0 ? e->x : 32 + 24 * (casc % 6);
     int y = e->y >= bar_h ? e->y : bar_h + 8 + 12 * (casc % 6);
     if (e->x < 0) casc++;
-    if (x + frame_w(iw) > 640) x = 640 - frame_w(iw);
-    if (y + frame_h(ih) > 256) y = 256 - frame_h(ih);
+    if (x + frame_w(iw) > dpy_w) x = dpy_w - frame_w(iw);
+    if (y + frame_h(ih) > dpy_h) y = dpy_h - frame_h(ih);
     if (x < 0) x = 0;
     if (y < bar_h) y = bar_h;
     dpy_call(DPY_WM_PLACE, (u32)w->id, (u32)(unsigned short)x << 16 | (unsigned short)y, (u32)iw << 16 | (u32)ih, 0);
@@ -164,7 +164,7 @@ static void zoom(int id)
         w->zoomed = 0;
     } else {
         w->ox = in.x; w->oy = in.y; w->ow = in.w; w->oh = in.h;
-        int iw = 640 - th.st.left - th.st.right, ih = 256 - bar_h - th.st.top - th.st.bottom;
+        int iw = dpy_w - th.st.left - th.st.right, ih = dpy_h - bar_h - th.st.top - th.st.bottom;
         dpy_call(DPY_WM_PLACE, (u32)id, (u32)bar_h, (u32)iw << 16 | (u32)ih, 0);
         w->zoomed = 1;
     }
@@ -426,7 +426,7 @@ int main(int argc, char **argv)
     if ((r = dpy_call(DPY_WM_STYLE, (u32)&st, 0, 0, 0)) < 0)
         dprintf(2, "zdesk: the theme %s's frame was refused (%d): the server's own is used\n", th.name, r);
     desk_init();
-    bar_id = dpy_window(WK_BAR, "", 0, 0, 640, bar_h, 0);
+    bar_id = dpy_window(WK_BAR, "", 0, 0, dpy_w, bar_h, 0);
     grabs_set(0);
     bar_init();
     bar_draw();

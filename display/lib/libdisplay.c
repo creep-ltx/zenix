@@ -211,6 +211,10 @@ int dpy_next(struct dpyev *e, int ticks)
             unsigned n = h->nrec ? h->nrec : RECS;
             *e = ring.r[h->tail % n];
             h->tail++;
+            if (e->type == EV_SCREEN) {         /* a new mode (DPY_MODE): dpy_w, dpy_h follow it */
+                dpy_w = e->w;
+                dpy_h = e->h;
+            }
             if (h->flags & DPYR_LOST)
                 lost = 1;
             return 1;
@@ -225,3 +229,5 @@ int dpy_next(struct dpyev *e, int ticks)
             return 0;
     }
 }
+
+int dpy_mode(int mode) { return dpy_call(DPY_MODE, (unsigned)mode, 0, 0, 0); }

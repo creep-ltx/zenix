@@ -15,7 +15,9 @@ DESCRIPTION
     xterm-16color.
 
     The window is 80 columns wide and ROWS rows high at first (24; 4 to
-    29); a resize gives it 20 to 80 columns and 4 to 29 rows, in whole
+    the most the screen holds: 29 on PAL's 256 lines, 22 on NTSC's 200,
+    32 interlaced); a resize gives it 20 to 80 columns and 4 to that many
+    rows, in whole
     cells, and the program gets SIGWINCH (lines wrap at the new width;
     what lay beyond it comes back when the window widens). Output is
     shown as xterm's jump scroll does: what the program writes goes into
@@ -28,7 +30,7 @@ DESCRIPTION
     program ends.
 
 OPTIONS
-    -r ROWS     the rows at first (4 to 29; 24)
+    -r ROWS     the rows at first (4 to 29, 22 NTSC, 32 interlaced; 24)
     -c COLUMNS  the columns at first (20 to 80; 80): a window that fits
                 beside the desktop's icons (the demo floppy's welcome)
     -p X,Y      where the window's frame goes, in pixels (else zdesk's

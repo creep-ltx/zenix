@@ -1,0 +1,7 @@
+# The desktop's screen mode, read by displayd when it starts (man zdesk "FILES", DESIGN D38 "Screen modes").
+# mode hires: 640 x 256 on a PAL Amiga, 640 x 200 on NTSC (steady on any monitor; 80 KB of chip RAM).
+# mode hires-lace: interlaced, 640 x 512 PAL, 640 x 400 NTSC: twice the lines, the same 8-pixel font with twice the
+#   rows; flickers on a TV or a 15 kHz monitor, steady through a flicker fixer or scandoubler; 160 KB of chip RAM
+#   (hires when less than that and 512 KB more is free).
+# mode auto (or no line): hires. PAL or NTSC is the machine's own, never set here.
+mode auto

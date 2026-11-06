@@ -279,8 +279,6 @@ int main(int argc, char **argv)
         dprintf(2, "usage: term [-r ROWS] [-c COLUMNS] [-p X,Y] [-e COMMAND [ARGUMENTS]]\n");
         return 2;
     }
-    if (rows < 4) rows = 4;
-    if (rows > 29) rows = 29;
     if (cols < 20) cols = 20;
     if (cols > 80) cols = 80;
     int r = dpy_open("term");
@@ -288,6 +286,13 @@ int main(int argc, char **argv)
         dprintf(2, "term: the display: %s\n", zstrerror(r) ? zstrerror(r) : "not reachable");
         return 1;
     }
+    /* rows: as many as the screen holds with a frame and the bar (29 on PAL's 256 lines, 22 on NTSC's 200), at most
+     * the console's model's 32 (an interlaced screen: D38 "Screen modes") */
+    int maxr = (dpy_h - 24) / 8;
+    if (maxr > 32) maxr = 32;
+    if (maxr < 4) maxr = 4;
+    if (rows < 4) rows = 4;
+    if (rows > maxr) rows = maxr;
     int s = -1;
     struct winsize ws = { (unsigned short)rows, (unsigned short)cols, 0, 0 };
     m = posix_openpt(O_RDWR | O_NONBLOCK);
@@ -313,10 +318,10 @@ int main(int argc, char **argv)
     d.y = (short)py;
     d.w = (unsigned short)(cols * 8);
     d.h = (unsigned short)(rows * 8);
-    d.minw = 20 * 8;                    /* 20 to 80 columns (the console's model: rows of 80), 4 to 29 rows */
+    d.minw = 20 * 8;                    /* 20 to 80 columns (the console's model: rows of 80), 4 to maxr rows */
     d.maxw = 640;
     d.minh = 4 * 8;
-    d.maxh = 29 * 8;
+    d.maxh = (unsigned short)(maxr * 8);
     d.stepw = 8;
     d.steph = 8;
     const char *b = strrchr(av[0], '/');

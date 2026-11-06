@@ -1468,7 +1468,9 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   (`UCONGRAB_TOPAZ`) also gets the console's Topaz 8 (1,792 bytes) for the server to draw text with.
 - **The display server** (`/sbin/displayd`, `display/server/`, DESIGN D38 step 3, docs/man/displayd.txt): the
   service `display` (`/etc/svctab`, nice -5), started by the desktop's first program, whose console (`PEER_CTTY`; a
-  console, never a pty) it grabs. Its screen: 640 x 256 (200 on NTSC), 4 interleaved planes at FMODE 3 on AGA, 3
+  console, never a pty) it grabs. Its screen: 640 x 256 (200 on NTSC), or interlaced 640 x 512 (400) by
+  `/etc/zdesk/screen` and `DPY_MODE` at run time (D38 "Screen modes": two field lists that keep their order by a wait
+  for the long field's last line, the kernel's pointer doubled), 4 interleaved planes at FMODE 3 on AGA, 3
   on OCS/ECS, in its own chip RAM; its Copper list sets the palette, the sprites (BPLCON2 puts them in front) and
   the planes. The protocol, version 1, is `display/proto.h` (frozen): synchronous requests on port `display`, each
   answered at once; every pointer checked with `SYS_peer`; drawing orders in batches (one `DPY_DRAW` per window
@@ -1503,7 +1505,7 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   `procinfo` once a second). `term` (`display/term/`, docs/man/term.txt) opens a pty (`openpty`), starts the shell
   on its slave, and builds the console's own `kernel/term.c` and `confont.c` into itself unchanged (D38 5: one parser
   for two users), its `gfx_*` calls becoming drawing orders (a run of cells in one colour one text order): 80
-  columns, the console's model, rows from 4 to 29. The desktop's tests drive the mouse through `CON_INPUT`'s
+  columns, the console's model, rows from 4 to 29 (32 interlaced, 22 NTSC). The desktop's tests drive the mouse through `CON_INPUT`'s
   `CONI_MOUSE` (root; records dx, dy, buttons, as the port's counters would move). Verified in FS-UAE by
   `tools/zdesk-test.sh`.
 - **The graphical login** (`/sbin/dlogin`, `display/dlogin/`, DESIGN D38 revision 3, docs/man/dlogin.txt): with

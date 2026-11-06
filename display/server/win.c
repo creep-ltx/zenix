@@ -669,6 +669,41 @@ void win_style(const struct dpystyle *st)
     win_redraw_all();
 }
 
+/* a new screen (DPY_MODE, D38 "Screen modes"): the desktop's window its size; a window taller than the room below
+ * the bar the room's (in its steps; told EV_RESIZE); every framed window kept on it; the kept copies given up (they
+ * are of the old screen's look: the programs draw again) and all painted again */
+void win_screen(void)
+{
+    int top, bot;
+    edges(&top, &bot);
+    for (int i = 0; i < NWIN; i++) {
+        struct win *w = &wins[i];
+        if (!w->id)
+            continue;
+        bm_free(&w->back);
+        int iw = w->iw, ih = w->ih;
+        if (w->kind == WK_DESKTOP) {
+            iw = scr.w;
+            ih = scr.h;
+        } else if (framed(w) && bt(w) + ih + bb(w) > bot - top) {
+            ih = clampsz(bot - top - bt(w) - bb(w), w->minh, 0, w->steph, w->steph ? w->ih % w->steph : 0);
+        } else if (ih > scr.h)
+            ih = scr.h;
+        if (iw != w->iw || ih != w->ih) {
+            w->iw = (u16)iw;
+            w->ih = (u16)ih;
+            ev_win(i, EV_RESIZE, 0, 0, 0, 0, iw, ih);
+        }
+        if (framed(w) && !w->lifted) {
+            int x = w->fx, y = w->fy;
+            onscreen(w, w->iw, w->ih, &x, &y);
+            w->fx = (s16)x;
+            w->fy = (s16)y;
+        }
+    }
+    win_redraw_all();
+}
+
 /* everything again: the background, the frames, the insides from their copies, the rest exposed */
 void win_redraw_all(void)
 {

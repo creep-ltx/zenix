@@ -66,6 +66,11 @@ FILES
                 doubles the counts beyond 4 in a frame, high triples the
                 counts beyond 2; none is 2 pixels across and a line down a
                 count (the kernel moves the pointer: DPY_WM_MOUSE)
+    screen      mode hires|hires-lace|auto (auto, or no file: hires):
+                the screen displayd(8) makes when it starts, 640 x 256
+                (NTSC 640 x 200) or interlaced 640 x 512 (640 x 400);
+                read only from /etc/zdesk; changed for a running desktop
+                by DPY_MODE (dpytest(1)'s mode)
     themes/NAME.theme
                 a theme (THEMES)
 

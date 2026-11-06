@@ -15,8 +15,17 @@
 # from chip RAM filled with 0xFF first, gcontest dirty: nothing of it may show), and a pen-0 patch in A over B shows pen 0's colour (playfield 2's pen 0 is
 # transparent). And after it: A where the drag ended, every part of B and the desktop as before. Printed: the drag's cost per move
 # (blits, pixels, copies onto the screen, the E-clock time of a move and of a show, the time waited for the beam;
-# emulator figures, not the real machine's).
+# emulator figures, not the real machine's). `tools/drag-test.sh lace`: all of it on the interlaced screen (640 x 512,
+# /etc/zdesk/screen's hires-lace: D38 "Screen modes"; the screenshots read with the lines half as tall).
 cd "$(dirname "$0")/.." || exit 1
+MODE=${1:-hires}
+if [ "$MODE" = lace ]; then SCREEN=hires-lace PY=18 BOT=359 HOLE="8 2 16 6" HY=4 CDY=8; else SCREEN=auto PY=36 BOT=103 HOLE="8 32 16 8" HY=36 CDY=16; fi
+FIELDS=-1 NF=1
+# interlaced: tools/dpy-test.py reads 512 lines, the drag's screenshots field by field (a screenshot weaves two
+# fields, which show a moving window at two places: interlace's own comb, D38 "Screen modes"); FS-UAE's screenshot
+# gives a lace line 1.28 pixels, so a field's lines blend with the other's at the edges: each field's box within 5
+# lines and a move's step (8 pixels) across, 93% filled (the comb), and the pixel-for-pixel comparison of the moving picture only in hires
+[ "$MODE" = lace ] && export DPY_LINES=512 DPY_TOL=5 && FIELDS="0 1" NF=2
 export ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenix-drag-serial}
 OUT=${ZENIX_OUT:-$(mktemp -d /tmp/zenix-drag.XXXXXX)}; mkdir -p "$OUT"
 B=$OUT/build
@@ -25,8 +34,12 @@ pass=1
 check() { if [ "$2" = 0 ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 NSHOT=14
 {
-cat <<'EOS'
+cat <<EOS
 wait zenix:/# 120
+send echo mode $SCREEN > /etc/zdesk/screen\\r
+sleep 1
+EOS
+cat <<'EOS'
 sleep 1
 send termtest columns\r
 sleep 5
@@ -68,7 +81,7 @@ send echo 'gcontest mouse 2,0,1 2,0,1 2,0,1; echo drag-held-$((1+1)); sleep 4; g
 sleep 1
 send gcontest dirty\r
 sleep 3
-send gcontest mouse -128,-128,0 -128,-128,0 78,36,0 0,0,1\r
+send gcontest mouse -128,-128,0 -128,-128,0 78,PY,0 0,0,1\r
 sleep 2
 send echo stat d0 >> /tmp/c\r
 sleep 2
@@ -109,6 +122,7 @@ send cat /tmp/z.log /tmp/d.log; echo drg-end-$((40+2))\r
 wait drg-end-42 30
 EOS
 } > "$OUT/script.txt"
+sed -i "s/78,PY,0/78,$PY,0/; s/hole A 8 32 16 8/hole A $HOLE/; s/mouse 20,16,0 0,0,1/mouse 20,$CDY,0 0,0,1/" "$OUT/script.txt"     # the title bar's line: frame lines (two lines each in interlace)
 make -s -j8 BUILD="$B" DIWV=0x38 "$B/zenix.adf" "$B/zenix.hdf" >"$OUT/build.log" 2>&1 ||
     { echo "FAIL build:"; grep -v 'RWX permissions' "$OUT/build.log" | tail -15; exit 1; }
 ZENIX_BUILD="$B" python3 tools/fsuae_conf.py fsuae/a1200-020-fast.fs-uae "$OUT/run.fs-uae" || exit 1
@@ -118,6 +132,10 @@ for s in columns pre post; do
     [ -f "$OUT/z-$s.png" ] || { echo "FAIL no screenshot $s (see $OUT/z.serial.log)"; exit 1; }
 done
 python3 tools/colour-test.py columns "$OUT/z-columns.png" > "$OUT/geom"; rc=$?; check "the text console's geometry ($(head -1 "$OUT/geom"))" $rc
+if [ "$MODE" = lace ]; then             # the interlaced screenshots: lines half as tall, the top kept ("x0 x1 yc h")
+    awk '{ t = $3 - 7.5 * $4; h = $4 / 2; print $1, $2, t + 7.5 * h, h }' "$OUT/geom" > "$OUT/geom1" && mv "$OUT/geom1" "$OUT/geom"
+    grep -a -q "^dpytest: open 0 screen 640x512" "$L"; check "the interlaced screen: 640 x 512" $?
+fi
 grep -a -q "^zdesk: running, theme whole, .* drag whole" "$L"; check "zdesk runs with the whole-window drag" $?
 grep -a -q "drag-done-2" "$L"; check "the drag's mouse records were all sent" $?
 info() { grep -a -o "dpytest: info $1 [-0-9 ]*" "$L" | sed -n "$2p" | cut -d' ' -f4-7; }
@@ -133,7 +151,10 @@ for i in $(seq 1 $NSHOT); do
     f=$OUT/z-d$i.png
     [ -f "$f" ] || continue
     n=$((n + 1))
-    python3 tools/dpy-test.py whole "$f" "$OUT/geom" D54 "$rw" "$rh" > "$OUT/w$i" || { torn=$((torn + 1)); echo "  d$i: $(cat "$OUT/w$i")"; }
+    for fl in $FIELDS; do               # interlaced: each field whole at one place (a screenshot weaves two fields)
+        DPY_FIELD=$fl python3 tools/dpy-test.py whole "$f" "$OUT/geom" D54 "$rw" "$rh" > "$OUT/w$i.$fl" ||
+            { torn=$((torn + 1)); echo "  d$i: $(cat "$OUT/w$i.$fl")"; }
+    done
 done
 [ "$n" -ge $((NSHOT - 2)) ] && [ "$torn" = 0 ]; check "during the drag $n screenshots, each with A whole at one place ($torn torn)" $?
 python3 tools/dpy-test.py whole "$OUT/z-post.png" "$OUT/geom" D54 "$rw" "$rh" > "$OUT/wp"; r=$?
@@ -150,21 +171,28 @@ rc=$?; check "held before the drop A is where the drop leaves it ($(cat "$OUT/wh
 # owner's A1200 of 2026-11-06: a photo of a drag showed the title bar out of line with the body)
 fw=$((aw + 2)) fh=$((ah + 13)) nm=0 bad=0
 for i in $(seq 1 $NSHOT); do
-    read -r wx wy < <(sed -n 's/.* at \([0-9]*\),\([0-9]*\) .*/\1 \2/p' "$OUT/w$i" 2>/dev/null)
+  for fl in $FIELDS; do
+    read -r wx wy < <(sed -n 's/.* at \([0-9]*\),\([0-9]*\) .*/\1 \2/p' "$OUT/w$i.$fl" 2>/dev/null)
     [ -n "$wy" ] && [ -n "$py" ] || continue
     nm=$((nm + 1))
-    python3 tools/dpy-test.py moved "$OUT/z-post.png" "$OUT/z-d$i.png" "$OUT/geom" "$ex,$ey,$fw,$fh" \
-        "$((wx - px + ex)),$((wy - py + ey))" > "$OUT/m$i" || { bad=$((bad + 1)); echo "  d$i: $(cat "$OUT/m$i")"; }
+    DPY_FIELD=$fl python3 tools/dpy-test.py moved "$OUT/z-post.png" "$OUT/z-d$i.png" "$OUT/geom" "$ex,$ey,$fw,$fh" \
+        "$((wx - px + ex)),$((wy - py + ey))" > "$OUT/m$i.$fl" || { bad=$((bad + 1)); echo "  d$i: $(cat "$OUT/m$i.$fl")"; }
+  done
 done
-[ "$nm" -ge $((NSHOT - 2)) ] && [ "$bad" = 0 ]; check "mid-drag A's frame and inside in $nm screenshots pixel for pixel as after the drop ($bad not)" $?
+nm=$((nm / NF))
+if [ "$MODE" = lace ]; then
+    echo "  (interlaced: the moving picture compared field by field, for the record only: $bad of $((nm * NF)) differ)"
+else
+    [ "$nm" -ge $((NSHOT - 2)) ] && [ "$bad" = 0 ]; check "mid-drag A's frame and inside in $nm screenshots pixel for pixel as after the drop ($bad not)" $?
+fi
 # the whole screen held as after the drop: playfield 2 transparent outside the window (its bitmap allocated from chip
 # RAM that gcontest dirty filled with 0xFF, as a real Amiga's holds old pictures: the owner's A1200 of 2026-11-06
 # showed garbage left of the window on its lines, padding the blitter had not cleared)
 python3 tools/dpy-test.py same "$OUT/z-post.png" "$OUT/z-held.png" "$OUT/geom" > "$OUT/same"; r=$?
 check "held before the drop the screen is as after it, nothing left or right of A ($(cut -c1-160 "$OUT/same"))" $r
 # A's pen-0 hole over B (playfield 2's pen 0 is transparent: the chips' drag gives it another pen of pen 0's colour)
-[ -n "$px" ] && [ $((px + 12)) -lt $((bx + 300)) ] && [ $((py + 36)) -lt $((by + 12 + 100)) ] &&
-    python3 tools/dpy-test.py px "$OUT/z-held.png" "$OUT/geom" "$((px + 12)),$((py + 36)),344" > "$OUT/hole"
+[ -n "$px" ] && [ $((px + 12)) -lt $((bx + 300)) ] && [ $((py + HY)) -lt $((by + 12 + 100)) ] &&
+    python3 tools/dpy-test.py px "$OUT/z-held.png" "$OUT/geom" "$((px + 12)),$((py + HY)),344" > "$OUT/hole"
 rc=$?; check "A's pen-0 pixels over B show pen 0's colour while dragged ($(cat "$OUT/hole" 2>/dev/null))" $rc
 stat() { grep -a -o "dpytest: stat $1 [^(]*([-0-9]*)" "$L" | head -1; }
 field() { stat "$1" | sed -n "s/.* $2 \([0-9]*\).*/\1/p"; }
@@ -190,7 +218,7 @@ read -r dx dy _ < <(info A 4)
 [ "$ux,$uy" = "7,11" ]; check "dragged up and left past the edges: A at $ux,$uy (7,11: the frame's left on the screen, its top on the bar's bottom)" $?
 python3 tools/dpy-test.py same "$OUT/z-cu-post.png" "$OUT/z-cu-held.png" "$OUT/geom" > "$OUT/same-cu"; r=$?
 check "... held there the screen is as after the drop ($(cut -c1-120 "$OUT/same-cu"))" $r
-[ "$dx,$dy" = "231,103" ]; check "with 16 pens dragged right and down past the edges: A at $dx,$dy (231,103: the whole frame on the screen, its bottom edge on the screen's)" $?
+[ "$dx,$dy" = "231,$BOT" ]; check "with 16 pens dragged right and down past the edges: A at $dx,$dy (231,$BOT: the whole frame on the screen, its bottom edge on the screen's)" $?
 python3 tools/dpy-test.py same "$OUT/z-cd-post.png" "$OUT/z-cd-held.png" "$OUT/geom" > "$OUT/same-cd"; r=$?
 check "... held there the screen is as after the drop ($(cut -c1-120 "$OUT/same-cd"))" $r
 cm=$(field c1 moves) cb=$(field c1 blits)

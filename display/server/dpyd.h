@@ -27,6 +27,8 @@ struct region { u16 n; u8 over; struct rect r[RMAX]; };    /* over: pieces were 
 extern struct bm scr;           /* the screen */
 extern int use_blit;            /* the blitter is ours (the console is shown): else the CPU draws */
 extern int aga;
+extern int lace;               /* the screen is interlaced (D38 "Screen modes"): line y on frame line y / 2 */
+extern int frame_l;            /* a frame's lines: 312 PAL, 262 NTSC */
 extern u32 chip_used, chip_budget;      /* the kept copies' chip RAM (D38 6.2: 256 KB, then simple refresh) */
 extern u32 nblits, npix, nglyphs, ncopies;  /* DPY_STAT's counters (draw.c) */
 extern u32 ndraws, npaints;             /* DPY_DRAW batches (displayd.c), damage painted (win.c) */
@@ -99,6 +101,7 @@ void win_style(const struct dpystyle *s);
 void win_draw(int slot, const u16 *o, u32 nwords, u32 *bad);    /* a DRAW batch */
 int win_at(int x, int y, int *part);   /* the window under a point (front first) and the part (0 inside, FP_*) */
 void win_redraw_all(void);
+void win_screen(void);         /* a new screen (DPY_MODE): windows kept on it, all drawn again */
 void win_drag(int slot, int mode, int px, int py);          /* follows the pointer until the button is let go */
 void win_drag_event(int x, int y, int up);                  /* the pointer while a drag runs (displayd.c) */
 extern int dragging;            /* a drag is under way: the slot + 1 */

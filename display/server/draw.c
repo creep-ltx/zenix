@@ -307,7 +307,23 @@ static void blit_whole(struct bm *s, int sx, int sy, struct bm *d, const struct 
     }
     blit_block(s, sx, sy, d, r, desc);
 }
+static void blit_block1(struct bm *s, int sx, int sy, struct bm *d, const struct rect *r, int desc);
+/* BLTSIZE has 10 bits of height: a block of more than 1,024 plane lines (an interlaced screen's 512 lines at 4 planes
+ * are 2,048) in pieces of whole lines, from the bottom when it copies descending */
 static void blit_block(struct bm *s, int sx, int sy, struct bm *d, const struct rect *r, int desc)
+{
+    int k = 1024 / d->depth, h = r->y1 - r->y0;
+    if (h <= k) {
+        blit_block1(s, sx, sy, d, r, desc);
+        return;
+    }
+    for (int i = 0; i < h; i += k) {
+        int o = desc ? (h - i - k > 0 ? h - i - k : 0) : i, n = desc ? h - i - o : (h - i < k ? h - i : k);
+        struct rect p = { r->x0, (s16)(r->y0 + o), r->x1, (s16)(r->y0 + o + n) };
+        blit_block1(s, sx, sy + o, d, &p, desc);
+    }
+}
+static void blit_block1(struct bm *s, int sx, int sy, struct bm *d, const struct rect *r, int desc)
 {
     int w0 = r->x0 >> 4, w1 = (r->x1 - 1) >> 4, W = w1 - w0 + 1, n = (r->y1 - r->y0) * d->depth;
     int edges = (r->x0 & 15) || (r->x1 & 15);
@@ -342,7 +358,9 @@ static void blit_block(struct bm *s, int sx, int sy, struct bm *d, const struct 
  * merged) shadow_show copies what changed onto the screen on view: one blit of whole words, B to D, top to bottom,
  * started where the beam cannot overtake it nor come round to meet it before it ends (beam_rule), so every frame
  * shows the area all as it was or all as it is. The screen's first line is the kernel's DIW_V (the same make
- * variable); a frame is 312 lines on PAL, 262 on NTSC (by the screen's height, as the kernel chose it). */
+ * variable); a frame is 312 lines on PAL, 262 on NTSC (by the console's height, as the kernel chose it). In
+ * interlace screen line y is on frame line y / 2 (D38 "Screen modes"): a band's frame lines hold two screen lines
+ * each, so the beam's rule is reckoned in frame lines with twice the words a line. */
 #ifndef DIW_V
 #define DIW_V 0x2C
 #endif
@@ -379,7 +397,7 @@ static void dirty_add(const struct rect *r)
     else
         dirty[ndirty++] = *r;
 }
-static int frame_lines(void) { return scr.h > 200 ? 312 : 262; }
+static int frame_lines(void) { return frame_l; }
 /* the display line the beam is on (0 the screen's first; negative above it, in the border and the vertical blank) */
 int dpy_beam(void)
 {
@@ -478,10 +496,7 @@ int shadow_begin(void)
     struct bm d = scr;
     d.p = p;
     struct rect all = { 0, 0, (s16)scr.w, (s16)scr.h };
-    if (scr.h * scr.depth <= 1024)
-        blit_block(&shown, 0, 0, &d, &all, 0);
-    else
-        memcpy(p, scr.p, scr.stride * scr.h);
+    blit_block(&shown, 0, 0, &d, &all, 0);
     blit_idle();
     scr.p = p;
     shadowing = 1;
@@ -514,9 +529,8 @@ void shadow_show(void)
         int words = (r.x1 - r.x0) >> 4, lo, len;
         if (words <= 0 || r.y1 <= r.y0)
             continue;
-        if ((r.y1 - r.y0) * scr.depth > 1024)
-            r.y1 = (s16)(r.y0 + 1024 / scr.depth);      /* (never: the screen's height at its depth is 1,024) */
-        beam_rule(r.y0, r.y1, words, &lo, &len);
+        int fy0 = r.y0 >> lace, fy1 = (r.y1 + lace) >> lace;     /* the band's frame lines */
+        beam_rule(fy0, fy1, words << lace, &lo, &len);
         blit_idle();                    /* the drawing finished first */
         u32 t0 = sys_hrtime();
         int ok = beam_wait(lo, len);
@@ -534,7 +548,7 @@ void shadow_show(void)
             if (show_k < 564)
                 show_k = 564;
         }
-        if (!ok || show_torn(b0, us, r.y0, r.y1)) {
+        if (!ok || show_torn(b0, us, fy0, fy1)) {
             if (nlate++ < 4 || !(nlate & 255))      /* (the serial line: the first few, then one in 256) */
                 dprintf(2, "displayd: a show late for the beam: lines %d..%d, %d words, the beam at %d (wanted %d "
                         "+%d), %u us%s\n", r.y0, r.y1, words, b0, lo, len, us, ok ? "" : ", the beam not seen");
@@ -575,9 +589,8 @@ void bm_copy(struct bm *s, int sx, int sy, struct bm *d, const struct rect *dr)
     int same = s == d, after = same && (r.y0 > sy || (r.y0 == sy && r.x0 > sx));
     int sh = (r.x0 & 15) - (sx & 15);
     int bl = use_blit && r.y1 - r.y0 <= 1024 && ((!after && sh >= 0) || (after && sh == 0));
-    if (bl && sh == 0 && depth == s->depth && depth == d->depth && s->bpr == d->bpr && s->stride == d->stride &&
-        (r.y1 - r.y0) * depth <= 1024) {
-        blit_whole(s, sx, sy, d, &r, after);    /* every plane in one blit */
+    if (bl && sh == 0 && depth == s->depth && depth == d->depth && s->bpr == d->bpr && s->stride == d->stride) {
+        blit_whole(s, sx, sy, d, &r, after);    /* every plane in one blit (more than 1,024 plane lines in pieces) */
         return;
     }
     for (int k = 0; k < depth; k++) {

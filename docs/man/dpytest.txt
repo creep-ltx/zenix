@@ -29,6 +29,8 @@ DESCRIPTION
         bad NAME           a batch with a broken order (refused)
         time NAME N        N raises and N moves: the mean round trip
         mem                free RAM, the memory of displayd and dpytest
+        mode [hires|lace]  the screen's mode (DPY_MODE; none: only asked):
+                           "dpytest: mode M screen WxH"
         stat [LABEL]       the server's counters since the last stat
                            (DPY_STAT): blits, pixels, glyphs, draws,
                            paints, copies; a whole drag's moves, their

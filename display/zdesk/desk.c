@@ -64,7 +64,7 @@ static void label_draw(int i)
 void desk_draw(int x, int y, int w, int h)
 {
     dpy_clip(desk_id, x, y, w, h);
-    dpy_fill(desk_id, 0, 0, 640, 256, pen(R_DESK));
+    dpy_fill(desk_id, 0, 0, dpy_w, dpy_h, pen(R_DESK));
     for (int i = 0; i < nicons; i++) {
         int a = -1;
         for (u32 k = 0; k < NART; k++)
@@ -86,7 +86,7 @@ void desk_init(void)
         icon_image(buf, arts[k].rows, 12, pens, depth);
         art_img[k] = dpy_image_new(24, 12, depth, IMG_MASK, buf);
     }
-    desk_id = dpy_window(WK_DESKTOP, "", 0, 0, 640, 256, 0);
+    desk_id = dpy_window(WK_DESKTOP, "", 0, 0, dpy_w, dpy_h, 0);
 }
 
 /* a click on an icon selects it, a second within half a second starts it */
@@ -157,7 +157,7 @@ void about(void)
     if (ab_id < 0)
         ab_id = 0;
     else
-        own_window(ab_id, "About Zenix", 200, 80, 240, 64);
+        own_window(ab_id, "About Zenix", (dpy_w - 240) / 2, (dpy_h - 64) / 2 - 16, 240, 64);
 }
 void about_event(const struct dpyev *e)
 {

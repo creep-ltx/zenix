@@ -128,6 +128,13 @@ static void command(char *line)
         return;
     }
     if (!strcmp(w[0], "wm")) { say("dpytest: wm %d\n", dpy_call(DPY_WM_HELLO, 0, 0, 0, 0)); return; }
+    if (!strcmp(w[0], "mode")) {       /* mode [hires|lace]: DPY_MODE (D38 "Screen modes"); none: only asked */
+        int want = n < 2 ? DPYM_ASK : !strcmp(w[1], "lace") ? DPYM_LACE : DPYM_HIRES;
+        int r = dpy_mode(want);
+        events();                       /* EV_SCREEN: dpy_w, dpy_h follow; the windows' exposes drawn */
+        say("dpytest: mode %d screen %ux%u\n", r, dpy_w, dpy_h);
+        return;
+    }
     if (!strcmp(w[0], "events")) { events(); sys_write(1, evlog, nev); nev = 0; say("dpytest: events end\n"); return; }
     if (!strcmp(w[0], "mem")) {
         u32 mi[4];

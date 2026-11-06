@@ -20,7 +20,13 @@ DESCRIPTION
     style (without one, a plain built-in style), the programs' drawing
     orders, sent in batches and checked one by one, and the pointer (the
     hardware's sprite 0, moved by the kernel). The screen is 640 x 256
-    (640 x 200 on NTSC) in 16 colours on AGA, 8 on OCS and ECS.
+    (640 x 200 on NTSC) in 16 colours on AGA, 8 on OCS and ECS, or
+    interlaced, 640 x 512 (640 x 400 on NTSC), when /etc/zdesk/screen says
+    "mode hires-lace" (zdesk(1) FILES) and the chip RAM free is at least
+    the screen and 512 KB more (else hires, and it says why). A program
+    may change the mode while it runs (DPY_MODE, a preferences program's
+    Test, Use and Cancel): the windows are kept on the new screen and
+    drawn again, and every program is told the new size (EV_SCREEN).
 
     Smart refresh: a window that is partly covered keeps a copy of its
     inside in chip RAM, so raising, uncovering and moving it never ask its
@@ -70,6 +76,7 @@ OPTIONS
 
 FILES
     /etc/svctab                       its service line
+    /etc/zdesk/screen                 the screen's mode at its start
     /usr/share/consolefonts/zenix-8x8.zcf   the characters beyond Latin-1
 
 NOTES
@@ -79,8 +86,13 @@ NOTES
     console of the first client is taken: a program on a pseudo-terminal
     or a service cannot start the desktop. One font: the console's (Topaz
     8 from the kernel, the Unicode supplement); a wide character draws as
-    one cell. At most 32 windows, 16 client programs and 48 images (64 KB
-    of chip RAM a program); a window's visible part is at most 24
-    rectangles (more: the change is painted whole and the programs asked
-    to draw). A program's events go only into its own ring (the port it
-    names must be its own). The protocol is display/proto.h.
+    one cell. In interlace the same 8 x 8 font gives twice the rows (half
+    as tall on the glass), the pointer is as large as in hires and its
+    tip moves two lines a step (the kernel's pointer is in frame lines);
+    the mode flickers on a TV or 15 kHz monitor (a flicker fixer or
+    scandoubler shows it steady). At most 32 windows, 16 client
+    programs and 48 images (64 KB of chip RAM a program); a window's
+    visible part is at most 24 rectangles (more: the change is painted
+    whole and the programs asked to draw). A program's events go only
+    into its own ring (the port it names must be its own). The protocol
+    is display/proto.h.

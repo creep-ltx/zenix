@@ -16,10 +16,15 @@ int aga;
 int wm_cl = -1;
 static int port, gfd = -1, confd = -1, persist, grabbed, grabbed_con;
 u32 ndraws;
-static u16 *copl;                       /* the Copper list (chip RAM) */
-static int cop_col, cop_col2;           /* the index of COLOR00's value in it; of playfield 2's first (AGA) */
-static u16 *dyn[2], *cop_jmp;           /* the Copper list's changing part, two of them; COP2LCL's value */
-static int dyn_cur;                     /* the one the Copper is told to use */
+/* the Copper list (chip RAM): its fixed part twice, one a field of an interlaced screen (the long field's, the short
+ * field's: D38 "Screen modes"; without interlace the first alone runs), each jumping to its field's changing part */
+static u16 *copl[2];
+static int cop_col, cop_col2;           /* the index of COLOR00's value in them; of playfield 2's first (AGA) */
+static u16 *dyn[2][2], *cop_jmp[2];     /* the changing part: two buffers, each a list a field; COP2LCL's values */
+static int dyn_cur;                     /* the buffer the Copper is told to use */
+int lace;                               /* the screen is interlaced: a field shows every other line */
+int frame_l = 312;                      /* a frame's lines: 312 PAL, 262 NTSC (a long field one more) */
+static int base_w, base_h;              /* the console's size (640 x 256 PAL, 640 x 200 NTSC): a field's */
 static u16 *spr;                        /* the pointer: sprite 0 */
 static int ptx, pty;                    /* the pointer, from the kernel */
 static u16 btns;                        /* its buttons (GQ_*BUTTON) */
@@ -195,11 +200,13 @@ static void default_style(void)
 static int pf2_pen = -1;                /* a lifted window's stand-in for pen 0 (D38 "Dragging with the chips") */
 static void set_palette(void)
 {
-    for (int i = 0; i < (1 << scr.depth); i++)
-        copl[cop_col + 2 * i + 1] = style.palette[i] & 0xFFF;
-    if (cop_col2)
-        for (int i = 0; i < 16; i++)
-            copl[cop_col2 + 2 * i + 1] = style.palette[i == pf2_pen ? 0 : i] & 0xFFF;
+    for (int f = 0; f < 2; f++) {
+        for (int i = 0; i < (1 << scr.depth); i++)
+            copl[f][cop_col + 2 * i + 1] = style.palette[i] & 0xFFF;
+        if (cop_col2)
+            for (int i = 0; i < 16; i++)
+                copl[f][cop_col2 + 2 * i + 1] = style.palette[i == pf2_pen ? 0 : i] & 0xFFF;
+    }
 }
 
 /* ---- the Copper list's changing part (D38 "Dragging with the chips") ----
@@ -209,20 +216,22 @@ static void set_palette(void)
 static const struct bm *lift;
 static int hx, hy;
 static const u8 *zero88;
-static void dyn_build(u16 *c, int on)
+static void dyn_build(u16 *c, int on, int f)    /* f: the field (0 long: lines 0, 2...; 1 short: 1, 3...) */
 {
 #define MOVE(r, v) do { *c++ = (u16)(r); *c++ = (u16)(v); } while (0)
-    int depth = scr.depth, f3 = aga;
+    int depth = scr.depth, f3 = aga, wrapped = 0;
+    u32 fo = lace && f ? scr.stride : 0;    /* the short field's planes start a line further in */
+    u16 lm = (u16)(lace ? scr.stride : 0);  /* and each field passes over the other's lines */
     if (!on) {
-        MOVE(0x100, 0x8200 | depth << 12);  /* BPLCON0: hires */
+        MOVE(0x100, 0x8200 | depth << 12 | lace << 2);  /* BPLCON0: hires (LACE: interlaced) */
         MOVE(0x102, 0);
         MOVE(0x104, 0x0024);                /* BPLCON2: the sprites in front of the planes */
-        MOVE(0x108, scr.stride - scr.bpr);
-        MOVE(0x10A, scr.stride - scr.bpr);
+        MOVE(0x108, scr.stride - scr.bpr + lm);
+        MOVE(0x10A, scr.stride - scr.bpr + lm);
         MOVE(0x092, f3 ? 0x38 : 0x3C);      /* the console's fetch window (kernel/gfx.c) */
         MOVE(0x094, f3 ? 0xC0 : 0xD4);
         for (int k = 0; k < depth; k++) {
-            u32 p = (u32)scr.p + (u32)k * scr.bpr;
+            u32 p = (u32)scr.p + (u32)k * scr.bpr + fo;
             MOVE(0x0E0 + 4 * k, p >> 16);
             MOVE(0x0E2 + 4 * k, p);
         }
@@ -232,26 +241,27 @@ static void dyn_build(u16 *c, int on)
         int sft = hx & 63;
         const u8 *p2 = lift->p - 8 * (((hx - sft) >> 6) + 1);
         int d = sft * 2;                    /* the delay in 35 ns steps: bits 2-5 to 4-7, 0-1 to 12-13, 6-7 to 14-15 */
-        MOVE(0x100, 0x8610);                /* BPLCON0: hires, dual playfield, 8 planes */
+        MOVE(0x100, 0x8610 | lace << 2);    /* BPLCON0: hires, dual playfield, 8 planes */
         MOVE(0x102, (d & 0x3C) << 2 | (d & 3) << 12 | (d & 0xC0) << 8);
         MOVE(0x104, 0x0064);                /* BPLCON2: playfield 2 in front, the sprites in front of both */
-        MOVE(0x108, scr.stride - 88);
+        MOVE(0x108, scr.stride - 88 + lm);
         MOVE(0x10A, (u16)-88);
         MOVE(0x092, 0x28);
         MOVE(0x094, 0xC0);
         for (int k = 0; k < 4; k++) {
-            u32 p = (u32)scr.p + (u32)k * scr.bpr - 8, z = (u32)zero88;
+            u32 p = (u32)scr.p + (u32)k * scr.bpr - 8 + fo, z = (u32)zero88;
             MOVE(0x0E0 + 8 * k, p >> 16);   /* playfield 1: planes 1, 3, 5, 7 */
             MOVE(0x0E2 + 8 * k, p);
             MOVE(0x0E4 + 8 * k, z >> 16);   /* playfield 2: 2, 4, 6, 8, the zero line until the window */
             MOVE(0x0E6 + 8 * k, z);
         }
-        int wrapped = 0;
         for (int e = 0; e < 2; e++) {
             int y = e ? hy + lift->h : hy;
+            if (lace && (y & 1) != f)
+                y++;                        /* the field's first line at or below it */
             if (y >= scr.h)
                 break;
-            int v = DIW_V + y - 1;          /* the line above: after its fetch, before the next one's */
+            int v = DIW_V + (y >> lace) - 1;    /* the line above: after its fetch, before the next one's */
             if (v >= 256 && !wrapped) {
                 *c++ = 0xFFDF; *c++ = 0xFFFE;
                 wrapped = 1;
@@ -259,27 +269,40 @@ static void dyn_build(u16 *c, int on)
             *c++ = (u16)((v & 0xFF) << 8 | 0xD9);
             *c++ = 0xFFFE;
             for (int k = 0; k < 4; k++) {
-                u32 p = e ? (u32)zero88 : (u32)p2 + (u32)k * lift->bpr;
+                u32 p = e ? (u32)zero88 : (u32)p2 + (u32)k * lift->bpr + (u32)(y - hy) * lift->stride;
                 MOVE(0x0E4 + 8 * k, p >> 16);
                 MOVE(0x0E6 + 8 * k, p);
             }
-            MOVE(0x10A, e ? (u16)-88 : (u16)(lift->stride - 88));
+            MOVE(0x10A, e ? (u16)-88 : (u16)(lift->stride - 88 + (lace ? lift->stride : 0)));
         }
+    }
+    if (lace) {
+        /* the next field's list, kept right by the Copper: the long field's after a short one; only a long field has
+         * line frame_l (312 PAL, 262 NTSC), and there the short field's is named instead */
+        MOVE(0x080, (u32)copl[0] >> 16);
+        MOVE(0x082, (u32)copl[0]);
+        if (!wrapped) {
+            *c++ = 0xFFDF; *c++ = 0xFFFE;
+        }
+        *c++ = (u16)((frame_l & 0xFF) << 8 | 0x01);
+        *c++ = 0xFFFE;
+        MOVE(0x080, (u32)copl[1] >> 16);
+        MOVE(0x082, (u32)copl[1]);
     }
     *c++ = 0xFFFF;
     *c++ = 0xFFFE;
 #undef MOVE
 }
-/* the other list written, then the one word that names it: the Copper takes it at the top of the next frame. Before
- * writing again the frame after the last change must have begun (the Copper may still run the old list until then) */
+/* the other buffer's lists written, then the words that name them (both fields'): the Copper takes them at the top
+ * of the next frame (in interlace a field). Before writing again the frame after the last change must have begun
+ * (the Copper may still run the old lists until then) */
 static u32 flip_t;
 static int flip_line = -1;
 static void dyn_settle(void)
 {
     if (flip_line < 0)
         return;
-    int L = scr.h > 200 ? 312 : 262;
-    u32 need = (u32)(L - flip_line + 3) * 46u;     /* lines of 64 us in E-clock ticks (709,379 Hz PAL, 715,909 NTSC) */
+    u32 need = (u32)(frame_l - flip_line + 3) * 46u;   /* lines of 64 us in E-clock ticks (709,379 Hz PAL, 715,909 NTSC) */
     while ((u32)(sys_hrtime() - flip_t) < need)
         ;
     flip_line = -1;
@@ -287,12 +310,14 @@ static void dyn_settle(void)
 static void dyn_flip(int on)
 {
     dyn_settle();
-    u16 *n = dyn[dyn_cur ^ 1];
-    dyn_build(n, on);
+    int b = dyn_cur ^ 1;
+    for (int f = 0; f < 2; f++)
+        dyn_build(dyn[b][f], on, f);
     flip_line = dpy_beam() + DIW_V;
     flip_t = sys_hrtime();
-    *cop_jmp = (u16)(u32)n;
-    dyn_cur ^= 1;
+    for (int f = 0; f < 2; f++)
+        *cop_jmp[f] = (u16)(u32)dyn[b][f];
+    dyn_cur = b;
 }
 int hw_ok(void) { return aga && use_blit && cop_col2 && scr.depth == 4; }
 void hw_show(const struct bm *b, const u8 *zero, int x, int y, int pen)
@@ -323,6 +348,54 @@ static const char *const arrow[16] = {
     "......oo........",
 };
 
+/* ---- screen modes (D38 "Screen modes"): hires or hires interlaced, PAL or NTSC as the console is ---- */
+#define LACE_SPARE (512u << 10)         /* chip RAM left after an interlaced screen: drags, copies, sound, disks */
+/* /etc/zdesk/screen's "mode hires|hires-lace|auto" -> DPYM_LACE or DPYM_HIRES (no file, no line, auto: hires) */
+static int mode_file(void)
+{
+    char b[512];
+    int fd = sys_open("/etc/zdesk/screen", O_RDONLY), n = 0, r, mode = DPYM_HIRES, ln = 0;
+    if (fd < 0)
+        return mode;
+    while (n < (int)sizeof b - 1 && (r = sys_read(fd, b + n, (u32)(sizeof b - 1 - n))) > 0)
+        n += r;
+    sys_close(fd);
+    b[n] = 0;
+    for (char *l = b, *e; l && *l; l = e) {
+        e = strchr(l, '\n');
+        if (e)
+            *e++ = 0;
+        ln++;
+        while (*l == ' ' || *l == '\t')
+            l++;
+        if (!*l || *l == '#')
+            continue;
+        if (!strcmp(l, "mode hires") || !strcmp(l, "mode auto"))
+            mode = DPYM_HIRES;
+        else if (!strcmp(l, "mode hires-lace"))
+            mode = DPYM_LACE;
+        else
+            dprintf(2, "displayd: /etc/zdesk/screen line %d: not understood (mode hires|hires-lace|auto): %s\n", ln, l);
+    }
+    return mode;
+}
+/* the screen's bitmap for a mode: 0, -ENOMEM (no chip RAM; interlace also when less than LACE_SPARE would be left) */
+static int mode_alloc(struct bm *b, int want, int depth)
+{
+    u32 need = (u32)(base_h << want) * (u32)(base_w / 8) * (u32)depth, mi[4];
+    if (want && sys_meminfo(mi) == 0 && mi[0] < need + LACE_SPARE) {
+        dprintf(2, "displayd: interlace needs %u KB of chip RAM, %u KB free: hires\n", (need + LACE_SPARE) >> 10,
+                mi[0] >> 10);
+        return -ENOMEM;
+    }
+    u32 was = chip_used;
+    if (bm_alloc(b, base_w, base_h << want, depth) < 0)
+        return -ENOMEM;
+    b->kept = 0;                        /* the screen is not a kept copy */
+    chip_used = was;
+    return 0;
+}
+
 static int screen_up(int con)
 {
     char dev[12] = "/dev/tty";
@@ -336,7 +409,8 @@ static int screen_up(int con)
         return -ENOMEM;
     spr = mem;
     u16 *nul = mem + 2 * 16 + 4;
-    copl = mem + 64;
+    copl[0] = mem + 64;                 /* the fixed part: at most 64 moves each */
+    copl[1] = copl[0] + 128;
     memset(mem, 0, 1024);
     for (int y = 0; y < 16; y++) {
         u16 a = 0, b = 0;
@@ -353,12 +427,12 @@ static int screen_up(int con)
     g.size = sizeof g;
     g.topaz = (u32)topaz;
     g.sprite = (u32)spr;
-    g.cop = (u32)copl;
+    g.cop = (u32)copl[0];
     g.sprh = 16;
-    /* the Copper list is built for the screen's size; the size is the console's: 640 x 256 PAL, 640 x 200 NTSC -
-     * asked with a list that is only its end, then the real one written in place before the hand-over takes effect
-     * (the Copper reads it from the next frame) */
-    copl[0] = 0xFFFF; copl[1] = 0xFFFE;
+    /* the Copper list is built for the screen's size; the size is the console's: 640 x 256 PAL, 640 x 200 NTSC
+     * (doubled in interlace) - asked with a list that is only its end, then the real one written in place before the
+     * hand-over takes effect (the Copper reads it from the next frame) */
+    copl[0][0] = 0xFFFF; copl[0][1] = 0xFFFE;
     gfd = sys_congrab(confd, &g);
     if (gfd < 0) {
         sys_close(confd);
@@ -367,20 +441,26 @@ static int screen_up(int con)
     }
     aga = g.chips & GCHIP_AGA;
     int depth = aga ? 4 : 3;
-    if (bm_alloc(&scr, g.width, g.height, depth) < 0) {    /* no chip RAM: the console given back, nothing kept */
+    base_w = g.width;
+    base_h = g.height;
+    frame_l = base_h > 200 ? 312 : 262;
+    lace = mode_file() == DPYM_LACE;
+    if (lace && mode_alloc(&scr, 1, depth) < 0)
+        lace = 0;
+    if (!lace && mode_alloc(&scr, 0, depth) < 0) {  /* no chip RAM: the console given back, nothing kept */
         sys_close(gfd);
         gfd = -1;
         sys_close(confd);
         sys_memfree(mem);
         return -ENOMEM;
     }
-    scr.kept = 0;
-    chip_used = 0;                      /* the screen is not a kept copy */
+    chip_used = 0;
     grabbed = 1;
     font_init(topaz);
     /* the fixed part of the Copper list; the part that changes (the planes, and playfield 2 while a window is dragged
-     * by the chips) is one of two lists in dynmem, jumped to with COP2LC and COPJMP2 (D38 "Dragging with the chips") */
-    u16 *dm = sys_memalloc_chip(1024 + 512);
+     * by the chips) is one of two buffers of a list a field in dynmem, jumped to with COP2LC and COPJMP2 (D38
+     * "Dragging with the chips", "Screen modes") */
+    u16 *dm = sys_memalloc_chip(1024 + 1024);
     if (!dm) {
         sys_close(gfd);
         gfd = -1;
@@ -389,45 +469,85 @@ static int screen_up(int con)
         bm_free(&scr);
         return -ENOMEM;
     }
-    dyn[0] = (u16 *)(((u32)dm + 511) & ~511u);  /* an aligned 512-byte block never crosses 64 KB: one word flips */
-    dyn[1] = dyn[0] + 128;
-    u16 *c = copl;
-    int f3 = aga;
+    u16 *d0 = (u16 *)(((u32)dm + 1023) & ~1023u);  /* an aligned 1 KB block never crosses 64 KB: one word flips */
+    for (int b = 0; b < 2; b++)
+        for (int f = 0; f < 2; f++)
+            dyn[b][f] = d0 + 128 * (2 * b + f);
+    for (int f = 0; f < 2; f++) {
+        u16 *c = copl[f];
+        int f3 = aga;
 #define MOVE(r, v) do { *c++ = (u16)(r); *c++ = (u16)(v); } while (0)
-    if (aga) {
-        MOVE(0x1FC, f3 ? 3 : 0);        /* FMODE: 64-bit bitplane fetch, 16-pixel sprites (gcon.c's contract) */
-        MOVE(0x106, 0x1400);            /* BPLCON3: bank 0, playfield 2's colours from 32 (PF2OF) */
-        MOVE(0x10C, 0x0011);            /* BPLCON4: the sprites' colours 16-31 */
-    }
-    cop_col = (int)(c - copl);
-    for (int i = 0; i < (1 << depth); i++)
-        MOVE(0x180 + 2 * i, 0);
-    MOVE(0x1A2, 0x000);                 /* the pointer: black outline, white face */
-    MOVE(0x1A4, 0xFFF);
-    MOVE(0x1A6, 0x888);
-    if (aga) {                          /* playfield 2's colours (32-47): bank 1 */
-        MOVE(0x106, 0x3400);
-        cop_col2 = (int)(c - copl);
-        for (int i = 0; i < 16; i++)
+        if (aga) {
+            MOVE(0x1FC, f3 ? 3 : 0);    /* FMODE: 64-bit bitplane fetch, 16-pixel sprites (gcon.c's contract) */
+            MOVE(0x106, 0x1400);        /* BPLCON3: bank 0, playfield 2's colours from 32 (PF2OF) */
+            MOVE(0x10C, 0x0011);        /* BPLCON4: the sprites' colours 16-31 */
+        }
+        cop_col = (int)(c - copl[f]);
+        for (int i = 0; i < (1 << depth); i++)
             MOVE(0x180 + 2 * i, 0);
-        MOVE(0x106, 0x1400);
-    }
-    MOVE(0x120, (u32)spr >> 16);
-    MOVE(0x122, (u32)spr);
-    for (int i = 1; i < 8; i++) {
-        MOVE(0x120 + 4 * i, (u32)nul >> 16);
-        MOVE(0x122 + 4 * i, (u32)nul);
-    }
-    MOVE(0x084, (u32)dyn[0] >> 16);     /* COP2LC: the list in use; the low word is the one a change writes */
-    cop_jmp = c + 1;
-    MOVE(0x086, (u32)dyn[0]);
-    MOVE(0x08A, 0);                     /* COPJMP2 */
+        MOVE(0x1A2, 0x000);             /* the pointer: black outline, white face */
+        MOVE(0x1A4, 0xFFF);
+        MOVE(0x1A6, 0x888);
+        if (aga) {                      /* playfield 2's colours (32-47): bank 1 */
+            MOVE(0x106, 0x3400);
+            cop_col2 = (int)(c - copl[f]);
+            for (int i = 0; i < 16; i++)
+                MOVE(0x180 + 2 * i, 0);
+            MOVE(0x106, 0x1400);
+        }
+        MOVE(0x120, (u32)spr >> 16);
+        MOVE(0x122, (u32)spr);
+        for (int i = 1; i < 8; i++) {
+            MOVE(0x120 + 4 * i, (u32)nul >> 16);
+            MOVE(0x122 + 4 * i, (u32)nul);
+        }
+        MOVE(0x084, (u32)dyn[0][f] >> 16);  /* COP2LC: the field's list in use; the low word is the one a change writes */
+        cop_jmp[f] = c + 1;
+        MOVE(0x086, (u32)dyn[0][f]);
+        MOVE(0x08A, 0);                 /* COPJMP2 */
 #undef MOVE
-    dyn_build(dyn[0], 0);
+        dyn_build(dyn[0][f], 0, f);
+    }
     set_palette();
     ptx = g.width / 2;
-    pty = g.height / 2;
+    pty = scr.h / 2;
     return 0;
+}
+
+/* DPY_MODE: the screen in another mode now (a preferences program's Test, Use and Cancel; D38 "Screen modes"): a new
+ * screen allocated, every window kept on it and drawn again there (the kept copies given up: the programs draw again,
+ * EV_EXPOSE; the desktop's window the new size, EV_RESIZE), the Copper pointed at it, the old one freed, every
+ * client told (EV_SCREEN) -> the mode now, or -EBUSY (a drag under way), -ENOMEM (no chip RAM for it: as it was) */
+static int mode_switch(int want)
+{
+    if (want == lace)
+        return want;
+    if (dragging || shadowing || !use_blit)
+        return -EBUSY;
+    struct bm nb, old = scr;
+    if (mode_alloc(&nb, want, scr.depth) < 0)
+        return -ENOMEM;
+    blit_idle();
+    int was = lace;
+    scr = nb;
+    lace = want;
+    pty = pty >> was << lace;
+    struct dpyev e;                     /* told first: their resizes and exposes after it see the new size */
+    memset(&e, 0, sizeof e);
+    e.type = EV_SCREEN;
+    e.arg = (u16)lace;
+    e.w = scr.w;
+    e.h = scr.h;
+    for (int i = 0; i < NCL; i++)
+        if (cls[i].used)
+            ev_to(i, &e);
+    win_screen();                       /* drawn into the new screen while the old one is shown */
+    blit_idle();
+    dyn_flip(0);
+    dyn_settle();                       /* the Copper shows the new one: the old may go */
+    bm_free(&old);
+    dprintf(1, "displayd: screen %ux%u%s\n", scr.w, scr.h, lace ? " interlaced" : "");
+    return lace;
 }
 
 /* ---- input from the kernel's ring ---- */
@@ -552,9 +672,9 @@ static void pgrab_event(u16 old, u16 now, u16 qual, int moved)
 static void pointer(const struct ugevent *e)
 {
     u16 old = btns, now = e->qual & (GQ_LBUTTON | GQ_RBUTTON | GQ_MBUTTON);
-    int moved = e->x != ptx || e->y != pty;
+    int moved = e->x != ptx || e->y << lace != pty;
     ptx = e->x;
-    pty = e->y;
+    pty = e->y << lace;                 /* the kernel's pointer is in frame lines: two lines a frame line in interlace */
     btns = now;
     if (pgrab_w >= 0 && (wins[pgrab_w].id != pgrab_id || !(wins[pgrab_w].state & WST_SHOWN)))
         pgrab_w = -1;
@@ -609,7 +729,7 @@ static void kernel_events(void)
             case GEV_ACQUIRE:           /* every key counts as up; the screen was never touched */
                 use_blit = 1;
                 ptx = e->x;
-                pty = e->y;
+                pty = e->y << lace;
                 break;
             case GEV_KEY:
                 key(e);
@@ -908,6 +1028,12 @@ static int req(struct umsg *m)
                 nlate = 0;
         return 0;
     }
+    case DPY_MODE:                      /* any client of the desktop's session (a preferences program) */
+        if (a[0] == DPYM_ASK)
+            return lace;
+        if (a[0] > DPYM_LACE)
+            return -EINVAL;
+        return mode_switch((int)a[0]);
     case DPY_SESSION:
         if (m->uid != 0 || cls[cl].uid != 0)
             return -EPERM;

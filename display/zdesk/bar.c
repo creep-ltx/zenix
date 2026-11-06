@@ -96,11 +96,11 @@ void bar_draw(void)
     int bg = pen(R_BAR), fg = pen(R_BARFG);
     painted = 0;
     bgpen = bg;
-    dpy_fill(bar_id, 0, bar_h - 1, 640, 1, pen(R_BARLINE));
+    dpy_fill(bar_id, 0, bar_h - 1, dpy_w, 1, pen(R_BARLINE));
     int x = 8;
     /* the right zone first: the middle's list gets what is left */
     right_compose(right_text);
-    int rw = 8 * (int)strlen(right_text), rx = 640 - 8 - rw;
+    int rw = 8 * (int)strlen(right_text), rx = dpy_w - 8 - rw;
     for (int z = 0; z < 2; z++) {
         if (z == 1)
             x += 24;
@@ -156,7 +156,7 @@ void bar_draw(void)
     if (rw)
         text(rx, right_text, (int)strlen(right_text), pen(R_CLOCK), bg, 0);
     right_x = rx;
-    upto(640);
+    upto(dpy_w);
     dpy_flush();
     if (verbose)
         dprintf(1, "zdesk: bar right: %s\n", right_text);
@@ -445,7 +445,7 @@ static void menu_show(int which, int x)
         maxl = 60;                      /* a long item is cut at 60 characters: the menu stays on the screen */
     mw = 8 * maxl + 16;
     mh = 10 * nitems + 4;
-    mx = (x + mw > 640 ? 640 - mw : x) & ~7;   /* the server puts an inside on an 8-pixel column */
+    mx = (x + mw > dpy_w ? dpy_w - mw : x) & ~7;   /* the server puts an inside on an 8-pixel column */
     mtitle_x = x;
     mwin = dpy_window(WK_BAR, "", mx, bar_h, mw, mh, WF_MOTION);
     if (mwin < 0)

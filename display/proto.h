@@ -42,6 +42,13 @@
                              * an action costs. a[1] 2: a[0] is u32[12], six more: a whole window's drag moves, their
                              * E-clock ticks, shows of the drawn screen onto the one on view (a whole drag draws off
                              * the screen), their ticks, the ticks waited for the beam, shows that missed its rule */
+#define DPY_MODE        15  /* a[0] the screen's mode (DPYM_*; DPYM_ASK: none changed) -> the mode now, or -EBUSY (a
+                             * drag under way, the console not shown), -ENOMEM (no chip RAM for it: unchanged). Every
+                             * client gets EV_SCREEN; windows are kept on the screen and drawn again (D38 "Screen
+                             * modes": a preferences program's Test, Use and Cancel) */
+#define DPYM_HIRES      0   /* 640 x 256 (PAL), 640 x 200 (NTSC) */
+#define DPYM_LACE       1   /* hires interlaced: 640 x 512, 640 x 400 */
+#define DPYM_ASK        0xFF
 /* the window manager's (only after DPY_WM_HELLO; one window manager at a time) */
 #define DPY_WM_HELLO    32  /* become the window manager -> 0, -EBUSY (another one), -EPERM (not the session's user) */
 #define DPY_WM_STYLE    33  /* a[0] struct dpystyle *: frames from now on (and the screen's palette) */
@@ -204,6 +211,7 @@ struct dpyev {
 #define EV_CLOSE        7   /* the close gadget was used: the program decides */
 #define EV_MINIMISED    8
 #define EV_MENU         9   /* a menu item was picked: code the menu, arg the item */
+#define EV_SCREEN       10  /* the screen's mode changed (DPY_MODE): w x h its size now, arg the mode (DPYM_*) */
 /* to the window manager */
 #define EV_WM_NEW       32  /* a window wants to appear: win, w, h its wanted inside, x, y its wanted place, arg kind */
 #define EV_WM_FRAME     33  /* a click on a frame: code the part (FP_*), qual the buttons, x, y */

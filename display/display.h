@@ -33,6 +33,8 @@ int dpy_flush(void);                    /* 0, or -errno (-EINVAL: an order was r
 int dpy_image_new(int w, int h, int depth, int flags, const void *planes);    /* -> its id */
 int dpy_image_free(int id);
 int dpy_palette(unsigned short *pal, int n);    /* -> the screen's depth */
+int dpy_mode(int mode);                  /* DPYM_HIRES, DPYM_LACE (DPYM_ASK: only asked) -> the mode now, -errno;
+                                         * every client gets EV_SCREEN and dpy_w, dpy_h follow (D38 "Screen modes") */
 
 /* events */
 int dpy_port(void);                     /* poll it with POLLPORT | POLLRDBAND */
