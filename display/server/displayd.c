@@ -353,7 +353,8 @@ static const char *const arrow[16] = {
 /* /etc/zdesk/screen's "mode hires|hires-lace|auto" -> DPYM_LACE or DPYM_HIRES (no file, no line, auto: hires) */
 static int mode_file(void)
 {
-    char b[512];
+    static char b[2048];                /* the shipped file with its comments is about 600 bytes (2026-11-07: a 512-byte
+                                         * buffer cut off its last line, "mode hires-lace", on the owner's A1200) */
     int fd = sys_open("/etc/zdesk/screen", O_RDONLY), n = 0, r, mode = DPYM_HIRES, ln = 0;
     if (fd < 0)
         return mode;
@@ -361,6 +362,8 @@ static int mode_file(void)
         n += r;
     sys_close(fd);
     b[n] = 0;
+    if (n == (int)sizeof b - 1)
+        dprintf(2, "displayd: /etc/zdesk/screen is longer than %u bytes: the rest is not read\n", (unsigned)sizeof b - 1);
     for (char *l = b, *e; l && *l; l = e) {
         e = strchr(l, '\n');
         if (e)

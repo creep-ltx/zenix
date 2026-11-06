@@ -32,7 +32,7 @@ sleep 5
 shot columns
 send q
 sleep 2
-send echo mode hires-lace > /etc/zdesk/screen; echo acceleration none > /etc/zdesk/mouse\\r
+send grep -v '^mode' /etc/zdesk/screen > /tmp/scr; echo mode hires-lace >> /tmp/scr; cp /tmp/scr /etc/zdesk/screen; echo acceleration none > /etc/zdesk/mouse\\r
 sleep 1
 send printf 'right cmd 3600 echo .\\\\n' > /etc/zdesk/bar\\r
 sleep 1
