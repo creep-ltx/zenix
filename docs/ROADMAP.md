@@ -92,6 +92,8 @@ PFS3 8 GB), to /dev/null and on the screen, in the text console and in zdesk's t
 
 **ZINE, open (2026-11-06):** the program's volume is named "ZINE", not after its folder as d29 5.6 says, so a demo that opens `<its disk's name>:data/...` fails.
 
+**Screen modes and preferences (owner 2026-11-06, docs/decisions.md):** the desktop's PAL hires / hires interlaced (NTSC detected), switched live; then preference programs with Test/Use/Save/Cancel for the screen mode, fonts, colours, for the desktop and the text console; the console's live mode/font switch.
+
 **Real-hardware findings waiting (the A1200 with the 1260, 2026-11-04), fixed next:** the 040/060 data cache on for fast
 RAM through the transparent translation registers, chip RAM uncached (done 2026-11-04, D37: 4.23 s -> 0.95 s on the 1260; boot log was: "data cache off"; `ls -laR /` of 506
 lines took 4.26 s, 9.64 s on the screen with the serial cable in: measured; built on branch cache 2026-11-04, DESIGN
