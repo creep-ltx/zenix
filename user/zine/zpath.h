@@ -56,3 +56,22 @@ struct za_cmd {
 int za_parse(const char *cmd, zu32 len, struct za_cmd *c);
 /* c applied to t: 0 or za_set's error */
 int za_apply(struct za_table *t, const struct za_cmd *c);
+
+/* An Execute command line (docs/d29-zine.md 16.11): "[run] [<IN] [>OUT | >>OUT] NAME [<IN] [>OUT] ARGUMENTS", the
+ * redirections before the name (after a leading "run") or right after it, as the Shell takes them; a redirection's file
+ * in the same word ("> NIL:" too). The line ends at its first newline or ';' (a comment) or after len bytes. */
+struct zx_cmd {
+    char name[ZA_PATHMAX + 1];          /* the command as given ("1", "C:Assign", "parts/2"; quotes taken off) */
+    char in[ZA_PATHMAX + 1], out[ZA_PATHMAX + 1];   /* "" when not redirected */
+    int append, run;                    /* ">>", a leading "run" */
+    zu32 at;                            /* where the name starts in cmd */
+    zu32 args, arglen;                  /* the arguments: cmd[args, args + arglen), blanks at both ends taken off */
+    zu32 next;                          /* where the next line starts (len when none) */
+};
+/* 1: c filled; 0: an empty line (blanks, a comment, a lone "run"), c->next set; -1: a name or file longer than
+ * ZA_PATHMAX, or a '<' or '>' with no file (c->next set) */
+int zx_parse(const char *cmd, zu32 len, struct zx_cmd *c);
+/* 1 when name's last part (after its ':' or '/') is a command of AmigaOS's Shell or C: that ZINE does not run
+ * (CD, Echo, Stack, Wait, SetPatch, LoadWB...: they act on the Shell or the system ZINE does not have), compared
+ * without case */
+int zx_known(const char *name);

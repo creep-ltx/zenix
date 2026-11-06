@@ -121,6 +121,7 @@ struct zstate {
     u32 out_fh, in_fh;                  /* the file handles (BPTRs) */
     u32 hport;                          /* every file handle's fh_Type: the handler port that answers packets */
     u32 ioerr;
+    u32 cur_in, cur_out;                /* a command dos Execute runs (16.11): its Input(), Output(); 0 the console's */
     u8 blitter;
     u32 mmu[9];                         /* 040/060 (zb_mmu_save): which were read (bit 0 TC, ITT0/1, DTT0/1, URP, SRP;
                                          * bit 1 the 060's PCR), then their values in that order */

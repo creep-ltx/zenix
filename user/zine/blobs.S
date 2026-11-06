@@ -211,7 +211,11 @@ zx_rts:
     move.l  #1,zr_how               /* ZH_RETURN */
     bra.s   zs_catch
 zx_Exit:
-    move.l  %d1,zr_code
+    tst.l   zb_depth                /* inside a command dos Execute runs (16.11): the command ends, its caller goes on */
+    beq.s   1f
+    move.l  %d1,%d0
+    bra.w   zb_segret
+1:  move.l  %d1,zr_code
     move.l  #2,zr_how               /* ZH_EXIT */
     bra.s   zs_catch
 zx_ColdReboot:
@@ -349,6 +353,37 @@ zb_go:
     sub.l   %a4,%a4
     sub.l   %a5,%a5
     rte
+/* zb_runseg(pc, usp, d0, a0, a3): a command dos Execute runs (blibs.c run_file; d29 16.11), on the same task as a
+ * Shell runs one: its own stack (usp, the return address zb_segret on it and the stack's size at 4(sp)), d0 and a0
+ * its argument line, a3 its segment list's first link as zb_go gives, a6 ExecBase; every other register clear. The
+ * caller's stack in zb_segsp (blibs.c keeps the one before, for a command inside a command). Back with d0 the
+ * command's return code, from its rts or dos Exit (zx_Exit); d2-d7/a2-a6 kept */
+    .globl  zb_runseg, zb_segret
+zb_runseg:
+    movem.l %d2-%d7/%a2-%a6,-(%sp)
+    move.l  %sp,zb_segsp
+    move.l  48(%sp),%a5
+    move.l  52(%sp),%a1
+    move.l  56(%sp),%d0
+    move.l  60(%sp),%a0
+    move.l  64(%sp),%a3
+    move.l  %a1,%sp
+    move.l  #ZEXEC,%a6
+    moveq   #0,%d1
+    moveq   #0,%d2
+    moveq   #0,%d3
+    moveq   #0,%d4
+    moveq   #0,%d5
+    moveq   #0,%d6
+    moveq   #0,%d7
+    sub.l   %a1,%a1
+    sub.l   %a2,%a2
+    sub.l   %a4,%a4
+    jmp     (%a5)
+zb_segret:
+    move.l  zb_segsp,%sp
+    movem.l (%sp)+,%d2-%d7/%a2-%a6
+    rts
 /* zb_leave(resume, d0, d1): to the kernel's resume routine */
 zb_leave:
     move.l  4(%sp),%a0

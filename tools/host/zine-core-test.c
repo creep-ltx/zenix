@@ -639,6 +639,48 @@ static void test_path(void)
     CHECK(za_parse(cmd, strlen(cmd), &c) == 1 && c.n == 1 && !strcmp(c.dir[0], "Ram:"), "path: the command ends at ';'");
     cmd = "Assign LIBS: Ram:";
     CHECK(za_parse(cmd, 13, &c) == 1 && c.n == 0, "path: the command ends at its length");
+    {   /* 16.11: Execute's command lines */
+        struct zx_cmd x;
+        const char *l = "zpart >NIL: one  \"two words\"  ";
+        CHECK(zx_parse(l, strlen(l), &x) == 1 && !strcmp(x.name, "zpart") && !strcmp(x.out, "NIL:") && !x.in[0] &&
+              !x.run && !x.append && x.at == 0 && x.arglen == 16 && !memcmp(l + x.args, "one  \"two words\"", 16) &&
+              x.next == strlen(l), "exec: name, >NIL:, the arguments as given, blanks at the end off");
+        l = "run >nil: setpatch\nC:Part2 <in.txt >> \"Ram Disk:log\" a b ; a comment\n  \n";
+        CHECK(zx_parse(l, strlen(l), &x) == 1 && x.run && !strcmp(x.name, "setpatch") && !strcmp(x.out, "nil:") &&
+              x.arglen == 0 && x.next == 19 && x.at == 10, "exec: a leading run, its redirection, the line's end");
+        CHECK(zx_parse(l + 19, strlen(l) - 19, &x) == 1 && !strcmp(x.name, "C:Part2") && !strcmp(x.in, "in.txt") &&
+              !strcmp(x.out, "Ram Disk:log") && x.append && x.arglen == 3 && !memcmp(l + 19 + x.args, "a b", 3),
+              "exec: < and >> with a quoted file after the name; a ';' comment ends the arguments");
+        CHECK(zx_parse("  \n", 3, &x) == 0 && x.next == 3 && zx_parse("; only", 6, &x) == 0 && zx_parse("run", 3, &x) == 0 &&
+              zx_parse("", 0, &x) == 0, "exec: empty lines, comments, a lone run");
+        CHECK(zx_parse(">", 1, &x) == -1 && zx_parse("x >", 3, &x) == -1 && zx_parse(">a:", 3, &x) == -1,
+              "exec: a redirection with no file or no command");
+        l = "\"my part\" x;y";
+        CHECK(zx_parse(l, strlen(l), &x) == 1 && !strcmp(x.name, "my part") && x.arglen == 1, "exec: a quoted name");
+        l = "echo \"a;b\" c";
+        CHECK(zx_parse(l, strlen(l), &x) == 1 && x.arglen == 7, "exec: a ';' inside quotes is no comment");
+        l = "part one >NIL:";
+        CHECK(zx_parse(l, strlen(l), &x) == 1 && !x.out[0] && x.arglen == 9, "exec: '>' after the arguments is an argument (the AmigaDOS Manual)");
+        l = "Run Run x";
+        CHECK(zx_parse(l, strlen(l), &x) == 1 && x.run && !strcmp(x.name, "Run"), "exec: only the first run is taken off");
+        l = "x";
+        CHECK(zx_parse(l, 0, &x) == 0, "exec: the line ends at its length");
+        char lp[300];
+        memset(lp, 'a', 299);
+        lp[299] = 0;
+        CHECK(zx_parse(lp, 299, &x) == -1, "exec: a name longer than 95 bytes");
+        lp[0] = '>';
+        CHECK(zx_parse(lp, 299, &x) == -1, "exec: a file longer than 95 bytes");
+        for (size_t n = 0; n <= strlen(l = "run >nil: \"a b\" <c >>d e f ; g\nh"); n++) {
+            char *b = malloc(n ? n : 1);        /* every prefix, read within its length only (ASan) */
+            memcpy(b, l, n);
+            CHECK(zx_parse(b, (zu32)n, &x) >= -1 && x.next <= n, "exec: prefix %zu", n);
+            free(b);
+        }
+        CHECK(zx_known("setpatch") && zx_known("C:SetPatch") && zx_known("SYS:c/STACK") && zx_known("LoadWB") &&
+              zx_known("cd") && !zx_known("1") && !zx_known("45") && !zx_known("Parts/Second") && !zx_known("setpatchx") &&
+              !zx_known("") && !zx_known("Assign") && !zx_known("run"), "exec: the Shell's and C:'s commands known, others not");
+    }
     /* the table: 8 names, then refused; a long path refused */
     za_init(&t);
     char nm[16];
