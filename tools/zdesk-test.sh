@@ -8,8 +8,8 @@
 #  - the bar (its colour, the clock and memory blocks; a command block, its interval raised to the 1 s floor), the
 #    desktop, two windows placed below the bar by zdesk, the active one's title in the active colour
 #  - a drag of a title bar by the mouse (an outline on the 68020, the window moved at the release); one of a window
-#    with all 16 pens (the outline) far up and left, then right and down: it stops under the bar, then with its title
-#    bar above the bottom (D38 "Windows stay on the screen")
+#    with all 16 pens (the outline) far up and left, then right and down: it stops under the bar, then with its frame's
+#    bottom edge on the screen's bottom (D38 "Windows stay on the screen")
 #  - the Zenix menu by a click on the bar (it stays), About picked by a click; About's OK by a click
 #  - the menus held with the right button, Shell picked: a terminal; a double click on the Shell icon: another
 #  - the terminal: a shell on a pty; ls and echo typed into it, their output in a file the test reads
@@ -166,7 +166,7 @@ read -r ox oy _ < <(grep -a -o "dpytest: info A [-0-9 ]*" "$L" | head -1 | cut -
 [ "$ox,$oy" = "7,11" ]; check "A dragged by an outline far up and left: dropped at $ox,$oy (7,11: its title bar under the bar, on the screen)" $?
 px ol-post 100,17,47B 300,5,112; check "... its title bar shown (active) below the bar" $?
 read -r ox oy _ < <(grep -a -o "dpytest: info A [-0-9 ]*" "$L" | sed -n 2p | cut -d' ' -f4-5)
-[ "$ox,$oy" = "431,244" ]; check "... then far right and down: dropped at $ox,$oy (431,244: wholly across, its title bar above the bottom)" $?
+[ "$ox,$oy" = "431,163" ]; check "... then far right and down: dropped at $ox,$oy (431,163: the whole frame on the screen, its bottom on the screen's)" $?
 px menuclick 80,13,EEE 80,53,EEE; check "a click on Zenix: the menu opens below it and stays" $?
 px about 420,100,EEE 380,84,47B; check "About picked with a click: its window, active" $?
 px aboutgone 420,100,344; check "About's OK clicked: it is gone" $?

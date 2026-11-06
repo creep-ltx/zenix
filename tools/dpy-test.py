@@ -12,6 +12,15 @@ tools/colour-test.py columns found ("x0 x1 yc h": an Amiga pixel is (x1 - x0 + 1
                                          and W pixels wide within 2 (the screenshot's scaling blurs the sides), at
                                          least 98% of it that colour - a window's inside whole at one place (W 0: only
                                          its place and size printed)
+  dpy-test.py moved A B GEOM X,Y,W,H NX,NY
+                                         the rectangle X,Y,W,H of shot A is in shot B at line NY and the column
+                                         nearest NX a multiple of 8 from X (a window's step), pixel for pixel inside its
+                                         outermost ring (which blurs into what is around it): the screenshot's
+                                         scaling samples a moved picture at another phase, so each pixel of B is
+                                         a blend of A's pixels within 2 across and 1 up or down (each channel in their range,
+                                         40 of tolerance: a shift of 2 pixels or more shows); the pointer, a box of
+                                         at most 32 x 16 where the two differ, is left out - a window's picture the
+                                         same at two places
   dpy-test.py title SHOT GEOM X0 X1 Y    the title bar's lines Y+2 .. Y+9: columns X0 .. X1-1 (the gap after a
                                          gadget) one colour, and the 12 columns after X1 hold another (the title)
 Prints what it found and exits 1 on a failure."""
@@ -65,6 +74,28 @@ def same(a):
     return 1 if bad or (inside and not changed) else 0
 
 
+def moved(a):
+    A, B = load(a[0], a[2]), load(a[1], a[2])
+    x0, y0, x1, y1 = rect(a[3])
+    nx, ny = (int(t) for t in a[4].split(","))
+    dx, dy = (nx - x0 + 4) // 8 * 8, ny - y0       # the window moves in 8-pixel steps across
+    if not (0 <= x0 + dx and x1 + dx <= 640 and 0 <= y0 + dy and y1 + dy <= 256):
+        print("moved: not inside the screen")
+        return 1
+    bad = []
+    for y in range(y0 + 1, y1 - 1):    # the outermost ring blurs into what is around it, different in A and B
+        for x in range(x0 + 1, x1 - 1):
+            b, n = B(x + dx, y + dy), [A(x + u, y + v) for u in (-2, -1, 0, 1, 2) for v in (-1, 0, 1)]
+            if any(c < min(q[k] for q in n) - 48 or c > max(q[k] for q in n) + 48 for k, c in enumerate(b)):
+                bad.append((x, y))
+    bx = (min(p[0] for p in bad), min(p[1] for p in bad), max(p[0] for p in bad) + 1, max(p[1] for p in bad) + 1) \
+        if bad else None
+    ptr = bx and bx[2] - bx[0] <= 32 and bx[3] - bx[1] <= 16
+    print(f"moved: at {x0 + dx},{y0 + dy}, {len(bad)} pixels differ" +
+          (f" in {bx[2] - bx[0]}x{bx[3] - bx[1]} at {bx[0]},{bx[1]}" if bad else "") + (" (the pointer)" if ptr else ""))
+    return 0 if not bad or ptr else 1
+
+
 def title(a):
     P = load(a[0], a[1])
     x0, x1, y = int(a[2]), int(a[3]), int(a[4])
@@ -102,6 +133,8 @@ def main(a):
         return whole(a[1:])
     if a[0] == "same":
         return same(a[1:])
+    if a[0] == "moved":
+        return moved(a[1:])
     if a[0] == "title":
         return title(a[1:])
     if a[0] != "px":

@@ -145,6 +145,18 @@ rc=$?; check "after the drag A is whole where it ended ($(cat "$OUT/wp"))" $rc
 python3 tools/dpy-test.py whole "$OUT/z-held.png" "$OUT/geom" D54 "$rw" "$rh" > "$OUT/wh"; r=$?
 [ "$r" = 0 ] && [ "$(sed -n 's/.* at \([0-9]*,[0-9]*\) .*/\1/p' "$OUT/wh")" = "$px,$py" ]
 rc=$?; check "held before the drop A is where the drop leaves it ($(cat "$OUT/wh"))" $rc
+# mid-drag the lifted picture is the dropped one, moved: A's frame and inside (the flat theme's borders 1, 1, 12, 1)
+# in each screenshot of the drag pixel for pixel as after the drop, at the place the inside's colour shows (the
+# owner's A1200 of 2026-11-06: a photo of a drag showed the title bar out of line with the body)
+fw=$((aw + 2)) fh=$((ah + 13)) nm=0 bad=0
+for i in $(seq 1 $NSHOT); do
+    read -r wx wy < <(sed -n 's/.* at \([0-9]*\),\([0-9]*\) .*/\1 \2/p' "$OUT/w$i" 2>/dev/null)
+    [ -n "$wy" ] && [ -n "$py" ] || continue
+    nm=$((nm + 1))
+    python3 tools/dpy-test.py moved "$OUT/z-post.png" "$OUT/z-d$i.png" "$OUT/geom" "$ex,$ey,$fw,$fh" \
+        "$((wx - px + ex)),$((wy - py + ey))" > "$OUT/m$i" || { bad=$((bad + 1)); echo "  d$i: $(cat "$OUT/m$i")"; }
+done
+[ "$nm" -ge $((NSHOT - 2)) ] && [ "$bad" = 0 ]; check "mid-drag A's frame and inside in $nm screenshots pixel for pixel as after the drop ($bad not)" $?
 # the whole screen held as after the drop: playfield 2 transparent outside the window (its bitmap allocated from chip
 # RAM that gcontest dirty filled with 0xFF, as a real Amiga's holds old pictures: the owner's A1200 of 2026-11-06
 # showed garbage left of the window on its lines, padding the blitter had not cleared)
@@ -170,7 +182,7 @@ if [ -n "$mv" ] && [ "$mv" -gt 0 ]; then
 fi
 # D38 "Windows stay on the screen": dragged far up and left (the chips' drag) A stops with its title bar under the bar
 # and its left edge on the screen; with all 16 pens (the drag drawn off the screen, the chips cannot lift it) far
-# right and down it stops wholly across, its title bar above the bottom. Held at the edge (the pointer further on) it
+# right and down it stops with its whole frame on the screen, the frame's bottom on the screen's bottom. Held at the edge (the pointer further on) it
 # shows where the drop leaves it.
 for s in cu-held cu-post cd-held cd-post; do [ -f "$OUT/z-$s.png" ] || { echo "FAIL no screenshot $s"; pass=0; }; done
 read -r ux uy _ < <(info A 3)
@@ -178,7 +190,7 @@ read -r dx dy _ < <(info A 4)
 [ "$ux,$uy" = "7,11" ]; check "dragged up and left past the edges: A at $ux,$uy (7,11: the frame's left on the screen, its top on the bar's bottom)" $?
 python3 tools/dpy-test.py same "$OUT/z-cu-post.png" "$OUT/z-cu-held.png" "$OUT/geom" > "$OUT/same-cu"; r=$?
 check "... held there the screen is as after the drop ($(cut -c1-120 "$OUT/same-cu"))" $r
-[ "$dx,$dy" = "231,244" ]; check "with 16 pens dragged right and down past the edges: A at $dx,$dy (231,244: wholly across, the title bar above the bottom)" $?
+[ "$dx,$dy" = "231,103" ]; check "with 16 pens dragged right and down past the edges: A at $dx,$dy (231,103: the whole frame on the screen, its bottom edge on the screen's)" $?
 python3 tools/dpy-test.py same "$OUT/z-cd-post.png" "$OUT/z-cd-held.png" "$OUT/geom" > "$OUT/same-cd"; r=$?
 check "... held there the screen is as after the drop ($(cut -c1-120 "$OUT/same-cd"))" $r
 cm=$(field c1 moves) cb=$(field c1 blits)

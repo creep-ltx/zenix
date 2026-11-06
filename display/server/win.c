@@ -420,9 +420,10 @@ static int clampsz(int v, int mn, int mx, int step, int base)
 }
 
 /* D38 "Windows stay on the screen": a framed window's frame top left (x, y) for an inside iw x ih, moved the least
- * so that its title bar is wholly on the screen, below a full-width bar along the top and above one along the bottom,
- * and the whole frame is across (one wider than the screen: its left edge at the first column). x stays on the
- * 8-pixel step. The pointer may go further; the window stops at the edge. */
+ * so that the whole frame is on the screen, below a full-width bar along the top and above one along the bottom (one
+ * taller than the room: its top at the top edge, the rest past the bottom) and across (one wider than the screen: its
+ * left edge at the first column). x stays on the 8-pixel step. The pointer may go further; the window stops at the
+ * edge. */
 static void edges(int *top, int *bot)
 {
     *top = 0;
@@ -439,16 +440,16 @@ static void edges(int *top, int *bot)
 }
 static void onscreen(const struct win *w, int iw, int ih, int *x, int *y)
 {
-    (void)ih;
     if (!framed(w))
         return;
     int top, bot;
     edges(&top, &bot);
     int xmin = ((bl(w) + 7) & ~7) - bl(w), xmax = ((scr.w - iw - br(w)) & ~7) - bl(w);
+    int ymax = bot - bt(w) - ih - bb(w);        /* the whole frame above the bottom edge */
     if (*x > xmax) *x = xmax;
     if (*x < xmin) *x = xmin;
-    if (*y > bot - bt(w)) *y = bot - bt(w);
-    if (*y < top) *y = top;
+    if (*y > ymax) *y = ymax;
+    if (*y < top) *y = top;             /* taller than the room: at the top, its bottom past the edge */
 }
 /* a bar or the frames changed: every other window back inside the edges (not one being dragged) */
 static void reclamp(void)

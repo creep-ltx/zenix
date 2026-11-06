@@ -580,10 +580,11 @@ The owner on the A1200: "If I drag a window and drop it with its border on the t
 title bar is behind the bar and I can't grab and move it again. Maybe hard borders that windows can't go past? So every
 window stays on screen." Now a framed window (normal or dialog) can never be where its title bar cannot be grabbed:
 
-- **The rule:** the frame's top is never above the bottom of a bar across the top of the screen (a shown `WK_BAR` as
-  wide as the screen; a menu, narrower, is no edge) and never lower than the screen's bottom (or a full-width bar
-  along it) less the frame's top border, so the whole title bar shows. Across, the whole frame stays on the screen
-  (the shadow may go past the right edge); a window wider than the screen keeps its left edge at the first column the
+- **The rule (revised 2026-11-06, below):** the whole frame stays on the screen, both ways: its top never above the
+  bottom of a bar across the top of the screen (a shown `WK_BAR` as wide as the screen; a menu, narrower, is no
+  edge), its bottom never below the screen's bottom (or a full-width bar along it), and across wholly on the screen
+  (the shadow may go past the right and bottom edges). A window taller than the room below the bar has its top at
+  the bar and its bottom past the screen's; one wider than the screen keeps its left edge at the first column the
   8-pixel step allows (column 0 when the left border is a multiple of 8, else the next: 7 for the 1-pixel borders).
   A window is moved the least to meet it. The pointer may go on; the window stops at the edge, as on Workbench, and
   follows again when the pointer comes back past where it stopped.
@@ -599,3 +600,25 @@ window stays on screen." Now a framed window (normal or dialog) can never be whe
   the bar, with all 16 pens dragged far right and down by the off-screen drawing at 231,244; held at the edge each shows
   where the drop leaves it), `zdesk-test` (with the outline, far up and left: dropped at 7,11, its title bar below the
   bar; then far right and down at 431,244). Not yet on the A1200. displayd grew by 882 bytes of code (46,880 -> 47,762).
+
+**On the A1200 (the owner, PiStorm, release 2026110605, 2026-11-06):** "Window title bar can't go outside the screen
+up/down, left/right. But the rest of the window can": a terminal dragged down until only its title bar showed at the
+bottom. The owner's wish was "every window stays on screen", so now the whole frame does (the rule above; it was the
+title bar alone): `onscreen` stops the frame's top at the screen's bottom less the whole frame's height, the same
+for every placing and drag. Verified in FS-UAE: `dpy-test` (900,400 asked: 535,203; placed at 600,250: 431,163, the
+frame's bottom on the screen's), `drag-test` (16 pens, far right and down: 231,103), `zdesk-test` (the outline, far
+right and down: 431,163). displayd +14 bytes of code (47,762 -> 47,776).
+
+And a photo taken while dragging showed the title bar about 5 pixels out of line with the body below it, lined up
+again after the drop. Read from the code: the lifted bitmap is one picture, the frame and the inside drawn into it at
+the same offset (`lift_start`: the frame at column `loff`, the inside copied at `loff` plus the left border, as on
+the screen), the inside's 8-pixel column and the frame's come from the same `fx`, and playfield 2 has one pointer
+and one delay for all its lines (BPLCON1 written once a frame at the list's top, its bits as the AGA notes give them:
+PF2H0 35 ns); nothing in it differs between the title bar's lines and the body's. A moving window is at a new place
+every frame (5 pixels is about one move), so a camera's rolling shutter or a monitor's scaler that catches the top
+of one frame and the rest of the next shows exactly that step; a still drag (held) and every screenshot showed none.
+`drag-test` now checks it: in each of the 14 screenshots of the drag the window's frame and inside are pixel for
+pixel those after the drop at the place they show (`dpy-test.py moved`; the pointer's box left out, and each pixel
+may be a blend of its neighbours, as the screenshot's scaling samples a moved picture at another phase: a title bar
+shifted by 2 pixels against the body is caught, tried on an altered screenshot). If the A1200
+shows the step when the window is held still mid-drag, it is the chips', not the camera's: say so.
