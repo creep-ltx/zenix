@@ -18,6 +18,9 @@ cp -r "$(dirname "$0")/../rootfs/." "$T/"
 [ -z "$ZENIX_RELEASE" ] || python3 "$(dirname "$0")/mkzup.py" release-passwd > "$T/etc/passwd"
 [ -n "$NOTESTS" ] || mkdir -p "$T/root"
 [ -n "$NOTESTS" ] && rm -rf "$T/tests"      # NOTESTS=1: leave the test scripts out (the small RAM-disk image)
+if [ -n "$NOTESTS" ]; then                  # and the font folders (the desktop package brings them), with
+    rm -rf "$T/usr/share/fonts"; rmdir "$T/usr/share" "$T/usr" 2>/dev/null || true   # the folders left empty
+fi
 # the eleven corrupt programs mem.sh feeds to the loader (tools/mkbadzexe.py), with the scripts, so mem.sh also runs on
 # a real machine's card (2026-10-24: on the A1200 they were missing and the check passed for the wrong reason)
 if [ -z "$NOTESTS" ] && [ -f "$B/hello.zx" ]; then

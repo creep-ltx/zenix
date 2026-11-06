@@ -94,6 +94,8 @@ PFS3 8 GB), to /dev/null and on the screen, in the text console and in zdesk's t
 
 **Screen modes and preferences (owner 2026-11-06, docs/decisions.md):** the desktop's PAL hires / hires interlaced (NTSC detected), switched live; then preference programs with Test/Use/Save/Cancel for the screen mode, fonts, colours, for the desktop and the text console; the console's live mode/font switch. Fonts: `/usr/share/fonts/amiga/` for AmigaOS bitmap fonts copied as they are (a reader for .font files), `/usr/share/fonts/truetype/` later, `~/.fonts/` per user (docs/decisions.md).
 
+**Test debt (2026-11-06):** mounttest fails on main (19-26 checks, D26 link chains and F13 reads through mounts) because root-mount.img has 2-3 free blocks and the mount floppy has no room to grow it (the kernel would leave -4,308 bytes): the tests' scratch no longer fits. Already failing at 5cc0b94, before the font folders. Fix: move the tests' scratch to a mounted disk or shrink what the image carries. lineedit-test's "prompt drawn once" check saw 2 prompts on the serial copy once (to look at).
+
 **Real-hardware findings waiting (the A1200 with the 1260, 2026-11-04), fixed next:** the 040/060 data cache on for fast
 RAM through the transparent translation registers, chip RAM uncached (done 2026-11-04, D37: 4.23 s -> 0.95 s on the 1260; boot log was: "data cache off"; `ls -laR /` of 506
 lines took 4.26 s, 9.64 s on the screen with the serial cable in: measured; built on branch cache 2026-11-04, DESIGN

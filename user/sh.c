@@ -445,8 +445,8 @@ static int complete_args(const char *buf, int ws, const char *pre, char **m, int
 /* returns the number of matches; the matches are strings in the arena */
 static int find_completions(const char *buf, int pos, char **m, int max, int *wstart)
 {
-    int ws = pos;
-    while (ws > 0 && !is_space(buf[ws - 1]) && !strchr("|;&<>(", buf[ws - 1])) ws--;
+    int ws = pos;                                   /* a backslash-escaped space or ( is part of the word, as bash's */
+    while (ws > 0 && ((!is_space(buf[ws - 1]) && !strchr("|;&<>(", buf[ws - 1])) || (ws > 1 && buf[ws - 2] == '\\'))) ws--;
     *wstart = ws;
     int cmdpos = 1;
     for (int i = 0; i < ws; i++) if (!is_space(buf[i]) && !strchr("|;&(", buf[i])) { cmdpos = 0; break; }
@@ -462,8 +462,9 @@ static int find_completions(const char *buf, int pos, char **m, int max, int *ws
             for (int k = 0; runners[k]; k++) if (!strcmp(w, runners[k])) cmdpos = 1;
         }
     }
-    char pre[200]; int pl = pos - ws; if (pl > 190) pl = 190;
-    memcpy(pre, buf + ws, (u32)pl); pre[pl] = 0;
+    char pre[200]; int pl = 0;                      /* the word as typed, its backslashes taken off */
+    for (int i = ws; i < pos && pl < 190; i++) { if (buf[i] == '\\' && i + 1 < pos) i++; pre[pl++] = buf[i]; }
+    pre[pl] = 0;
     int n = 0;
     if (pre[0] == '$' && !strchr(pre, '/')) {                       /* variable names */
         for (int i = 0; i < 128; i++) if (vars[i].used && !strncmp(vars[i].name, pre + 1, strlen(pre + 1)) && strlen(vars[i].name) < 98) {
@@ -494,6 +495,20 @@ static int find_completions(const char *buf, int pos, char **m, int max, int *ws
     }
     sort_strs(m, n);
     return n;
+}
+
+/* a match as it goes on the command line: the shell's special letters (space, ( ) ' " $ & ; | < > * ? [ ] { } ! # `
+ * \) get a backslash, as bash's completion does; in the arena */
+static char *esc_word(const char *w)
+{
+    char t[300]; u32 k = 0;
+    if (*w == '$') return adup(w);                      /* a variable's name: left as it is */
+    for (; *w && k < sizeof t - 3; w++) {
+        if (strchr(" \t()'\"$&;|<>*?[]{}!#`\\", *w)) t[k++] = '\\';
+        t[k++] = *w;
+    }
+    t[k] = 0;
+    return adup(t);
 }
 
 /* The list shows each match's last part, as bash does (Latex/ Loonies/, not /mnt/sh0/Demos/Latex/ ...): what follows
@@ -687,8 +702,10 @@ static int readline(const char *prompt, int plen, char *buf, int max)
             char *mark = abrk;
             int n = find_completions(buf, pos, m, 160, &ws);
             if (n == 0) { arel(mark); break; }
-            const char *first = m[0]; int common = (int)strlen(first);
-            for (int i = 1; i < n; i++) { int k = 0; while (k < common && m[i][k] == first[k]) k++; common = k; }
+            char *e[160];                                       /* the matches as they go on the line: a space, ( ) and */
+            for (int i = 0; i < n; i++) e[i] = esc_word(m[i]);  /* the shell's other special letters get a backslash */
+            const char *first = e[0]; int common = (int)strlen(first);
+            for (int i = 1; i < n; i++) { int k = 0; while (k < common && e[i][k] == first[k]) k++; common = k; }
             int have = pos - ws;
             if (common > have && len + (common - have) < max - 2) {
                 int add = common - have;

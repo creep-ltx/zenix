@@ -19,4 +19,10 @@ send (termtest screen /dev/tty1 'tl-ma''rk' 30 'ls /tmp/tc/L\\x09\\x09\\x15echo 
 wait tl-over 90
 send cat /tmp/tl.txt; echo tl-""shown\r
 wait tl-shown 30
+send mkdir -p '/tmp/tc/001 Star (Lotus)'; echo es-""made\r
+wait es-made 30
+send (termtest screen /dev/tty1 'es-ma''rk' 30 'cd /tmp/tc/0\\x09\\rpwd; echo es-don""e\\r' > /dev/null; termtest screen /dev/tty1 '^es-done' 60 '' > /tmp/es.txt; echo es-""over) & echo es-mark\r
+wait es-over 90
+send cat /tmp/es.txt; echo es-""shown\r
+wait es-shown 30
 stop

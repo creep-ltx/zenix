@@ -28,4 +28,8 @@ n=$(sed 's/\x1b\[[0-9;]*[A-Za-z]//g' $OUT/run.log | grep -v "^row [0-9]*|" | gre
 if grep -q '^row [0-9]*|Latex/ *Loonies/ *|' $OUT/run.log && ! grep -q '^row [0-9]*|/tmp/tc/Latex/' $OUT/run.log; then
     ok "Tab lists a path's matches by their last part (Latex/  Loonies/)"
 else bad "Tab's list of a path's matches: $(grep -m1 'Latex/' $OUT/run.log)"; fi
+# Tab on a name with a space and brackets puts backslashes in (as bash), so the line runs: cd lands in the folder
+if grep -q '^row [0-9]*|zenix:/# cd /tmp/tc/001\\ Star\\ \\(Lotus\\)/' $OUT/run.log && grep -q '^row [0-9]*|/tmp/tc/001 Star (Lotus) *|' $OUT/run.log; then
+    ok "Tab escapes a name's space and brackets (cd /tmp/tc/001\\ Star\\ \\(Lotus\\)/), and cd goes there"
+else bad "Tab on a name with a space and brackets: $(grep -m1 'tc/001' $OUT/run.log)"; fi
 [ $pass = 1 ] && echo "lineedit-test: all passed" || { echo "lineedit-test: FAILED (log $OUT/run.log)"; exit 1; }
