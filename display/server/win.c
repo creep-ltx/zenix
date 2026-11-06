@@ -419,6 +419,57 @@ static int clampsz(int v, int mn, int mx, int step, int base)
     return v;
 }
 
+/* D38 "Windows stay on the screen": a framed window's frame top left (x, y) for an inside iw x ih, moved the least
+ * so that its title bar is wholly on the screen, below a full-width bar along the top and above one along the bottom,
+ * and the whole frame is across (one wider than the screen: its left edge at the first column). x stays on the
+ * 8-pixel step. The pointer may go further; the window stops at the edge. */
+static void edges(int *top, int *bot)
+{
+    *top = 0;
+    *bot = scr.h;
+    for (int i = 0; i < NWIN; i++) {
+        const struct win *b = &wins[i];
+        if (!b->id || b->kind != WK_BAR || !(b->state & WST_SHOWN) || b->iw < scr.w)
+            continue;                   /* a menu (narrower than the screen) is no edge */
+        if (b->fy <= 0 && b->fy + b->ih > *top)
+            *top = b->fy + b->ih;
+        else if (b->fy > 0 && b->fy + b->ih >= scr.h && b->fy < *bot)
+            *bot = b->fy;
+    }
+}
+static void onscreen(const struct win *w, int iw, int ih, int *x, int *y)
+{
+    (void)ih;
+    if (!framed(w))
+        return;
+    int top, bot;
+    edges(&top, &bot);
+    int xmin = ((bl(w) + 7) & ~7) - bl(w), xmax = ((scr.w - iw - br(w)) & ~7) - bl(w);
+    if (*x > xmax) *x = xmax;
+    if (*x < xmin) *x = xmin;
+    if (*y > bot - bt(w)) *y = bot - bt(w);
+    if (*y < top) *y = top;
+}
+/* a bar or the frames changed: every other window back inside the edges (not one being dragged) */
+static void reclamp(void)
+{
+    for (int i = 0; i < NWIN; i++) {
+        struct win *w = &wins[i];
+        if (!w->id || !w->placed || !framed(w) || w->lifted || dragging == i + 1)
+            continue;
+        int x = w->fx, y = w->fy;
+        onscreen(w, w->iw, w->ih, &x, &y);
+        if (x != w->fx || y != w->fy) {
+            if (w->state & WST_SHOWN)
+                win_place(i, x, y, w->iw, w->ih);
+            else {
+                w->fx = (s16)x;
+                w->fy = (s16)y;
+            }
+        }
+    }
+}
+
 int win_new(int cl, const struct dpywin *d)
 {
     int s = -1;
@@ -492,6 +543,7 @@ void win_place(int s, int x, int y, int iw, int ih)
     if (iw > scr.w) iw = scr.w;
     if (ih > scr.h) ih = scr.h;
     x = ((x + bl(w)) & ~7) - bl(w);
+    onscreen(w, iw, ih, &x, &y);
     int resized = iw != w->iw || ih != w->ih;
     before();
     damage_of(s, &d, 1);
@@ -514,6 +566,8 @@ void win_place(int s, int x, int y, int iw, int ih)
         calc_vis();
         drag_show();
     }
+    if (w->kind == WK_BAR)
+        reclamp();
 }
 
 void win_stack(int s, int back)
@@ -541,6 +595,12 @@ void win_show(int s, int show, int why)
         casc++;
         win_place(s, x, y, w->iw, w->ih);
     }
+    if (show && !(w->state & WST_SHOWN)) {    /* placed by the manager without DPY_WM_PLACE: on the screen too */
+        int x = w->fx, y = w->fy;
+        onscreen(w, w->iw, w->ih, &x, &y);
+        w->fx = (s16)x;
+        w->fy = (s16)y;
+    }
     before();
     damage_of(s, &d, 1);
     if (show)
@@ -554,6 +614,8 @@ void win_show(int s, int show, int why)
     if (!show && why == HIDE_WORKSPACE)
         bm_free(&w->back);              /* a workspace's window gives its copy up (D38 revision 2) */
     ev_win(s, EV_MINIMISED, 0, !show, 0, 0, 0, 0);
+    if (show && w->kind == WK_BAR)
+        reclamp();
 }
 
 void win_focus(int s)
@@ -594,8 +656,15 @@ void win_title(int s)
 void win_style(const struct dpystyle *st)
 {
     style = *st;
-    for (int i = 0; i < NWIN; i++)
+    for (int i = 0; i < NWIN; i++) {
         bm_free(&wins[i].back);
+        if (wins[i].id && framed(&wins[i]) && !wins[i].lifted && dragging != i + 1) {
+            int x = wins[i].fx, y = wins[i].fy;    /* new borders: still on the screen (all is painted again) */
+            onscreen(&wins[i], wins[i].iw, wins[i].ih, &x, &y);
+            wins[i].fx = (s16)x;
+            wins[i].fy = (s16)y;
+        }
+    }
     win_redraw_all();
 }
 
@@ -1028,11 +1097,16 @@ void win_drag_event(int x, int y, int up)
         ny = dy0 + y - dpy;
         nx = ((nx + bl(w)) & ~7) - bl(w);
     } else {
-        nw = clampsz(dw0 + x - dpx, w->minw ? w->minw : 16, w->maxw, w->stepw, w->stepw ? dw0 % w->stepw : 0);
-        nh = clampsz(dh0 + y - dpy, w->minh ? w->minh : 8, w->maxh, w->steph, w->steph ? dh0 % w->steph : 0);
+        int top, bot, mw = scr.w - dx0 - bl(w) - br(w), mh;      /* the frame's right and bottom stay on it */
+        edges(&top, &bot);
+        mh = bot - dy0 - bt(w) - bb(w);
+        if (w->maxw && w->maxw < mw) mw = w->maxw;
+        if (w->maxh && w->maxh < mh) mh = w->maxh;
+        int mnw = w->minw ? w->minw : 16, mnh = w->minh ? w->minh : 8;   /* (no room for the least: it moves) */
+        nw = clampsz(dw0 + x - dpx, mnw, mw >= mnw ? mw : w->maxw, w->stepw, w->stepw ? dw0 % w->stepw : 0);
+        nh = clampsz(dh0 + y - dpy, mnh, mh >= mnh ? mh : w->maxh, w->steph, w->steph ? dh0 % w->steph : 0);
     }
-    if (ny < 0) ny = 0;
-    if (ny > scr.h - 8) ny = scr.h - 8;
+    onscreen(w, nw, nh, &nx, &ny);      /* D38 "Windows stay on the screen", every drag's way */
     if (hw) {                           /* playfield 2's pointer stays inside its bitmap's zero bytes */
         if (nx - loff < 64 - lwb * 8)
             nx = 64 - lwb * 8 + loff;

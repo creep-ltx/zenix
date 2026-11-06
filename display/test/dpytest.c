@@ -3,9 +3,11 @@
  * its standard input (or, with -f FILE, from FILE as it grows), one a line, so a test script types them
  * (tools/dpy-test.sh, tools/zdesk-test.sh); each answers one line
  * "dpytest: ..." on its standard output:
- *   win NAME W H PEN   a window of W x H pixels, filled with PEN, its name in the top left in pen 7 on PEN
+ *   win NAME W H PEN [X Y]  a window of W x H pixels, filled with PEN, its name in the top left in pen 7 on PEN;
+ *                      X Y: the place it asks for (the server keeps it on the screen, D38 "Windows stay on the screen")
  *   text NAME X Y S    the text S at X, Y (pen 1 on 2)
  *   hole NAME X Y W H  a rectangle of pen 0 inside the window, drawn with it from now on (the chips' drag test)
+ *   pens NAME          a patch of all 16 pens in its bottom right, from now on (the chips' drag cannot lift it)
  *   move NAME X Y      (the window manager's) the frame's top left at X, Y
  *   size NAME W H      (the window manager's) the inside W x H
  *   raise NAME | lower NAME | focus NAME | hide NAME | show NAME | close NAME
@@ -26,7 +28,7 @@
 typedef unsigned short u16;
 
 #define NW 8
-static struct { char name[16]; int id, pen, w, h, hx, hy, hw, hh; } ws[NW];
+static struct { char name[16]; int id, pen, w, h, hx, hy, hw, hh, pens; } ws[NW];
 static char evlog[2048];
 static u32 nev;
 
@@ -53,6 +55,8 @@ static void paint(int i, int x, int y, int w, int h)
     dpy_text(ws[i].id, 0, 0, 7, ws[i].pen, 0, ws[i].name, (int)strlen(ws[i].name));
     if (ws[i].hw)
         dpy_fill(ws[i].id, ws[i].hx, ws[i].hy, ws[i].hw, ws[i].hh, 0);
+    for (int p = 0; ws[i].pens && p < 16; p++)
+        dpy_fill(ws[i].id, ws[i].w - 64 + p * 4, ws[i].h - 4, 4, 4, p);
     dpy_clip(ws[i].id, 0, 0, 0, 0);
     dpy_flush();
 }
@@ -94,8 +98,8 @@ static int words(char *l, char **w, int max)
 
 static void command(char *line)
 {
-    char *w[6];
-    int n = words(line, w, 6), i = n > 1 ? find(w[1]) : -1, r = 0;
+    char *w[8];
+    int n = words(line, w, 8), i = n > 1 ? find(w[1]) : -1, r = 0;
     if (!n)
         return;
     if (!strcmp(w[0], "win") && n >= 5) {
@@ -103,7 +107,7 @@ static void command(char *line)
         for (int j = 0; j < NW; j++)
             if (!ws[j].id) { k = j; break; }
         if (k < 0) { say("dpytest: no room\n"); return; }
-        int id = dpy_window(WK_NORMAL, w[1], -1, -1, atoi(w[2]), atoi(w[3]), 0);
+        int id = dpy_window(WK_NORMAL, w[1], n >= 7 ? atoi(w[5]) : -1, n >= 7 ? atoi(w[6]) : -1, atoi(w[2]), atoi(w[3]), 0);
         if (id < 0) { say("dpytest: win %s: %d\n", w[1], id); return; }
         strncpy(ws[k].name, w[1], 15);
         ws[k].id = id;
@@ -144,6 +148,9 @@ static void command(char *line)
         r = dpy_flush();
     } else if (!strcmp(w[0], "hole") && n >= 6) {
         ws[i].hx = atoi(w[2]); ws[i].hy = atoi(w[3]); ws[i].hw = atoi(w[4]); ws[i].hh = atoi(w[5]);
+        paint(i, 0, 0, ws[i].w, ws[i].h);
+    } else if (!strcmp(w[0], "pens")) {
+        ws[i].pens = 1;
         paint(i, 0, 0, ws[i].w, ws[i].h);
     } else if (!strcmp(w[0], "move") && n >= 4) {
         struct dpyinfo in;

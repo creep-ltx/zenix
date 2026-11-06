@@ -86,6 +86,25 @@ sleep 2
 send echo info A >> /tmp/c\r
 sleep 2
 shot post
+send gcontest mouse 0,0,1 -128,-128,1 -128,-128,1 -128,-128,1\r
+sleep 3
+shot cu-held
+send gcontest mouse 0,0,0\r
+sleep 2
+send echo info A >> /tmp/c\r
+sleep 3
+shot cu-post
+send echo pens A >> /tmp/c; echo stat c0 >> /tmp/c\r
+sleep 2
+sleep 1
+send gcontest mouse 20,16,0 0,0,1 127,127,1 127,127,1 127,127,1\r
+sleep 4
+shot cd-held
+send gcontest mouse 0,0,0\r
+sleep 2
+send echo info A >> /tmp/c; echo stat c1 >> /tmp/c\r
+sleep 3
+shot cd-post
 send cat /tmp/z.log /tmp/d.log; echo drg-end-$((40+2))\r
 wait drg-end-42 30
 EOS
@@ -149,4 +168,19 @@ if [ -n "$mv" ] && [ "$mv" -gt 0 ]; then
         if (s > 0) printf ", %.2f ms showing (%d shows), %.2f ms waiting for the beam", st / s / 709.379, s, w / s / 709.379
         printf "\n" }'
 fi
+# D38 "Windows stay on the screen": dragged far up and left (the chips' drag) A stops with its title bar under the bar
+# and its left edge on the screen; with all 16 pens (the drag drawn off the screen, the chips cannot lift it) far
+# right and down it stops wholly across, its title bar above the bottom. Held at the edge (the pointer further on) it
+# shows where the drop leaves it.
+for s in cu-held cu-post cd-held cd-post; do [ -f "$OUT/z-$s.png" ] || { echo "FAIL no screenshot $s"; pass=0; }; done
+read -r ux uy _ < <(info A 3)
+read -r dx dy _ < <(info A 4)
+[ "$ux,$uy" = "7,11" ]; check "dragged up and left past the edges: A at $ux,$uy (7,11: the frame's left on the screen, its top on the bar's bottom)" $?
+python3 tools/dpy-test.py same "$OUT/z-cu-post.png" "$OUT/z-cu-held.png" "$OUT/geom" > "$OUT/same-cu"; r=$?
+check "... held there the screen is as after the drop ($(cut -c1-120 "$OUT/same-cu"))" $r
+[ "$dx,$dy" = "231,244" ]; check "with 16 pens dragged right and down past the edges: A at $dx,$dy (231,244: wholly across, the title bar above the bottom)" $?
+python3 tools/dpy-test.py same "$OUT/z-cd-post.png" "$OUT/z-cd-held.png" "$OUT/geom" > "$OUT/same-cd"; r=$?
+check "... held there the screen is as after the drop ($(cut -c1-120 "$OUT/same-cd"))" $r
+cm=$(field c1 moves) cb=$(field c1 blits)
+[ -n "$cm" ] && [ "$cm" -gt 0 ] && [ "$cb" -gt $((cm * 10)) ]; check "... that drag was the one drawn off the screen ($cm moves, $cb blits)" $?
 exit $((1 - pass))

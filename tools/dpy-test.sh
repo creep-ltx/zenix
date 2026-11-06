@@ -11,6 +11,8 @@
 #  - raised, lowered and raised again, hidden and shown: always from the kept copy - the program is asked to draw
 #    (EV_EXPOSE) only once for each window, when it first appeared (smart refresh, D38 3.2)
 #  - scrolled (O_COPY) and the freed lines filled; a broken order refused with its offset
+#  - a window opened at 900,400 and one placed at -300,-50 and 600,250 kept on the screen (D38 "Windows stay on the
+#    screen")
 #  - closed: the desktop again; the last client gone: displayd ends and the console is text again
 # Measured and printed (emulator figures, not hardware speeds): the round trip of a raise and of a move, and the memory
 # of displayd and dpytest with two windows.
@@ -43,7 +45,18 @@ send info B\r
 send mem\r
 sleep 2
 shot two
+send win C 100 40 5 900 400\r
+sleep 2
+send info C\r
+send close C\r
+sleep 1
 send wm\r
+send move A -300 -50\r
+sleep 1
+send info A\r
+send move A 600 250\r
+sleep 1
+send info A\r
 send move A 100 100\r
 sleep 2
 shot moved
@@ -91,6 +104,10 @@ grep -q "^svc: display: started /sbin/displayd" "$L" && grep -q "^dpytest: open 
 check "dpytest starts displayd (the display service) and says hello: 640 x 256, 4 planes" $?
 grep -q "^dpytest: info A 23 16 200 80 24 28 1" "$L" && grep -q "^dpytest: info B 39 28 160 64 40 40 1" "$L"
 check "no window manager: the windows placed one below the other, the insides on 8-pixel columns" $?
+grep -q "^dpytest: info C 535 244 100 40 " "$L"
+check "a window asking for 900,400 opens on the screen: wholly across, its title bar above the bottom (535,244)" $?
+grep -q "^dpytest: info A 7 0 200 80 " "$L" && grep -q "^dpytest: info A 431 244 200 80 " "$L"
+check "placed at -300,-50 and at 600,250: kept on the screen (7,0 and 431,244; D38 'Windows stay on the screen')" $?
 px two 120,72,D54 210,60,47B 400,200,344 100,20,BBC; check "two windows: B over A, A's uncovered part, the desktop, A's title" $?
 px moved 210,60,344 30,20,344 250,150,47B 120,72,D54 150,102,D54; check "A moved: its old place is the desktop, it is under B where they overlap" $?
 px raised 150,102,BBC 250,150,47B; check "A raised: in front of B" $?

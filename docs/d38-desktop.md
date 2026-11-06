@@ -573,3 +573,29 @@ delay and the modulos were right on the real chips (the window and the desktop a
 now runs `gcontest dirty` first (the free chip RAM filled with 0xFF, as a real machine's holds data), and checks the
 whole screen held before the drop against the one after it: before the fix 33,307 pixels differed, after it none.
 displayd +150 bytes.
+
+## Windows stay on the screen (2026-11-06, branch clamp)
+
+The owner on the A1200: "If I drag a window and drop it with its border on the top bar, when I let go the window's
+title bar is behind the bar and I can't grab and move it again. Maybe hard borders that windows can't go past? So every
+window stays on screen." Now a framed window (normal or dialog) can never be where its title bar cannot be grabbed:
+
+- **The rule:** the frame's top is never above the bottom of a bar across the top of the screen (a shown `WK_BAR` as
+  wide as the screen; a menu, narrower, is no edge) and never lower than the screen's bottom (or a full-width bar
+  along it) less the frame's top border, so the whole title bar shows. Across, the whole frame stays on the screen
+  (the shadow may go past the right edge); a window wider than the screen keeps its left edge at the first column the
+  8-pixel step allows (column 0 when the left border is a multiple of 8, else the next: 7 for the 1-pixel borders).
+  A window is moved the least to meet it. The pointer may go on; the window stops at the edge, as on Workbench, and
+  follows again when the pointer comes back past where it stopped.
+- **Where it lives: displayd** (`display/server/win.c`, `onscreen`), not zdesk: the server runs every drag (D38 3.3)
+  and is the one place every position passes, whoever asks: the manager's `DPY_WM_PLACE`, the server's own placing
+  without a manager, `DPY_WM_SHOW` of a window never placed, each step of every drag (the chips' drag, the whole window
+  drawn off the screen, the outline) and its drop, a resize by the frame (its width and height stop at the screen's
+  right and bottom edges unless the window's least size does not fit, which then moves it), a new frame style
+  (`DPY_WM_STYLE`), and a bar placed or shown (every other window put back inside the new edges). zdesk's own placing
+  (below the bar, on the screen) stays as it was; the server's rule is the guarantee for any manager and client.
+- **Verified in FS-UAE:** `dpy-test` (a window asking for 900,400 opens at 535,244; placed at -300,-50 and 600,250 it
+  stays at 7,0 and 431,244), `drag-test` (a 400 x 140 window dragged far up and left by the chips stops at 7,11 under
+  the bar, with all 16 pens dragged far right and down by the off-screen drawing at 231,244; held at the edge each shows
+  where the drop leaves it), `zdesk-test` (with the outline, far up and left: dropped at 7,11, its title bar below the
+  bar; then far right and down at 431,244). Not yet on the A1200. displayd grew by 882 bytes of code (46,880 -> 47,762).

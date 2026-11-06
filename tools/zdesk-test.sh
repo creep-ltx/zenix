@@ -7,7 +7,9 @@
 # the real keyboard's and mouse's paths). Screenshots are checked pixel by pixel (tools/dpy-test.py):
 #  - the bar (its colour, the clock and memory blocks; a command block, its interval raised to the 1 s floor), the
 #    desktop, two windows placed below the bar by zdesk, the active one's title in the active colour
-#  - a drag of a title bar by the mouse (an outline on the 68020, the window moved at the release)
+#  - a drag of a title bar by the mouse (an outline on the 68020, the window moved at the release); one of a window
+#    with all 16 pens (the outline) far up and left, then right and down: it stops under the bar, then with its title
+#    bar above the bottom (D38 "Windows stay on the screen")
 #  - the Zenix menu by a click on the bar (it stays), About picked by a click; About's OK by a click
 #  - the menus held with the right button, Shell picked: a terminal; a double click on the Shell icon: another
 #  - the terminal: a shell on a pty; ls and echo typed into it, their output in a file the test reads
@@ -47,6 +49,21 @@ shot wins
 send gcontest mouse -110,-103,0 0,0,1 50,60,1 0,0,0\r
 sleep 3
 shot dragged
+send echo pens A >> /tmp/c\r
+sleep 2
+send gcontest mouse 0,0,1 -128,-128,1 -128,-128,1\r
+sleep 2
+send gcontest mouse 0,0,0\r
+sleep 2
+send echo info A >> /tmp/c\r
+sleep 2
+shot ol-post
+send gcontest mouse 20,16,0 0,0,1 127,127,1 127,127,1 0,0,0\r
+sleep 3
+send echo info A >> /tmp/c\r
+sleep 2
+send gcontest mouse -87,-85,0 -87,-85,0\r
+sleep 1
 send gcontest mouse -90,-80,0 0,0,1 0,0,0\r
 sleep 2
 shot menuclick
@@ -144,6 +161,12 @@ grep -q "^zdesk: bar right: chip [0-9.]*[KMG] fast [0-9.]*[KMG]  [0-9][0-9]:[0-9
 check "the bar's right zone: memory, the clock, a command block's line" $?
 grep -q "zdesk: the bar: a command every 0 s: every 1 s, the least" "$L"; check "... a command block's interval raised to the 1 s floor" $?
 px dragged 200,150,47B 40,100,344; check "A's title dragged by the mouse: A moved 100 right and 60 down, its old place the desktop" $?
+# D38 "Windows stay on the screen": A with all 16 pens (the chips cannot lift it: the outline) dragged far up and left
+read -r ox oy _ < <(grep -a -o "dpytest: info A [-0-9 ]*" "$L" | head -1 | cut -d' ' -f4-5)
+[ "$ox,$oy" = "7,11" ]; check "A dragged by an outline far up and left: dropped at $ox,$oy (7,11: its title bar under the bar, on the screen)" $?
+px ol-post 100,17,47B 300,5,112; check "... its title bar shown (active) below the bar" $?
+read -r ox oy _ < <(grep -a -o "dpytest: info A [-0-9 ]*" "$L" | sed -n 2p | cut -d' ' -f4-5)
+[ "$ox,$oy" = "431,244" ]; check "... then far right and down: dropped at $ox,$oy (431,244: wholly across, its title bar above the bottom)" $?
 px menuclick 80,13,EEE 80,53,EEE; check "a click on Zenix: the menu opens below it and stays" $?
 px about 420,100,EEE 380,84,47B; check "About picked with a click: its window, active" $?
 px aboutgone 420,100,344; check "About's OK clicked: it is gone" $?
