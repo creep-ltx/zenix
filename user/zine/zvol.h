@@ -4,9 +4,11 @@
  * before the hand-over and ZINE's dos reads during the session (names found by ZINE itself, no handler). Plain C
  * (zcore.h). The block is internal to one build (zine and the blob come from the same tree): native byte order.
  *
- * Layout: struct zv_hdr, then cap entries (struct zv_ent; entry 0 is the root, the volume itself), then the files'
- * data, each 4-aligned. Names follow AmigaDOS's rules: Latin-1, compared without case (Latin-1 letters too), no ':'
- * or '/', at most ZV_NAMEMAX bytes. */
+ * Layout: struct zv_hdr, then cap entries (struct zv_ent; entry 0 is the root, the volume itself; a directory before
+ * its entries), then the files' data, each 4-aligned. Names follow AmigaDOS's rules: Latin-1, compared without case
+ * (ASCII and the Latin-1 letters, not x and the division sign), no ':' or '/', at most ZV_NAMEMAX bytes. Two names that
+ * differ only in case (a Unix filesystem has them) are both kept: a lookup takes the exact name first, else the first
+ * added (d29 16.10). */
 #include "zcore.h"
 
 #define ZV_MAGIC    0x5a564f4cu         /* "ZVOL" */
@@ -53,9 +55,9 @@ int zv_init(void *blk, zu32 size, zu32 cap, const char *name);
  * mode, mtime Unix seconds, size the bytes. The entry's index, with *data where its size bytes go (the caller reads
  * the file into it); or a ZV_E_ code (negative) and nothing added: say zv_reason() and go on. */
 int zv_add(void *blk, zu32 parent, const char *name, int dir, zu32 mode, zu32 mtime, zu32 size, zu8 **data);
+/* (-3 was ZV_E_CLASH, a name the same as another but for case: since 16.10 both are added; zv_twin finds it) */
 #define ZV_E_NAME   -1                  /* not a Latin-1 name, or holds ':' or '/', or is empty, "." or ".." */
 #define ZV_E_LONG   -2                  /* longer than 107 bytes */
-#define ZV_E_CLASH  -3                  /* another name in the directory is the same but for case */
 #define ZV_E_FULL   -4                  /* no entry left */
 #define ZV_E_SPACE  -5                  /* no room for the data */
 #define ZV_E_PARENT -6                  /* parent is no directory of the volume */
@@ -64,10 +66,13 @@ const char *zv_reason(int e);
 /* Reader (the blob's dos). zv_check: the block is whole and consistent (0, or -ZE_INVAL). */
 int zv_check(const void *blk, zu32 len);
 const struct zv_ent *zv_ent(const void *blk, zu32 i);
-/* Finds path (Latin-1, AmigaDOS form) from the directory entry cur: "NAME:", "SYS:", "PROGDIR:" and ":" are the
+/* Finds path (Latin-1, AmigaDOS form) from the directory entry cur, each name the exact one first, else without case: "NAME:", "SYS:", "PROGDIR:" and ":" are the
  * root, "C:", "S:", "L:", "LIBS:", "DEVS:", "FONTS:" the root's directories of those names; '/' at the start or
  * twice goes up one. 0 and *out, or -ZE_NOENT, -ZE_NOTDIR, -ZE_NODEV (a device the volume is not: "NIL:", "CON:"). */
 int zv_find(const void *blk, zu32 cur, const char *path, zu32 *out);
+/* an entry before i in i's directory whose name is the same as i's but for case (the one a lookup that is not exact
+ * finds), or 0 */
+zu32 zv_twin(const void *blk, zu32 i);
 /* the first entry after `after` in directory dir (ExNext's order), or 0 at the end; zv_next(blk, dir, 0) is the first */
 zu32 zv_next(const void *blk, zu32 dir, zu32 after);
 /* AmigaDOS's comparison: 1 when a and b (Latin-1, n bytes of a, b 0-ended) are the same name but for case */

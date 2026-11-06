@@ -104,9 +104,6 @@ int zv_add(void *blk, zu32 parent, const char *name, int dir, zu32 mode, zu32 mt
         return n;
     if (parent >= h->nent || !E(blk, parent)->dir)
         return ZV_E_PARENT;
-    for (zu32 i = 1; i < h->nent; i++)
-        if (E(blk, i)->parent == parent && zv_same(e.name, (zu32)n, E(blk, i)->name))
-            return ZV_E_CLASH;
     if (h->nent >= h->cap)
         return ZV_E_FULL;
     if (dir)
@@ -141,7 +138,6 @@ const char *zv_reason(int e)
     switch (e) {
     case ZV_E_NAME: return "its name is not an AmigaDOS name (Latin-1, no ':' or '/')";
     case ZV_E_LONG: return "its name is longer than 107 bytes";
-    case ZV_E_CLASH: return "another name in its directory is the same but for case";
     case ZV_E_FULL: return "too many files";
     case ZV_E_SPACE: return "no room left in the volume";
     case ZV_E_PARENT: return "its directory was left out";
@@ -171,12 +167,39 @@ const struct zv_ent *zv_ent(const void *blk, zu32 i)
     return i < H(blk)->nent ? E(blk, i) : 0;
 }
 
-/* the entry named s (n bytes) in directory dir, or 0 */
+/* 1 when a (n bytes) and b (0-ended) are the same bytes */
+static int exact(const char *a, zu32 n, const char *b)
+{
+    zu32 i;
+    for (i = 0; i < n && b[i]; i++)
+        if (a[i] != b[i])
+            return 0;
+    return i == n && !b[i];
+}
+
+/* the entry named s (n bytes) in directory dir, or 0: the name exactly as written first, else the first entry that is
+ * the same but for case (AmigaDOS's rule; two such names can come from a Unix filesystem) */
 static zu32 child(const void *blk, zu32 dir, const char *s, zu32 n)
 {
+    zu32 first = 0;
     for (zu32 i = 1; i < H(blk)->nent; i++)
-        if (E(blk, i)->parent == dir && zv_same(s, n, E(blk, i)->name))
-            return i;
+        if (E(blk, i)->parent == dir && zv_same(s, n, E(blk, i)->name)) {
+            if (exact(s, n, E(blk, i)->name))
+                return i;
+            if (!first)
+                first = i;
+        }
+    return first;
+}
+
+zu32 zv_twin(const void *blk, zu32 i)
+{
+    if (!i || i >= H(blk)->nent)
+        return 0;
+    const struct zv_ent *e = E(blk, i);
+    for (zu32 k = 1; k < i; k++)
+        if (E(blk, k)->parent == e->parent && zv_same(e->name, e->namelen, E(blk, k)->name))
+            return k;
     return 0;
 }
 

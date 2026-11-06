@@ -147,6 +147,103 @@ static const char *fpu_missing(u32 w)
     return 0;
 }
 
+/* The volume's walk (5.6, 16.10): the program's directory and its subdirectories, to ZV_DEPTH levels. Pass 1 (W.vol
+ * 0) counts the entries and the files' bytes, stopping once past 5.6's limits; pass 2 adds them to W.vol. Recursive,
+ * a small frame a level (no path on the stack: W.path is the one being read). */
+#define ZV_DEPTH 8
+static struct {
+    char path[400];                     /* the Zenix path being read */
+    u32 top;                            /* bytes of the program's directory with its '/' (names shown from there) */
+    u32 n, bytes;                       /* pass 1: entries (files and directories) and bytes found */
+    int over;                           /* pass 1: past the limits, stopped */
+    u8 *vol;                            /* pass 2: the volume being filled */
+} W;
+
+/* a volume name (Latin-1) as UTF-8 into o (room for 2 * 107 + 1) */
+static void utf8_of(char *o, const char *s)
+{
+    for (const u8 *p = (const u8 *)s; *p; p++)
+        if (*p < 0x80)
+            *o++ = (char)*p;
+        else
+            *o++ = (char)(0xC0 | *p >> 6), *o++ = (char)(0x80 | (*p & 0x3F));
+    *o = 0;
+}
+
+static void walk(u32 plen, u32 parent, int depth)
+{
+    struct ustat st;
+    struct udirent de;
+    int dfd;
+    if (sys_stat(W.path[0] ? W.path : "/", &st) || !may_read(&st) || (dfd = sys_open(W.path[0] ? W.path : "/", 0)) < 0)
+        return;
+    while (!W.over && sys_readdir(dfd, &de) > 0) {
+        if (de.name[0] == '.' || (!depth && !strcmp(de.name, name)))
+            continue;
+        u32 l = strlen(de.name);
+        if (plen + 1 + l >= sizeof W.path) {
+            if (W.vol)
+                dprintf(2, "zine: %s/%s left out: its path is longer than %u bytes\n", W.path + W.top, de.name,
+                        (u32)sizeof W.path - 1);
+            continue;
+        }
+        W.path[plen] = '/';
+        memcpy(W.path + plen + 1, de.name, l + 1);
+        if (sys_stat(W.path, &st) || !may_read(&st))
+            continue;
+        int dir = (st.mode & S_IFMT) == S_IFDIR;
+        if (!dir && (st.mode & S_IFMT) != S_IFREG)
+            continue;
+        if (dir && depth + 1 >= ZV_DEPTH) {
+            if (W.vol)
+                dprintf(2, "zine: %s left out: deeper than %u directories\n", W.path + W.top, ZV_DEPTH);
+            continue;
+        }
+        if (!W.vol) {
+            W.n++;
+            if (!dir && st.size > ZV_MAXBYTES - W.bytes)
+                W.over = 1;
+            else if (!dir)
+                W.bytes += st.size;
+            if (W.n > ZV_MAXFILES)
+                W.over = 1;
+            if (dir && !W.over)
+                walk(plen + 1 + l, 0, depth + 1);
+            continue;
+        }
+        u8 *data;
+        int e = zv_add(W.vol, parent, de.name, dir, st.mode, st.mtime, dir ? 0 : st.size, &data);
+        if (e < 0) {
+            dprintf(2, "zine: %s left out: %s\n", W.path + W.top, zv_reason(e));
+            continue;
+        }
+        u32 t = zv_twin(W.vol, (u32)e);
+        if (t) {                        /* AmigaDOS has no two names that differ only in case: said once, here */
+            static char tw[2 * ZV_NAMEMAX + 2];
+            utf8_of(tw, zv_ent(W.vol, t)->name);
+            W.path[plen] = 0;
+            const char *in = plen >= W.top ? W.path + W.top : "";
+            const char *sl = *in ? "/" : "";
+            dprintf(1, "ZINE: %s%s%s and %s%s%s differ only in case, which AmigaDOS does not tell apart: a name the "
+                    "program uses finds the one spelt exactly so, else %s%s%s\n", in, sl, tw, in, sl, de.name, in, sl, tw);
+            W.path[plen] = '/';
+        }
+        if (dir) {
+            walk(plen + 1 + l, (u32)e, depth + 1);
+            continue;
+        }
+        int ffd = sys_open(W.path, 0);
+        u32 got = 0;
+        int n;
+        while (ffd >= 0 && got < st.size && (n = sys_read(ffd, data + got, st.size - got)) > 0)
+            got += (u32)n;
+        if (ffd >= 0)
+            sys_close(ffd);
+    }
+    sys_close(dfd);
+    W.path[plen] = 0;
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 3 && !strcmp(argv[1], "--blob")) {     /* the tests' other blobs (/tests/zine/null.blob): root only */
@@ -200,63 +297,39 @@ int main(int argc, char **argv)
     else if (inf.ovl)                   /* a cruncher's data container (Spaceballs' Peek): d29 16.7 */
         dprintf(1, "ZINE: %s keeps %u KB of data after its overlay table and reads it itself through its overlay "
                 "file, from memory\n", name, (len - inf.end + 1023) >> 10);
-    /* the volume (5.6): the program's directory, its plain files (not its subdirectories yet), when they fit (at
-     * most 500 files, 16 MB and half the free fast RAM); else the program alone */
-    char dir[256];
+    /* the volume (5.6): the program's directory with its subdirectories (16.10), when it fits (at most 500 entries,
+     * 16 MB and half the free fast RAM); else the program alone */
     u32 dl = (u32)(name - path);
-    if (dl >= sizeof dir)
+    if (dl >= sizeof W.path - 64)
         dl = 0;
-    memcpy(dir, path, dl);
-    dir[dl] = 0;
+    memcpy(W.path, path, dl);
+    W.path[dl] = 0;
     if (!dl)
-        strcpy(dir, ".");
-    u32 nfiles = 0, bytes = 0;
-    struct udirent de;
-    struct ustat fst;
-    int dfd = sys_stat(dir, &fst) == 0 && may_read(&fst) ? sys_open(dir, 0) : -1;
-    char fp[320];
-    if (dfd >= 0) {
-        while (sys_readdir(dfd, &de) > 0) {
-            if (de.name[0] == '.' || !strcmp(de.name, name))
-                continue;
-            snprintf(fp, sizeof fp, "%s/%s", dir, de.name);
-            if (sys_stat(fp, &fst) == 0 && (fst.mode & S_IFMT) == S_IFREG && may_read(&fst))
-                nfiles++, bytes += fst.size;
-        }
-        sys_close(dfd);
+        strcpy(W.path, "./");
+    W.top = strlen(W.path);
+    W.path[--W.top] = 0;                /* without its '/' (the walk puts one before each name) */
+    walk(W.top, 0, 0);                  /* pass 1: count */
+    W.top++;
+    u32 nent = W.n;
+    if (W.over || !zv_fits(nent + 1, W.bytes + len, info.fast_free)) {
+        dprintf(2, "zine: only %s goes into ZINE's volume: its directory holds %s%u files and directories and %u KB "
+                "(ZINE takes at most 500, 16 MB and half the free fast RAM, %u KB): a program that loads files may "
+                "not find them; give it a directory of its own\n", name, W.over ? "at least " : "", nent,
+                (W.bytes + 1023) >> 10, info.fast_free >> 11);
+        nent = 0, W.bytes = 0;
     }
-    if (!zv_fits(nfiles + 1, bytes + len, info.fast_free))
-        nfiles = 0, bytes = 0;
-    u32 vsize = zv_need(nfiles + 2, bytes + len, nfiles + 1);
-    u8 *vol = sys_memalloc(vsize), *data;
-    if (!vol || zv_init(vol, vsize, nfiles + 2, "ZINE") || zv_add(vol, 0, name, 0, st.mode, st.mtime, len, &data) < 0)
+    u32 vsize = zv_need(nent + 2, W.bytes + len, nent + 1);
+    u8 *data;
+    W.vol = sys_memalloc(vsize);
+    if (!W.vol || zv_init(W.vol, vsize, nent + 2, "ZINE") || zv_add(W.vol, 0, name, 0, st.mode, st.mtime, len, &data) < 0)
         die("zine: not enough memory for %s", name);
     memcpy(data, file, len);
     free(file);
-    if (nfiles && (dfd = sys_open(dir, 0)) >= 0) {
-        u32 added = 0;
-        while (added < nfiles && sys_readdir(dfd, &de) > 0) {
-            if (de.name[0] == '.' || !strcmp(de.name, name))
-                continue;
-            snprintf(fp, sizeof fp, "%s/%s", dir, de.name);
-            if (sys_stat(fp, &fst) || (fst.mode & S_IFMT) != S_IFREG || !may_read(&fst))
-                continue;
-            int e = zv_add(vol, 0, de.name, 0, fst.mode, fst.mtime, fst.size, &data);
-            if (e < 0) {
-                dprintf(2, "zine: %s left out: %s\n", de.name, zv_reason(e));
-                continue;
-            }
-            int ffd = sys_open(fp, 0);
-            u32 got = 0;
-            int n;
-            while (ffd >= 0 && got < fst.size && (n = sys_read(ffd, data + got, fst.size - got)) > 0)
-                got += (u32)n;
-            if (ffd >= 0)
-                sys_close(ffd);
-            added++;
-        }
-        sys_close(dfd);
+    if (nent) {
+        W.path[W.top - 1] = 0;
+        walk(W.top - 1, 0, 0);          /* pass 2: fill */
     }
+    u8 *vol = W.vol;
     u32 bsize, blob = load_blob(&bsize);
     /* the ZINE block: the saved chip RAM (Zenix's used chip blocks, low memory), the plan, the stack, the libraries */
     u32 ksize = info.chip_total - info.chip_free + (256u << 10);

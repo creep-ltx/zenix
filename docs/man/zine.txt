@@ -66,6 +66,15 @@ DESCRIPTION
     RAM:), as demos that carry their own library do. audio.device
     gives out the four channels but plays nothing itself.
 
+    The program sees its folder and its subfolders (8 levels deep, at
+    most 500 files and folders, 16 MB and half the free fast RAM; more,
+    and only the program goes in, said), copied into memory first. Names
+    are found without case, as on AmigaOS (data/xyl.tp3 finds
+    Data/XYL.TP3; the Latin-1 letters too). Two names in one folder that
+    differ only in case (AmigaOS has no such pair) are both kept: a name
+    the program uses finds the one spelt exactly so, else the first
+    found; zine says so once, before the program starts.
+
     ZINE is being built (DESIGN D29): real demos run in FS-UAE.
 
     Ctrl-Amiga-Amiga while the program runs restarts the machine into

@@ -354,8 +354,8 @@ bytes, the parent, the size, the protection bits, the date, the data's offset) a
 revision 2's FFS image and device: AmigaOS's own filesystem is not running, so ZINE's dos finds names itself.
 
 - **Names:** AmigaDOS's rules: compared without case (Latin-1 letters too), `/` and `:` separate; UTF-8 names that are
-  Latin-1 become Latin-1; names outside Latin-1, with `:` or `/`, or equal to another but for case are left out with a
-  warning. Protection bits from the Unix mode (`r` R, `w` W and D, `x` E), dates from the modification time.
+  Latin-1 become Latin-1; names outside Latin-1 or with `:` or `/` are left out with a warning; two equal but for case
+  are both kept, the exact one found first (16.10). Protection bits from the Unix mode (`r` R, `w` W and D, `x` E), dates from the modification time.
 - **Paths:** the volume is named after the directory (demos that open `NAME:data/...` by their disk's name find it);
   `SYS:`, `PROGDIR:` and the volume name are its root; `C:`, `S:`, `L:`, `LIBS:`, `DEVS:`, `FONTS:` its subdirectories
   where they exist; the current directory at the start is the program's. The owner's CPU library (10.1) is added as
@@ -1412,6 +1412,47 @@ core): `za_key`'s forms, the limits, every short buffer.
 
 Sizes (the 68020-60 build): the blob 40,728 -> 42,116 bytes (memory 45,864 -> 47,480); `/bin/zine` and the kernel
 unchanged.
+
+### 16.10 Subfolders, and names found without case (2026-11-06, branch zcase)
+
+Found on the owner's A1200 (release 2026110603): Ward's `XYLOP96.exe` (in a folder `xylop/` on a PFS3 partition
+mounted read-only) stopped with "ZINE: no file PROGDIR:data/xyl.tp3"; the file is `data/XYL.TP3`. AmigaDOS names are
+case-insensitive and case-preserving, Zenix's filesystems case-sensitive. *Read* from the source: ZINE's dos never asks
+a Zenix filesystem for a name; it looks in the volume (5.6) with `zv_same`, which already compared without case. The
+stop came first from 5.6's "recursively" not being built: `zine` copied the folder's plain files only, so no
+`data/...` path could be found in any case. Both are now done.
+
+**Built** (`user/zine.c`, `user/zine/zvol.c`; *read*: the AmigaDOS Manual's name rules; the case rule as 5.6 has it):
+- **Subfolders.** `zine` copies the program's folder with its subfolders into the volume, 8 levels deep (deeper: left
+  out, said), in two passes (count, then fill; the count stops once past 5.6's limits: 500 entries, files and
+  folders together, 16 MB, half the free fast RAM). Past them only the program goes in, and now says so ("only NAME
+  goes into ZINE's volume: its directory holds ..."). Names starting with `.` are left out as before; a folder the user
+  may not read is left out. Every dos call that takes a path finds them: `Open`, `LoadSeg`, `OpenLibrary` from
+  `LIBS:` (the folder's `Libs`, in any case), `DeleteFile`, the overlay and packet reads; `Lock` and `Examine` ZINE
+  still has not (16.9).
+- **The case rule** (`zv_same`, `za_key`'s compare, unchanged and now host-tested for it): ASCII letters and the
+  Latin-1 letters `à`-`þ` against `À`-`Þ`, not `×`/`÷` (0xD7/0xF7), not `ß` against `ÿ`; nothing else. Each part of a
+  path is found in its folder: the name spelt exactly so first, else the first entry the same but for case
+  (`zv_find`'s `child`). The memory files of 16.9 compare their keys by the same rule, so a write to `Data/Foo` and a
+  read of `DATA/FOO` meet, and a written file shadows the volume's file of any case. Nothing is cached: the volume is
+  built for each session from the disk.
+- **Two names the same but for case** (a Unix filesystem may hold `clash` and `CLASH`; 5.6 left the second out): both
+  are kept; the exact name finds its own, another spelling the first found (the directory's order). `zine` says so
+  once, before the program starts: "ZINE: Data/clash and Data/CLASH differ only in case, which AmigaDOS does not tell
+  apart: a name the program uses finds the one spelt exactly so, else Data/clash". `zv_twin` (zvol.h) names the pair;
+  `ZV_E_CLASH` is gone (the volume block is internal to one build, never frozen).
+
+*Verified* in FS-UAE (`tools/zine-emu-test.sh`, A1200 68020 4 MB fast): `zcase` (`tools/tests/zine/zcase.S`) in a
+folder the test makes (`Data/XYL.TP3`, `Data/Deep/Er/Mod.X`, `Data/clash` and `Data/CLASH`, `Data/Deep/Er/zexit`,
+`LIBS/ZT.Library`): opens `DATA/Xyl.Tp3`, `PROGDIR:data/xyl.tp3`, `SYS:data/deep/er/mod.x`; `Data/clash` and
+`Data/CLASH` each its own, `Data/Clash` the first; `LoadSeg("data/DEEP/er/ZEXIT")`; `OpenLibrary("zt.library")` loaded
+from the folder's `LIBS/ZT.Library`; writes `data/NEW.txt` and reads `DATA/new.TXT`; writes `DATA/xyl.TP3` over the
+folder's file and reads `Data/XYL.TP3` as written; deletes `data/Xyl.tp3`, then `DATA/Xyl.Tp3` is not found; return
+code 0; the folder afterwards as before. The zine line about the pair is checked. On the PC (`tools/host/zine-test.sh`
+core): the rule's letters and non-letters, the exact-first lookup, `zv_twin`, a path's every part without case, keys
+of two spellings meeting. Not yet: `XYLOP96.exe` itself, on the owner's A1200.
+
+Sizes (the 68020-60 build): `/bin/zine` 31,796 -> 33,108 bytes (the walk); the blob 47,480 -> 47,476 bytes (the exact-first lookup in, the clash check out); the kernel unchanged.
 
 ## 17. Questions for the owner (what ZINE should be)
 

@@ -349,9 +349,9 @@ static void test_vol(void)
 {
     static zu32 blkw[16384];
     void *b = blkw;
-    zu32 sz = zv_need(12, 300, 6);
+    zu32 sz = zv_need(16, 300, 6);
     CHECK(sz && sz <= sizeof blkw, "vol: zv_need");
-    CHECK(zv_init(b, sz, 12, "Arte demo") == 0 && !strcmp(zv_ent(b, 0)->name, "Arte demo"), "vol: init, the volume name");
+    CHECK(zv_init(b, sz, 16, "Arte demo") == 0 && !strcmp(zv_ent(b, 0)->name, "Arte demo"), "vol: init, the volume name");
     zu8 *d;
     int arte = zv_add(b, 0, "Arte", 0, 0755, 252460800u + 86400 + 61, 10, &d);
     CHECK(arte == 1, "vol: a file");
@@ -363,8 +363,13 @@ static void test_vol(void)
     int c = zv_add(b, 0, "c", 1, 0755, 0, 0, 0);
     int dir = zv_add(b, c, "Dir", 0, 0700, 0, 0, 0);
     CHECK(data > 0 && mod > 0 && rk > 0 && c > 0 && dir > 0, "vol: entries added");
-    CHECK(zv_add(b, 0, "ARTE", 0, 0644, 0, 0, 0) == ZV_E_CLASH, "vol: a case clash left out");
-    CHECK(zv_add(b, data, "r\xc3\x84KSM\xc3\x96RG\xc3\x85S", 0, 0644, 0, 0, 0) == ZV_E_CLASH, "vol: a Latin-1 case clash left out");
+    /* 16.10: names the same but for case are both kept (a Unix filesystem has them); zv_twin names the earlier */
+    int arte2 = zv_add(b, 0, "ARTE", 0, 0644, 0, 0, 0);
+    int rk2 = zv_add(b, data, "r\xc3\x84KSM\xc3\x96RG\xc3\x85S", 0, 0644, 0, 0, 0);
+    int xyl = zv_add(b, data, "XYL.TP3", 0, 0644, 0, 0, 0);
+    CHECK(arte2 > 0 && rk2 > 0 && xyl > 0, "vol: names the same but for case both added");
+    CHECK(zv_twin(b, arte2) == (zu32)arte && zv_twin(b, rk2) == (zu32)rk && !zv_twin(b, arte) && !zv_twin(b, xyl) &&
+          !zv_twin(b, 0) && !zv_twin(b, 999), "vol: zv_twin names the earlier of two names the same but for case");
     CHECK(zv_add(b, data, "Arte", 0, 0644, 0, 0, 0) > 0, "vol: the same name in another directory");
     CHECK(zv_add(b, 0, "a:b", 0, 0644, 0, 0, 0) == ZV_E_NAME && zv_add(b, 0, "\xe6\x97\xa5", 0, 0644, 0, 0, 0) == ZV_E_NAME &&
           zv_add(b, 0, ".", 0, 0644, 0, 0, 0) == ZV_E_NAME && zv_add(b, 0, "\xc3", 0, 0644, 0, 0, 0) == ZV_E_NAME &&
@@ -405,9 +410,26 @@ static void test_vol(void)
     FIND(0, "nothere", 0, -ZE_NOENT);
     FIND(0, "Arte/x", 0, -ZE_NOTDIR);
     FIND(arte, "x", 0, -ZE_NOTDIR);
+    /* 16.10: the exact name first, else the first added; a path's every name found without case */
+    FIND(0, "ARTE", arte2, 0);
+    FIND(0, "aRTE", arte, 0);
+    FIND(data, "R\xe4ksm\xf6rg\xe5s", rk, 0);
+    FIND(data, "r\xc4KSM\xd6RG\xc5S", rk2, 0);
+    FIND(data, "r\xe4KSM\xf6RG\xe5S", rk, 0);
+    FIND(0, "PROGDIR:data/xyl.tp3", xyl, 0);
+    FIND(0, "DATA/Xyl.Tp3", xyl, 0);
+    FIND(0, "arte DEMO:Data/xYL.tP3", xyl, 0);
+    FIND(0, "Data/XYL.TP3/", xyl, 0);
+    FIND(0, "Data/XYL.TP", 0, -ZE_NOENT);
+    /* AmigaDOS's case rule: ASCII and the Latin-1 letters (a grave to thorn against A grave to Thorn), not the
+     * multiplication and division signs, not sharp s against y diaeresis, nothing else */
+    CHECK(zv_same("abcZ", 4, "ABCz") && zv_same("\xe0\xe9\xf6\xf8\xfe", 5, "\xc0\xc9\xd6\xd8\xde") &&
+          !zv_same("\xd7", 1, "\xf7") && !zv_same("\xdf", 1, "\xff") && !zv_same("@", 1, "`") &&
+          !zv_same("[", 1, "{") && !zv_same("\xa0", 1, "\x80") && !zv_same("a", 1, "ab"),
+          "vol: the case rule (ASCII, Latin-1 letters only)");
     zu32 k = zv_next(b, data, 0), n = 0;
     while (k) n++, k = zv_next(b, data, k);
-    CHECK(n == 3 && zv_next(b, data, 0) == (zu32)mod, "vol: a directory's entries in order");
+    CHECK(n == 5 && zv_next(b, data, 0) == (zu32)mod, "vol: a directory's entries in order");
     /* damage is found */
     struct zv_hdr *h = b;
     h->nent = h->cap + 1;
@@ -578,6 +600,10 @@ static void test_path(void)
               "key: above a device's top refused");
         CHECK(!za_key("ram:abcdefgh", 0, o, 10) && za_key("ram:abcde", 0, o, 10) && !strcmp(o, "RAM:abcde"),
               "key: the limit (max bytes with the end)");
+        char o2[200];                                   /* 16.10: a write to "Foo" and a read of "FOO" meet */
+        CHECK(za_key("PROGDIR:Data/Xyl.\xe5\xe4", "MyDemo", o, sizeof o) && za_key("mydemo:DATA/xYL.\xc5\xc4", "MyDemo", o2, sizeof o2) &&
+              zv_same(o, (zu32)strlen(o), o2) && za_key("t:\xd7", 0, o, sizeof o) && za_key("T:\xf7", 0, o2, sizeof o2) &&
+              !zv_same(o, (zu32)strlen(o), o2), "key: keys compare without case (Latin-1 letters too, not x and the division sign)");
         for (int n = 1; n < 14; n++) {                  /* every short room: never written past (ASan) */
             char *b = malloc((size_t)n);
             CHECK(za_key("dh0:abc/def", 0, b, (zu32)n) == (n >= 12), "key: room %d", n);
