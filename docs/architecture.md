@@ -1642,20 +1642,28 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   spare ones with fast RAM, half as many without; display row r is ring row (base + r) mod the ring's size. The
   Copper list has two sets of plane pointers: the first at the ring's row `base`, the second at its row 0 after a
   WAIT for the line where the ring wraps on the screen (lines from 256 on: line 255's end `$FFDF` first). A
-  full-screen scroll is base + 1 and one **blitter** fill of the row that comes in (filled before the display may
-  show it), never a copy; the pointers and WAITs are written at vertical blank, only while the beam is before line
-  `$1C` (else at the next one), so all planes move together. The spare rows keep what is drawn out of sight while
-  the display still shows an older base; a scroll that would reach the rows on show waits for the vertical blank
-  (not with interrupts masked; 100 ms timeout, said once on the log). Region scrolls and fills are a blit per run of
-  rows that lie in one piece of the ring. Every wait for the blitter gives up after 500 ms and says so once on the
-  log. **A cell stored again unchanged** (character, attributes and colour) is not drawn again, nor an erased cell
-  already blank in the erase colour (ESC[K, ESC[2K): a program that redraws a line rewrites only what changed on
-  the screen (owner 2026-11-04: flicker while typing). The cursor is hidden at the start of each write and drawn
-  where the write ends. A glyph line is drawn by the CPU, one byte per
-  plane: `(glyph & m1) ^ m2` (m1 set where the foreground and background bits differ, m2 where the background bit is
-  set); with more than one plane the glyphs are kept a second time with each line repeated in all four bytes of a
-  long (7 KB), so a line is one read. Glyphs come from the ROM Topaz 8 font, grabbed from `GfxBase` by the bootblock
-  before the OS is killed. A kernel panic turns the background dark red and every other colour white.
+  full-screen scroll moves base, never copies; the pointers and WAITs are written at vertical blank, only while the
+  beam is before line `$1C` (else at the next one), so all planes move together. **Drawing waits for the end of a
+  write** (DESIGN D28 21): while a write runs the terminal only stores the cells in its grids and notes, for the
+  shown console, the cells changed on each row, the rows to draw whole (scrolled in, erased) and the full-screen
+  scrolls. At the write's end (and before anything that draws at once: the cursor, a region scroll by the blitter)
+  `flush` moves the screen by all the scrolls in one step (`gfx_jump`: within the spare rows nothing waits; beyond
+  them, with fast RAM, the whole screen is drawn in the half of the ring not on show, so nothing waits either;
+  without fast RAM the vertical blank is waited for), fills the whole rows by blitter (one blit for all planes when
+  the background is black or white), draws each row's changed or not-blank cells and only then lets the vertical
+  blank show the new base (`gfx_done`), so no row is ever shown half drawn. However much scrolled past within one
+  write, at most a screenful is drawn. The grids are rows reached through a table of row offsets (`rx`): a scroll
+  turns the table and moves no cell. Region scrolls and fills are a blit per run of rows that lie in one piece of
+  the ring. Every wait for the blitter gives up after 500 ms and says so once on the log; the wait for the vertical
+  blank after 100 ms (not with interrupts masked). **A cell stored again unchanged** (character, attributes and
+  colour) is not drawn again, nor an erased cell already blank in the erase colour (ESC[K, ESC[2K): a program that
+  redraws a line rewrites only what changed on the screen (owner 2026-11-04: flicker while typing). The cursor is
+  hidden at the start of each write and drawn where the write ends. A glyph is drawn by the CPU from its 8 bytes:
+  `(glyph & m1) ^ m2` per plane (m1 set where the foreground and background bits differ, m2 where the background
+  bit is set); four cells in one attribute and colour that start at a multiple of 4 are drawn a long word per plane
+  and line (`gfx_cells`: a quarter of the chip RAM writes), four spaces without reading a glyph. The CPU never reads
+  chip RAM to draw. Glyphs come from the ROM Topaz 8 font, grabbed from `GfxBase` by the bootblock before the OS is
+  killed. A kernel panic turns the background dark red and every other colour white.
 - **A console's font and rules for BBS terminals** (DESIGN D20 4.2-4.5, `SYS_console`'s ops 2 and 3, step 1 built on
   branch t12 2026-10-27). The op word is `op | (fd + 1) << 8`: the console is named by a descriptor (`FT_TTY` with a
   console number, else -ENOTTY; none, -EBADF), which must be the caller's controlling tty with the caller in its
@@ -1773,7 +1781,8 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   at once so it ends or stops); and between the pieces of a long terminal write (`tty_write`: drawing
   4 KB can take seconds on a 68020 with chip RAM only, and the rings would overflow; the terminal is consistent
   there, and a writer killed by Ctrl-C stops at once). A piece is at most 256 bytes and ends early once 10-20 ms
-  (two ticks) of drawing have passed while input waits or a better process is ready (`term_write_some`); between
+  (two ticks) have passed while input waits or a better process is ready (`term_write_some`; checked after each
+  character and each row's run of text, the drawing at the piece's end, DESIGN D28 21); between
   pieces `tty_write` also acts on `need_resched` as a return to user mode does (`resched`: a strictly better process
   runs now, one of the writer's level when its slice is over) - the only place a system call gives the CPU away
   without blocking, so netd, woken by SLIP's bytes, runs within about one piece (DESIGN D20 section 6). An interrupt that cuts into kernel code (a system call, or `kwork` itself) never

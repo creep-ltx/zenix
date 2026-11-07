@@ -23,12 +23,13 @@
  * plane pointers: the first at the top (the ring's row base), the second where the ring wraps (its row 0), after a
  * WAIT for that line (PAL's lines from 256 on through the usual WAIT for line 255's end first), both written at
  * vertical blank. The spare rows keep the text the CPU and blitter draw out of sight while the display still shows
- * an older base (several scrolls within one frame); a scroll that would reach the rows on show waits for the
- * vertical blank (DESIGN D28 20). Region scrolls (CSI S/T/L/M, a scroll region) are blitter copies too, a copy per run
- * of rows that lie in one piece of the ring, and erased rows blitter fills with the background colour. A glyph is
- * drawn by the CPU, one byte per plane per glyph line: (glyph & m1) ^ m2 per plane, m1
- * set where the foreground and background bits differ, m2 where the background bit is set. Glyphs come from the
- * Kickstart ROM's Topaz 8, found through GfxBase before the OS memory is reused.
+ * an older base; the terminal moves the screen by all of a write's scrolls at once (gfx_jump, DESIGN D28 21), and
+ * shows what it drew when it is done (gfx_done). Region scrolls (CSI S/T/L/M, a scroll region) are blitter copies
+ * too, a copy per run of rows that lie in one piece of the ring, and erased rows blitter fills with the background
+ * colour. A glyph is drawn by the CPU from its 8 bytes: (glyph & m1) ^ m2 per plane, m1 set where the foreground and
+ * background bits differ, m2 where the background bit is set; four cells in one colour a long word per plane and
+ * line (gfx_cells). The CPU never reads chip RAM to draw. Glyphs come from the Kickstart ROM's Topaz 8, found through
+ * GfxBase before the OS memory is reused.
  * DESIGN D28: a cell above U+00FF (gfx_ucell) takes its glyph from the Unicode font (confont.c: the half-page index,
  * an entry, then Topaz's glyph of a Latin-1 byte for a stand-in, else the font's 8 bytes drawn byte-wise: each
  * plane's byte (b & m) ^ n, with no replicated table and no multiply), or the box built in here when the font has
@@ -77,7 +78,8 @@ static u8 *tbuf;                        /* chip RAM: nring rows */
 static int nring;                       /* the ring's rows: trows + spare (gfx_init) */
 static volatile u16 *cop;
 static int cop_col, cop_ptr, cop_ptr2;  /* where the colours and the two sets of plane pointers are (words) */
-static int base;                        /* the ring's row shown as display row 0 (the drawing's) */
+static int base;                        /* the ring's row to show as display row 0 (the vertical blank applies it) */
+static int dbase;                       /* D28 21: the ring's row drawn as display row 0 (ahead of base inside a flush) */
 static volatile int hw_base = -1;       /* what the Copper list shows (-1: not known yet) */
 static u8 glyphs[224][8] __attribute__((aligned(4)));  /* Latin-1 32..255 */
 static u8 c1alt[32][8];                 /* D28: the glyphs of 0x80-0x9F not in glyphs[] now (Topaz's, or the boxes) */
@@ -261,29 +263,26 @@ static void blit_fill(u8 *dst, u32 lines, u32 bg)
                 memset(dst + l * lstride + (u32)k * STRIDE, (bg >> k & 1) ? 0xFF : 0, STRIDE);
         return;
     }
-    for (int k = 0; k < gfx_depth; k++) {
+    int one = !bg || bg == (1u << gfx_depth) - 1u;     /* D28 21: every plane the same bit: one blit of all of them */
+    if (one)
+        lines *= (u32)gfx_depth;
+    for (int k = 0; k < (one ? 1 : gfx_depth); k++) {
         u8 *d = dst + k * STRIDE;
         for (u32 left = lines; left;) {
             u32 h = left > 1024 ? 1024 : left;
             blit_wait();
             BLTCON0 = (bg >> k & 1) ? 0x01FF : 0x0100;     /* D only, D = 1 or D = 0 */
             BLTCON1 = 0;
-            BLTDMOD = (u16)(lstride - STRIDE);
+            BLTDMOD = one ? 0 : (u16)(lstride - STRIDE);
             blit_ptr(&BLTDPTH, d);
             BLTSIZE = (u16)((h << 6) | (STRIDE / 2));
-            d += h * lstride;
+            d += h * (one ? STRIDE : lstride);
             left -= h;
         }
     }
 }
 
 /* ---- drawing ---- */
-
-/* bit k of a colour index -> plane k's byte of a long (plane 0 in the top byte) */
-static const u32 expand[16] = {
-    0x00000000, 0xFF000000, 0x00FF0000, 0xFFFF0000, 0x0000FF00, 0xFF00FF00, 0x00FFFF00, 0xFFFFFF00,
-    0x000000FF, 0xFF0000FF, 0x00FF00FF, 0xFFFF00FF, 0x0000FFFF, 0xFF00FFFF, 0x00FFFFFF, 0xFFFFFFFF,
-};
 
 /* a background colour as this depth shows it */
 static u32 bg_of(u8 colour)
@@ -294,75 +293,21 @@ static u32 bg_of(u8 colour)
 /* attr bits: 1 inverse, 2 underline, 4 bold; colour: foreground in the low nibble, background in the high one. One
  * plane: the colours are not shown (grey on black, inverse is the glyph inverted, as before D14). Three planes: a
  * bright foreground is the colour plus bold (bright black, 8, is grey: black on black would hide it). If foreground
- * and background are the same, inverse (the cursor) uses the default colours so that it stays visible. With more
- * than one plane each glyph line is kept four times in a long (rglyph: the byte in every plane's lane), so a line is
- * one read, an AND, an XOR and a byte store per plane; one loop per depth keeps the masks in registers (the stack is
- * chip RAM on a stock A1200). Bold and underline, rarer, go through a copy of the glyph first. */
+ * and background are the same, inverse (the cursor) uses the default colours so that it stays visible. DESIGN
+ * D28 21: every glyph is drawn from its 8 bytes (gfx_cells: four cells a long word at a time, others put_bytes);
+ * the table of each glyph line kept four times in a long (7 KB for Topaz, 8 KB for each loaded font) is gone. */
 #define HOT __attribute__((optimize("O2")))     /* gfx.c is built -Os (cold set-up code); drawing is not */
-static u32 *rglyph;                     /* [224][8], with more than one plane */
 
-/* A console's loaded 8-bit font (DESIGN D20 4.2: CON_FONT, each byte one of its 256 glyphs, indexed by the byte), with
- * its own four-bytes table while there is more than one plane. Only the shown console is drawn, so one pointer says
- * whose glyphs put_glyph takes (0: the ROM's Topaz, indexed byte - 32, a byte below 32 drawn as '?'). Every font is
- * on a list, so a depth change builds or frees their tables with Topaz's. */
+/* A console's loaded 8-bit font (DESIGN D20 4.2: CON_FONT, each byte one of its 256 glyphs, indexed by the byte).
+ * Only the shown console is drawn, so one pointer says whose glyphs are drawn (0: the ROM's Topaz, indexed byte - 32,
+ * a byte below 32 drawn as '?'). */
 struct gfont {
-    struct gfont *next;
-    u32 *r;                             /* [256][8], with more than one plane */
     u8 g[256][8];
 };
-static struct gfont *fonts;
 static const struct gfont *sfont;
 static int scga;                        /* the shown console asked for the CGA palette (CONR_CGAPAL) */
 static volatile int pal_dirty;          /* the Copper list's colours are to be written at the next vertical blank */
 static u32 dgen;                        /* CON_LINE's generation: raised when the depth, planes or palette change */
-
-static HOT void draw1(u8 *p, const u8 *g, u32 attr, u32 x)
-{
-    for (int y = 0; y < 8; y++) {
-        u32 b = g[y];
-        if (attr & 4)
-            b |= b >> 1;                        /* bold: smear one pixel */
-        if ((attr & 2) && y == 7)
-            b = 0xFF;                           /* underline */
-        p[y * STRIDE] = (u8)(b ^ x);
-    }
-}
-
-static HOT void draw4(u8 *p, const u32 *g, u32 m1, u32 m2)
-{
-    for (int y = 0; y < 8; y++) {
-        u32 v = (g[y] & m1) ^ m2;
-        p[3 * STRIDE] = (u8)v;
-        v >>= 8;
-        p[2 * STRIDE] = (u8)v;
-        v >>= 8;
-        p[STRIDE] = (u8)v;
-        p[0] = (u8)(v >> 8);
-        p += 4 * STRIDE;
-    }
-}
-
-static HOT void draw3(u8 *p, const u32 *g, u32 m1, u32 m2)
-{
-    for (int y = 0; y < 8; y++) {
-        u32 v = ((g[y] & m1) ^ m2) >> 8;
-        p[2 * STRIDE] = (u8)v;
-        v >>= 8;
-        p[STRIDE] = (u8)v;
-        p[0] = (u8)(v >> 8);
-        p += 3 * STRIDE;
-    }
-}
-
-static HOT void draw2(u8 *p, const u32 *g, u32 m1, u32 m2)
-{
-    for (int y = 0; y < 8; y++) {
-        u32 v = ((g[y] & m1) ^ m2) >> 16;
-        p[STRIDE] = (u8)v;
-        p[0] = (u8)(v >> 8);
-        p += 2 * STRIDE;
-    }
-}
 
 /* the colours a cell is drawn in at this depth (more than one plane): *fg, *bg; bold added for a bright colour at 2
  * or 3 planes, and inverse applied -> the attributes then */
@@ -390,44 +335,13 @@ static inline __attribute__((always_inline)) HOT u32 pens(u32 attr, u32 colour, 
     return attr;
 }
 
-static inline __attribute__((always_inline)) HOT void put_glyph(u8 *p, u8 ch, u32 attr, u32 colour)
-{
-    const struct gfont *f = sfont;
-    int gi = f ? ch : (ch < 32 ? '?' : ch) - 32;
-    if (gfx_depth == 1) {
-        draw1(p, f ? f->g[gi] : glyphs[gi], attr, (attr & 1) ? 0xFF : 0);
-        return;
-    }
-    u32 fg, bg;
-    attr = pens(attr, colour, &fg, &bg);
-    const u32 *g = (f ? f->r : rglyph) + gi * 8;
-    u32 tmp[8];
-    if (attr & 6) {
-        for (int y = 0; y < 8; y++) {
-            u32 v = g[y];
-            if (attr & 4)
-                v |= (v >> 1) & 0x7F7F7F7Fu;
-            tmp[y] = v;
-        }
-        if (attr & 2)
-            tmp[7] = ~0u;
-        g = tmp;
-    }
-    if (gfx_depth == 4)
-        draw4(p, g, expand[fg ^ bg], expand[bg]);
-    else if (gfx_depth == 3)
-        draw3(p, g, expand[fg ^ bg], expand[bg]);
-    else
-        draw2(p, g, expand[fg ^ bg], expand[bg]);
-}
-
 /* gfx_cell's addresses without a multiply (the 68020's muls.l costs up to 44 cycles, and gcc turns shift-and-add back
  * into one): `top` is the ring's first byte, `rowoff` each display row's byte offset in the ring (DESIGN D28 15, 20) */
 static u8 *top;
 static u32 rowoff[TROWS_MAX];
-static void set_base(int b)             /* the ring's row b is display row 0 now, or tbuf/lstride changed */
+static void set_rows(int b)             /* the ring's row b is display row 0 of the drawing, or tbuf/lstride changed */
 {
-    base = b;
+    dbase = b;
     top = tbuf;
     u32 a = (u32)b * rstride, end = (u32)nring * rstride;
     for (int r = 0; r < TROWS_MAX; r++, a += rstride) {
@@ -436,6 +350,7 @@ static void set_base(int b)             /* the ring's row b is display row 0 now
         rowoff[r] = a;
     }
 }
+static void set_base(int b) { set_rows(b); base = b; }   /* ... and shown from the next vertical blank */
 static u8 *row_at(int r) { return tbuf + rowoff[r]; }
 static u8 *line_at(int l) { return row_at(l >> 3) + (u32)(l & 7) * lstride; }     /* display line l */
 
@@ -456,68 +371,96 @@ static int run_down(int a, int b, int n)
     return k;
 }
 
-HOT __attribute__((noipa)) void gfx_cell(int row, int col, u8 ch, u8 attr, u8 colour)
-{
-    if (up)
-        put_glyph(top + rowoff[row] + col, ch, attr, colour);
-}
 
 /* D28: 8 glyph bytes drawn byte-wise at any depth: each plane's byte is (b & m) ^ n, m set where the foreground and
  * background bits differ, n where the background bit is set (no replicated table: gcc turns every C replication into
- * a 44-cycle muls.l, DESIGN D28 8). Bold and underline, rarer, go through a copy first; one loop per depth keeps the
- * masks in registers. */
-static HOT void put_bytes(u8 *p, const u8 *g, u32 attr, u32 colour)
+ * a 44-cycle muls.l, DESIGN D28 8); bold smears a pixel, underline fills the last line. D28 21: one cell (gfx_cells
+ * draws runs four at a time), so one small loop over the planes (-Os) */
+static void put_bytes(u8 *p, const u8 *g, u32 attr, u32 colour)
 {
-    u8 tmp[8];
-    if (attr & 6) {
-        for (int y = 0; y < 8; y++) {
-            u32 b = g[y];
-            if (attr & 4)
-                b |= b >> 1;                    /* bold: smear one pixel */
-            tmp[y] = (u8)b;
-        }
-        if (attr & 2)
-            tmp[7] = 0xFF;                      /* underline */
-        g = tmp;
+    u32 fg = 7, bg = 0;
+    int d = gfx_depth;
+    if (d > 1)
+        attr = pens(attr, colour, &fg, &bg);
+    else if (attr & 1)
+        fg = 0, bg = 7;                                 /* one plane: inverse is the glyph inverted */
+    u8 m[4], n[4];
+    for (int k = 0; k < d; k++) {
+        m[k] = ((fg ^ bg) >> k & 1) ? 0xFF : 0;
+        n[k] = (bg >> k & 1) ? 0xFF : 0;
     }
-    if (gfx_depth == 1) {
-        u8 x = (attr & 1) ? 0xFF : 0;
-        for (int y = 0; y < 8; y++, p += STRIDE)
-            *p = (u8)(g[y] ^ x);
-        return;
+    for (int y = 0; y < 8; y++, p += lstride) {
+        u32 b = g[y];
+        if (attr & 4)
+            b |= b >> 1;
+        if ((attr & 2) && y == 7)
+            b = 0xFF;
+        for (int k = 0; k < d; k++)
+            p[k * STRIDE] = (u8)((b & m[k]) ^ n[k]);
     }
-    u32 fg, bg;
-    pens(attr, colour, &fg, &bg);
-    u8 m0 = (fg ^ bg) & 1 ? 0xFF : 0, n0 = bg & 1 ? 0xFF : 0;
-    u8 m1 = (fg ^ bg) & 2 ? 0xFF : 0, n1 = bg & 2 ? 0xFF : 0;
-    u8 m2 = (fg ^ bg) & 4 ? 0xFF : 0, n2 = bg & 4 ? 0xFF : 0;
-    u8 m3 = (fg ^ bg) & 8 ? 0xFF : 0, n3 = bg & 8 ? 0xFF : 0;
-    /* opaque to gcc: knowing a mask is 0 or 0xFF it would turn b & m into a muls.w (D28 8's trap) */
-    __asm__("" : "+d"(m0), "+d"(n0), "+d"(m1), "+d"(n1));
-    __asm__("" : "+d"(m2), "+d"(n2), "+d"(m3), "+d"(n3));
-    const u8 *e = g + 8;
-    if (gfx_depth == 3)
-        for (; g < e; g++, p += 3 * STRIDE) {
-            u8 b = *g;
-            p[0] = (b & m0) ^ n0;
-            p[STRIDE] = (b & m1) ^ n1;
-            p[2 * STRIDE] = (b & m2) ^ n2;
-        }
-    else if (gfx_depth == 4)
-        for (; g < e; g++, p += 4 * STRIDE) {
-            u8 b = *g;
-            p[0] = (b & m0) ^ n0;
-            p[STRIDE] = (b & m1) ^ n1;
-            p[2 * STRIDE] = (b & m2) ^ n2;
-            p[3 * STRIDE] = (b & m3) ^ n3;
-        }
-    else
-        for (; g < e; g++, p += 2 * STRIDE) {
-            u8 b = *g;
-            p[0] = (b & m0) ^ n0;
-            p[STRIDE] = (b & m1) ^ n1;
-        }
 }
+
+/* DESIGN D28 21: cells x0..x1-1 of display row `row` from a console's grids (ch, at, co: the cells' bytes, cell x0
+ * first; none above U+00FF). Four cells in one attribute and colour that start at a multiple of 4 are drawn a long
+ * word at a time: each glyph line's four bytes gathered in a register, each plane one long-word store (G & m) ^ n,
+ * m set where the foreground and background bits differ, n where the background bit is set: a quarter of the chip
+ * RAM writes of drawing them one by one, the CPU never reads chip RAM. Others, bold and underline, one by one. */
+__attribute__((optimize("O2", "no-unswitch-loops"))) void gfx_cells(int row, int x0, int x1, const u8 *ch, const u8 *at, const u8 *co)
+{
+    if (!up)
+        return;
+    u8 *p = top + rowoff[row];
+    const struct gfont *f = sfont;
+    for (int x = x0; x < x1;) {
+        int i = x - x0;
+        u32 a4 = 0, c4 = 0;
+        if (!(x & 3) && x + 4 <= x1) {
+            a4 = *(const u32 *)(at + i);
+            c4 = *(const u32 *)(co + i);
+        }
+        u32 fg = 0, bg = 0, a = at[i];
+        if ((x & 3) || x + 4 > x1 || ((a4 ^ (a4 >> 8)) & 0xFFFFFF) || ((c4 ^ (c4 >> 8)) & 0xFFFFFF) ||
+            (gfx_depth == 1 ? (a & 6) : (pens(a, co[i], &fg, &bg) & 6))) {
+            u32 c = ch[i];
+            put_bytes(p + x, f ? f->g[c] : glyphs[(c < 32 ? '?' : c) - 32], a, co[i]);
+            x++;
+            continue;
+        }
+        const u8 *g[4];
+        int sp = !f && *(const u32 *)(ch + i) == 0x20202020u;  /* four spaces in Topaz: no glyph read (a cleared row) */
+        for (int j = 0; j < 4; j++) {
+            u32 c = ch[i + j];
+            g[j] = f ? f->g[c] : glyphs[(c < 32 ? '?' : c) - 32];
+        }
+        u32 m0 = ~0u, n0 = (a & 1) ? ~0u : 0, m1 = 0, n1 = 0, m2 = 0, n2 = 0, m3 = 0, n3 = 0;
+        if (gfx_depth > 1) {
+            u32 d = fg ^ bg;
+            m0 = -(d & 1); n0 = -(bg & 1);
+            m1 = -(d >> 1 & 1); n1 = -(bg >> 1 & 1);
+            m2 = -(d >> 2 & 1); n2 = -(bg >> 2 & 1);
+            m3 = -(d >> 3 & 1); n3 = -(bg >> 3 & 1);
+        }
+        __asm__("" : "+d"(m0), "+d"(n0), "+d"(m1), "+d"(n1));       /* opaque: no muls for a 0/~0 mask (D28 8) */
+        __asm__("" : "+d"(m2), "+d"(n2), "+d"(m3), "+d"(n3));
+        u8 *q = p + x;
+        for (int y = 0; y < 8; y++, q += lstride) {
+            u32 v = sp ? 0 : (u32)g[0][y] << 24 | (u32)g[1][y] << 16 | (u32)g[2][y] << 8 | g[3][y];
+            *(u32 *)q = (v & m0) ^ n0;
+            if (gfx_depth > 1) {
+                *(u32 *)(q + STRIDE) = (v & m1) ^ n1;
+                if (gfx_depth > 2) {
+                    *(u32 *)(q + 2 * STRIDE) = (v & m2) ^ n2;
+                    if (gfx_depth > 3)
+                        *(u32 *)(q + 3 * STRIDE) = (v & m3) ^ n3;
+                }
+            }
+        }
+        x += 4;
+    }
+}
+
+/* one cell (the cursor, a cell above U+00FF's stand-in): gfx_cells' one-by-one path */
+void gfx_cell(int row, int col, u8 ch, u8 attr, u8 colour) { gfx_cells(row, col, col + 1, &ch, &attr, &colour); }
 
 /* D28: a cell above U+00FF: part 0 one cell, 1 the left half of a wide character, 2 its right half (v the lead's).
  * The font's entry: 0 none (the box; a wide character's halves of the wide box), 32-255 Topaz's glyph of that byte
@@ -527,7 +470,7 @@ HOT void gfx_ucell(int row, int col, u16 v, u8 attr, u8 colour, int part)
     if (!up)
         return;
     u8 *p = top + rowoff[row] + col;
-    u32 e = 0;                          /* (Topaz's glyphs through gfx_cell: put_glyph stays inlined in that hot path) */
+    u32 e = 0;
     if (v < 0xFFFE && cf_index) {
         u32 h = cf_index[v >> 7];
         if (h)
@@ -629,47 +572,49 @@ void gfx_vblank(void)
     gcon_vblank();                      /* D38: the pointer's new place, before sprite DMA reads it */
 }
 
-/* DESIGN D28 20: the row a scroll brings in must not be on show. The display shows the ring from hw_base (set at
- * vertical blank); the drawing may run ahead of it by up to the spare rows (nring - trows) - more scrolls than that
- * within one frame wait for the vertical blank. Not with the interrupts masked (a panic, a kprintf inside a masked
- * part: no vertical blank comes), and every wait has a timeout: 100 ms, said once on the log, then no more waits. */
+/* DESIGN D28 20, 21: the rows a scroll brings in must not be on show. The display shows the ring from hw_base (set at
+ * vertical blank); the drawing (dbase) may run ahead of it by up to the spare rows (nring - trows). gfx_jump moves the
+ * drawing k rows on: within the spare rows nothing waits; beyond them, with fast RAM (as many spare rows as the
+ * screen's) the whole screen is drawn afresh in the half not on show, so nothing ever waits either; without fast RAM
+ * (half as many) it waits for the vertical blank, and a jump of more rows than the spare ones draws the whole screen
+ * as far on as the spare rows allow (the rows it shares with the shown picture are drawn while on show, until the
+ * next frame). What is drawn is shown once the caller says it is done (gfx_done): the vertical blank never shows a
+ * row half drawn. No waiting with the interrupts masked (a panic, a kprintf inside a masked part: no vertical blank
+ * comes), and every wait has a timeout: 100 ms, said once on the log, then no more waits. -> the rows at the bottom
+ * of the screen to fill and draw: k, or trows (all of them). */
 static int vb_dead;
-static void vb_room(int nb)
+int gfx_jump(int k)
 {
-    int h = hw_base;
-    if (h < 0 || vb_dead)
-        return;
-    int ahead = nb - h;
+    if (k > trows)
+        k = trows;
+    int h = hw_base, sp = nring - trows, ahead = dbase - h;
     if (ahead < 0)
         ahead += nring;
-    if (ahead <= nring - trows)
-        return;
     u16 sr;
     __asm__ volatile("move.w %%sr,%0" : "=d"(sr));
-    if ((sr & 0x0700) >= 0x0300)
-        return;                         /* the vertical-blank interrupt (level 3) cannot come */
-    u32 t0 = hr_time(), n = 0;
-    while (hw_base == h)
-        if ((++n & 63) == 0 && (u32)(hr_time() - t0) > eclock_hz / 10) {
-            vb_dead = 1;
-            kprintf("gfx: no vertical blank in 100 ms: scrolling goes on without waiting for it\n");
-            return;
+    if (up && h >= 0 && !vb_dead && (sr & 0x0700) < 0x0300 && ahead + k > sp) {
+        if (sp >= trows) {                              /* the half not on show */
+            set_rows(h + trows >= nring ? h + trows - nring : h + trows);
+            return trows;
         }
+        u32 t0 = hr_time(), n = 0;
+        while (base != h && hw_base == h)               /* (nothing new to show: no vertical blank to wait for) */
+            if ((++n & 63) == 0 && (u32)(hr_time() - t0) > eclock_hz / 10) {
+                vb_dead = 1;
+                kprintf("gfx: no vertical blank in 100 ms: scrolling goes on without waiting for it\n");
+                break;
+            }
+        if (k > sp) {                                   /* (dbase is shown now: gfx_done came before) */
+            set_rows(dbase + sp >= nring ? dbase + sp - nring : dbase + sp);
+            return trows;
+        }
+    }
+    int nb = dbase + k;
+    set_rows(nb >= nring ? nb - nring : nb);
+    return k;
 }
 
-void gfx_scroll(u8 colour)
-{
-    if (!up)
-        return;
-    vb_room(base + 1 == nring ? 0 : base + 1);
-    int nb = base + 1 == nring ? 0 : base + 1;     /* read again: vb_room's log line may have scrolled (the boot log) */
-    int nr = nb + trows - 1;                        /* the row that comes in, filled before the display may show it */
-    if (nr >= nring)
-        nr -= nring;
-    blit_fill(tbuf + (u32)nr * rstride, 8, bg_of(colour));
-    set_base(nb);
-    blit_wait();
-}
+void gfx_done(void) { base = dbase; }
 
 /* the whole screen takes the background of `colour`; the ring keeps its place. The display may still show an older
  * base until the vertical blank: its rows are cleared too when they are others */
@@ -678,11 +623,11 @@ void gfx_clear_text(u8 colour)
     if (!up)
         return;
     int h = hw_base;
-    if (h >= 0 && h != base) {
-        int b = base;
-        set_base(h);
+    if (h >= 0 && h != dbase) {
+        int b = dbase;
+        set_rows(h);
         gfx_fill_rows(0, trows, colour);
-        set_base(b);
+        set_rows(b);
     }
     gfx_fill_rows(0, trows, colour);
 }
@@ -714,8 +659,8 @@ static int lisa(void)
 }
 
 /* DESIGN D28 20: the ring's chip RAM at ls bytes a line. Its spare rows (gfx_init): as many as the screen's with fast
- * RAM (up to 32 scrolls within a frame before one waits: about 1,600 lines a second on PAL), half as many on a machine
- * with chip RAM only (whose CPU draws far fewer lines than 800 a second) */
+ * RAM (a whole screen drawn out of sight: no scroll ever waits, D28 21), half as many on a machine with chip RAM only
+ * (whose CPU draws far fewer lines than 800 a second) */
 static u32 ring_bytes(u32 ls) { return (u32)nring * 8 * ls; }
 
 /* the depth for this machine (D14's default, section 11): AGA with fast RAM: 4; fast RAM on OCS/ECS, or 2 MB of chip
@@ -788,38 +733,12 @@ static void build_cop(volatile u16 *l, int depth, int *col, int *ptr, int *ptr2)
 
 /* glyph lines kept four times in a long, for more than one plane (Topaz's 7 KB, a loaded font's 8 KB): 0 when out
  * of memory */
-static u32 *make_r(const u8 *g, u32 n)
-{
-    u32 *r = kmalloc(n * 4);
-    if (r)
-        for (u32 i = 0; i < n; i++)
-            r[i] = g[i] * 0x01010101u;
-    return r;
-}
-static u32 *make_rglyph(void) { return make_r(glyphs[0], sizeof glyphs); }
-
-/* every loaded font's table freed (one plane draws from the plain glyphs) */
-static void fonts_flat(void)
-{
-    for (struct gfont *f = fonts; f; f = f->next) {
-        kfree(f->r);
-        f->r = 0;
-    }
-}
-
 struct gfont *gfx_font_new(const u8 *g)
 {
     struct gfont *f = kmalloc(sizeof *f);
     if (!f)
         return 0;
     memcpy(f->g, g, sizeof f->g);
-    f->r = 0;
-    if (gfx_depth > 1 && !(f->r = make_r(f->g[0], sizeof f->g))) {
-        kfree(f);
-        return 0;
-    }
-    f->next = fonts;
-    fonts = f;
     return f;
 }
 
@@ -829,12 +748,6 @@ void gfx_font_free(struct gfont *f)
         return;
     if (sfont == f)
         sfont = 0;
-    for (struct gfont **pp = &fonts; *pp; pp = &(*pp)->next)
-        if (*pp == f) {
-            *pp = f->next;
-            break;
-        }
-    kfree(f->r);
     kfree(f);
 }
 
@@ -847,8 +760,6 @@ static void c1_swap(void)
             u8 t = a[y];
             a[y] = b[y];
             b[y] = t;
-            if (rglyph)
-                rglyph[(0x80 - 32 + i) * 8 + y] = a[y] * 0x01010101u;
         }
     }
     c1topaz = !c1topaz;
@@ -897,14 +808,6 @@ int gfx_init(void)
     }
     if (!tbuf)
         return -1;
-    if (gfx_depth > 1 && !(rglyph = make_rglyph())) {
-        mem_free(tbuf);
-        gfx_depth = 1;
-        lstride = STRIDE;
-        tbuf = mem_alloc(ring_bytes(lstride), MEM_CHIP, 0);
-        if (!tbuf)
-            return -1;
-    }
     say_depth();
     build_cop(cop, gfx_depth, &cop_col, &cop_ptr, &cop_ptr2);
     rstride = 8 * lstride;
@@ -953,23 +856,12 @@ int gfx_set_colours(int colours)
         d = 3;
     if (d == gfx_depth)
         return 1 << d;
-    u32 *rg = rglyph;
     u32 ls = (u32)STRIDE * (u32)d;
     volatile u16 *nc = mem_alloc(COP_BYTES, MEM_CHIP, 0);
     u8 *nb = mem_alloc(ring_bytes(ls), MEM_CHIP, 0);
-    if (d > 1 && !rg)
-        rg = make_rglyph();
-    int fok = 1;                        /* a loaded font's table too (D20), built before anything changes */
-    for (struct gfont *f = fonts; d > 1 && f && fok; f = f->next)
-        if (!f->r && !(f->r = make_r(f->g[0], sizeof f->g)))
-            fok = 0;
-    if (!nc || !nb || (d > 1 && !rg) || !fok) {
+    if (!nc || !nb) {
         mem_free((void *)nc);
         mem_free(nb);
-        if (rg != rglyph)
-            kfree(rg);
-        if (gfx_depth == 1)
-            fonts_flat();               /* the tables just built: one plane keeps none */
         return -ENOMEM;
     }
     int col, ptr, ptr2;
@@ -983,7 +875,6 @@ int gfx_set_colours(int colours)
     cop = nc;
     gfx_depth = d;
     lstride = ls;
-    rglyph = rg;
     cop_col = col;
     cop_ptr = ptr;
     cop_ptr2 = ptr2;
@@ -1005,11 +896,6 @@ int gfx_set_colours(int colours)
     }
     mem_free((void *)oc);
     mem_free(ob);
-    if (d == 1) {                       /* one plane draws from the plain glyphs */
-        kfree(rglyph);
-        rglyph = 0;
-        fonts_flat();
-    }
     say_depth();
     term_redraw();
     return 1 << d;
@@ -1105,8 +991,8 @@ void gfx_panic(void)
     if (held)
         reclaim();                      /* D38: a display server had the screen (panic_begin did it already) */
     sfont = 0;                          /* Topaz (D20 4.2: a panic is always readable); no table work here */
-    set_base(base);                     /* a fault inside set_base may have left rowoff half done */
-    cop_point(base);
+    set_base(dbase);                    /* a fault inside set_rows may have left rowoff half done */
+    cop_point(dbase);
     cop[cop_col + 1] = 0x800;
     for (int i = 1; i < (1 << gfx_depth); i++)
         cop[cop_col + 2 * i + 1] = 0xFFF;

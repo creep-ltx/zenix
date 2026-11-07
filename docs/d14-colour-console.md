@@ -257,7 +257,8 @@ The owner's decision above, as built (branch `diet`):
   The kernel says the new depth on the log (`display: AGA chips, 2 bitplanes at 64-bit fetch (FMODE 3)`); init says
   when a value is wrong or cannot be had.
 - **Memory:** the screen takes 40, 80, 120 or 160 KB of chip RAM for 2, 4, 8 or 16 colours; the 7 KB glyph table for
-  more than one plane is freed again at one plane.
+  more than one plane is freed again at one plane. (D28 21, 2026-11-07: the table is gone, every glyph is drawn from
+  its 8 bytes; d28-console-text.md section 21.)
 - **Tests:** `tools/colour-test.sh` runs 1, 2, 3 and 4 planes (all 80 columns, the pixels at the edges where one plane
   has them, the colour page, scrolling, scrollback, edit's status line) and the setting on the A1200 without fast RAM
   (`colours 4` and `16` switch and the pages are right afterwards, `colours 7` is refused); the matrix checks each

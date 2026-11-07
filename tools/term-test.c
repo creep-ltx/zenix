@@ -12,7 +12,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include "../kernel/kernel.h"
+/* D28 21: drawing waits for a write's end, so time passes per byte taken (term_write_some's bound reads the tick) */
+static u32 tick_per_cell, tick_v;
+static u32 tick_now(void) { return tick_v += tick_per_cell; }
+#define ticks tick_now()
 #include "../kernel/term.c"
+#undef ticks
 #include "../kernel/confont.c"
 #include "../net/telnet/telnet.h"
 
@@ -30,10 +36,8 @@ static u16 scr_v[TROWS_MAX][COLS];      /* D28: what was drawn: the byte (gfx_ce
 static u8 scr_k[TROWS_MAX][COLS];       /* D28: 0 gfx_cell, 1 gfx_ucell one cell, 2 its left half, 3 its right half */
 static int shown_eight;                 /* D28: gfx_show's 8-bit mode */
 static long blits, cells;
-volatile u32 ticks;                     /* the kernel's tick, input waiting, a better process ready (term_write_some) */
 volatile int kwork_pending;
 volatile u8 need_resched;
-static u32 tick_per_cell;
 int gfx_up(void) { return up; }
 static void inside(int row, int n, const char *what)
 {
@@ -50,7 +54,6 @@ void gfx_cell(int row, int col, u8 ch, u8 attr, u8 colour)
     scr_v[row][col] = ch;
     scr_k[row][col] = 0;
     cells++;
-    ticks += tick_per_cell;             /* drawing takes time (term_write_some's bound) */
 }
 void gfx_ucell(int row, int col, u16 v, u8 attr, u8 colour, int part)
 {
@@ -75,14 +78,35 @@ static void fill(int row, int n, u8 colour)
     for (int r = row; r < row + n; r++)
         for (int x = 0; x < COLS; x++) scr_v[r][x] = ' ', scr_k[r][x] = 0;
 }
-void gfx_scroll(u8 colour)
+/* D28 21: the screen up k rows; the rows that come in hold junk (a '#' in colour 0xEE) that term.c must draw over:
+ * with jump_all set, as with fast RAM beyond the spare rows, every row is junk and all are drawn afresh */
+static int jump_all, jumps, dones;
+static void junk(int row, int n)
 {
-    memmove(scr_ch[0], scr_ch[1], (size_t)(trows - 1) * COLS);
-    memmove(scr_at[0], scr_at[1], (size_t)(trows - 1) * COLS);
-    memmove(scr_co[0], scr_co[1], (size_t)(trows - 1) * COLS);
-    memmove(scr_v[0], scr_v[1], (size_t)(trows - 1) * sizeof scr_v[0]);
-    memmove(scr_k[0], scr_k[1], (size_t)(trows - 1) * COLS);
-    fill(trows - 1, 1, colour);
+    memset(scr_ch[row], '#', (size_t)n * COLS); memset(scr_at[row], 0, (size_t)n * COLS); memset(scr_co[row], 0xEE, (size_t)n * COLS);
+    for (int r = row; r < row + n; r++) for (int x = 0; x < COLS; x++) scr_v[r][x] = '#', scr_k[r][x] = 0;
+}
+int gfx_jump(int k)
+{
+    if (k < 1) { printf("FAIL: gfx_jump(%d)\n", k); exit(1); }
+    jumps++;
+    if (k >= trows || jump_all) { junk(0, trows); return trows; }
+    memmove(scr_ch[0], scr_ch[k], (size_t)(trows - k) * COLS);
+    memmove(scr_at[0], scr_at[k], (size_t)(trows - k) * COLS);
+    memmove(scr_co[0], scr_co[k], (size_t)(trows - k) * COLS);
+    memmove(scr_v[0], scr_v[k], (size_t)(trows - k) * sizeof scr_v[0]);
+    memmove(scr_k[0], scr_k[k], (size_t)(trows - k) * COLS);
+    junk(trows - k, k);
+    return k;
+}
+void gfx_done(void) { dones++; }
+void gfx_cells(int row, int x0, int x1, const u8 *ch, const u8 *at, const u8 *co)
+{
+    if (x0 < 0 || x1 > COLS || x0 >= x1) { printf("FAIL: gfx_cells %d..%d\n", x0, x1); exit(1); }
+    for (int x = x0; x < x1; x++) {
+        if (at[x - x0] & A_HI) { printf("FAIL: gfx_cells given A_HI at %d,%d\n", row, x); exit(1); }
+        gfx_cell(row, x, ch[x - x0], at[x - x0], co[x - x0]);
+    }
 }
 void gfx_clear_text(u8 colour) { fill(0, trows, colour); }
 void gfx_fill_rows(int row, int n, u8 colour) { inside(row, n, "gfx_fill_rows"); if (n) fill(row, n, colour); blits++; }
@@ -187,14 +211,14 @@ static void reset(void) { out("\033c"); gfx_clear_text(7); }
 static struct term *T(void) { return wsp[1]; }
 /* the screen shows the grid: every cell as the grid has it (a blank cell may be a fill: then only its background
  * counts), the cursor's cell drawn inverse */
-static u32 gv(int y, int x) { struct term *t = T(); return (t->at[y][x] & A_HI) ? (u32)t->hi[y * COLS + x] << 8 | t->ch[y][x] : t->ch[y][x]; }
+static u32 gv(int y, int x) { struct term *t = T(); return (ROW(t, at, y)[x] & A_HI) ? (u32)t->hi[RX(t, y) + x] << 8 | ROW(t, ch, y)[x] : ROW(t, ch, y)[x]; }
 /* D28: a cell above 0xFF as it must be drawn: (kind, value) from the grid (section 5's drawing rules) */
 static int hi_ok(int y, int x, u8 at)
 {
     struct term *t = T();
     u32 v = gv(y, x), k = scr_k[y][x], d = scr_v[y][x];
     at &= (u8)~A_HI;
-    if (scr_at[y][x] != at || scr_co[y][x] != t->co[y][x]) { printf("      cell %d,%d (U+%04X): attr %x colour %02x, the grid %x %02x\n", y, x, v, scr_at[y][x], scr_co[y][x], at, t->co[y][x]); return 0; }
+    if (scr_at[y][x] != at || scr_co[y][x] != ROW(t, co, y)[x]) { printf("      cell %d,%d (U+%04X): attr %x colour %02x, the grid %x %02x\n", y, x, v, scr_at[y][x], scr_co[y][x], at, ROW(t, co, y)[x]); return 0; }
     if (eight(t)) {
         if (k != 0 || d != (v == 0xFFFF ? ' ' : '?')) { printf("      cell %d,%d (U+%04X) in 8-bit mode: kind %u value %x\n", y, x, v, k, d); return 0; }
         return 1;
@@ -215,22 +239,22 @@ static int screen_is_grid(void)
     for (int y = 0; y < trows; y++)
         for (int x = 0; x < COLS; x++) {
             int cur = t->curvis && y == t->cy && x == t->cx;
-            u8 at = (u8)(t->at[y][x] ^ (cur ? A_INV : 0));
-            if (t->at[y][x] & A_HI) {
+            u8 at = (u8)(ROW(t, at, y)[x] ^ (cur ? A_INV : 0));
+            if (ROW(t, at, y)[x] & A_HI) {
                 if (!hi_ok(y, x, at)) return 0;
                 continue;
             }
-            if (scr_k[y][x]) { printf("      cell %d,%d: drawn as U+%04X, the grid has the byte %02x\n", y, x, scr_v[y][x], t->ch[y][x]); return 0; }
-            if (scr_ch[y][x] != t->ch[y][x]) { printf("      cell %d,%d: '%c', the grid has '%c'\n", y, x, scr_ch[y][x], t->ch[y][x]); return 0; }
-            if (t->ch[y][x] == ' ' && !at && !scr_at[y][x]) {
-                if ((scr_co[y][x] & 0xF0) != (t->co[y][x] & 0xF0)) { printf("      cell %d,%d: background %x, the grid %x\n", y, x, scr_co[y][x] >> 4, t->co[y][x] >> 4); return 0; }
+            if (scr_k[y][x]) { printf("      cell %d,%d: drawn as U+%04X, the grid has the byte %02x\n", y, x, scr_v[y][x], ROW(t, ch, y)[x]); return 0; }
+            if (scr_ch[y][x] != ROW(t, ch, y)[x]) { printf("      cell %d,%d: '%c', the grid has '%c'\n", y, x, scr_ch[y][x], ROW(t, ch, y)[x]); return 0; }
+            if (ROW(t, ch, y)[x] == ' ' && !at && !scr_at[y][x]) {
+                if ((scr_co[y][x] & 0xF0) != (ROW(t, co, y)[x] & 0xF0)) { printf("      cell %d,%d: background %x, the grid %x\n", y, x, scr_co[y][x] >> 4, ROW(t, co, y)[x] >> 4); return 0; }
                 continue;
             }
-            if (scr_at[y][x] != at || scr_co[y][x] != t->co[y][x]) { printf("      cell %d,%d: attr %x colour %02x, the grid %x %02x\n", y, x, scr_at[y][x], scr_co[y][x], at, t->co[y][x]); return 0; }
+            if (scr_at[y][x] != at || scr_co[y][x] != ROW(t, co, y)[x]) { printf("      cell %d,%d: attr %x colour %02x, the grid %x %02x\n", y, x, scr_at[y][x], scr_co[y][x], at, ROW(t, co, y)[x]); return 0; }
         }
     return 1;
 }
-static u8 co_at(int y, int x) { return T()->co[y][x]; }
+static u8 co_at(int y, int x) { return ROW(T(), co, y)[x]; }
 /* does the screen show only `want` on row 0 and nothing else (the cursor is drawn inverse: that is allowed) */
 static int only(const char *want)
 {
@@ -338,7 +362,7 @@ static void d28(void)
                 "the scrollback view's live rows draw cells above 0xFF and wide halves (review finding 1)");
     term_scroll_view(-1);
     reset(); out("\xe2\x94\x80\xe4\xb8\x80"); out("\033c");
-    EXPECT_TRUE(!(T()->at[0][0] & A_HI) && gv(0, 0) == ' ' && screen_is_grid(), "ESC c after Unicode: no stale cell");
+    EXPECT_TRUE(!(ROW(T(), at, 0)[0] & A_HI) && gv(0, 0) == ' ' && screen_is_grid(), "ESC c after Unicode: no stale cell");
     /* the plane on first use; the '?' when it cannot be had */
     struct term *t = T();
     free(t->hi); t->hi = 0;
@@ -641,8 +665,9 @@ int main(void)
       EXPECT_TRUE(cells - c0 == 7 && co_at(0, 0) == 0x01, "... the same characters in another colour: drawn");
       out("\033[m\033[3;1H"); b0 = blits; out("\033[2K\033[2K");
       EXPECT_TRUE(blits == b0, "ESC[2K on a row already blank in that colour: no fill");
-      out("\033[44m\033[2K");
-      EXPECT_TRUE(blits == b0 + 1 && co_at(2, 5) == 0x47, "... in another background colour: filled"); }
+      long c1 = cells; out("\033[44m\033[2K");
+      EXPECT_TRUE(blits == b0 + 1 && cells - c1 == 2 && co_at(2, 5) == 0x47 && screen_is_grid(),
+                  "... in another background colour: filled, no cell drawn but the cursor (off, on)"); }
 
     /* ---- colours (DESIGN D14 step 2) ---- */
     reset(); out("\033[31mA\033[42mB\033[91mC\033[104mD\033[39mE\033[49mF\033[0mG");
@@ -650,8 +675,8 @@ int main(void)
                 co_at(0, 4) == 0xC7 && co_at(0, 5) == 0x07 && co_at(0, 6) == 0x07, "SGR 30-37 40-47 90-97 100-107 39 49 0");
     out("\033[33;44mH\033[mI");
     EXPECT_TRUE(co_at(0, 7) == 0x43 && co_at(0, 8) == 0x07 && T()->attr == 0, "a bare ESC[m resets colours and attributes");
-    out("\033[1;35mJ"); EXPECT_TRUE(co_at(0, 9) == 0x05 && (T()->at[0][9] & A_BOLD), "1 is bold and leaves the colour alone");
-    out("\033[22;2;3;5;8;9mK"); EXPECT_TRUE(co_at(0, 10) == 0x05 && !(T()->at[0][10] & A_BOLD), "22 ends bold; 2 3 5 8 9 are ignored");
+    out("\033[1;35mJ"); EXPECT_TRUE(co_at(0, 9) == 0x05 && (ROW(T(), at, 0)[9] & A_BOLD), "1 is bold and leaves the colour alone");
+    out("\033[22;2;3;5;8;9mK"); EXPECT_TRUE(co_at(0, 10) == 0x05 && !(ROW(T(), at, 0)[10] & A_BOLD), "22 ends bold; 2 3 5 8 9 are ignored");
     out("\033c\033[38;5;196mA\033[38;5;46mB\033[48;5;21mC\033[38;5;244mD\033[38;5;9mE\033[48;5;255mF");
     EXPECT_TRUE(co_at(0, 0) == 0x01 && co_at(0, 1) == 0x02 && (co_at(0, 2) >> 4) == 4 && (co_at(0, 3) & 15) == 8 &&
                 (co_at(0, 4) & 15) == 9 && (co_at(0, 5) >> 4) == 15, "38;5;n and 48;5;n: the 256 colours map to the nearest of the 16");
@@ -660,8 +685,8 @@ int main(void)
                 (co_at(0, 4) & 15) == 4, "true colour 38;2;r;g;b, 48;2, the ':' forms (with and without a colour space)");
     out("\033c\033[38;5;300mA\033[38;2;1mB\033[38;5mC\033[38;7;31mD");
     EXPECT_TRUE(only("ABCD") && co_at(0, 0) == 0x07, "bad or short 38 sequences change nothing and print nothing");
-    out("\033c\033[38;5;196;1mA"); EXPECT_TRUE(co_at(0, 0) == 0x01 && (T()->at[0][0] & A_BOLD), "parameters after 38;5;n still count");
-    out("\033c\033[4:3mA\033[4:0mB"); EXPECT_TRUE((T()->at[0][0] & A_UND) && !(T()->at[0][1] & A_UND), "4:3 underlines, 4:0 does not");
+    out("\033c\033[38;5;196;1mA"); EXPECT_TRUE(co_at(0, 0) == 0x01 && (ROW(T(), at, 0)[0] & A_BOLD), "parameters after 38;5;n still count");
+    out("\033c\033[4:3mA\033[4:0mB"); EXPECT_TRUE((ROW(T(), at, 0)[0] & A_UND) && !(ROW(T(), at, 0)[1] & A_UND), "4:3 underlines, 4:0 does not");
 
     reset(); out("\033[32;45m\0337\033[0m\033[5;5H\0338X");
     EXPECT_TRUE(scr_ch[0][0] == 'X' && co_at(0, 0) == 0x52, "ESC 7 / ESC 8 save and restore the colours with the cursor");
@@ -802,7 +827,7 @@ int main(void)
     EXPECT_TRUE(scr_ch[0][0] == 'H' && scr_ch[4][4] == 'Q', "CONR_CLRHOME: ESC[2J homes the cursor (ESC[J does not)");
     reset(); term_conop(OP(CON_RULES, 1), CONR_BRIGHT, CONR_ALL);
     out("\033[1;31mA\033[22mB\033[1mC\033[0;30;1mD\033[39mE\033[0;93;1mF\033[mG");
-    EXPECT_TRUE(co_at(0, 0) == 0x09 && !(T()->at[0][0] & A_BOLD) && co_at(0, 1) == 0x01 && co_at(0, 2) == 0x09 &&
+    EXPECT_TRUE(co_at(0, 0) == 0x09 && !(ROW(T(), at, 0)[0] & A_BOLD) && co_at(0, 1) == 0x01 && co_at(0, 2) == 0x09 &&
                 co_at(0, 3) == 0x08 && co_at(0, 4) == 0x0F && co_at(0, 5) == 0x0B && co_at(0, 6) == 0x07 && screen_is_grid(),
                 "CONR_BRIGHT: SGR 1 stores the bright foreground (1;30 is dark grey), never bold; 22 and 0 end it");
     out("\033[1;32m\0337\033[0m\0338H");
@@ -813,7 +838,7 @@ int main(void)
                 co_at(0, 79) == 0xE7 && screen_is_grid(), "CONR_ICE: SGR 5 and 6 store the bright background (erases too), 25 and 0 end it");
     reset(); term_conop(OP(CON_RULES, 1), 0, CONR_ALL);
     out("\033[5;44mA\033[1;31mB");
-    EXPECT_TRUE(co_at(0, 0) == 0x47 && co_at(0, 1) == 0x41 && (T()->at[0][1] & A_BOLD), "... without the rules: 5 ignored, 1 bold (D14)");
+    EXPECT_TRUE(co_at(0, 0) == 0x47 && co_at(0, 1) == 0x41 && (ROW(T(), at, 0)[1] & A_BOLD), "... without the rules: 5 ignored, 1 bold (D14)");
     reset(); term_conop(OP(CON_RULES, 1), CONR_LFONLY, CONR_ALL);
     out("AB\nC\r\nD");
     EXPECT_TRUE(scr_ch[1][2] == 'C' && scr_ch[2][0] == 'D' && screen_is_grid(), "CONR_LFONLY: LF moves down in the same column");
@@ -866,6 +891,39 @@ int main(void)
         if (i % 97 == 0 && !T()->esc && !screen_is_grid()) { fuzz_ok = 0; printf("      after piece %d\n", i); }
     }
     EXPECT_TRUE(fuzz_ok, "200000 random pieces of sequences and text: the screen always shows the grid");
+    /* D28 21: drawing waits for the write's end: big writes of many pieces (scrolls past the screen in one write,
+     * region scrolls, erases between), with the jump that draws the whole screen afresh (fast RAM's) a third of them */
+    reset();
+    srand(21);
+    static char big[8192];
+    for (int i = 0; i < 20000 && fuzz_ok; i++) {
+        int n = 0, m = rand() % 300;
+        for (int j = 0; j < m; j++) {
+            const char *p = bits[rand() % (int)(sizeof bits / sizeof bits[0])];
+            int l = (int)strlen(p);
+            if (n + l >= (int)sizeof big) break;
+            memcpy(big + n, p, (size_t)l);
+            n += l;
+        }
+        jump_all = rand() % 3 == 0;
+        outn(big, (u32)n);
+        if (!T()->esc && !screen_is_grid()) { fuzz_ok = 0; printf("      after big write %d\n", i); }
+    }
+    jump_all = 0;
+    EXPECT_TRUE(fuzz_ok, "20000 big writes (up to 300 pieces each), a third with the whole-screen jump: the screen shows the grid");
+    reset();
+    { long j0 = jumps, c0 = cells; int d0 = dones, k = 0, w = 0, pk = panicked;
+      panicked = 0;                                     /* (a panic test before: every cell drawn then) */
+      for (int i = 1; i <= 2000; i++) {
+          k += sprintf(big + k, "%d\n", i);
+          if (k > 7000) { outn(big, (u32)k); k = 0; w++; }
+      }
+      outn(big, (u32)k);
+      w++;
+      EXPECT_TRUE(screen_is_grid() && !strncmp(row(trows - 2), "2000", 4) && jumps - j0 == w && dones - d0 >= w &&
+                  cells - c0 <= (long)w * (trows * 4 + 2), "seq 1 2000 in a few big writes: one jump of the Copper's pointers a write, at most a screenful drawn");
+      panicked = (u8)pk;
+      out("\033[H"); }                                 /* (the cursor inside the NTSC screen below) */
     trows = 25;                                         /* NTSC */
     reset();
     for (int i = 0; i < 100000 && fuzz_ok; i++) {
@@ -898,12 +956,12 @@ int main(void)
     reset();
     kwork_pending = 1;
     got = term_write_some(1, line, 256, 256);
-    EXPECT_TRUE(got >= 1 && got <= 2, "input waiting: the piece ends after two ticks of drawing (a byte or two here)");
+    EXPECT_TRUE(got >= 1 && got <= COLS + 2, "input waiting: the piece ends after two ticks (D28 21: within a row's run of text)");
     EXPECT_TRUE(screen_is_grid(), "... the screen is consistent there (the cursor drawn)");
     kwork_pending = 0;
     need_resched = 1;
     u32 got2 = term_write_some(1, line + got, 254, 254);
-    EXPECT_TRUE(got2 >= 1 && got2 <= 2, "a better process ready: the same");
+    EXPECT_TRUE(got2 >= 1 && got2 <= COLS + 2, "a better process ready: the same");
     need_resched = 0;
     term_write_some(1, line + got + got2, 299 - got - got2, 299 - got - got2);
     EXPECT_TRUE(!strncmp(row(0), line, 80) && !strncmp(row(3), line + 240, 59) && screen_is_grid(),
@@ -940,7 +998,7 @@ int main(void)
         for (int y = 0; y < trows && same; y++)
             for (int x = 0; x < COLS && same; x++) {
                 const u8 *c = cells + 3 * (y * COLS + x);
-                same = c[0] == T()->ch[y][x] && c[1] == T()->at[y][x] && c[2] == T()->co[y][x] &&
+                same = c[0] == ROW(T(), ch, y)[x] && c[1] == ROW(T(), at, y)[x] && c[2] == ROW(T(), co, y)[x] &&
                        (c[0] == scr_ch[y][x] || !screen_is_grid());
             }
         EXPECT_TRUE(same && screen_is_grid(), "CON_READ: every cell as the grid holds it (and the screen shows it)");

@@ -219,7 +219,9 @@ extern const u8 *cf_glyphs;             /* its glyphs, 8 bytes each */
 extern u32 cf_nglyphs;
 long term_ufont(u32 a2, u32 a3);        /* SYS_console CON_UFONT (root; no descriptor) */
 int term_eight(int con);                /* console con is in 8-bit mode (CON_FONT or CONR_8BIT): no UTF-8 */
-void gfx_scroll(u8 colour);             /* the whole screen up a row; the new row takes colour's background */
+int gfx_jump(int k);                    /* D28 21: the screen up k rows -> the rows at its bottom to draw afresh (k or all) */
+void gfx_done(void);                    /* D28 21: what was drawn since gfx_jump is shown from the next vertical blank */
+void gfx_cells(int row, int x0, int x1, const u8 *ch, const u8 *at, const u8 *co);  /* cells x0..x1-1 of a row (no A_HI) */
 void gfx_clear_text(u8 colour);
 void gfx_fill_rows(int row, int n, u8 colour);  /* n rows take colour's background (the blitter) */
 void gfx_move_rows(int dst, int src, int n);    /* n rows from src to dst, overlapping or not (the blitter) */

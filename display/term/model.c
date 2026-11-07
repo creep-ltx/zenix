@@ -28,7 +28,22 @@ void gfx_ucell(int row, int col, u16 v, u8 attr, u8 colour, int part)
 {
     m_cell(row, col, part == 2 ? ' ' : v, attr & 7, colour);   /* a wide character's halves: its glyph, then blank */
 }
-void gfx_scroll(u8 colour) { m_move(0, 1, trows - 1); m_fill(trows - 1, 1, colour); }
+/* D28 21: the screen up k rows (term.c fills and draws the rows that come in); what was drawn is shown at once */
+int gfx_jump(int k) { if (k > trows) k = trows; if (k < trows) m_move(0, k, trows - k); return k; }
+void gfx_done(void) { }
+/* a whole row (term.c draws a row whole after a scroll or an erase): a fill in its last cell's background, then the
+ * cells up to the last one that is not blank in it, as before D28 21 (one fill order, not a run of spaces) */
+void gfx_cells(int row, int x0, int x1, const u8 *ch, const u8 *at, const u8 *co)
+{
+    if (x0 == 0 && x1 == m_cols) {
+        u8 c = co[x1 - 1];
+        while (x1 > 0 && ch[x1 - 1] == ' ' && !at[x1 - 1] && !((co[x1 - 1] ^ c) & 0xF0))
+            x1--;
+        m_fill(row, 1, c);
+    }
+    for (int x = x0; x < x1; x++)
+        m_cell(row, x, ch[x - x0], at[x - x0] & 7, co[x - x0]);
+}
 void gfx_clear_text(u8 colour) { m_fill(0, trows, colour); }
 void gfx_fill_rows(int row, int n, u8 colour) { m_fill(row, n, colour); }
 void gfx_move_rows(int dst, int src, int n) { m_move(dst, src, n); }

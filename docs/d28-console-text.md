@@ -1026,3 +1026,98 @@ s. And typing at the prompt made the `z` of `zenix` and the first character of t
   the serial copy's cost does not show): the stock A1200 (68020, 3 planes): `seq 1 2000` on the screen 13.14 ->
   12.01 s (to /dev/null 0.67 s), `ls -laR /` 19.48 -> 18.71 s (8.21 s); the 68060 matrix config (4 planes): `seq 1
   2000` 7.60 -> 6.04 s (0.20 s), `ls -laR /` 7.13 -> 6.58 s (2.74 s). The hardware "after" is the owner's partner's.
+
+## 21. Drawing at the end of a write (2026-11-07, branch confast)
+
+The real-world benchmark (docs/ROADMAP.md): `time ls -laR /` took 12.8 s on the text console against 4.36 s to
+/dev/null on the A1200 with the 1260, and 1.37 s against 0.32 s in a desktop term window on the PiStorm. Where the
+time went, measured in FS-UAE with a profiling build (the E-clock around each part; emulator figures, the stock A1200
+with 4 MB of fast RAM, 4 planes, the serial copy off):
+
+- **Every scroll drew its row and filled the next one at once**, so a write of 2,000 short lines drew 2,000 lines,
+  most of them pushed off the screen moments later, and more than 32 scrolls in one frame waited for the vertical
+  blank (1,600 lines a second at most with fast RAM, D28 20).
+- **Every scroll moved the grid:** three `memmove`s of 31 rows of 80 bytes (7.4 KB a line).
+- **Every glyph was one byte store per plane and line:** 32 chip RAM writes a cell at 4 planes, through a second
+  glyph table that held each line four times in a long (7 KB, and 8 KB more for each loaded font).
+- **The serial copy** (D28 20's rule: it waits for the port while a byte was received in the last 10 s) adds its own
+  time when a terminal on the cable types; FS-UAE's port slows it too (measured once, 2026-11-07, each command typed
+  on the serial line: the 600 long lines took 5.52 s on the stock A1200 with the copy waiting, 3.61 s without), so
+  the note in section 20 that it has no baud delay is not right.
+
+What changed (the D28 20 rule stands: between writes the shown console's planes equal its grid):
+
+- **Notes during a write, drawing at its end (term.c).** While a write runs the terminal stores cells in its grids
+  and, for the shown console only, notes the cells changed on each row (a span), the rows to draw whole (scrolled
+  in, erased: a bit each) and the full-screen scrolls (a count). `flush` at the write's end brings the screen to the
+  grid: one `gfx_jump` for all the scrolls, the whole rows filled by the blitter (runs of rows in one colour, the
+  colour of the row's last cell; one blit for all planes when the background is black or white) and their cells not
+  blank in that colour drawn, then each row's span. Anything that draws at once flushes first: the cursor, a region
+  scroll or inserted/deleted lines (the blitter moves what is on the screen, so the screen must be the grid before
+  the grid moves), the scrollback view; a console switch, a font, mode, depth or palette change redraws whole rows.
+  The notes are a ring as the screen is (`LZ(y)`): a scroll turns it. A printable ASCII run on one row is stored by
+  a loop of its own in `write_` (no call and no tests per byte beyond its range); `term_write_some`'s two-tick bound
+  is checked after each run (a row at most) instead of each byte.
+- **`gfx_jump(k)` and `gfx_done` (gfx.c).** The drawing has its own base (`dbase`), ahead of the one the vertical
+  blank shows (`base`) until `gfx_done`, so no row is shown half drawn. Within the spare rows a jump only moves
+  `dbase`. Beyond them, with fast RAM (as many spare rows as the screen's), the whole screen is drawn afresh in the
+  half of the ring not on show: nothing ever waits, and however much scrolled past within one write, one screenful
+  is drawn. Without fast RAM (16 spare rows) it waits for the vertical blank (only when something new is waiting to
+  be shown; 100 ms timeout said once, never with interrupts masked); a jump of more than 16 rows then draws the whole
+  screen 16 rows on, the rows it shares with the shown picture drawn while on show until the next frame (the 2 MB
+  chip-only machine is best effort; the final picture is always right).
+- **The grid is rows through a table (`rx`, term.c).** Display row y's cells are at `rx[y]` in each grid (and the
+  high plane); a full-screen scroll turns the table (31 words), a region scroll turns its part; no cell is copied.
+  A scrollback push copies a row without attributes as it is (the colour fold only for rows with inverse or high
+  cells). CSI `@` and `P` are one loop over the grids.
+- **Glyphs from their 8 bytes (gfx.c `gfx_cells`).** Four cells in one attribute and colour that start at a column
+  that is a multiple of 4: each glyph line's four bytes gathered in a register, each plane one long-word store
+  `(G & m) ^ n`, a quarter of the chip RAM writes; four spaces in Topaz without reading a glyph. Others, bold and
+  underline, the cursor and the cells above U+00FF one by one (`put_bytes`, one small loop over the planes). The
+  replicated glyph tables are gone (7 KB of RAM with Topaz, 8 KB more per loaded font). The CPU never reads chip RAM
+  to draw. Measured in FS-UAE, the 16-bit blitter's fill of whole rows (2 slots a word) was faster than the 020's
+  long-word stores to chip RAM there, so whole rows are still filled by the blitter.
+- **The serial copy** is as section 20 left it (ROADMAP's item: done there, 2026-11-04): the screen waits for the port
+  only while a byte was received in the last 10 s, and `conmirror off` (root) stops the copy. Not changed: a terminal
+  that types on the cable is listening, and losing its output would break it and the test rig.
+
+Interfaces: `gfx_scroll` is gone; `gfx_jump`, `gfx_done` and `gfx_cells` are new (kernel.h), and the two other
+users of term.c follow: the desktop's term model (display/term/model.c: a whole row is still one fill order and the
+cells up to its last one not blank, as before) and the host test's model (tools/term-test.c: the rows a jump brings
+in are junk the terminal must draw over). Nothing a program sees changes (no system call, struct or message).
+
+Room (tools/ksize-budget): kernel.bin 183,508 -> 182,820 bytes, 688 smaller (gfx 9,184 -> 8,010: the replicated
+tables and the per-depth glyph code gone; term 12,946 -> 13,428); the mount tests' floppy has 1,500 bytes free
+(800 must stay), so 700 bytes are there for later work (the console mode switch, CON_MODE, and ctop's CPU time need
+about 1-1.5 KB: the rest must be found then). RAM: 7 KB less with more than one plane (the glyph table), 8 KB less
+for each loaded font.
+
+Tests: `tools/term-test.sh` (host): the model's jump fills the rows it brings in with junk, so every row the terminal
+does not draw shows; 20,000 big writes of up to 300 random pieces (scrolls past the screen, region scrolls, erases),
+a third of them with the whole-screen jump, each followed by the screen = grid check; `seq 1 2000` in a few writes:
+one jump a write, at most a screenful drawn; the existing checks (unchanged cells not drawn, a blank row erased
+again not filled, region scrolls one blit and one fill, the fuzz runs) pass. `tools/scroll-test.sh` (screenshots
+with and without fast RAM: the ring after `seq 1 2000`, scrollback, region scrolls from three places) and the other
+console tests in FS-UAE. `tools/conspeed-test.sh` (new, with `rootfs/tests/conspeed.sh`): the figures below, at
+stock speed, each console part under a ceiling (today's figure and 30%; the figures before this change fail all
+eight).
+
+Emulator figures (FS-UAE, `time` inside Zenix, the serial copy off; not hardware), on the screen before -> after,
+to /dev/null in brackets:
+
+| Output | Stock A1200 + 4 MB fast (68020) | The 68060 config |
+|---|---|---|
+| `seq 1 2000` | 8.46 -> 2.74 s (0.38) | 5.86 -> 1.97 s (0.20) |
+| 600 lines of 74 characters | 6.97 -> 3.62 s (0.20) | 3.95 -> 2.40 s (0.11) |
+| the same, a colour every 10 characters | 8.56 -> 6.03 s (0.27) | 4.80 -> 3.63 s (0.15) |
+| `ls -laR /` | 12.22 -> 9.58 s (5.93) | 6.98 -> 5.66 s (3.27) |
+
+The console's own part (screen minus /dev/null) is 1.3 to 3.4 times smaller; most for many short lines, least for
+colour changes (each SGR sequence goes through the parser byte by byte, unchanged here). The profiling build's
+split after the change, the stock A1200: for `seq 1 2000` most of what is left is the blitter's fill of each new
+screen (one per 256-byte piece of the write) and the scrollback's copy of each line; for the long lines the glyphs
+(four reads from the glyph table and four long-word stores a plane and line for four cells). Not done here, for
+later if wanted: bigger pieces than `tty_write`'s 256 bytes (fewer whole screens drawn for short lines; the
+latency of D20 section 6 to be measured again), and a faster SGR path. Not yet on the A1200 or the PiStorm: there
+the chip RAM writes the CPU no longer makes (a quarter of them for text, none for what scrolls past) should count
+for more than in FS-UAE.
