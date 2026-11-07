@@ -69,8 +69,9 @@ FILES
     screen      mode hires|hires-lace|auto (auto, or no file: hires):
                 the screen displayd(8) makes when it starts, 640 x 256
                 (NTSC 640 x 200) or interlaced 640 x 512 (640 x 400);
-                displayd reads /etc's, zdesk applies the user's (or
-                /etc's) at its start; deskprefs(1) changes it. Also
+                displayd reads /etc's at its start, zdesk applies the
+                user's own at its start and puts back what it found
+                when it leaves; deskprefs(1) changes it. Also
                 font NAME SIZE:
                 the desktop's font, an AmigaOS bitmap font copied as it
                 is into /usr/share/fonts/amiga (NAME.font and the NAME

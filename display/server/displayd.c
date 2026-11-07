@@ -570,10 +570,8 @@ static int font_switch(const char *name, int size)
             ev_to(i, &e);
     blit_idle();
     win_screen();
-    if (name[0])
-        dprintf(1, "displayd: font %s %d\n", name, size);
-    else
-        dprintf(1, "displayd: font 8x8\n");
+    if (!name[0])
+        dprintf(1, "displayd: font 8x8\n");     /* a font that was read said so itself (font_ui_load) */
     return 0;
 }
 

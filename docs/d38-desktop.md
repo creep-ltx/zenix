@@ -855,9 +855,9 @@ editors have (a click the next value, Shift-click the one before), and the four 
   `~/.config/zdesk/theme.use` and `SIGHUP` sent to every process named zdesk the user may signal (the process list,
   `SYS_procinfo`; the kernel refuses another user's): zdesk reads its theme again, `theme.use` before `theme`.
 - **Use:** the same, then the window closes. It lasts for the session: zdesk removes `theme.use` when a session starts
-  and ends, and at its start applies the saved screen file (below), so the next session starts from what was saved,
-  also under dlogin where displayd outlives a session (AmigaOS's Use lasts until the reboot; a session is Zenix's
-  nearest unit, and a user's Use must not reach the next user's session).
+  and ends, and when it leaves puts back the mode and the font displayd showed when it started, so the next session
+  starts from what was saved, also under dlogin where displayd outlives a session (AmigaOS's Use lasts until the
+  reboot; a session is Zenix's nearest unit, and a user's Use must not reach the next user's session).
 - **Save:** applied, then written: the screen file's `mode` and `font` lines replaced (its comments and other lines
   kept, user/cfgfile.c: a new file renamed over the old, so a cut leaves one or the other), the theme's name in the
   theme file, `theme.use` removed.
@@ -871,10 +871,12 @@ font. So each user saves their own, as zdesk's other settings already are (`~/.c
 `/etc/zdesk/NAME`, man zdesk "FILES"): `~/.config/zdesk/screen` (the same lines as `/etc/zdesk/screen`) and
 `~/.config/zdesk/theme`. Root's Save writes `/etc/zdesk/screen` and `/etc/zdesk/theme`, the system's defaults, which
 users without their own file and dlogin's greeter use. displayd still reads only `/etc/zdesk/screen` (it is root's and
-serves dlogin before anyone logs in); zdesk, the user's, applies the user's file when the session starts:
-`apply_saved` reads `~/.config/zdesk/screen` (else `/etc/zdesk/screen`) and asks `DPY_MODE` and `DPY_FONT_SET` for
-what differs from displayd's. A user with no file of their own costs nothing (the two already agree); one with their
-own interlace pays one mode switch at the start. displayd reads the file with display/lib/screenfile.c (its own
+serves dlogin before anyone logs in); zdesk, the user's, applies the user's own file when the session starts:
+`apply_saved` reads `~/.config/zdesk/screen` and asks `DPY_MODE` and `DPY_FONT_SET` for what differs from displayd's,
+and at Log out zdesk asks for the mode and font it found (so `/etc`'s settings are never applied twice, and a font
+`/etc` names that cannot be read is said once, by displayd). A user with no file of their own costs nothing; one
+with their own interlace pays one mode switch at the start. Root's Save to `/etc/zdesk/screen` counts from displayd's
+next start (under dlogin, the next boot), as before. displayd reads the file with display/lib/screenfile.c (its own
 `mode_file` before), zdesk with its settings reader (conf.c's `conf_screen`, the words of its other files: 300 bytes
 where linking the server's reader cost 700, measured, for the demo floppy's room); a line either does not understand
 is skipped and the first is said in one line ("... (and more lines)"), so a broken file is one line and the defaults.
@@ -895,9 +897,9 @@ deskprefs on `EV_SCREEN` lays itself out for the new font (its window resized th
 widths give.
 
 **Memory and speed.** deskprefs is 23 KB on the disk (libz linked statically, as every program), about 3 KB of lists
-in memory, and runs only while open. displayd grew 668 bytes (the request; the reader replaced its own), zdesk 2,252
-(the style redone on a change, the saved file applied, the theme again on SIGHUP), init 160; the man pages of zdesk
-and init 314 bytes. **The DD demo floppy** (D25), which had 2,048 bytes free, has 0 (it still fits; its Zenix menu
+in memory, and runs only while open. displayd grew 624 bytes (the request; the reader replaced its own), zdesk 2,516
+(the style redone on a change, the user's file applied and the start's settings put back, the theme again on
+SIGHUP), init 160; the man pages of zdesk and init about 330 bytes. **The DD demo floppy** (D25), which had 2,048 bytes free, has 0 (it still fits; its Zenix menu
 loses the Preferences line, tools/mkroot.sh, as deskprefs is not on it); the HD one has 314 KB free. A font change
 costs one load of the font (as at the start) and one redraw of the screen, as a mode change does; nothing is paid
 while nothing changes.

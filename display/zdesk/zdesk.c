@@ -432,22 +432,42 @@ static void screen_changed(int font)
     dprintf(1, "zdesk: screen %dx%d, font %s (%d lines: bar %d, title bar %d)\n", dpy_w, dpy_h,
             uf.name[0] ? uf.name : "8x8", fh, bar_h, th.st.title);
 }
-/* the session starts from the saved settings: the user's ~/.config/zdesk/screen (else /etc/zdesk/screen) applied when
- * displayd shows something else (a user's own file; or under dlogin, the last session's Use) */
-static void apply_saved(void)
+/* a session's screen (docs/d38-desktop.md "Preferences"): the mode and the font displayd shows when zdesk starts are
+ * kept, and put back when it leaves, so a Use lasts for the session (under dlogin displayd outlives it); the user's
+ * own ~/.config/zdesk/screen is applied at the start (/etc/zdesk/screen is displayd's own, read when it started) */
+static int mode0 = -1, size0;
+static char font0[DPY_FONTNAME];
+static void screen_set(const char *path, int mode, const char *font, int size)
 {
-    char path[ZPATH_MAX], font[DPY_FONTNAME], want[40];
-    int mode, size, m, r;
+    char want[40];
     struct dpyfont f;
-    if (conf_screen(path, &mode, font, &size) < 0)
-        return;
-    if ((m = dpy_mode(DPYM_ASK)) >= 0 && m != mode && (r = dpy_mode(mode)) < 0)
-        dprintf(2, "zdesk: %s: the mode: %s\n", path, zstrerror(r) ? zstrerror(r) : "refused");
+    int m = dpy_mode(DPYM_ASK), r = 0;
     want[0] = 0;
     if (*font)
         snprintf(want, sizeof want, "%s %d", font, size);
-    if (dpy_font(DPYF_UI, &f) == 0 && strcmp(f.name, want) && (r = dpy_fontset(font, size)) < 0)
-        dprintf(2, "zdesk: %s: the font %s: %s\n", path, want, zstrerror(r) ? zstrerror(r) : "refused");
+    if (m >= 0 && m != mode)
+        r = dpy_mode(mode);
+    if (dpy_font(DPYF_UI, &f) == 0 && strcmp(f.name, want) && (m = dpy_fontset(font, size)) < 0)
+        r = m;
+    if (r < 0)                          /* displayd said what it could not do */
+        dprintf(2, "zdesk: %s: %s\n", path, zstrerror(r) ? zstrerror(r) : "refused");
+}
+static void apply_saved(void)
+{
+    char path[ZPATH_MAX], font[DPY_FONTNAME];
+    int mode, size;
+    struct dpyfont f;
+    mode0 = dpy_mode(DPYM_ASK);
+    if (dpy_font(DPYF_UI, &f) == 0 && f.name[0] && strlen(f.name) < sizeof font0) {
+        strcpy(font0, f.name);          /* "NAME SIZE" */
+        char *sp = strrchr(font0, ' ');
+        if (sp) {
+            *sp = 0;
+            size0 = atoi(sp + 1);
+        }
+    }
+    if (conf_screen(path, &mode, font, &size) == 0 && strncmp(path, "/etc/", 5))
+        screen_set(path, mode, font, size);
 }
 /* SIGHUP: the theme read again (a preferences program's Test, Use, Save, Cancel of the colours): the session's
  * ~/.config/zdesk/theme.use first (deskprefs' Test and Use; removed when a session starts and ends, as AmigaOS's ENV:
@@ -492,6 +512,8 @@ void logout(void)
 static void end_session(void)
 {
     menu_close();
+    if (mode0 >= 0)                     /* the screen as the session found it */
+        screen_set("the session's start", mode0, font0, size0);
     for (int i = 0; i < NZW; i++)       /* every program on the desktop is asked to end */
         if (zws[i].id && !own(zws[i].id) && zws[i].pid > 0 && zws[i].pid != sys_getpid())
             sys_killsig(zws[i].pid, SIGTERM);

@@ -232,7 +232,7 @@ px open geom 140,40,47B 140,54,BBC 50,40,EEE > "$OUT/q1"; rc=$?; check "... its 
 grep -a -q '^deskprefs: Test: mode Hires, font zbad 11, colours flat: That font cannot be read$' "$L"
 check "a damaged font, Test: refused, said in the window (and on its output)" $?
 grep -a -q '^displayd: /usr/share/fonts/amiga/zbad/11: cut short in its hunk: the built-in 8x8 is used' "$L"; check "... displayd says why, in one line" $?
-grep -a -q '^deskprefs: test: mode Hires, font ztest 11, colours flat$' "$L" && grep -a -q '^displayd: font ztest 11$' "$L"
+grep -a -q '^deskprefs: test: mode Hires, font ztest 11, colours flat$' "$L" && grep -a -q '^displayd: font ztest 11: 11 lines' "$L"
 check "ztest 11, Test: the desktop's font changed live (DPY_FONT_SET)" $?
 grep -a -q '^zdesk: screen 640x256, font ztest 11 (11 lines: bar 14, title bar 14)' "$L"; check "... zdesk: the bar and the title bars 3 lines taller (EV_SCREEN)" $?
 px font geom 600,13,112 600,14,344 > "$OUT/q2"; rc=$?; check "... the bar's line at line 13, the desktop from 14 ($(cat "$OUT/q2"))" $rc

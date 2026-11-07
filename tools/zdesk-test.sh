@@ -67,10 +67,10 @@ sleep 1
 send gcontest mouse -90,-80,0 0,0,1 0,0,0\r
 sleep 2
 shot menuclick
-send gcontest mouse 5,52,0 0,0,1 0,0,0\r
+send gcontest mouse 5,62,0 0,0,1 0,0,0\r
 sleep 3
 shot about
-send gcontest mouse 93,45,0 92,44,0 0,0,1 0,0,0\r
+send gcontest mouse 93,40,0 92,39,0 0,0,1 0,0,0\r
 sleep 2
 shot aboutgone
 send gcontest mouse 0,0,2\r
