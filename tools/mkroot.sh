@@ -21,6 +21,9 @@ cp -r "$(dirname "$0")/../rootfs/." "$T/"
 if [ -n "$NOTESTS" ]; then                  # and the font folders (the desktop package brings them), with
     rm -rf "$T/usr/share/fonts"; rmdir "$T/usr/share" "$T/usr" 2>/dev/null || true   # the folders left empty
 fi
+# LEAN=1 (the mount tests' RAM disk, whose free blocks are the room those tests write into): no desktop settings
+# (/etc/zdesk: there is no desktop on it, 13 blocks), and /lost+found in one block instead of mke2fs's twelve (below)
+[ -z "$LEAN" ] || rm -rf "$T/etc/zdesk"
 # the eleven corrupt programs mem.sh feeds to the loader (tools/mkbadzexe.py), with the scripts, so mem.sh also runs on
 # a real machine's card (2026-10-24: on the A1200 they were missing and the check passed for the wrong reason)
 if [ -z "$NOTESTS" ] && [ -f "$B/hello.zx" ]; then
@@ -197,6 +200,15 @@ fakeroot sh -c '
     chmod 644 "$1/etc/passwd" "$1/etc/group" "$1/etc/svctab" "$1/etc/daemons"
     mke2fs -q -t ext2 -E revision=0 -b 1024 -N "$2" -d "$1" -F "$3" "$4"
 ' sh "$T" "$INODES" "$TMPOUT" "$SIZE"
+# LEAN=1: mke2fs makes /lost+found 12 KB so that e2fsck need not grow it; fsck.ext2 grows a directory as any write
+# does (and makes /lost+found when it is missing), so one block serves (11 blocks back on the small image)
+if [ -n "$LEAN" ]; then
+    debugfs -w -R "rmdir lost+found" "$TMPOUT" >/dev/null 2>&1
+    debugfs -w -R "mkdir lost+found" "$TMPOUT" >/dev/null 2>&1
+    debugfs -w -R "sif lost+found mode 040700" "$TMPOUT" >/dev/null 2>&1
+    [ "$(debugfs -R "stat lost+found" "$TMPOUT" 2>/dev/null | grep -c 'Size: 1024')" = 1 ] ||
+        { echo "mkroot.sh: LEAN: /lost+found was not remade in one block" >&2; exit 1; }
+fi
 e2fsck -fn "$TMPOUT" >/dev/null
 mv -f "$TMPOUT" "$OUT"
 echo "$OUT: ext2 root, $(echo $PROGS | wc -w) programs, $(dumpe2fs -h "$OUT" 2>/dev/null | awk -F: '/^Free blocks/ { f = $2 } /^Block count/ { n = $2 } END { printf "%d of %d blocks free", f, n }')"

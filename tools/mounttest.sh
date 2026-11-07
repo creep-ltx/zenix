@@ -9,6 +9,11 @@ cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
 make -s BUILD=$BD all $BD/zenix-mount.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 OUT=${ZENIX_OUT:-/tmp/zenix-mounttest}; mkdir -p $OUT
+# the RAM disk's free blocks are the room these tests write into (mount points and files in / and /tmp: about 13
+# blocks); with less, dozens of checks fail for want of space (2026-11-06: 1 block left), so say that instead
+free=$(dumpe2fs -h $BD/root-mount.img 2>/dev/null | awk -F: '/^Free blocks/ { print $2 + 0 }')
+[ "${free:-0}" -ge 16 ] || { echo "FAIL root-mount.img has ${free:-?} free blocks, the mount tests need 16 (Makefile RAMDISK_MOUNT_K, MOUNTAPPS)"; exit 1; }
+echo "INFO root-mount.img: $free blocks free"
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 dd if=/dev/zero of=$BD/scratch.hdf bs=1M count=16 status=none
