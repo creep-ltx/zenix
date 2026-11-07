@@ -977,6 +977,7 @@ static int req(struct umsg *m)
         return (int)((u32)fi.id << 16 | (u32)(fi.xsize & 0xFF) << 8 | fi.height);
     }
     case DPY_FONT_INFO: {
+        _Static_assert(sizeof(struct dpyfont) == DPYFONT_FIRST, "struct dpyfont is frozen at 304 bytes");
         struct dpyfont *d = (struct dpyfont *)a[1];
         if (a[0] > DPYF_UI)
             return -EINVAL;
