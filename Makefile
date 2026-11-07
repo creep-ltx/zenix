@@ -48,7 +48,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet \
-          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror
+          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -531,10 +531,13 @@ STACK_pfs3d := 8192
 DPYDOBJS := $(patsubst %,$(BUILD)/dpyd-%.no,displayd win draw font amifont)
 $(BUILD)/dpyd-%.no: display/server/%.c display/server/dpyd.h display/server/amifont.h display/proto.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Iuser -DDIW_V=$(DIWV) $(if $(filter displayd win amifont,$*),-Os) -c $< -o $@
-$(BUILD)/displayd.uelf: $(DPYDOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(DPYDOBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(BUILD)/displayd.uelf: $(DPYDOBJS) $(BUILD)/screenfile.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(DPYDOBJS) $(BUILD)/screenfile.no $(BUILD)/libz.uo $(LIBGCC) -o $@
 STACK_displayd := 8192
 $(BUILD)/libdisplay.no: display/lib/libdisplay.c display/display.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
+# the desktop's screen file's reader (display/screenfile.h): displayd's (zdesk reads a user's with its conf.c)
+$(BUILD)/screenfile.no: display/lib/screenfile.c display/screenfile.h display/proto.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
 $(BUILD)/dpytest.uo: display/test/dpytest.c display/display.h display/proto.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
@@ -546,6 +549,18 @@ $(BUILD)/zd-%.no: display/zdesk/%.c display/zdesk/zdesk.h display/display.h disp
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
 $(BUILD)/zdesk.uelf: $(ZDESKOBJS) $(BUILD)/libdisplay.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(ZDESKOBJS) $(BUILD)/libdisplay.no $(BUILD)/libz.uo $(LIBGCC) -o $@
+# the preference programs (D38 "Preferences", D28 section 22): settings files written by user/cfgfile.c; deskprefs
+# lists the Amiga fonts' sizes with the server's own contents reader (amifont.c), cold: -Os
+$(BUILD)/cfgfile.uo: user/cfgfile.c user/cfgfile.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/deskprefs.uo: display/prefs/deskprefs.c display/display.h display/proto.h display/screenfile.h display/server/amifont.h user/cfgfile.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
+$(BUILD)/deskprefs.uelf: $(BUILD)/deskprefs.uo $(BUILD)/libdisplay.no $(BUILD)/dpyd-amifont.no $(BUILD)/cfgfile.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/deskprefs.uo $(BUILD)/libdisplay.no $(BUILD)/dpyd-amifont.no $(BUILD)/cfgfile.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(BUILD)/conprefs.uo: user/conprefs.c user/cfgfile.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/conprefs.uelf: $(BUILD)/conprefs.uo $(BUILD)/cfgfile.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/conprefs.uo $(BUILD)/cfgfile.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 # dlogin (DESIGN D38 revision 3): the graphical login; zdesk's theme reader (conf.c) and login's password test
 # (pw_auth in sha.c) linked in, not copied
 $(BUILD)/dlogin.uo: display/dlogin/dlogin.c display/zdesk/zdesk.h display/display.h display/proto.h user/pw.h user/zpw.h user/libz.h user/usys.h | $(BUILD)

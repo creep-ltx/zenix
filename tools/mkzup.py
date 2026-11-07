@@ -215,7 +215,7 @@ FAMILIES = [
                    "sleep date cal clear time timeout watch"),
     ("sysinfo", "who and what: uname, id, hostname, uptime", "uname whoami id hostname uptime"),
     ("procps", "processes and memory: ps, kill, nice", "ps free kill pgrep nice renice"),
-    ("sysutils", "the console, the kernel log, the disks' sync, restart", "dmesg input beep sync reboot conmirror"),
+    ("sysutils", "the console, the kernel log, the disks' sync, restart", "dmesg input beep sync reboot conmirror conprefs"),
     ("pager", "less and man, the pager and the manual reader", "less man"),
     ("edit", "the text editor", "edit"),
     ("sumi", "Sumi, a text editor: tabs, colours for code, undo, find and replace", "sumi"),
@@ -235,7 +235,7 @@ FAMILIES = [
     ("sntp", "set the clock from the network", "sntp"),
     ("zine", "ZINE: AmigaOS programs on Zenix (zine PROGRAM)", "zine"),
     ("zinstall", "the installer: put Zenix on a disk; the boot partition's programs", "zinstall"),
-    ("desktop", "Zenix Desktop: the display server, the window manager, the terminal", "zdesk term"),
+    ("desktop", "Zenix Desktop: the display server, the window manager, the terminal", "zdesk term deskprefs"),
     ("zenix-tests", "Zenix's test programs and the start-up programs' copies", "hello spin crash badptr msgpingd msgping "
                     "socktestd socktest bench termtest priotest svctest sigtest ptytest gcontest dpytest nettest cryptotest boot diskd"),
 ]
