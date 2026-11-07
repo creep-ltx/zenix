@@ -234,3 +234,90 @@ Each production under its pass-2 blocker if it ran again, else its pass-1 one.
 
 Pass-2 outcomes: running (picture, changing) 12, running (picture, unchanged) 1, running (black screen) 2, ended cleanly (code 0, or after 60+ s) 15, ended (error code) 25, missing call 91, crashed 11, stopped (other) 63.
 
+## After the fixes (2026-11-07, branch zinefix, d29 16.12)
+
+The blockers above were fixed in this order: exec `SuperState`/`UserState`; memory (zine loads a program whose file
+and hunks do not fit together from its file itself; the volume's rule: half the fast RAM the program leaves free,
+archives and then the largest files left out and named, instead of all or nothing); the cruncher's overlay form;
+the missing calls (IsInteractive, OpenFont and text, RawIOInit/RawMayGetChar/RawPutChar, utility.library,
+LockPubScreen, the six math libraries, FWrite, GetProgramName, ReadArgs, CreateIORequest, AddPort, SetChipRev,
+GetBitMapAttr, BestModeIDA, AllocScreenBuffer, and more of the same families) with every stopping call named from
+the NDK's `.fd` files; Latin-1 file names. Then the 188 affected productions (every one whose blocker, or whose
+lines, named one of these) ran again on both machines, with the same harness and limit. *Verified* in FS-UAE.
+
+**How many run now** (running at the limit, or ended cleanly: return code 0 or after 60 s and more):
+
+| Machine | Before | After |
+|---|---|---|
+| A1200, 68EC020, 2 MB chip + 8 MB fast (pass 1) | 206 | 263 |
+| A1200, 68030 + 68882, 2 + 16 MB (pass 2; a production that did not run again there counts with its pass-1 result) | 244 | 312 |
+
+Of the 426 productions with an AmigaOS executable, 263 run on the stock-style A1200 and 312 on the bigger machine.
+None that ran before stops now: three that ended at once before (no math library, an error code 20) now get
+further and stop at a call ZINE still lacks (Massive: `Allocate`; Trauma: `QueryOverscan`; Sunglasses at Night:
+`Lock`).
+
+What became of each fixed blocker (each production under its old blocker; "further": it now stops at another one):
+
+Pass 1 (68EC020, 8 MB):
+
+| Blocker before | Productions | Run or end cleanly now | Same blocker | Further, another blocker |
+|---|---|---|---|---|
+| SuperState | 18 | 18 | 0 | 0 |
+| overlay form | 15 | 12 | 1 | 2 |
+| cannot be read | 14 | 0 | 0 | 14 |
+| does not fit | 49 | 4 | 34 | 11 |
+| could not be loaded | 14 | 0 | 13 | 1 |
+| IsInteractive | 6 | 2 | 0 | 4 |
+| OpenFont | 8 | 7 | 0 | 1 |
+| RawIOInit | 2 | 2 | 0 | 0 |
+| LockPubScreen | 1 | 0 | 0 | 1 |
+| FWrite | 3 | 3 | 0 | 0 |
+| GetProgramName | 4 | 2 | 0 | 2 |
+| ReadArgs | 3 | 3 | 0 | 0 |
+| CreateIORequest | 2 | 0 | 0 | 2 |
+| AddPort | 3 | 0 | 0 | 3 |
+| SetChipRev | 3 | 2 | 0 | 1 |
+| AllocScreenBuffer | 1 | 0 | 0 | 1 |
+| TextLength | 1 | 0 | 0 | 1 |
+| SetAPen | 1 | 0 | 0 | 1 |
+
+Pass 2 (68030 + 68882, 16 MB):
+
+| Blocker before | Productions | Run or end cleanly now | Same blocker | Further, another blocker |
+|---|---|---|---|---|
+| SuperState | 20 | 20 | 0 | 0 |
+| overlay form | 15 | 13 | 1 | 1 |
+| cannot be read | 13 | 1 | 0 | 12 |
+| does not fit | 19 | 2 | 15 | 2 |
+| could not be loaded | 15 | 0 | 15 | 0 |
+| IsInteractive | 12 | 6 | 0 | 6 |
+| OpenFont | 8 | 8 | 0 | 0 |
+| RawIOInit | 8 | 7 | 0 | 1 |
+| LockPubScreen | 5 | 0 | 0 | 5 |
+| FWrite | 4 | 4 | 0 | 0 |
+| GetProgramName | 4 | 0 | 0 | 4 |
+| ReadArgs | 3 | 3 | 0 | 0 |
+| CreateIORequest | 3 | 0 | 0 | 3 |
+| AddPort | 3 | 0 | 0 | 3 |
+| SetChipRev | 3 | 1 | 0 | 2 |
+| GetBitMapAttr | 2 | 0 | 0 | 2 |
+| BestModeIDA | 1 | 1 | 0 | 0 |
+| AllocScreenBuffer | 1 | 1 | 0 | 0 |
+| SetAPen | 2 | 1 | 0 | 1 |
+
+- `SuperState` was the whole story for its 20: all run now. The cruncher's overlay form: 13 of 15 run, Animotion
+  (a truly truncated file) stays refused, one gets further.
+- **Memory:** the 7-26 MB executables no longer stop at "cannot be read"; on these test machines most still do not
+  fit (their hunks alone are 7-26 MB), and some find no free fast block in one piece for their largest hunk (Zenix's
+  memory, 8 + 8 MB in two boards on the 030 machine). A real 1260 with 64 MB is where they belong. "Does not fit"
+  now means the hunks alone are too big.
+- The demos whose data was left out of the volume (Starstruck, Ocean Machine, Silkcut, Rift, Lightshaft...: 10-35 MB
+  of `.dat`/`.wav` files) now get past the calls they lacked and stop at the FPU on the 020 or at their data on
+  smaller machines; zine names each file left out.
+
+**What blocks the most now** (the full tables are in the results folder's `summary.md`): on the stock-style A1200
+the machine itself (no FPU: 37; hunks larger than its memory: 47; not enough memory in one piece: 23); on the
+bigger machine the next ZINE gaps are graphics `GetVPModeID` (9), dos `Lock` (6), exec `Allocate` (6),
+intuition `QueryOverscan` (5), graphics `VideoControl` (4), intuition `RethinkDisplay` (3), 4 MOVE16 (68040/060
+only), and 29 black screens at the limit (still in precalc, or hung: not yet looked at one by one).
