@@ -1,6 +1,6 @@
 # Command reference
 
-Zenix has 147 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
+Zenix has 149 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
 page in `docs/man/NAME.txt`; a few more pages are for names that start the same program (`gunzip`, `zcat`, `chgrp`,
 `more`, `pkill`, `ifup`, `ifdown`, `unlzx`). The pages use the exact format that Zenix's own `man` reads (plain text of at most 78 columns, a
 `NAME(section)` header, `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`, `EXAMPLES`, `EXIT STATUS`, `SEE ALSO`); the
@@ -42,6 +42,7 @@ spot-checked against the code that day.
 | [echo](man/echo.txt), [printf](man/printf.txt), [seq](man/seq.txt), [yes](man/yes.txt), [expr](man/expr.txt) | generate and calculate |
 | [less](man/less.txt) / [more](man/more.txt), [edit](man/edit.txt), [sumi](man/sumi.txt), [maki](man/maki.txt), [markdown](man/markdown.txt) | pagers and editors (the owner's: sumi the editor with tabs and colours for code, maki the pager with colours, pipes and directories, markdown the Markdown viewer and editor; `ports/`) |
 | [zdesk](man/zdesk.txt), [term](man/term.txt) | Zenix Desktop (DESIGN D38): the floating window manager with its bar, workspaces and icons, typed after logging in as startx; the terminal window |
+| [deskprefs](man/deskprefs.txt), [conprefs](man/conprefs.txt) | preferences with Test, Use, Save and Cancel: the desktop's screen mode, font and colours (a window); the text console's colours and Unicode font (a text screen, root's) |
 | [ahiru](man/ahiru.txt) | the owner's file manager in three columns: previews, marks, copy, move, delete, archives and disk images as folders, tabs, find (`ports/ahiru`) |
 | [zine](man/zine.txt) | runs an AmigaOS program under ZINE, Zenix's own small AmigaOS (DESIGN D29; being built: real demos run in FS-UAE); an executable AmigaOS program also runs by its name |
 | [ctop](man/ctop.txt) | the owner's monitor in the way of btop: memory, disks, the network's rates and every process in four boxes (`ports/ctop`) |
@@ -106,7 +107,7 @@ spot-checked against the code that day.
 
 ## Run on AmigaOS, not on Zenix
 [zenixboot](man/zenixboot.txt) starts Zenix from files on a hard disk, CF or SD card partition, so that no floppy is
-needed (not one of the 147 programs: it is an AmigaOS program on the AmigaDOS boot partition).
+needed (not one of the 149 programs: it is an AmigaOS program on the AmigaDOS boot partition).
 [bootmenu](man/bootmenu.txt) is the boot menu of a disk with AmigaOS and Zenix on it (the SD card of
 `tools/mkdualcard.sh`): it boots a chosen AmigaOS partition or runs zenixboot.
 

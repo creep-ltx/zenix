@@ -42,6 +42,9 @@ int dpy_image_free(int id);
 int dpy_palette(unsigned short *pal, int n);    /* -> the screen's depth */
 int dpy_mode(int mode);                  /* DPYM_HIRES, DPYM_LACE (DPYM_ASK: only asked) -> the mode now, -errno;
                                          * every client gets EV_SCREEN and dpy_w, dpy_h follow (D38 "Screen modes") */
+int dpy_fontset(const char *name, int size);    /* the desktop's font now: name in a buffer of DPY_FONTNAME bytes
+                                         * (0 or "": the 8 x 8) -> 0, -errno;
+                                         * every client gets EV_SCREEN with DPYS_FONT (D38 "Preferences") */
 
 /* events */
 int dpy_port(void);                     /* poll it with POLLPORT | POLLRDBAND */

@@ -11,6 +11,7 @@
  * gives is checked with SYS_peer before it is read or written, every order's lengths and places before use; events
  * reach a client only through SYS_post, which the kernel checks against the client's memory at every write. */
 #include "dpyd.h"
+#include "../screenfile.h"
 
 int aga;
 int wm_cl = -1;
@@ -355,66 +356,17 @@ static const char *const arrow[16] = {
 
 /* ---- screen modes (D38 "Screen modes"): hires or hires interlaced, PAL or NTSC as the console is ---- */
 #define LACE_SPARE (512u << 10)         /* chip RAM left after an interlaced screen: drags, copies, sound, disks */
-/* /etc/zdesk/screen's "mode hires|hires-lace|auto" -> DPYM_LACE or DPYM_HIRES (no file, no line, auto: hires); its
- * "font NAME SIZE" (the desktop's font, docs/d38-desktop.md "Fonts") into font_name and font_size (none: "" and 0) */
+/* /etc/zdesk/screen (display/lib/screenfile.c): its mode -> DPYM_LACE or DPYM_HIRES (no file, no line, auto: hires);
+ * its "font NAME SIZE" (the desktop's font, docs/d38-desktop.md "Fonts") into font_name and font_size (none: "", 0) */
 static char font_name[32];
 static int font_size;
 static int mode_file(void)
 {
-    static char b[2048];                /* the shipped file with its comments is about 600 bytes (2026-11-07: a 512-byte
-                                         * buffer cut off its last line, "mode hires-lace", on the owner's A1200) */
-    int fd = sys_open("/etc/zdesk/screen", O_RDONLY), n = 0, r, mode = DPYM_HIRES, ln = 0;
-    if (fd < 0)
-        return mode;
-    while (n < (int)sizeof b - 1 && (r = sys_read(fd, b + n, (u32)(sizeof b - 1 - n))) > 0)
-        n += r;
-    sys_close(fd);
-    b[n] = 0;
-    if (n == (int)sizeof b - 1)
-        dprintf(2, "displayd: /etc/zdesk/screen is longer than %u bytes: the rest is not read\n", (unsigned)sizeof b - 1);
-    for (char *l = b, *e; l && *l; l = e) {
-        e = strchr(l, '\n');
-        if (e)
-            *e++ = 0;
-        ln++;
-        while (*l == ' ' || *l == '\t')
-            l++;
-        if (!*l || *l == '#')
-            continue;
-        char *e2 = l + strlen(l);
-        while (e2 > l && (e2[-1] == ' ' || e2[-1] == '\t' || e2[-1] == '\r'))
-            *--e2 = 0;
-        if (!strcmp(l, "mode hires") || !strcmp(l, "mode auto"))
-            mode = DPYM_HIRES;
-        else if (!strcmp(l, "mode hires-lace"))
-            mode = DPYM_LACE;
-        else if (!strcmp(l, "font builtin") || !strcmp(l, "font topaz 8")) {
-            font_name[0] = 0;           /* the 8 x 8: Topaz 8 is the ROM's, already there */
-            font_size = 0;
-        } else if (!strncmp(l, "font ", 5)) {
-            char *n = l + 5, *sz = strrchr(n, ' ');
-            while (*n == ' ' || *n == '\t')
-                n++;
-            int v = 0;
-            if (sz && sz > n) {
-                char *q = sz + 1;
-                while (*q >= '0' && *q <= '9' && v < 1000)
-                    v = v * 10 + (*q++ - '0');
-                if (q == sz + 1 || *q)
-                    v = 0;
-                *sz = 0;
-            }
-            if (v <= 0 || strlen(n) >= sizeof font_name || strchr(n, ' ')) {
-                dprintf(2, "displayd: /etc/zdesk/screen line %d: not understood (font NAME SIZE): %s\n", ln, l);
-                continue;
-            }
-            strcpy(font_name, n);
-            font_size = v;
-        } else
-            dprintf(2, "displayd: /etc/zdesk/screen line %d: not understood (mode hires|hires-lace|auto, font NAME SIZE): %s\n",
-                    ln, l);
-    }
-    return mode;
+    struct dpyscreen sf;
+    dpy_screenfile("/etc/zdesk/screen", &sf, "displayd");
+    strcpy(font_name, sf.font);
+    font_size = sf.size;
+    return sf.mode;
 }
 /* the screen's bitmap for a mode: 0, -ENOMEM (no chip RAM; interlace also when less than LACE_SPARE would be left) */
 static int mode_alloc(struct bm *b, int want, int depth)
@@ -587,6 +539,42 @@ static int mode_switch(int want)
     bm_free(&old);
     dprintf(1, "displayd: screen %ux%u%s\n", scr.w, scr.h, lace ? " interlaced" : "");
     return lace;
+}
+
+/* DPY_FONT_SET: the desktop's font changed now (a preferences program's Test, Use and Cancel; D38 "Preferences"):
+ * loaded (a font that cannot be read: said, the one in use stays), the server's own style's title bar its height
+ * when no window manager runs, every client told (EV_SCREEN with DPYS_FONT: zdesk takes the new height for its bar
+ * and its style), every window drawn again -> 0, or -EBUSY (a drag under way), -ENOENT, -EINVAL, -ENOMEM */
+static int font_switch(const char *name, int size)
+{
+    if (dragging || shadowing)
+        return -EBUSY;
+    int r = 0;
+    if (name[0])
+        r = font_ui_load(name, size);
+    else
+        font_ui_drop();
+    if (r < 0)
+        return r;
+    if (wm_cl < 0)
+        default_style();
+    struct dpyev e;
+    memset(&e, 0, sizeof e);
+    e.type = EV_SCREEN;
+    e.code = DPYS_FONT;
+    e.arg = (u16)lace;
+    e.w = scr.w;
+    e.h = scr.h;
+    for (int i = 0; i < NCL; i++)
+        if (cls[i].used)
+            ev_to(i, &e);
+    blit_idle();
+    win_screen();
+    if (name[0])
+        dprintf(1, "displayd: font %s %d\n", name, size);
+    else
+        dprintf(1, "displayd: font 8x8\n");
+    return 0;
 }
 
 /* ---- input from the kernel's ring ---- */
@@ -1089,6 +1077,18 @@ static int req(struct umsg *m)
         if (a[0] > DPYM_LACE)
             return -EINVAL;
         return mode_switch((int)a[0]);
+    case DPY_FONT_SET: {                /* the same clients: a[0] 32 bytes, the name (0: the 8 x 8), a[1] the size */
+        char nm[32];
+        nm[0] = 0;
+        if (a[0]) {
+            if (peer(m, PEER_RD, a[0], sizeof nm) < 0)
+                return -EFAULT;
+            memcpy(nm, (const void *)a[0], sizeof nm);
+            if (nm[sizeof nm - 1] || !nm[0] || a[1] < 1 || a[1] > 255)
+                return -EINVAL;
+        }
+        return font_switch(nm, (int)a[1]);
+    }
     case DPY_SESSION:
         if (m->uid != 0 || cls[cl].uid != 0)
             return -EPERM;

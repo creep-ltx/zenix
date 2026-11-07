@@ -59,6 +59,8 @@ int conf_load(const char *theme);   /* 0, or -1 (said on standard error) */
 extern unsigned mouse_acc;          /* the file mouse: DPY_WM_MOUSE's argument */
 int conf_theme(const char *theme);  /* the theme alone (dlogin's greeter): 0, or -1 (said) */
 const char *conf_file(const char *name, char *buf);  /* ~/.config/zdesk/NAME if there, else /etc/zdesk/NAME */
+void conf_session_clear(void);
+int conf_screen(char *path, int *mode, char *font, int *size);   /* the user's screen file (else /etc's): 0, -1 none */      /* the session's theme (~/.config/zdesk/theme.use, deskprefs' Use) removed */
 
 /* ---- windows (zdesk.c) ---- */
 #define NZW 32

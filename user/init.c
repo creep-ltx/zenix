@@ -48,6 +48,16 @@ static void start(int n, int again)
  * every start of init, so a change counts from the next boot. DESIGN D28 7: "font auto|none|NAME", the console's
  * Unicode font, kept here and loaded after mount -a (font_setup); no file or no such line is "font auto". */
 static char ufont[24] = "auto";
+/* a line not understood: the first said (at the end, with how many more), so a broken file is one line (D28 22) */
+static const char *bad_fmt, *bad_v;     /* the first's message and word (in console_setup's buffer) */
+static int nbad;
+static void bad(const char *fmt, const char *v)
+{
+    if (!nbad++) {
+        bad_fmt = fmt;
+        bad_v = v;
+    }
+}
 
 static void console_setup(void)
 {
@@ -74,22 +84,27 @@ static void console_setup(void)
             while (*x && *x != ' ' && *x != '\t' && *x != '\r') x++;
             *x = 0;
             if (!*v || strchr(v, '/') || x - v > (int)sizeof ufont - 1)
-                dprintf(1, "init: /etc/console: font %s: auto, none or a font's name (at most 23 letters)\n", v);
+                bad("font %s: auto, none or a font's name (at most 23 letters)", v);
             else
                 strcpy(ufont, v);
             continue;
         }
         if (!strcmp(w, "login")) {                      /* D38 revision 3: text (the default) or graphical */
             if (!strncmp(v, "graphical", 9)) graphical = 1;
-            else if (strncmp(v, "text", 4)) dprintf(1, "init: /etc/console: login %s: text or graphical\n", v);
+            else if (strncmp(v, "text", 4)) bad("login %s: text or graphical", v);
             continue;
         }
-        if (strcmp(w, "colours") && strcmp(w, "colors")) { dprintf(1, "init: /etc/console: unknown setting %s\n", w); continue; }
+        if (strcmp(w, "colours") && strcmp(w, "colors")) { bad("unknown setting %s", w); continue; }
         if (!strncmp(v, "auto", 4)) continue;
         int c = atoi(v), r = c ? sys_console(CON_COLOURS, c) : -EINVAL;
-        if (r == -EINVAL) dprintf(1, "init: /etc/console: colours %s: 2, 4, 8 or 16 (or auto)\n", v);
+        if (r == -EINVAL) bad("colours %s: 2, 4, 8 or 16 (or auto)", v);
         else if (r < 0) dprintf(1, "init: /etc/console: colours %d: %s, staying at %d\n", c, zstrerror(r), sys_console(CON_COLOURS, 0));
         else if (r != c) dprintf(1, "init: /etc/console: colours %d: this machine shows %d\n", c, r);
+    }
+    if (nbad) {
+        dprintf(1, "init: /etc/console: ");
+        dprintf(1, bad_fmt, bad_v);
+        dprintf(1, "%s\n", nbad > 1 ? " (and more lines not understood)" : "");
     }
     oflush();
 }
@@ -101,6 +116,7 @@ static void console_setup(void)
  * (init never ends). What fails is said on the console; the console then shows the box for what it cannot draw. */
 static void font_setup(void)
 {
+    sys_unlink("/var/run/console");                    /* the last boot's Use (conprefs, D28 22): gone */
     if (!strcmp(ufont, "none"))
         return;
     int a = !strcmp(ufont, "auto");

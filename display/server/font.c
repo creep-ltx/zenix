@@ -131,10 +131,22 @@ COLD static u8 *slurp(const char *path, u32 max, u32 *n, const char **why)
     return b;
 }
 
+/* said in one line; the font in use stays (at the start the 8 x 8) -> -ENOENT (no such file), -ENOMEM, -EINVAL */
 COLD static int refused(const char *path, const char *why)
 {
-    dprintf(2, "displayd: %s: %s: the built-in 8x8 is used\n", path, why);
-    return -1;
+    dprintf(2, "displayd: %s: %s: %s\n", path, why, ufp ? "the font in use stays" : "the built-in 8x8 is used");
+    return !strcmp(why, "not there") ? -ENOENT : !strncmp(why, "no memory", 9) ? -ENOMEM : -EINVAL;
+}
+/* the 8 x 8 from now on (DPY_FONT_SET with no name, D38 "Preferences") */
+COLD void font_ui_drop(void)
+{
+    if (ufp) {
+        free(ufp->bits);
+        free(ufp);
+    }
+    free(mbuf);
+    ufp = 0;
+    mbuf = 0;
 }
 COLD int font_ui_load(const char *name, int size)
 {

@@ -828,3 +828,87 @@ refused; then 20,000 mutations and every cut of a good font, each read or refuse
 `tools/font-test.sh` on the stock A1200 with 4 MB fast: a damaged font refused in one line with the 8 x 8 kept, then
 ztest 11 read, its widths through `DPY_FONT_INFO`, the bar and title bars 3 lines taller, a window's title "D.D" in
 the font pixel by pixel where the widths put it (the "." from the 8 x 8), and a client's text in it.
+
+## Preferences: deskprefs and the font changed live (2026-11-07, branch prefs)
+
+The owner (2026-11-06, docs/decisions.md "Screen modes and preferences"): "It must also be possible to set screen
+modes, fonts, and everything like that in both console and desktop. And test/use/save/cancel options...". This is
+the desktop's half; the console's is D28 section 22.
+
+**The program: `deskprefs`** (display/prefs/deskprefs.c, the Zenix menu's "Preferences", `/etc/zdesk/menu`). One small
+window (300 pixels wide, 82 lines with the 8 x 8), in the desktop's font, with three cycle gadgets, as AmigaOS's
+editors have (a click the next value, Shift-click the one before), and the four buttons:
+- **Screen mode:** Hires or Hires interlaced (`DPY_MODE`, "Screen modes").
+- **Font:** topaz 8 (the built-in 8 x 8), then every size of every AmigaOS bitmap font in `/usr/share/fonts/amiga/`
+  (the sizes from each `NAME.font` contents file, read with displayd's own reader, `af_contents`; an outline font's
+  contents file, `0x0f03`, is left out; sizes up to the reader's 64 lines), by name and size.
+- **Colours:** zdesk's theme (`/etc/zdesk/themes/*.theme`): a theme is the desktop's palette with the frames' and the
+  bar's pens chosen for it, so the colours are chosen as a whole (decided here: sixteen sliders would let any pen
+  pair become unreadable, and themes are what the desktop's looks are made of, section 8). Single colours stay a
+  theme file's lines.
+- Keys too: Up and Down a line, Left and Right a value, `t` `u` `s` `c` the buttons, Return Use, Esc Cancel. The close
+  gadget is Cancel.
+
+**Test, Use, Save, Cancel.** At the start the program asks what is in effect: the mode (`DPYM_ASK`), the font
+(`DPY_FONT_INFO`'s name), the theme (the session's `theme.use`, else the saved `theme`):
+- **Test:** applied now, the window stays: `DPY_MODE`, `DPY_FONT_SET` (below), the theme written to the session's
+  `~/.config/zdesk/theme.use` and `SIGHUP` sent to every process named zdesk the user may signal (the process list,
+  `SYS_procinfo`; the kernel refuses another user's): zdesk reads its theme again, `theme.use` before `theme`.
+- **Use:** the same, then the window closes. It lasts for the session: zdesk removes `theme.use` when a session starts
+  and ends, and at its start applies the saved screen file (below), so the next session starts from what was saved,
+  also under dlogin where displayd outlives a session (AmigaOS's Use lasts until the reboot; a session is Zenix's
+  nearest unit, and a user's Use must not reach the next user's session).
+- **Save:** applied, then written: the screen file's `mode` and `font` lines replaced (its comments and other lines
+  kept, user/cfgfile.c: a new file renamed over the old, so a cut leaves one or the other), the theme's name in the
+  theme file, `theme.use` removed.
+- **Cancel:** the mode, the font and the theme as they were when the window opened (only what changed is asked
+  again), `theme.use` as it was.
+- A refused request (`-ENOMEM` for interlace, a font that cannot be read, `-EBUSY` during a drag) is said in the
+  window's last line, that setting stays as it was, and Use and Save stop there: nothing is written for it.
+
+**Where Save writes (decided here).** `/etc` is root's; a user cannot write it, and should not need `sudo` to choose a
+font. So each user saves their own, as zdesk's other settings already are (`~/.config/zdesk/NAME` wins over
+`/etc/zdesk/NAME`, man zdesk "FILES"): `~/.config/zdesk/screen` (the same lines as `/etc/zdesk/screen`) and
+`~/.config/zdesk/theme`. Root's Save writes `/etc/zdesk/screen` and `/etc/zdesk/theme`, the system's defaults, which
+users without their own file and dlogin's greeter use. displayd still reads only `/etc/zdesk/screen` (it is root's and
+serves dlogin before anyone logs in); zdesk, the user's, applies the user's file when the session starts:
+`apply_saved` reads `~/.config/zdesk/screen` (else `/etc/zdesk/screen`) and asks `DPY_MODE` and `DPY_FONT_SET` for
+what differs from displayd's. A user with no file of their own costs nothing (the two already agree); one with their
+own interlace pays one mode switch at the start. displayd reads the file with display/lib/screenfile.c (its own
+`mode_file` before), zdesk with its settings reader (conf.c's `conf_screen`, the words of its other files: 300 bytes
+where linking the server's reader cost 700, measured, for the demo floppy's room); a line either does not understand
+is skipped and the first is said in one line ("... (and more lines)"), so a broken file is one line and the defaults.
+
+**The font changed live: `DPY_FONT_SET`** (request 17, display/proto.h; claimed in docs/claims.md). a[0] 32 bytes of
+the client's memory holding the name, ended by a 0 (a[0] 0: the 8 x 8), a[1] the size (1-255). Any client of the
+desktop's session, as `DPY_MODE`. displayd loads the font with the start's code (`font_ui_load`: the same checks;
+the old font freed only once the new one is read), so a font that cannot be read is one line on its standard error,
+the answer -ENOENT (no such file or size), -EINVAL (a damaged file) or -ENOMEM, and the font in use stays. Then: the
+server's own style's title bar its new height when no window manager runs; every client gets `EV_SCREEN` with
+`code` `DPYS_FONT` (1; a mode change keeps code 0, as before); every window is drawn again (`win_screen`: the kept
+copies given up, the programs draw on `EV_EXPOSE`). -EBUSY during a drag. libdisplay: `dpy_fontset(name, size)`.
+zdesk on `EV_SCREEN` with `DPYS_FONT` asks `DPY_FONT_INFO` again and does what its start does (`restyle`): the bar
+11 + (height - 8) lines, the theme's title bar and frame top as much taller, the style sent again (`DPY_WM_STYLE`),
+the bar's window its new height, the bar and the desktop drawn; with code 0 (a mode) the bar the screen's width.
+deskprefs on `EV_SCREEN` lays itself out for the new font (its window resized through zdesk). A client that ignores
+`EV_SCREEN` keeps its own layout; the server draws its `DPYF_UI` text in the new font, clipped to the box the new
+widths give.
+
+**Memory and speed.** deskprefs is 23 KB on the disk (libz linked statically, as every program), about 3 KB of lists
+in memory, and runs only while open. displayd grew 668 bytes (the request; the reader replaced its own), zdesk 2,252
+(the style redone on a change, the saved file applied, the theme again on SIGHUP), init 160; the man pages of zdesk
+and init 314 bytes. **The DD demo floppy** (D25), which had 2,048 bytes free, has 0 (it still fits; its Zenix menu
+loses the Preferences line, tools/mkroot.sh, as deskprefs is not on it); the HD one has 314 KB free. A font change
+costs one load of the font (as at the start) and one redraw of the screen, as a mode change does; nothing is paid
+while nothing changes.
+
+**Not in this step:** a user's own fonts in `~/.fonts/` (displayd reads one place), the terminals' font (8 x 8,
+"Fonts"), dlogin's greeter in the chosen font, single colours, the mouse and keys (their files stay text), a
+preference for the console from the desktop (the console's is a text program, D28 22: "never desktop features in the
+text console", and the reverse keeps the two apart).
+
+**Tests (FS-UAE):** `tools/prefs-test.sh desk` on the stock A1200 with 4 MB fast, as root: the mouse clicks the
+gadgets and Test (a damaged font refused and said, the 8 x 8 kept; ztest 11 changed live, the bar and title bars 3
+lines taller in the screenshot; interlace), Cancel (all back, nothing written); the keyboard: Use (the theme through
+SIGHUP, no file but `theme.use`), Esc at once (nothing changes), Save (`/etc/zdesk/screen` with its comments kept,
+`/etc/zdesk/theme`, `theme.use` gone); then a reboot and zdesk on the saved settings (interlaced, ztest 11, platinum).

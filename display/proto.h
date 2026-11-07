@@ -55,6 +55,12 @@
                              * desktop's font is /etc/zdesk/screen's "font NAME SIZE" (an AmigaOS bitmap font in
                              * /usr/share/fonts/amiga/), or the 8 x 8 when none is set or it could not be read
                              * (docs/d38-desktop.md "Fonts") */
+#define DPY_FONT_SET    17  /* a[0] 32 bytes (the client's memory): the font's name, ended by a 0 (0: the 8 x 8), a[1] its
+                             * size -> 0: the desktop's font from now on, every client told (EV_SCREEN with DPYS_FONT)
+                             * and every window drawn again; -ENOENT (no such font or size), -EINVAL (a file that cannot
+                             * be read), -ENOMEM: the font in use stays; -EBUSY (a drag). Any client of the desktop's
+                             * session, as DPY_MODE (docs/d38-desktop.md "Preferences": Test, Use, Cancel) */
+#define DPY_FONTNAME    32
 /* the window manager's (only after DPY_WM_HELLO; one window manager at a time) */
 #define DPY_WM_HELLO    32  /* become the window manager -> 0, -EBUSY (another one), -EPERM (not the session's user) */
 #define DPY_WM_STYLE    33  /* a[0] struct dpystyle *: frames from now on (and the screen's palette) */
@@ -238,7 +244,9 @@ struct dpyev {
 #define EV_CLOSE        7   /* the close gadget was used: the program decides */
 #define EV_MINIMISED    8
 #define EV_MENU         9   /* a menu item was picked: code the menu, arg the item */
-#define EV_SCREEN       10  /* the screen's mode changed (DPY_MODE): w x h its size now, arg the mode (DPYM_*) */
+#define EV_SCREEN       10  /* the screen's mode changed (DPY_MODE): w x h its size now, arg the mode (DPYM_*); code
+                             * DPYS_FONT: the desktop's font changed (DPY_FONT_SET; ask DPY_FONT_INFO again) */
+#define DPYS_FONT       1
 /* to the window manager */
 #define EV_WM_NEW       32  /* a window wants to appear: win, w, h its wanted inside, x, y its wanted place, arg kind */
 #define EV_WM_FRAME     33  /* a click on a frame: code the part (FP_*), qual the buttons, x, y */

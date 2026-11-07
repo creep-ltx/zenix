@@ -88,8 +88,9 @@ THE CONSOLE'S COLOURS AND FONT
     for red, yellow and magenta, cyan for green, blue and cyan); with 8 a
     bright colour is shown bold; with 2, grey on black. init reads the file
     once when it starts, so a change counts from the next boot (as
-    Workbench's ScreenMode preferences). A value it cannot use is said on
-    console 1: "init: /etc/console: colours 7: 2, 4, 8 or 16 (or auto)";
+    Workbench's; conprefs(8) changes it at once). A value it cannot use
+    is said on console 1: "init: /etc/console: colours 7: 2, 4, 8 or 16
+    (or auto)", only the first such line (a broken file is one line);
     16 on an OCS or ECS Amiga gives 8; without the chip RAM for the new
     screen the console stays as it was and init says so. The kernel says
     the new depth in its log (dmesg): "display: AGA chips, 2 bitplanes ...".
@@ -131,7 +132,9 @@ NOTES
     next time it is shown.
 
 FILES
-    /etc/console, /etc/motd, /etc/fstab, /etc/daemons
+    /etc/console, /etc/motd, /etc/fstab, /etc/daemons; removes
+    /var/run/console (conprefs)
 
 SEE ALSO
-    boot(8), login(1), dlogin(8), mount(8), ifconfig(8), wasabid(8)
+    boot(8), login(1), dlogin(8), mount(8), ifconfig(8), wasabid(8),
+    conprefs(8)

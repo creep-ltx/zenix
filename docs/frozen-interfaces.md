@@ -133,6 +133,14 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   height), `DPY_FONT` with a[0] 0 (the desktop's font); libdisplay's `dpy_font`, `dpy_textw`, `dpy_textf`;
   `/etc/zdesk/screen`'s `font NAME SIZE` and `font builtin`; `/usr/share/fonts/amiga/` holding AmigaOS bitmap
   fonts as they are (`NAME.font`, `NAME/SIZE`: the AmigaOS formats, read, not ours).
+- **D38 "Preferences" and D28 22 (branch prefs, 2026-11-07):** `DPY_FONT_SET` 17 (a[0] 32 bytes, the name ended
+  by a 0, all 32 readable, or 0 for the 8 x 8; a[1] the size 1-255; the answer 0, -ENOENT, -EINVAL, -ENOMEM, -EBUSY), `EV_SCREEN`'s
+  code `DPYS_FONT` 1 (the desktop's font changed; 0 a mode, as before), libdisplay's `dpy_fontset`; a user's
+  `~/.config/zdesk/screen` (the lines of `/etc/zdesk/screen`, applied by zdesk at a session's start),
+  `~/.config/zdesk/theme.use` (the session's theme, one word, read before `theme`, removed at a session's start and
+  end), zdesk's `SIGHUP` (its theme read again); `/var/run/console`
+  (the console's session settings: `/etc/console`'s `colours` and `font` lines, removed by init at boot);
+  `deskprefs [-v]`, `conprefs [-q]` (its line `conprefs: colours N|auto, font NAME`).
 - **D25 revision 3 (the demo floppy, branch demo, 2026-11-05):** `/etc/dlogin`'s `autologin NAME SESSION` (SESSION a
   label of its `session` lines; never root; once while `/tmp/.dlogin-autologin` does not exist); `login -s PROGRAM`'s
   PROGRAM may carry arguments split at spaces (at most 7 words in 127 bytes). Not frozen: the demo disk's layout and

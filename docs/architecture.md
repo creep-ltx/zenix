@@ -1486,7 +1486,9 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   the console's. Two fonts (D38 "Fonts"): the 8 x 8 (terminals) and the desktop's, an AmigaOS bitmap font named by
   `/etc/zdesk/screen`'s `font NAME SIZE`, read once at the start from `/usr/share/fonts/amiga/` (`amifont.c`: the
   hunk file checked and its glyphs converted into fast RAM) for titles and what clients draw with `DPYF_UI`; a run
-  of it is built in a fast-RAM mask and written a byte a plane; clients get its widths with `DPY_FONT_INFO`. Drags run in the server: an outline (XOR) or the whole window, until the button is let go; on AGA a move lifts the
+  of it is built in a fast-RAM mask and written a byte a plane; clients get its widths with `DPY_FONT_INFO`; it is
+  changed while the desktop runs by `DPY_FONT_SET` (D38 "Preferences": every client told, `EV_SCREEN` with
+  `DPYS_FONT`, everything drawn again; `deskprefs`, the preferences, uses it and `DPY_MODE`). Drags run in the server: an outline (XOR) or the whole window, until the button is let go; on AGA a move lifts the
   window into playfield 2 (dual playfield) and moves it with the Copper alone (D38 "Dragging with the chips").
   Without a window manager windows are placed one below the other, a click raises and focuses, the title bar drags
   the outline, the close gadget sends EV_CLOSE. It ends when its last client has gone (`-persist`: never), and the

@@ -1121,3 +1121,59 @@ later if wanted: bigger pieces than `tty_write`'s 256 bytes (fewer whole screens
 latency of D20 section 6 to be measured again), and a faster SGR path. Not yet on the A1200 or the PiStorm: there
 the chip RAM writes the CPU no longer makes (a quarter of them for text, none for what scrolls past) should count
 for more than in FS-UAE.
+
+## 22. Console preferences: conprefs (2026-11-07, branch prefs)
+
+The owner (2026-11-06, docs/decisions.md "Screen modes and preferences"): screen modes, fonts and the like for the
+console too, with Test, Use, Save and Cancel. The desktop's half is docs/d38-desktop.md "Preferences".
+
+**What the console can change while it runs (read from the code).** Its colours: `CON_COLOURS` (root) allocates the
+new depth's screen, switches the Copper list and draws every row again (`gfx_set_colours`, built for D14 and used
+only by init until now). Its Unicode font: `CON_UFONT` (root, section 7) swaps the font and draws the shown console
+again. Topaz stays the look of Latin-1 (section 6: a font that replaces it is not promised; `CON_FONT`'s PSF fonts are
+a program's 8-bit mode and end with it, so they are no setting). Its mode: nothing yet (below). So `conprefs` offers
+the colours (auto, 2, 4, 8, 16) and the Unicode font (auto, none, or any `/usr/share/consolefonts/NAME.zcf`).
+
+**The program: `conprefs`** (user/conprefs.c, 18 KB on the disk), a text screen in the console's own terms (escape
+sequences, the tty in raw mode; Up and Down a setting, Left and Right its value, `t` `u` `s` `c` the buttons, Return
+Use, Esc Cancel). `conprefs -q` prints the settings in effect in one line (for scripts and the tests).
+- **The console is the system's** (one screen for the ten consoles, one font for all): applying is root's, as
+  `/etc/console` is (decided here, as `CON_COLOURS` and `CON_UFONT` already are). Another user sees the settings and
+  is told "Only root can change the console: sudo conprefs".
+- **Test:** applied now, the screen stays. **Use:** applied, then the program ends; nothing saved, and the session's
+  choice is written to `/var/run/console` (the same lines), which init removes at every boot: AmigaOS's `ENV:` beside
+  its `ENVARC:`. It is there because the kernel does not say which font it has (section 7: "an op to ask which font
+  is loaded: nothing needs it"); conprefs reads the font in effect from it, else from `/etc/console`. The colours it
+  asks the kernel. **Save:** applied, then `/etc/console`'s `colours` and `font` lines replaced (the `login` line and
+  the comments kept; a new file renamed over the old, user/cfgfile.c), `/var/run/console` removed. **Cancel:** the
+  colours and the font as they were at the start, `/var/run/console` as it was. A refused change (`-EBUSY` while the
+  desktop has the screen, `-ENOMEM` for a depth's screen, a font file that is not ZCF1) is said on the screen's last
+  line, and Use and Save stop there.
+- **auto colours** is what the kernel chooses at boot (section 13, D14): 16 with fast RAM (8 on OCS/ECS: the kernel
+  shows the most it can), else 8. A 68020 machine with no fast RAM and less than 2 MB of chip RAM (the kernel's 2
+  colours) is not one Zenix is made for; there auto asks for 8, which the kernel refuses with -ENOMEM if it cannot.
+
+**At boot (the robust path).** init reads `/etc/console` as before (section 7, D14 section 11) and applies `colours`
+at once and `font` after `mount -a`. What changed: a line it does not understand no longer gives a line each; the
+first is said, once, at the end ("init: /etc/console: unknown setting bogus (and more lines not understood)"), and
+every line it does understand still counts, so a broken file is one line and the defaults for what it broke. A
+missing or unreadable font file is init's one line as before; the console then shows the box for what Topaz lacks.
+
+**The console's mode (hires or interlaced): not built, for want of kernel room.** `CON_MODE` as designed in
+docs/d38-desktop.md "Screen modes" ("The text console the same way") needs, read from the code: `gfx_set_colours`
+made one switch for depth and lace (it is 548 bytes; the lace adds the two field lists' line-312 wait and `COP1LC`
+moves to `build_cop`, 528 bytes, and a second set of plane pointers to `cop_point`), and in term.c the grids
+allocated per console instead of `[TROWS_MAX][COLS]` arrays (64 rows statically would add 77 KB of bss for every
+user: ten consoles of 3 x 32 x 80 more bytes), the row ring (`rx`, `lz_c`, 32 by a `_Static_assert`) made 64, every
+console's text moved into its new grid at a switch and `SIGWINCH` sent to each foreground group. Estimated 1.0-1.5 KB
+of kernel code (as D38 said); the room is 1,500 bytes on the mount tests' floppy of which `tools/ksize-budget`'s
+`ROOM` keeps 800, so 700 usable, and 780 under the budget's `TOTAL`: **300-800 bytes short**, and `TROWS_MAX` is in
+kernel.h (the main session's file), and the change is a deep core one (two design reviews, CLAUDE.md). conprefs shows
+no mode line until the kernel has the call; adding it is one line of the program's table (`CON_MODE`'s answer on a
+kernel without it is -EINVAL, the same probe as `CON_UFONT`'s).
+
+**Tests (FS-UAE):** `tools/prefs-test.sh con` on the stock A1200 with 4 MB fast, typed on the serial line: 8 colours
+and Test (in effect), Cancel (16 again); 8 colours and no font, Use (in effect, the block character drawn as the box in
+the screenshot, `/var/run/console` written, `/etc/console` not); Cancel at once (nothing changes); 4 colours and the
+font, Save (`/etc/console`'s lines replaced, its comments and login line kept); three broken lines added and a reboot:
+init's one line, the saved settings in effect (the block solid: the font loaded at boot), `/var/run/console` gone.

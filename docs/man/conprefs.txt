@@ -1,0 +1,58 @@
+CONPREFS(8)			Zenix manual
+
+NAME
+    conprefs - the text console's preferences: colours and font
+
+SYNOPSIS
+    conprefs [-q]
+
+DESCRIPTION
+    A text screen with the console's settings and AmigaOS's four buttons.
+
+    Colours       2, 4, 8 or 16, or auto: the machine's choice at boot (16
+                  with fast RAM, 8 on an OCS or ECS Amiga; 8 without fast
+                  RAM). Fewer colours leave more chip RAM free (the screen
+                  takes 40, 80, 120 or 160 KB).
+    Unicode font  the font for what Topaz lacks (box lines, symbols, other
+                  letters): auto (zenix-8x8), none (a box for everything
+                  above U+00FF, 11 KB saved) or any
+                  /usr/share/consolefonts/NAME.zcf.
+
+    Test    applies the choice now; the screen stays, so Cancel can still
+            go back.
+    Use     applies it until the next boot; nothing is saved.
+    Save    applies it and writes /etc/console's colours and font lines
+            (its other lines and comments kept), which init reads at
+            every boot.
+    Cancel  everything back as it was when conprefs started.
+
+    The ten consoles share one screen, so the settings are the system's:
+    only root changes them (sudo conprefs). Another user sees them. A
+    change the console refuses (the desktop has the screen, not enough
+    chip RAM, a file that is not a console font) is said on the last
+    line and nothing is saved for it.
+
+KEYS
+    Up and Down choose a setting, Left and Right change it; t, u, s and c
+    the buttons, Return Use, Esc Cancel.
+
+OPTIONS
+    -q  print the settings in effect in one line and end:
+        "conprefs: colours 16, font auto"
+
+FILES
+    /etc/console       the saved settings (init(8))
+    /var/run/console   this boot's Use (the same lines), removed by init
+                       at boot
+
+EXIT STATUS
+    0 done, 1 no memory, 2 a wrong argument.
+
+NOTES
+    The console's mode stays hires (640 x 256, 32 rows; NTSC 25): an
+    interlaced console needs a kernel call there is no room for yet. The
+    font in effect is read from /var/run/console or /etc/console (the
+    kernel does not say which it has). Topaz itself is not replaced.
+
+SEE ALSO
+    init(8), deskprefs(1), docs/d28-console-text.md (section 22)

@@ -242,6 +242,8 @@ static void action(int k)
     }
 }
 
+static void screen_changed(int font);
+
 /* ---- the server's events ---- */
 static int own(int id) { return id == bar_id || id == desk_id || menu_win(id) || (about_id() && id == about_id()); }
 static void frame_click(const struct dpyev *e)
@@ -327,6 +329,10 @@ static void event(const struct dpyev *e)
         break;
     case EV_WM_DRAGEND:
         break;
+    case EV_SCREEN:                     /* a new mode or font (a preferences program): the bar and the frames follow */
+        if (e->win == bar_id || !e->win)
+            screen_changed(e->code & DPYS_FONT);
+        break;
     default:                            /* events for zdesk's own windows */
         if (e->win == desk_id) {
             if (e->type == EV_BUTTON && (e->code & 0x7F) == 2 && !(e->code & 0x80)) {
@@ -342,6 +348,140 @@ static void event(const struct dpyev *e)
         else if (about_id() && e->win == about_id())
             about_event(e);
     }
+}
+
+/* ---- the style: the theme's frame and pens for this screen and font (at the start, and again when the font or the
+ * theme changes: docs/d38-desktop.md "Preferences") ---- */
+static u8 top0, title0;                 /* the theme's own frame top and title bar (before the font's growth) */
+static void restyle(void)
+{
+    /* the desktop's font: a taller one makes the bar and the title bars taller by the difference (a shorter one keeps
+     * them, the text centred in its room) */
+    dpy_font(DPYF_UI, &uf);
+    fh = uf.height ? uf.height : 8;
+    bar_h = 11;
+    th.st.top = top0;
+    th.st.title = title0;
+    if (fh > 8) {
+        int d = fh - 8;
+        bar_h += d;
+        if (th.st.title && th.st.title + d <= 64 && th.st.top + d <= 64) {
+            th.st.title = (unsigned char)(th.st.title + d);
+            th.st.top = (unsigned char)(th.st.top + d);
+        }
+    }
+    /* the style: the theme's pens as this screen shows them, its gadgets as images */
+    struct dpystyle st = th.st;
+    int r;
+    if (depth < 4) {
+        for (int i = 0; i < 2; i++) {
+            st.border[i] = th.map8[st.border[i] & 15];
+            st.bar[i] = th.map8[st.bar[i] & 15];
+            st.text[i] = th.map8[st.text[i] & 15];
+        }
+        st.light = th.map8[st.light & 15]; st.dark = th.map8[st.dark & 15];
+        st.shadowc = th.map8[st.shadowc & 15]; st.stripes = st.stripes ? th.map8[st.stripes & 15] : 0;
+    }
+    for (int g = 0; g < NGAD; g++) {
+        if (!th.gadh[g]) {
+            if (gad_img[g] > 0)
+                dpy_image_free(gad_img[g]);
+            gad_img[g] = 0;
+            continue;
+        }
+        static u8 buf[2 * 12 * 5];
+        int wpr = 2;
+        memset(buf, 0, sizeof buf);
+        for (int y = 0; y < th.gadh[g]; y++)
+            for (int x = 0; x < th.gadw[g] && th.gad[g][y][x]; x++) {
+                char c = th.gad[g][y][x];
+                if (c == '.' || c == ' ')
+                    continue;
+                int p = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : 1;
+                if (depth < 4) p = th.map8[p];
+                for (int pl = 0; pl < depth; pl++)
+                    if (p >> pl & 1)
+                        buf[(pl * th.gadh[g] + y) * wpr + (x >> 3)] |= (u8)(0x80 >> (x & 7));
+                buf[(depth * th.gadh[g] + y) * wpr + (x >> 3)] |= (u8)(0x80 >> (x & 7));
+            }
+        if (gad_img[g] > 0)
+            dpy_image_free(gad_img[g]);
+        gad_img[g] = dpy_image_new(th.gadw[g], th.gadh[g], depth, IMG_MASK, buf);
+        st.gad[g] = (unsigned short)(gad_img[g] > 0 ? gad_img[g] : 0);
+    }
+    if (th.drag < 0) {                  /* D38 question 3: by the CPU */
+        u32 zi[7];
+        st.drag = sys3(93, 0, (u32)zi, sizeof zi) == 0 && (zi[2] & 0x88) ? 0 : DRAG_OUTLINE;
+    } else
+        st.drag = (u8)th.drag;
+    ndrag = st.drag;
+    if (depth < 4)
+        for (int i = 8; i < 16; i++) st.palette[i] = st.palette[th.map8[i]];
+    if ((r = dpy_call(DPY_WM_STYLE, (u32)&st, 0, 0, 0)) < 0)
+        dprintf(2, "zdesk: the theme %s's frame was refused (%d): the server's own is used\n", th.name, r);
+}
+/* EV_SCREEN: a new mode (the bar the screen's width) or font (the bar's and the title bars' height, the style) */
+static void screen_changed(int font)
+{
+    menu_close();
+    if (font)
+        restyle();
+    dpy_call(DPY_WM_PLACE, (u32)bar_id, 0, (u32)dpy_w << 16 | (u32)bar_h, 0);
+    bar_draw();
+    desk_draw(0, 0, dpy_w, dpy_h);
+    dprintf(1, "zdesk: screen %dx%d, font %s (%d lines: bar %d, title bar %d)\n", dpy_w, dpy_h,
+            uf.name[0] ? uf.name : "8x8", fh, bar_h, th.st.title);
+}
+/* the session starts from the saved settings: the user's ~/.config/zdesk/screen (else /etc/zdesk/screen) applied when
+ * displayd shows something else (a user's own file; or under dlogin, the last session's Use) */
+static void apply_saved(void)
+{
+    char path[ZPATH_MAX], font[DPY_FONTNAME], want[40];
+    int mode, size, m, r;
+    struct dpyfont f;
+    if (conf_screen(path, &mode, font, &size) < 0)
+        return;
+    if ((m = dpy_mode(DPYM_ASK)) >= 0 && m != mode && (r = dpy_mode(mode)) < 0)
+        dprintf(2, "zdesk: %s: the mode: %s\n", path, zstrerror(r) ? zstrerror(r) : "refused");
+    want[0] = 0;
+    if (*font)
+        snprintf(want, sizeof want, "%s %d", font, size);
+    if (dpy_font(DPYF_UI, &f) == 0 && strcmp(f.name, want) && (r = dpy_fontset(font, size)) < 0)
+        dprintf(2, "zdesk: %s: the font %s: %s\n", path, want, zstrerror(r) ? zstrerror(r) : "refused");
+}
+/* SIGHUP: the theme read again (a preferences program's Test, Use, Save, Cancel of the colours): the session's
+ * ~/.config/zdesk/theme.use first (deskprefs' Test and Use; removed when a session starts and ends, as AmigaOS's ENV:
+ * beside its ENVARC:), else the saved theme */
+static volatile int hup;
+static void on_hup(int sig) { (void)sig; hup = 1; }
+static char *session_theme(char *buf)
+{
+    const char *h = getenv("HOME");
+    if (!h || strlen(h) + 32 >= ZPATH_MAX)
+        return 0;
+    strcpy(buf, h);
+    strcat(buf, "/.config/zdesk/theme.use");
+    return buf;
+}
+static void theme_again(void)
+{
+    char path[ZPATH_MAX], name[16];
+    int fd = session_theme(path) ? sys_open(path, O_RDONLY) : -1, n = fd < 0 ? 0 : sys_read(fd, name, 15);
+    if (fd >= 0)
+        sys_close(fd);
+    while (n > 0 && (name[n - 1] == '\n' || name[n - 1] == ' ' || name[n - 1] == '\r'))
+        n--;
+    name[n > 0 ? n : 0] = 0;
+    hup = 0;
+    if (conf_theme(n > 0 ? name : 0) < 0)
+        return;                         /* said (not even flat could be read): the frames as they were */
+    top0 = th.st.top;
+    title0 = th.st.title;
+    menu_close();
+    restyle();
+    bar_draw();
+    desk_draw(0, 0, dpy_w, dpy_h);
+    dprintf(1, "zdesk: theme %s\n", th.name);
 }
 
 /* ---- leaving ---- */
@@ -370,12 +510,17 @@ static void on_signal(int sig) { (void)sig; quit = 1; }
 int main(int argc, char **argv)
 {
     const char *tname = 0;
+    char path[ZPATH_MAX];
     for (int i = 1; i < argc; i++)
         if (!strcmp(argv[i], "-theme") && i + 1 < argc) tname = argv[++i];
         else if (!strcmp(argv[i], "-v")) verbose = 1;
         else { dprintf(2, "usage: zdesk [-v] [-theme NAME]\n"); return 2; }
     if (conf_load(tname) < 0)
         return 1;
+    top0 = th.st.top;
+    title0 = th.st.title;
+    if (session_theme(path))
+        sys_unlink(path);
     int r = dpy_open("zdesk");
     if (r < 0) {
         dprintf(2, "zdesk: the display server: %s\n", zstrerror(r) ? zstrerror(r) : "not reachable");
@@ -389,61 +534,10 @@ int main(int argc, char **argv)
     }
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
-    /* the desktop's font: a taller one makes the bar and the title bars taller by the difference (a shorter one keeps
-     * them, the text centred in its room) */
-    dpy_font(DPYF_UI, &uf);
-    fh = uf.height ? uf.height : 8;
-    if (fh > 8) {
-        int d = fh - 8;
-        bar_h += d;
-        if (th.st.title && th.st.title + d <= 64 && th.st.top + d <= 64) {
-            th.st.title = (unsigned char)(th.st.title + d);
-            th.st.top = (unsigned char)(th.st.top + d);
-        }
-    }
-    /* the style: the theme's pens as this screen shows them, its gadgets as images */
-    struct dpystyle st = th.st;
-    if (depth < 4) {
-        for (int i = 0; i < 2; i++) {
-            st.border[i] = th.map8[st.border[i] & 15];
-            st.bar[i] = th.map8[st.bar[i] & 15];
-            st.text[i] = th.map8[st.text[i] & 15];
-        }
-        st.light = th.map8[st.light & 15]; st.dark = th.map8[st.dark & 15];
-        st.shadowc = th.map8[st.shadowc & 15]; st.stripes = st.stripes ? th.map8[st.stripes & 15] : 0;
-    }
-    for (int g = 0; g < NGAD; g++) {
-        if (!th.gadh[g])
-            continue;
-        static u8 buf[2 * 12 * 5];
-        int wpr = 2;
-        memset(buf, 0, sizeof buf);
-        for (int y = 0; y < th.gadh[g]; y++)
-            for (int x = 0; x < th.gadw[g] && th.gad[g][y][x]; x++) {
-                char c = th.gad[g][y][x];
-                if (c == '.' || c == ' ')
-                    continue;
-                int p = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : 1;
-                if (depth < 4) p = th.map8[p];
-                for (int pl = 0; pl < depth; pl++)
-                    if (p >> pl & 1)
-                        buf[(pl * th.gadh[g] + y) * wpr + (x >> 3)] |= (u8)(0x80 >> (x & 7));
-                buf[(depth * th.gadh[g] + y) * wpr + (x >> 3)] |= (u8)(0x80 >> (x & 7));
-            }
-        gad_img[g] = dpy_image_new(th.gadw[g], th.gadh[g], depth, IMG_MASK, buf);
-        st.gad[g] = (unsigned short)(gad_img[g] > 0 ? gad_img[g] : 0);
-    }
-    if (th.drag < 0) {                  /* D38 question 3: by the CPU */
-        u32 zi[7];
-        st.drag = sys3(93, 0, (u32)zi, sizeof zi) == 0 && (zi[2] & 0x88) ? 0 : DRAG_OUTLINE;
-    } else
-        st.drag = (u8)th.drag;
-    ndrag = st.drag;
-    if (depth < 4)
-        for (int i = 8; i < 16; i++) st.palette[i] = st.palette[th.map8[i]];
+    signal(SIGHUP, on_hup);
     dpy_call(DPY_WM_MOUSE, mouse_acc, 0, 0, 0);
-    if ((r = dpy_call(DPY_WM_STYLE, (u32)&st, 0, 0, 0)) < 0)
-        dprintf(2, "zdesk: the theme %s's frame was refused (%d): the server's own is used\n", th.name, r);
+    apply_saved();
+    restyle();
     desk_init();
     bar_id = dpy_window(WK_BAR, "", 0, 0, dpy_w, bar_h, 0);
     grabs_set(0);
@@ -471,10 +565,14 @@ int main(int argc, char **argv)
                     title_of(&zws[i]);
             bar_draw();
         }
+        if (hup)
+            theme_again();
         bar_tick();
         reap();
     }
     dprintf(1, "zdesk: leaving\n");
+    if (session_theme(path))
+        sys_unlink(path);
     end_session();
     return 0;
 }

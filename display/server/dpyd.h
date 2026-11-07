@@ -63,7 +63,8 @@ void rg_add(struct region *g, const struct rect *r);
  * is set (/etc/zdesk/screen's "font NAME SIZE"), else the 8 x 8 too */
 void font_init(const u8 *topaz);        /* the kernel's Topaz (CON_GRAB), then /usr/share/consolefonts/zenix-8x8.zcf */
 const u8 *font_glyph(u32 cp);           /* 8 bytes */
-int font_ui_load(const char *name, int size);   /* 0, or -1 (said on standard error: the 8 x 8 stays) */
+int font_ui_load(const char *name, int size);   /* 0, or -errno (said on standard error: the font in use stays) */
+void font_ui_drop(void);                /* the desktop's font the 8 x 8 again */
 int font_id(int f);                     /* the font O_TEXT's word asks for: 1 the desktop's if it is loaded, else 0 */
 int font_h(int f);                      /* its lines */
 int font_w(int f, const u8 *s, u32 n);  /* n bytes of UTF-8: their width in pixels */

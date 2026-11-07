@@ -370,6 +370,35 @@ static void bar_file(void)
     }
 }
 
+/* the screen file (zdesk(1) FILES: ~/.config/zdesk/screen, else /etc/zdesk/screen; the format of
+ * display/lib/screenfile.c, which displayd reads /etc's with): its mode (DPYM_*), its font's name ("" the 8 x 8) and
+ * size -> 0, or -1 (no file). A line not understood is skipped (the first said) */
+int conf_screen(char *path, int *mode, char *font, int *size)
+{
+    char *b = slurp(conf_file("screen", path)), *p = b, *l, *w[4];
+    int ln = 0, nbad = 0;
+    *mode = DPYM_HIRES;
+    *font = 0;
+    *size = 0;
+    if (!b)
+        return -1;
+    while ((l = next_line(&p))) {
+        int n = words(l, w, 4), v = n == 3 ? atoi(w[2]) : 0;
+        ln++;
+        if (n == 2 && !strcmp(w[0], "mode"))
+            *mode = !strcmp(w[1], "hires-lace") ? DPYM_LACE : DPYM_HIRES;
+        else if (n == 2 && !strcmp(w[0], "font"))
+            *font = 0, *size = 0;       /* font builtin */
+        else if (n == 3 && !strcmp(w[0], "font") && v > 0 && strlen(w[1]) < DPY_FONTNAME) {
+            strcpy(font, strcmp(w[1], "topaz") || v != 8 ? w[1] : "");
+            *size = *font ? v : 0;
+        } else if (n && !nbad++)
+            bad(path, ln, w[0]);
+    }
+    free(b);
+    return 0;
+}
+
 int conf_theme(const char *theme)
 {
     char path[ZPATH_MAX], name[16] = "flat";
@@ -378,8 +407,8 @@ int conf_theme(const char *theme)
     else {
         char *b = slurp(conf_file("theme", path));
         if (b) {
-            char *w[2];
-            if (words(b, w, 2) >= 1 && strlen(w[0]) < 16)
+            char *w[2], *p = b, *l = next_line(&p);   /* the first line (a file ends with a newline: not the name's) */
+            if (l && words(l, w, 2) >= 1 && strlen(w[0]) < 16)
                 strcpy(name, w[0]);
             free(b);
         }

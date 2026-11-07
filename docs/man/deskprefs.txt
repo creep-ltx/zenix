@@ -1,0 +1,64 @@
+DESKPREFS(1)			Zenix manual
+
+NAME
+    deskprefs - the desktop's preferences: screen mode, font, colours
+
+SYNOPSIS
+    deskprefs [-v]
+
+DESCRIPTION
+    A window on Zenix Desktop (the Zenix menu's Preferences) with three
+    settings and AmigaOS's four buttons. Each setting is a cycle gadget:
+    a click shows the next value, Shift and a click the one before.
+
+    Screen mode  Hires (640 x 256, 640 x 200 on NTSC) or Hires interlaced
+                 (640 x 512, 640 x 400): twice the lines; it flickers on a
+                 TV or a 15 kHz monitor, not through a flicker fixer.
+    Font         the desktop's font (window titles, the bar, menus,
+                 labels): topaz 8, built in, or any size of an AmigaOS
+                 bitmap font copied into /usr/share/fonts/amiga.
+                 Terminals keep the 8 x 8.
+    Colours      the theme: flat, platinum, workbench, or any
+                 /etc/zdesk/themes/NAME.theme (its palette and pens).
+
+    Test    shows the choice now; the window stays, so Cancel can still
+            go back.
+    Use     shows it for this session (until Log out); nothing is saved.
+    Save    shows it and saves it: ~/.config/zdesk/screen and
+            ~/.config/zdesk/theme (root: /etc/zdesk/screen and
+            /etc/zdesk/theme, the defaults for everyone without their
+            own, and the login screen's). The screen file's comments and
+            other lines are kept.
+    Cancel  everything back as it was when the window opened.
+
+    What the desktop refuses (not enough chip RAM for interlace, a font
+    file that cannot be read, a window being dragged) is said in the
+    window's last line; that setting stays as it was, and nothing is
+    saved for it.
+
+KEYS
+    Up and Down choose a setting, Left and Right change it; t, u, s and c
+    the buttons, Return Use, Esc Cancel. The close gadget is Cancel.
+
+OPTIONS
+    -v  say on standard output where the window's parts are, and each
+        button's result ("deskprefs: use: mode Hires, font topaz 8 (built
+        in), colours flat")
+
+FILES
+    ~/.config/zdesk/screen, /etc/zdesk/screen   mode and font (zdesk(1))
+    ~/.config/zdesk/theme, /etc/zdesk/theme     the theme's name
+    ~/.config/zdesk/theme.use                   this session's theme
+
+EXIT STATUS
+    0 the window closed, 1 no desktop, 2 a wrong argument.
+
+NOTES
+    The theme is changed by zdesk: deskprefs sends SIGHUP to the user's
+    zdesk, so under another window manager only the mode and the font
+    change.
+    Not done: single colours (a theme file's palette line), the mouse and
+    the keys (their files), fonts in ~/.fonts, the terminals' font.
+
+SEE ALSO
+    zdesk(1), displayd(8), conprefs(8), docs/d38-desktop.md (Preferences)

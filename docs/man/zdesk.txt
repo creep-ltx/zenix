@@ -69,8 +69,9 @@ FILES
     screen      mode hires|hires-lace|auto (auto, or no file: hires):
                 the screen displayd(8) makes when it starts, 640 x 256
                 (NTSC 640 x 200) or interlaced 640 x 512 (640 x 400);
-                read only from /etc/zdesk; changed for a running desktop
-                by DPY_MODE (dpytest(1)'s mode). Also font NAME SIZE:
+                displayd reads /etc's, zdesk applies the user's (or
+                /etc's) at its start; deskprefs(1) changes it. Also
+                font NAME SIZE:
                 the desktop's font, an AmigaOS bitmap font copied as it
                 is into /usr/share/fonts/amiga (NAME.font and the NAME
                 folder): window titles, the bar, menus and labels (not
@@ -80,6 +81,9 @@ FILES
                 displayd says why on its standard error
     themes/NAME.theme
                 a theme (THEMES)
+    theme.use   the session's theme (deskprefs), read before theme on
+                SIGHUP (the theme again); removed when zdesk starts and
+                ends
 
 THEMES
     flat (the default, look (a)), workbench (b) and platinum (e), in
@@ -97,6 +101,6 @@ THEMES
 
 NOTES
     The clock is UTC (Zenix has no time zones yet). Files on the desktop
-    and a preferences program are not there yet; icons only start
-    commands. The bar's command blocks run through /bin/sh -c and are
-    ended when they take longer than their interval (at least 10 s).
+    are not there yet; icons only start commands. The bar's command
+    blocks run through /bin/sh -c and are ended when they take longer
+    than their interval (at least 10 s).
