@@ -240,7 +240,9 @@ RAMDISK_K := 640
 # (2026-11-04, the 040/060 data cache: 2 KB of kernel): 41 blocks free there (43 at 712). 704 since DESIGN D38 step 1
 # (2026-11-04, pseudo-terminals: 3.6 KB of kernel): 35 blocks free, mounttest passes. 700 since DESIGN D38 step 2
 # (2026-11-04, the console handed to the display server: 4 KB of kernel). 699 since DESIGN D28 20 (2026-11-04, the
-# console's ring of rows: 1.3 KB of kernel).
+# console's ring of rows: 1.3 KB of kernel). Its free blocks are the room the mount tests write into (about 13 blocks:
+# mount points and files in / and /tmp; tools/mounttest.sh refuses to run below 16): by 2026-11-06 only 1 was left,
+# and LEAN=1 (tools/mkroot.sh: no /etc/zdesk, a one-block /lost+found) gave 25 back (26 free).
 RAMDISK_MOUNT_K := 699
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
@@ -301,7 +303,7 @@ $(BUILD)/root-ram.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh
 	NOMAN=1 NOTESTS=1 tools/mkroot.sh $@ $(BUILD) "$(RAMAPPS)" $(RAMDISK_K)K 128
 
 $(BUILD)/root-mount.img: $(USERZX) $(SBINZX) $(shell find rootfs -type f) tools/mkroot.sh Makefile
-	NOMAN=1 NOPURE=1 NOTESTS=1 tools/mkroot.sh $@ $(BUILD) "$(MOUNTAPPS)" $(RAMDISK_MOUNT_K)K 128
+	LEAN=1 NOMAN=1 NOPURE=1 NOTESTS=1 tools/mkroot.sh $@ $(BUILD) "$(MOUNTAPPS)" $(RAMDISK_MOUNT_K)K 128
 
 $(BUILD)/zenix-mount.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/root-mount.img tools/mkadf.py
 	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@ $(BUILD)/root-mount.img
