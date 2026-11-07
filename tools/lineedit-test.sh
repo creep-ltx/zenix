@@ -20,8 +20,10 @@ grep -q '^one two three' $OUT/run.log && ok "the whole line ran" || bad "the lin
 grep -q '^row [0-9]*|zenix:/# zpkg -Qq coreutils *|' $OUT/run.log && ok "Tab after zpkg -Qq completes an installed package's name (coreutils)" || bad "Tab did not complete the package name"
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g' $OUT/run.log | grep -q '^ahiru$' && ok "... and zpkg -Qq prints names only" || bad "zpkg -Qq did not print the name alone"
 # typed at the end of the line, each key writes that character alone (DESIGN D28 20): the prompt is drawn once, not
-# once a key (it was "\r", the prompt and the whole line for every key)
-n=$(sed 's/\x1b\[[0-9;]*[A-Za-z]//g' $OUT/run.log | grep -v "^row [0-9]*|" | grep -o "# printf" | wc -l)
+# once a key (it was "\r", the prompt and the whole line for every key). Counted in that step only (from w-ok to
+# qz-ok): later, the "p" of the es step's "pwd" shows the rest of this history line as its suggestion (grey on the
+# screen; the serial copy carries no colour), "# printf 'qz-..." again without any redraw (2026-11-07)
+n=$(sed -n '/^w-ok$/,/^qz-ok$/p' $OUT/run.log | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -v "^row [0-9]*|" | grep -o "# printf" | wc -l)
 [ "$n" = 1 ] && grep -q '^qz-ok' $OUT/run.log && ok "typing at the end of the line writes only the new characters (the prompt drawn once)" ||
     bad "typing redrew the line: the prompt and 'printf' $n times on the serial copy"
 # Tab twice on a path lists the matches by their last part (Latex/ Loonies/), as bash does, not the whole path
