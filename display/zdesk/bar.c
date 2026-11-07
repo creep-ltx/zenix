@@ -55,21 +55,21 @@ static void upto(int x)                 /* the background from where the last pi
         painted = x;
     }
 }
-/* text at x (line 2) in fg on hb, with pad pixels of hb on each side (a highlight: lines 1 to 9), the rest of its
- * column the bar's background */
+/* text at x (line 2, the desktop's font) in fg on hb, with pad pixels of hb on each side (a highlight: lines 1 to
+ * 1 + fh), the rest of its column the bar's background */
 static int seg(int x, const char *s, int n, int fg, int hb, int bold, int pad)
 {
-    int a = x - pad, x1 = x + 8 * n, b = x1 + pad;
+    int a = x - pad, x1 = x + tw(s, n), b = x1 + pad;
     upto(a);
     dpy_fill(bar_id, a, 0, b - a, 1, bgpen);
     dpy_fill(bar_id, a, 1, b - a, 1, hb);
     if (pad) {
-        dpy_fill(bar_id, a, 2, pad, 8, hb);
-        dpy_fill(bar_id, x1, 2, pad, 8, hb);
+        dpy_fill(bar_id, a, 2, pad, fh, hb);
+        dpy_fill(bar_id, x1, 2, pad, fh, hb);
     }
-    dpy_text(bar_id, x, 2, fg, hb, bold ? TA_BOLD : 0, s, n);
-    if (bar_h - 1 > 10)
-        dpy_fill(bar_id, a, 10, b - a, bar_h - 11, bgpen);
+    utext(bar_id, x, 2, fg, hb, bold ? TA_BOLD : 0, s, n);
+    if (bar_h - 1 > 2 + fh)
+        dpy_fill(bar_id, a, 2 + fh, b - a, bar_h - 3 - fh, bgpen);
     if (b > painted)
         painted = b;
     return x1;
@@ -100,7 +100,7 @@ void bar_draw(void)
     int x = 8;
     /* the right zone first: the middle's list gets what is left */
     right_compose(right_text);
-    int rw = 8 * (int)strlen(right_text), rx = dpy_w - 8 - rw;
+    int rw = tw(right_text, (int)strlen(right_text)), rx = dpy_w - 8 - rw;
     for (int z = 0; z < 2; z++) {
         if (z == 1)
             x += 24;
@@ -129,7 +129,7 @@ void bar_draw(void)
                     int n = (int)strlen(w->title);
                     if (n > 12) n = 12;
                     if (!n) n = 1;
-                    if (x + 8 * n + 8 > rx)
+                    if (x + tw(w->title[0] ? w->title : "?", n) + 8 > rx)
                         break;
                     int cur = w->id == focus_id;
                     int x0 = x;
@@ -144,11 +144,11 @@ void bar_draw(void)
                     for (int j = 0; j < NZW; j++)
                         if (zws[j].id && !zws[j].own && zws[j].ws == n) used = 1;
                     char c = (char)('0' + n);
-                    int cur = n == cur_ws;
+                    int cur = n == cur_ws, cw = tw(&c, 1);
                     seg(x, &c, 1, cur ? pen(R_BARCUR) : used ? fg : pen(R_BARDIM), cur ? pen(R_BARCURBG) : bg, cur,
                         cur ? 4 : 0);
-                    hit(x - 4, x + 12, H_WS, n);
-                    x += 16;
+                    hit(x - 4, x + cw + 4, H_WS, n);
+                    x += cw + 8;
                 }
             }
         }
@@ -357,22 +357,25 @@ static const char *item_text(int i, int *len)  /* the i-th item of the open menu
         *len = seglen(s);
     return s;
 }
-/* item i (10 lines from line 2): every pixel drawn once, in its final colour - the text's cells with their
- * background, the margins around them filled - so a changed highlight never shows a cleared item */
+/* item i (ih() lines from line 2): every pixel drawn once, in its final colour - the text with its background, the
+ * margins around it filled - so a changed highlight never shows a cleared item */
+static int ih(void) { return fh + 2; }
+static int item_n(int n) { return n > 60 ? 60 : n; }   /* a long item cut at 60 bytes: the menu stays on the screen */
 static void menu_item(int i)
 {
     int n;
     const char *t = item_text(i, &n);
     if (!t)
         return;
-    if (n > 60)
-        n = 60;
-    int on = i == sel, bg = pen(on ? R_SELBG : R_MENUBG), y = 2 + 10 * i;
+    n = item_n(n);
+    int on = i == sel, bg = pen(on ? R_SELBG : R_MENUBG), y = 2 + ih() * i, w = tw(t, n);
+    if (8 + w > mw - 1)
+        w = mw - 9;
     dpy_fill(mwin, 1, y, mw - 2, 1, bg);
-    dpy_fill(mwin, 1, y + 1, 7, 8, bg);
-    dpy_text(mwin, 8, y + 1, pen(on ? R_SELFG : R_MENUFG), bg, 0, t, n);
-    dpy_fill(mwin, 8 + 8 * n, y + 1, mw - 9 - 8 * n, 8, bg);
-    dpy_fill(mwin, 1, y + 9, mw - 2, 1, bg);
+    dpy_fill(mwin, 1, y + 1, 7, fh, bg);
+    utext(mwin, 8, y + 1, pen(on ? R_SELFG : R_MENUFG), bg, 0, t, n);
+    dpy_fill(mwin, 8 + w, y + 1, mw - 9 - w, fh, bg);
+    dpy_fill(mwin, 1, y + 1 + fh, mw - 2, 1, bg);
 }
 static void menu_paint(void)            /* the whole menu: when it opens, and on EV_EXPOSE */
 {
@@ -435,16 +438,18 @@ static void menu_show(int which, int x)
     mopen = which;
     sel = -1;
     nitems = 0;
-    int maxl = 4, n;
+    int maxw = 32, n;
+    const char *t;
     mfor = focus_id;
-    while (nitems < 32 && item_text(nitems, &n)) {
-        if (n > maxl) maxl = n;
+    while (nitems < 32 && (t = item_text(nitems, &n))) {
+        int w = tw(t, item_n(n));
+        if (w > maxw) maxw = w;
         nitems++;
     }
-    if (maxl > 60)
-        maxl = 60;                      /* a long item is cut at 60 characters: the menu stays on the screen */
-    mw = 8 * maxl + 16;
-    mh = 10 * nitems + 4;
+    if (maxw > dpy_w - 32)
+        maxw = dpy_w - 32;
+    mw = maxw + 16;
+    mh = ih() * nitems + 4;
     mx = (x + mw > dpy_w ? dpy_w - mw : x) & ~7;   /* the server puts an inside on an 8-pixel column */
     mtitle_x = x;
     mwin = dpy_window(WK_BAR, "", mx, bar_h, mw, mh, WF_MOTION);
@@ -483,8 +488,8 @@ static void track(int x, int y)
     if (y < bar_h && title_at(x, &w, &tx))
         menu_show(w, tx);
     int s = -1;
-    if (mwin && x >= mx && x < mx + mw && y >= bar_h + 2 && y < bar_h + 2 + 10 * nitems)
-        s = (y - bar_h - 2) / 10;
+    if (mwin && x >= mx && x < mx + mw && y >= bar_h + 2 && y < bar_h + 2 + ih() * nitems)
+        s = (y - bar_h - 2) / ih();
     menu_select(s);
 }
 void menu_hold(int button)

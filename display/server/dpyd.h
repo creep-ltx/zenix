@@ -42,6 +42,7 @@ void bm_fill(struct bm *b, const struct rect *r, int pen);
 void bm_xor(struct bm *b, const struct rect *r, int pen);            /* invert the pen's planes */
 void bm_copy(struct bm *s, int sx, int sy, struct bm *d, const struct rect *dr);   /* dr's size from (sx, sy) */
 void bm_text(struct bm *b, int x, int y, const u8 *glyph, int fg, int bg, int attr, const struct rect *clip);
+void bm_mask(struct bm *b, int bx0, int y0, int rows, const u8 *mask, int ms, int x0, int x1, int fg, int bg);
 void bm_image(const struct bm *img, const u8 *mask, int sx, int sy, struct bm *d, const struct rect *dr);
 int bm_alloc(struct bm *b, int w, int h, int depth);
 extern int shadowing;           /* a whole window's drag: scr is a drawn screen, shown once a pass (D38 6.3) */
@@ -58,9 +59,17 @@ void rg_sub(struct region *g, const struct rect *r);
 void rg_and(struct region *g, const struct rect *r);
 void rg_add(struct region *g, const struct rect *r);
 
-/* font.c */
+/* font.c: font 0 the 8 x 8 (the terminals' cells), font 1 (DPYF_UI) the desktop's, an AmigaOS bitmap font when one
+ * is set (/etc/zdesk/screen's "font NAME SIZE"), else the 8 x 8 too */
 void font_init(const u8 *topaz);        /* the kernel's Topaz (CON_GRAB), then /usr/share/consolefonts/zenix-8x8.zcf */
 const u8 *font_glyph(u32 cp);           /* 8 bytes */
+int font_ui_load(const char *name, int size);   /* 0, or -1 (said on standard error: the 8 x 8 stays) */
+int font_id(int f);                     /* the font O_TEXT's word asks for: 1 the desktop's if it is loaded, else 0 */
+int font_h(int f);                      /* its lines */
+int font_w(int f, const u8 *s, u32 n);  /* n bytes of UTF-8: their width in pixels */
+u32 font_fit(int f, const u8 *s, u32 n, int maxw, int *w);  /* the bytes of whole characters within maxw, *w theirs */
+void font_run(struct bm *b, int x, int y, int f, const u8 *s, u32 n, int fg, int bg, int attr, const struct rect *clip);
+void font_info(int f, struct dpyfont *o);       /* DPY_FONT_INFO's answer */
 
 /* win.c */
 #define NWIN 32

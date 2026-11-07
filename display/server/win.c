@@ -114,25 +114,6 @@ static int whole(const struct win *w, const struct region *vis)
 }
 
 /* ---- painting ---- */
-static void text_at(int x, int y, const char *s, int fg, int bg, int attr, const struct rect *clip)
-{
-    while (*s) {
-        u32 c = (u8)*s++;
-        if (c >= 0xC0 && (*s & 0xC0) == 0x80) {        /* a two-byte UTF-8 character (titles are short) */
-            c = (c & 0x1F) << 6 | ((u8)*s++ & 0x3F);
-        }
-        bm_text(&scr, x, y, font_glyph(c), fg, bg, attr, clip);
-        x += 8;
-    }
-}
-static int title_cols(const struct win *w)
-{
-    int n = 0;
-    for (const char *s = w->title; *s; s++)
-        if ((*s & 0xC0) != 0x80)
-            n++;
-    return n;
-}
 static int gad_x(int i, const struct rect *f)
 {
     int g = style.gadx[i];
@@ -183,12 +164,15 @@ static void frame_paint(struct win *w, const struct rect *c)
                 if (style.gadx[i] < 128 && gx + gw + 6 > lx) lx = gx + gw + 6;
                 if (style.gadx[i] >= 128 && gx - 4 < rx) rx = gx - 4;
             }
-            int cols = title_cols(w), tw = cols * 8;
-            if (tw > rx - lx) tw = rx - lx > 0 ? (rx - lx) & ~7 : 0;
+            /* the desktop's font (the 8 x 8 without one): a long title cut after its last whole character */
+            int tf = font_id(DPYF_UI), fh = font_h(tf), tw;
+            u32 tn = font_fit(tf, (const u8 *)w->title, strlen(w->title), rx - lx > 0 ? rx - lx : 0, &tw);
             int x = style.centre ? (tx0 + tx1 - tw) / 2 : lx;
             if (x < lx) x = lx;
             if (x + tw > rx) x = rx - tw;
-            int y = ty0 + (style.title - 1 - 8) / 2;
+            int y = ty0 + (style.title - 1 - fh) / 2, gy = ty0 + (style.title - 1 - 8) / 2;
+            if (y < ty0) y = ty0;
+            if (gy < ty0) gy = ty0;
             int patch = style.centre || (act && style.stripes);    /* the title on a plain patch over the stripes */
             int ppen = style.bar[0] == style.bar[1] || !style.stripes ? style.bar[act] : style.bar[0];
             /* every pixel once: the bar (and its stripes) beside the title, the patch around it, then the text */
@@ -209,7 +193,7 @@ static void frame_paint(struct win *w, const struct rect *c)
                 }
             }
             struct rect pl = { (s16)px0, (s16)ty0, (s16)x, (s16)ty1 }, pr = { (s16)(x + tw), (s16)ty0, (s16)px1, (s16)ty1 },
-                        tt = { (s16)x, (s16)ty0, (s16)(x + tw), (s16)y }, tb = { (s16)x, (s16)(y + 8), (s16)(x + tw), (s16)ty1 },
+                        tt = { (s16)x, (s16)ty0, (s16)(x + tw), (s16)y }, tb = { (s16)x, (s16)(y + fh), (s16)(x + tw), (s16)ty1 },
                         kp;
             if (r_and(&kp, &pl, &k)) bm_fill(&scr, &kp, ppen);
             if (r_and(&kp, &pr, &k)) bm_fill(&scr, &kp, ppen);
@@ -217,7 +201,8 @@ static void frame_paint(struct win *w, const struct rect *c)
             if (r_and(&kp, &tb, &k)) bm_fill(&scr, &kp, patch ? ppen : style.bar[act]);
             struct rect tc = { (s16)x, (s16)ty0, (s16)(x + tw), (s16)ty1 };
             if (r_and(&kp, &tc, &k))
-                text_at(x, y, w->title, style.text[act], patch ? ppen : style.bar[act], act ? TA_BOLD : 0, &kp);
+                font_run(&scr, x, y, tf, (const u8 *)w->title, tn, style.text[act], patch ? ppen : style.bar[act],
+                         act ? TA_BOLD : 0, &kp);
             for (int i = 0; i < 3; i++) {
                 if (!style.gadx[i])
                     continue;                   /* no such gadget in this style */
@@ -233,7 +218,7 @@ static void frame_paint(struct win *w, const struct rect *c)
                 } else if (!style.gad[i]) {
                     struct rect g = t;
                     if (r_and(&k, &g, c))
-                        bm_text(&scr, gx, y, font_glyph("x_o"[i]), style.text[act], style.bar[act], 0, &k);
+                        bm_text(&scr, gx, gy, font_glyph("x_o"[i]), style.text[act], style.bar[act], 0, &k);
                 }
             }
         }
@@ -792,26 +777,13 @@ static void d_xor(struct bm *b, const struct rect *c, int pen, int inback, const
     (void)inback; (void)p;
     bm_xor(b, c, pen);
 }
-struct textarg { int x, y, fg, bg, attr; const u8 *s; u32 n; };
+struct textarg { int x, y, fg, bg, attr, font; const u8 *s; u32 n; };
 static void d_text(struct bm *b, const struct rect *c, int unused, int inback, const void *p)
 {
     (void)unused;
     const struct textarg *t = p;
-    int ox = inback ? 0 : dr_in.x0, oy = inback ? 0 : dr_in.y0, x = t->x + ox, y = t->y + oy;
-    for (u32 i = 0; i < t->n;) {
-        u32 cp = t->s[i];
-        int k = cp < 0x80 ? 1 : cp >= 0xC2 && cp <= 0xDF ? 2 : cp >= 0xE0 && cp <= 0xEF ? 3 : cp >= 0xF0 && cp <= 0xF4 ? 4 : 1;
-        if (k > 1 && i + (u32)k <= t->n) {
-            cp &= (u32)(0x7F >> k);
-            for (int j = 1; j < k; j++)
-                cp = cp << 6 | (t->s[i + j] & 0x3F);
-        } else
-            k = 1;
-        i += (u32)k;
-        if (x + 8 > c->x0 && x < c->x1)
-            bm_text(b, x, y, font_glyph(cp), t->fg, t->bg, t->attr, c);
-        x += 8;
-    }
+    int ox = inback ? 0 : dr_in.x0, oy = inback ? 0 : dr_in.y0;
+    font_run(b, t->x + ox, t->y + oy, t->font, t->s, t->n, t->fg, t->bg, t->attr, c);
 }
 struct imgarg { struct bm *img; const u8 *mask; int sx, sy, dx, dy; };
 static void d_image(struct bm *b, const struct rect *c, int unused, int inback, const void *p)
@@ -860,8 +832,10 @@ void win_draw(int s, const u16 *o, u32 nw, u32 *bad)
             if (na < 6) goto bad;
             u32 nb = (u16)a[5];
             if (nb > (na - 6) * 2 || !s16ok(a[0]) || !s16ok(a[1])) goto bad;
-            struct textarg t = { a[0], a[1], a[3] & 15, (a[3] >> 8) & 15, a[4] & 7, (const u8 *)&a[6], nb };
-            struct rect r = { a[0], a[1], (s16)(a[0] + 8 * (int)nb), (s16)(a[1] + 8) };
+            int f = font_id((u16)a[2]);         /* 0 the 8 x 8, 1 the desktop's font */
+            struct textarg t = { a[0], a[1], a[3] & 15, (a[3] >> 8) & 15, a[4] & 7, f, (const u8 *)&a[6], nb };
+            int tw = f ? font_w(f, t.s, nb) : 8 * (int)nb;
+            struct rect r = { a[0], a[1], (s16)(a[0] + (tw < 8192 ? tw : 8192)), (s16)(a[1] + font_h(f)) };
             each(&r, d_text, 0, &t);
             break;
         }

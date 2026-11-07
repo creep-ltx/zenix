@@ -751,3 +751,80 @@ the desktop, a term, the pointer at the bottom edge, `DPY_MODE` to hires and bac
 the places the server reports), PAL and NTSC (FS-UAE's NTSC A1200: 640 x 400 and 640 x 200); `drag-test lace`: the
 whole drag test (the chips' drag held mid-way, the edges, the 16-pen drag drawn off the screen) on the interlaced
 screen.
+
+## Fonts: AmigaOS bitmap fonts for the desktop (2026-11-07, branch fonts)
+
+The owner (2026-11-06, docs/decisions.md "A place for fonts"): "We need a place for bitmap fonts ... So I can copy
+over my cool Amiga fonts to zenix." The fonts go into `/usr/share/fonts/amiga/` exactly as they are in `FONTS:`
+(`NAME.font` and the `NAME/` folder); displayd reads them as they are, with no conversion step.
+
+**The setting.** `/etc/zdesk/screen` (the file of the screen's mode, read by displayd when it starts) takes a second
+kind of line, `font NAME SIZE` (`font helvetica 11`; `font builtin`, `font topaz 8` or no line: the 8 x 8). The same
+file, so the preferences program has one file for the desktop's screen and one Save; the same reader. The font is
+the desktop's: window titles, zdesk's bar and menus, the desktop's labels, the About window. Not the terminals (below)
+and not dlogin's greeter (its fields are laid out in 8-pixel cells; a later step).
+
+**The files (RKM Libraries "Graphics Library and Text", includes `libraries/diskfont.h`, `graphics/text.h`; checked
+against the fonts of a 3.2 install, 2026-11-07).** `NAME.font` is a FontContentsHeader: `fch_FileID` 0x0f00 (or
+0x0f02 with tags, 0x0f03 an outline font's), `fch_NumEntries`, then entries of 260 bytes: the file name relative to
+`FONTS:` (256 bytes; in a TFontContents the last two are a tag count, the tags at the name's end), the size (UWORD),
+the style and the flags. The entry of the asked size is taken (the plain style first). Its file, `NAME/SIZE`, is an
+AmigaDOS executable: `HUNK_HEADER` (one hunk), `HUNK_CODE` with `moveq #-1,d0; rts`, the DiskFontHeader (a node,
+`DFH_ID` 0x0f80, the name) and at hunk offset 58 the TextFont: `tf_YSize` +20, `tf_Style` +22, `tf_Flags` +23,
+`tf_XSize` +24, `tf_Baseline` +26, `tf_LoChar`/`tf_HiChar` +32/+33, `tf_CharData` +34, `tf_Modulo` +38, `tf_CharLoc`
++40, `tf_CharSpace` +44, `tf_CharKern` +48; then `HUNK_RELOC32` (or `HUNK_RELOC32SHORT`) for the pointers, which are
+offsets into the hunk. The strike is one bitmap of `tf_YSize` rows of `tf_Modulo` bytes, the glyphs side by side;
+`tf_CharLoc` gives each its bit offset and width (HiChar - LoChar + 2 entries, the last the "no such character"
+glyph); a character is drawn `tf_CharKern` pixels right of the pen, and the pen moves `tf_CharSpace` + `tf_CharKern`
+(a proportional font) or `tf_XSize` (a fixed one).
+
+**The reader** (`display/server/amifont.c`, no system calls: the host test builds the same file) reads the file
+without loading it: every pointer the TextFont uses must be one the relocation table names (an absolute address is
+refused) and lies in the hunk with its whole table; every glyph's location lies in its row; heights 1-64, glyph
+widths up to 64, kerning within 64, advances 0-255, the converted glyphs at most 64 KB, a font file at most 256 KB.
+Refused: more than one hunk, right-to-left fonts (`FPF_REVPATH`), anything cut short. A refused or missing font is
+one line on displayd's standard error ("displayd: /usr/share/fonts/amiga/zbad/11: cut short in its hunk: the
+built-in 8x8 is used") and the desktop runs with the 8 x 8. **Colour fonts** (`FSF_COLORFONT`, a ColorTextFont) are
+read in one colour: a pixel is drawn where any of its planes is set (their own colours are not shown).
+
+**Conversion at load, and drawing.** Each glyph is cut out of the strike once into its own packed picture (rows of
+(width + 7) / 8 bytes), in fast RAM: Helvetica 11 takes 2.1 KB, Times 24 8.3 KB (the 3.2 install's fonts: 1.7-8.3 KB
+each), plus a mask of the font's lines x 84 bytes (0.9 KB at 11 lines). A run of text is put together in that mask
+(fast RAM), then written into the bitmap a byte a plane (`bm_mask`): chip RAM is written once and read only at the
+run's two edge bytes a line (PiStorm's chip RAM reads at 2.7 MB/s). A title of 20 characters is a few hundred byte
+writes, as with the 8 x 8. Font 0 (the 8 x 8, the terminals') keeps its own path (a glyph a cell, `bm_text`)
+unchanged, so a terminal's output costs what it did. A code point the font lacks (outside LoChar..HiChar, an empty
+slot, past Latin-1) is drawn by the 8 x 8, its baseline (line 6) on the font's, 8 pixels wide; bold smears a pixel
+right (as the 8 x 8's), underline is the line below the baseline.
+
+**The protocol** (grows at the end, docs/frozen-interfaces.md). O_TEXT's font word: 0 the 8 x 8 (as before), 1
+(`DPYF_UI`) the desktop's font; its box is x .. x + the text's width, y .. y + the font's height, nothing drawn
+outside it. `DPY_FONT_INFO` 16 (a[0] the font, a[1] a `struct dpyfont`, 304 bytes): the id, height, baseline, nominal
+width, flags (`DPYFF_PROP` 1, `DPYFF_BUILTIN` 2), name, and the width of each code point 0-255 (past 255: 8), so a
+client lays text out before drawing it. `DPY_FONT` with a[0] 0 answers the desktop's font. libdisplay:
+`dpy_font(font, &f)`, `dpy_textw(&f, s, n)`, `dpy_textf(win, &f, x, y, ...)` (`dpy_text` is `dpy_textf` with the
+8 x 8).
+
+**The geometry follows the font.** A font taller than 8 lines makes zdesk's bar and every title bar taller by the
+difference (Helvetica 11: the bar 14 lines, the flat theme's title bar 14, its frame's top 15); the server's own
+style (no window manager) the same. A shorter font keeps the theme's sizes, centred. The menus' items are the font's
+height + 2, the desktop's icons spread when the font is taller than 16 lines, the About window grows.
+
+**Terminals stay 8 x 8 (decided here).** term's cells are the console's cell model (kernel/term.c, 8 x 8 by
+construction, its widths and scrolling in 8-pixel units), and the console's own font is D28's (`/etc/console`).
+A fixed-width Amiga font for terminals needs a cell of the font's size through term's model and its window steps;
+it is cheap only for an 8 x 8 font, and those are what the console already loads (PSF, ZCF). So: later, with the
+console's fonts in the preferences (D28's "fixed-width fonts that fit its cell").
+
+**Not in this step:** the font changed while the desktop runs (a `DPY_FONT_SET` for the preferences program's
+Test: load, then `EV_SCREEN` to every client, zdesk taking the new height for the bar and the style; designed, not
+built), `~/.fonts/` (displayd is root's and reads one setting), several fonts at once for clients (one desktop font
+and the 8 x 8), dlogin's greeter, TrueType.
+
+**Tests.** `tools/amifont-host-test.sh` (host, AddressSanitizer): tools/mkamifont.py makes fonts (a proportional and
+a fixed one, a colour one, `HUNK_RELOC32SHORT`, `HUNK_DATA`, `HUNK_NAME`/`HUNK_DEBUG`) and 24 damaged files and 14
+contents files; each read and compared (metrics, glyph count, a checksum of the converted pictures, widths) or
+refused; then 20,000 mutations and every cut of a good font, each read or refused, nothing read outside. In FS-UAE,
+`tools/font-test.sh` on the stock A1200 with 4 MB fast: a damaged font refused in one line with the 8 x 8 kept, then
+ztest 11 read, its widths through `DPY_FONT_INFO`, the bar and title bars 3 lines taller, a window's title "D.D" in
+the font pixel by pixel where the widths put it (the "." from the 8 x 8), and a client's text in it.

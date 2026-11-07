@@ -4,4 +4,7 @@
 #   rows; flickers on a TV or a 15 kHz monitor, steady through a flicker fixer or scandoubler; 160 KB of chip RAM
 #   (hires when less than that and 512 KB more is free).
 # mode auto (or no line): hires. PAL or NTSC is the machine's own, never set here.
+# font NAME SIZE: the desktop's font (titles, the bar, menus, labels), an AmigaOS bitmap font copied as it is into
+#   /usr/share/fonts/amiga (NAME.font and the NAME folder), e.g. "font helvetica 11"; a taller font makes the bar
+#   and the title bars taller. font builtin (or no line): Topaz 8. Terminals always use the 8x8.
 mode auto

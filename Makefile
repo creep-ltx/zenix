@@ -526,11 +526,11 @@ $(BUILD)/pfs3d.uo: user/pfs3d.c user/amigatext.h user/volid.h user/diskcall.h ke
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
 STACK_pfs3d := 8192
 # ---- Zenix Desktop (DESIGN D38, docs/d38-desktop.md): the display server /sbin/displayd (display/server/: the
-# protocol and the input cold, -Os; the drawing and the font -O2: the golden path, input to screen), the client
+# protocol, the input and the font reader cold, -Os; the drawing and the fonts -O2: the golden path, input to screen), the client
 # library display/lib/libdisplay.c linked into each client (static, D38 5), the test client dpytest ----
-DPYDOBJS := $(patsubst %,$(BUILD)/dpyd-%.no,displayd win draw font)
-$(BUILD)/dpyd-%.no: display/server/%.c display/server/dpyd.h display/proto.h user/libz.h user/usys.h | $(BUILD)
-	$(CC) $(UCFLAGS) -Iuser -DDIW_V=$(DIWV) $(if $(filter displayd win,$*),-Os) -c $< -o $@
+DPYDOBJS := $(patsubst %,$(BUILD)/dpyd-%.no,displayd win draw font amifont)
+$(BUILD)/dpyd-%.no: display/server/%.c display/server/dpyd.h display/server/amifont.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -DDIW_V=$(DIWV) $(if $(filter displayd win amifont,$*),-Os) -c $< -o $@
 $(BUILD)/displayd.uelf: $(DPYDOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(DPYDOBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
 STACK_displayd := 8192

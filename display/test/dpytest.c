@@ -6,6 +6,9 @@
  *   win NAME W H PEN [X Y]  a window of W x H pixels, filled with PEN, its name in the top left in pen 7 on PEN;
  *                      X Y: the place it asks for (the server keeps it on the screen, D38 "Windows stay on the screen")
  *   text NAME X Y S    the text S at X, Y (pen 1 on 2)
+ *   utext NAME X Y S   the same in the desktop's font (DPYF_UI)
+ *   font               the desktop's font (DPY_FONT_INFO): "dpytest: font ID HEIGHT BASELINE XSIZE FLAGS NAME|-
+ *                      widths of A D W . space"
  *   hole NAME X Y W H  a rectangle of pen 0 inside the window, drawn with it from now on (the chips' drag test)
  *   pens NAME          a patch of all 16 pens in its bottom right, from now on (the chips' drag cannot lift it)
  *   move NAME X Y      (the window manager's) the frame's top left at X, Y
@@ -147,11 +150,23 @@ static void command(char *line)
                 say("dpytest: mem %s %u KB\n", pr.name, pr.mem >> 10);
         return;
     }
+    if (!strcmp(w[0], "font")) {       /* the desktop's font's metrics (DPY_FONT_INFO) */
+        static struct dpyfont f;
+        int r = dpy_font(DPYF_UI, &f);
+        say("dpytest: font %d %u %u %u %u %u %s widths %u %u %u %u %u\n", r, f.id, f.height, f.baseline, f.xsize,
+            f.flags, f.name[0] ? f.name : "-", f.adv['A'], f.adv['D'], f.adv['W'], f.adv['.'], f.adv[' ']);
+        return;
+    }
     if (!strcmp(w[0], "quit")) { dpy_close(); say("dpytest: quit\n"); sys_exit(0); }
     if (i < 0) { say("dpytest: no window %s\n", n > 1 ? w[1] : ""); return; }
     int id = ws[i].id;
     if (!strcmp(w[0], "text") && n >= 5) {
         dpy_text(id, atoi(w[2]), atoi(w[3]), 1, 2, 0, w[4], (int)strlen(w[4]));
+        r = dpy_flush();
+    } else if (!strcmp(w[0], "utext") && n >= 5) {
+        static struct dpyfont f;
+        dpy_font(DPYF_UI, &f);
+        dpy_textf(id, &f, atoi(w[2]), atoi(w[3]), 1, 2, 0, w[4], (int)strlen(w[4]));
         r = dpy_flush();
     } else if (!strcmp(w[0], "hole") && n >= 6) {
         ws[i].hx = atoi(w[2]); ws[i].hy = atoi(w[3]); ws[i].hw = atoi(w[4]); ws[i].hh = atoi(w[5]);

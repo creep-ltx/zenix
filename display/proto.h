@@ -25,7 +25,8 @@
 #define DPY_WIN_CLOSE   4   /* a[0] id: the window goes */
 #define DPY_DRAW        5   /* a[0] id, a[1] the orders (the client's memory), a[2] their bytes -> 0, or -EINVAL with
                              * the bad order's byte offset in a[3] */
-#define DPY_FONT        6   /* a[0] the name ("topaz"), a[1] the size in pixels -> id << 16 | width << 8 | height */
+#define DPY_FONT        6   /* a[0] the name ("topaz"), a[1] the size in pixels -> id << 16 | width << 8 | height: the
+                             * 8 x 8 (id 0) for any name; a[0] 0: the desktop's font (DPYF_UI, its nominal width) */
 #define DPY_IMAGE       7   /* a[0] struct dpyimage * -> the image's id (1..); the server keeps a copy */
 #define DPY_PALETTE     8   /* a[0] u16 * (12 bits 0x0RGB), a[1] the room in entries -> the screen's depth */
 #define DPY_BYE         9   /* the client leaves: its windows go */
@@ -49,6 +50,11 @@
 #define DPYM_HIRES      0   /* 640 x 256 (PAL), 640 x 200 (NTSC) */
 #define DPYM_LACE       1   /* hires interlaced: 640 x 512, 640 x 400 */
 #define DPYM_ASK        0xFF
+#define DPY_FONT_INFO   16  /* a[0] a font (0 the 8 x 8, DPYF_UI the desktop's), a[1] struct dpyfont * (the client's
+                             * memory) -> 0, its metrics and widths written there; -EINVAL another number. The
+                             * desktop's font is /etc/zdesk/screen's "font NAME SIZE" (an AmigaOS bitmap font in
+                             * /usr/share/fonts/amiga/), or the 8 x 8 when none is set or it could not be read
+                             * (docs/d38-desktop.md "Fonts") */
 /* the window manager's (only after DPY_WM_HELLO; one window manager at a time) */
 #define DPY_WM_HELLO    32  /* become the window manager -> 0, -EBUSY (another one), -EPERM (not the session's user) */
 #define DPY_WM_STYLE    33  /* a[0] struct dpystyle *: frames from now on (and the screen's palette) */
@@ -184,9 +190,30 @@ struct dpystyle {
 #define O_COPY          4   /* sx, sy, w, h, dx, dy: inside the window (scrolling) */
 #define O_IMAGE         5   /* id, sx, sy, w, h, dx, dy */
 #define O_XLINE         6   /* x, y, w, h [, pen]: invert the pen's planes (all without one) - a cursor, an outline */
+/* O_TEXT's font word: 0 the 8 x 8 (Topaz from the ROM and the ZCF supplement: terminals' cells, 8 pixels a code
+ * point), DPYF_UI the desktop's font (window titles, the bar, menus, labels: proportional, its own height; a code
+ * point it lacks drawn by the 8 x 8 at its baseline); another number: 0. The text's box is x .. x + its width
+ * (DPY_FONT_INFO's widths), y .. y + the font's height: drawn in fg on bg, nothing outside it */
+#define DPYF_UI         1
 #define TA_BOLD         1
 #define TA_UNDER        2
 #define TA_INV          4
+
+/* a font's metrics (DPY_FONT_INFO), for laying text out before it is drawn */
+struct dpyfont {
+    unsigned size;               /* sizeof (DPYFONT_FIRST) */
+    unsigned short id;           /* O_TEXT's font word for it */
+    unsigned short height;       /* lines */
+    unsigned short baseline;     /* the baseline's line from the top (0 .. height - 1) */
+    unsigned short xsize;        /* the nominal width (every character's in a fixed-width font) */
+    unsigned short flags;        /* DPYFF_* */
+    unsigned short other;        /* the width of a code point past 255 (drawn by the 8 x 8): 8 */
+    char name[32];               /* "topaz 11" (the setting's name and size), "" the 8 x 8 */
+    unsigned char adv[256];      /* the width of each code point 0-255 (the pen's advance) in pixels */
+};
+#define DPYFONT_FIRST   304
+#define DPYFF_PROP      1        /* proportional */
+#define DPYFF_BUILTIN   2        /* the 8 x 8 (no font set, or it could not be read) */
 
 /* ---- events (the ring's records, 16 bytes) ---- */
 struct dpyev {

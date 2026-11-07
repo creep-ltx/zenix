@@ -25,9 +25,16 @@ void dpy_clip(int win, int x, int y, int w, int h);
 void dpy_fill(int win, int x, int y, int w, int h, int pen);
 void dpy_xor(int win, int x, int y, int w, int h);
 void dpy_text(int win, int x, int y, int fg, int bg, int attr, const char *s, int n);  /* n bytes of UTF-8 */
+void dpy_textf(int win, const struct dpyfont *f, int x, int y, int fg, int bg, int attr, const char *s, int n);
+                                        /* in font f (dpy_font's; 0: the 8 x 8, as dpy_text) */
 void dpy_copy(int win, int sx, int sy, int w, int h, int dx, int dy);
 void dpy_image(int win, int id, int sx, int sy, int w, int h, int dx, int dy);
 int dpy_flush(void);                    /* 0, or -errno (-EINVAL: an order was refused) */
+
+/* fonts (docs/d38-desktop.md "Fonts") */
+int dpy_font(int font, struct dpyfont *f);     /* 0 the 8 x 8, DPYF_UI the desktop's: its metrics and widths -> 0,
+                                                * -errno (then f is the 8 x 8's) */
+int dpy_textw(const struct dpyfont *f, const char *s, int n);   /* n bytes of UTF-8: their width in f (0: 8 each) */
 
 /* images and colours */
 int dpy_image_new(int w, int h, int depth, int flags, const void *planes);    /* -> its id */

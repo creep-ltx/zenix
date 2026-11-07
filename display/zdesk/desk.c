@@ -45,20 +45,21 @@ void icon_image(u8 *planes, const char *const *rows, int nrows, const u8 *pens, 
         }
 }
 
-static int icon_y(int i) { return bar_h + 16 + 40 * i; }
+/* icons 40 lines apart; a font taller than 16 lines spreads them (the label under the picture fits) */
+static int icon_y(int i) { return bar_h + 16 + (fh > 16 ? fh + 24 : 40) * i; }
 
-/* an icon's label (lx - 2 .. lx + 8n + 2, iy + 15 .. iy + 25): every pixel once - the selection's (or the label's)
- * background around the text, the text's cells in it */
+/* an icon's label (lx - 2 .. lx + its width + 2, iy + 15 .. iy + 17 + fh): every pixel once - the selection's (or
+ * the label's) background around the text, the text in it */
 static void label_draw(int i)
 {
     const char *l = icons[i].label;
-    int n = (int)strlen(l), lx = 40 - n * 4, iy = icon_y(i);
+    int n = (int)strlen(l), w = tw(l, n), lx = 40 - w / 2, iy = icon_y(i);
     int bg = i == sel_icon ? pen(R_SELBG) : pen(R_LABELBG) == 255 ? pen(R_DESK) : pen(R_LABELBG);
-    dpy_fill(desk_id, lx - 2, iy + 15, n * 8 + 4, 1, bg);
-    dpy_fill(desk_id, lx - 2, iy + 16, 2, 8, bg);
-    dpy_fill(desk_id, lx + n * 8, iy + 16, 2, 8, bg);
-    dpy_fill(desk_id, lx - 2, iy + 24, n * 8 + 4, 1, bg);
-    dpy_text(desk_id, lx, iy + 16, i == sel_icon ? pen(R_SELFG) : pen(R_ICONFG), bg, 0, l, n);
+    dpy_fill(desk_id, lx - 2, iy + 15, w + 4, 1, bg);
+    dpy_fill(desk_id, lx - 2, iy + 16, 2, fh, bg);
+    dpy_fill(desk_id, lx + w, iy + 16, 2, fh, bg);
+    dpy_fill(desk_id, lx - 2, iy + 16 + fh, w + 4, 1, bg);
+    utext(desk_id, lx, iy + 16, i == sel_icon ? pen(R_SELFG) : pen(R_ICONFG), bg, 0, l, n);
 }
 
 void desk_draw(int x, int y, int w, int h)
@@ -100,7 +101,7 @@ void desk_event(const struct dpyev *e)
         return;
     int hitn = -1;
     for (int i = 0; i < nicons; i++)
-        if (e->x >= 8 && e->x < 72 && e->y >= icon_y(i) && e->y < icon_y(i) + 26)
+        if (e->x >= 8 && e->x < 72 && e->y >= icon_y(i) && e->y < icon_y(i) + 18 + fh)
             hitn = i;
     u32 now = sys_ticks();
     if (hitn >= 0 && hitn == last_icon && (u32)(now - last_click) < 50) {
@@ -121,6 +122,7 @@ void desk_event(const struct dpyev *e)
 /* ---- About ---- */
 static int ab_id;
 int about_id(void) { return ab_id; }
+static int ab_h(void) { return 5 * (fh + 1) + fh + 11; }  /* five lines and the button: 64 with the 8 x 8 */
 static void about_draw(void)
 {
     char l[5][48];
@@ -135,16 +137,16 @@ static void about_draw(void)
     sprintf(l[3], "Fast %uK free", mi[1] >> 10);
     u32 up = (u32)sys3(20, 1, 0, 0);
     sprintf(l[4], "Up %u:%02u", up / 3600, up / 60 % 60);
-    int bg = pen(R_WINBG), fg = pen(R_WINFG);
-    dpy_fill(ab_id, 0, 0, 240, 64, bg);
+    int bg = pen(R_WINBG), fg = pen(R_WINFG), by = ab_h() - fh - 8, bh = fh + 4;
+    dpy_fill(ab_id, 0, 0, 240, ab_h(), bg);
     for (int i = 0; i < 5; i++)
-        dpy_text(ab_id, 8, 4 + 9 * i, fg, bg, i ? 0 : TA_BOLD, l[i], (int)strlen(l[i]));
-    dpy_fill(ab_id, 176, 48, 48, 12, pen(R_BTN));
-    dpy_fill(ab_id, 176, 48, 48, 1, fg);
-    dpy_fill(ab_id, 176, 59, 48, 1, fg);
-    dpy_fill(ab_id, 176, 48, 1, 12, fg);
-    dpy_fill(ab_id, 223, 48, 1, 12, fg);
-    dpy_text(ab_id, 192, 50, pen(R_BTNFG), pen(R_BTN), 0, "OK", 2);
+        utext(ab_id, 8, 4 + (fh + 1) * i, fg, bg, i ? 0 : TA_BOLD, l[i], (int)strlen(l[i]));
+    dpy_fill(ab_id, 176, by, 48, bh, pen(R_BTN));
+    dpy_fill(ab_id, 176, by, 48, 1, fg);
+    dpy_fill(ab_id, 176, by + bh - 1, 48, 1, fg);
+    dpy_fill(ab_id, 176, by, 1, bh, fg);
+    dpy_fill(ab_id, 223, by, 1, bh, fg);
+    utext(ab_id, 176 + (48 - tw("OK", 2)) / 2, by + 2, pen(R_BTNFG), pen(R_BTN), 0, "OK", 2);
     dpy_flush();
 }
 void about(void)
@@ -153,18 +155,18 @@ void about(void)
         focus_win(ab_id);
         return;
     }
-    ab_id = dpy_window(WK_NORMAL, "About Zenix", -1, -1, 240, 64, 0);
+    ab_id = dpy_window(WK_NORMAL, "About Zenix", -1, -1, 240, ab_h(), 0);
     if (ab_id < 0)
         ab_id = 0;
     else
-        own_window(ab_id, "About Zenix", (dpy_w - 240) / 2, (dpy_h - 64) / 2 - 16, 240, 64);
+        own_window(ab_id, "About Zenix", (dpy_w - 240) / 2, (dpy_h - ab_h()) / 2 - 16, 240, ab_h());
 }
 void about_event(const struct dpyev *e)
 {
     if (e->type == EV_EXPOSE || e->type == EV_RESIZE)
         about_draw();
     else if (e->type == EV_CLOSE || (e->type == EV_BUTTON && e->code == 1 && e->x >= 176 && e->x < 224 &&
-                                     e->y >= 48 && e->y < 60) ||
+                                     e->y >= ab_h() - fh - 8 && e->y < ab_h() - 4) ||
              (e->type == EV_KEY && !(e->code & 0x80) && (e->ch[0] == '\r' || e->code == 0x45))) {
         dpy_destroy(ab_id);
         ab_id = 0;
