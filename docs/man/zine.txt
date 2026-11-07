@@ -45,8 +45,12 @@ DESCRIPTION
     file while it runs, as many demos of the 1990s do) run: the whole
     file is in memory during the session, and the program's overlay
     supervisor loads each part from there. zine says so first
-    ("NAME is overlaid: N later parts ..."). zine refuses a program
-    when its file and its hunks together need more memory than is free.
+    ("NAME is overlaid: N later parts ..."). A program whose file and
+    hunks do not fit in memory together is loaded by zine from its
+    file before the hand-over, and its file is not kept (zine says so);
+    that cannot be done for an overlaid program, or for chip RAM hunks
+    larger than the chip RAM Zenix has free at the moment: zine says
+    which and refuses.
     A program may also send packets to its file's handler itself (as
     crunchers do through the overlay file): ZINE answers reading,
     writing, seeking, closing and flushing.
@@ -76,13 +80,22 @@ DESCRIPTION
     gives out the four channels but plays nothing itself.
 
     The program sees its folder and its subfolders (8 levels deep, at
-    most 500 files and folders, 16 MB and half the free fast RAM; more,
-    and only the program goes in, said), copied into memory first. Names
+    most 500 files and folders, 48 MB, and half the fast RAM the program
+    leaves free), copied into memory first. A bigger folder: its
+    archives and disk images are left out first, then its largest
+    files, each named (a program that loads one will not find it);
+    with more than 500 entries only the program goes in. Names
     are found without case, as on AmigaOS (data/xyl.tp3 finds
     Data/XYL.TP3; the Latin-1 letters too). Two names in one folder that
     differ only in case (AmigaOS has no such pair) are both kept: a name
     the program uses finds the one spelt exactly so, else the first
-    found; zine says so once, before the program starts.
+    found; zine says so once, before the program starts. A file name
+    on the Zenix disk that is not UTF-8 is taken as Latin-1 bytes.
+
+    ZINE also has utility.library and the math libraries (mathffp,
+    mathtrans, mathieeesingbas/-singtrans, mathieeedoubbas/-doubtrans,
+    computed in software), and topaz 8 as the ROM font (its glyphs are
+    Zenix's own); fonts on disk are not supported.
 
     ZINE is being built (DESIGN D29): real demos run in FS-UAE.
 

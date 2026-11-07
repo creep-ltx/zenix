@@ -99,6 +99,10 @@ zv_priv:
     beq.s   4f
     cmp.l   #zs_cc,2(%sp)
     beq.s   5f
+    cmp.l   #zs_super,2(%sp)
+    beq.s   6f
+    cmp.l   #zs_user,2(%sp)
+    beq.s   7f
     bra.w   zv_crash
 1:  move.l  %a0,-(%sp)              /* Supervisor: the frame's PC becomes the caller's return address (popped from */
     move.l  %usp,%a0                /* the user stack), and the function runs in supervisor mode; its rte returns */
@@ -129,6 +133,17 @@ zv_priv:
     jsr     zb_cachectl
     addq.l  #8,%sp
     move.l  #zs_rts,2(%sp)
+    rte
+6:  move.w  (%sp),%d1               /* SuperState from user mode: supervisor mode with the caller's SR otherwise, */
+    or.w    #0x2000,%d1             /* on the caller's own stack (its return address popped), d0 the system stack */
+    move.l  %usp,%a0                /* without this frame (the RKRM autodoc: "oldSysStack ... save this") */
+    move.l  (%a0)+,%a1
+    addq.l  #8,%sp                  /* the format 0 frame (020-060): SR, PC, format/vector */
+    move.l  %sp,%d0
+    move.l  %a0,%sp
+    move.w  %d1,%sr
+    jmp     (%a1)
+7:  move.l  #zs_rts,2(%sp)          /* UserState from user mode: already there, nothing to do */
     rte
 
 /* ---- exec functions that keep every register (5.2) ---- */
@@ -181,6 +196,25 @@ zs_setsr:
 zs_rts:
 zx_chain:                               /* the server chains' handler in IntVects (blob.c runs the chain itself) */
     rts
+/* SuperState() (-150): from user mode by the privilege violation (above); in supervisor mode it does nothing and
+ * answers 0 (the RKRM autodoc) */
+    .globl  zx_SuperState, zx_UserState
+zx_SuperState:
+zs_super:
+    ori.w   #0,%sr
+    moveq   #0,%d0
+    rts
+/* UserState(d0 the system stack SuperState gave) (-156): back to user mode on the same stack, the system stack d0
+ * again; from user mode nothing (above) */
+zx_UserState:
+zs_user:
+    ori.w   #0,%sr
+    move.l  (%sp)+,%a0              /* the return address; the stack after it becomes the user stack */
+    move.l  %sp,%a1
+    move.l  %a1,%usp
+    move.l  %d0,%sp
+    andi.w  #0xDFFF,%sr             /* user mode: the stack is the user stack from here */
+    jmp     (%a0)
 /* CacheClearU(), CacheClearE() */
 zx_CacheClearU:
 zs_flush:
@@ -611,6 +645,195 @@ zs_AllocBitMap:
 .endm
     CFALL   zs_ObtainSemaphore, c_ObtainSemaphore, %a0
     CFALL   zs_ReleaseSemaphore, c_ReleaseSemaphore, %a0
+/* ---- docs/d29-zine.md 16.12: the calls the Top 100 asked for (bmore.c, bmath.c, blibs.c) ---- */
+    /* exec */
+    CF  zs_RawIOInit, c_RawIOInit, 0
+    CF  zs_RawMayGetChar, c_RawMayGetChar, 0
+    CF  zs_RawPutChar, c_RawPutChar, 1, %d0
+    CF  zs_CreateIORequest, c_CreateIORequest, 2, %a0, %d0
+    CF  zs_DeleteIORequest, c_DeleteIORequest, 1, %a0
+    CF  zs_AddPort, c_AddPort, 1, %a1
+    CF  zs_RemPort, c_RemPort, 1, %a1
+    CF  zs_FindPort, c_FindPort, 1, %a1
+    /* dos */
+    CF  zs_IsInteractive, c_IsInteractive, 1, %d1
+    CF  zs_FRead, c_FRead, 4, %d1, %d2, %d3, %d4
+    CF  zs_FWrite, c_FWrite, 4, %d1, %d2, %d3, %d4
+    CF  zs_GetProgramName, c_GetProgramName, 2, %d1, %d2
+    CF  zs_GetArgStr, c_GetArgStr, 0
+    CF  zs_ReadArgs, c_ReadArgs, 3, %d1, %d2, %d3
+    CF  zs_FreeArgs, c_FreeArgs, 1, %d1
+    CF  zs_AllocDosObject, c_AllocDosObject, 2, %d1, %d2
+    CF  zs_FreeDosObject, c_FreeDosObject, 2, %d1, %d2
+    /* graphics */
+    CF  zs_OpenFont, c_OpenFont, 1, %a0
+    CF  zs_CloseFont, c_CloseFont, 1, %a1
+    CF  zs_SetFont, c_SetFont, 2, %a1, %a0
+    CF  zs_AskFont, c_AskFont, 2, %a1, %a0
+    CF  zs_TextLength, c_TextLength, 3, %a1, %a0, %d0
+    CF  zs_Text, c_Text, 3, %a1, %a0, %d0
+    CF  zs_Move, c_Move, 3, %a1, %d0, %d1
+    CF  zs_SetAPen, c_SetAPen, 2, %a1, %d0
+    CF  zs_SetBPen, c_SetBPen, 2, %a1, %d0
+    CF  zs_SetDrMd, c_SetDrMd, 2, %a1, %d0
+    CF  zs_RectFill, c_RectFill, 5, %a1, %d0, %d1, %d2, %d3
+    CF  zs_SetRast, c_SetRast, 2, %a1, %d0
+    CF  zs_SetChipRev, c_SetChipRev, 1, %d0
+    CF  zs_GetBitMapAttr, c_GetBitMapAttr, 2, %a0, %d1
+    CF  zs_BestModeIDA, c_BestModeIDA, 1, %a0
+    /* intuition */
+    CF  zs_LockPubScreen, c_LockPubScreen, 1, %a0
+    CF  zs_UnlockPubScreen, c_UnlockPubScreen, 2, %a0, %a1
+    CF  zs_AllocScreenBuffer, c_AllocScreenBuffer, 3, %a0, %a1, %d0
+    CF  zs_FreeScreenBuffer, c_FreeScreenBuffer, 2, %a0, %a1
+    CF  zs_ChangeScreenBuffer, c_ChangeScreenBuffer, 2, %a0, %a1
+    /* utility.library */
+    CF  zs_FindTagItem, c_FindTagItem, 2, %d0, %a0
+    CF  zs_GetTagData, c_GetTagData, 3, %d0, %d1, %a0
+    CF  zs_PackBoolTags, c_PackBoolTags, 3, %d0, %a0, %a1
+    CF  zs_NextTagItem, c_NextTagItem, 1, %a0
+    CF  zs_AllocateTagItems, c_AllocateTagItems, 1, %d0
+    CF  zs_CloneTagItems, c_CloneTagItems, 1, %a0
+    CF  zs_FreeTagItems, c_FreeTagItems, 1, %a0
+    CF  zs_TagInArray, c_TagInArray, 2, %d0, %a0
+    CF  zs_Amiga2Date, c_Amiga2Date, 2, %d0, %a0
+    CF  zs_Date2Amiga, c_Date2Amiga, 1, %a0
+    CF  zs_CheckDate, c_CheckDate, 1, %a0
+    CF  zs_Stricmp, c_Stricmp, 2, %a0, %a1
+    CF  zs_Strnicmp, c_Strnicmp, 3, %a0, %a1, %d0
+    CF  zs_ToUpper, c_ToUpper, 1, %d0
+    CF  zs_ToLower, c_ToLower, 1, %d0
+    CF  zs_SMult64, c_SMult64, 2, %d0, %d1  /* the 64-bit answer in d0 (high) and d1 (low), as gcc returns it */
+    CF  zs_UMult64, c_UMult64, 2, %d0, %d1
+    CF  zs_GetUniqueID, c_GetUniqueID, 0
+    .globl  zs_CallHookPkt, zs_SMult32, zs_UMult32, zs_SDivMod32, zs_UDivMod32
+zs_CallHookPkt:                         /* hook a0, object a2, message a1: on to h_Entry (offset 8) as they are */
+    move.l  8(%a0),-(%sp)
+    rts
+zs_SMult32:
+zs_UMult32:                             /* the low 32 bits are the same either way (32-bit mulu.l: on every CPU) */
+    mulu.l  %d1,%d0
+    rts
+zs_SDivMod32:                           /* d0 the quotient, d1 the remainder (32-bit divsl.l: on every CPU) */
+    move.l  %d2,-(%sp)
+    move.l  %d1,%d2
+    divsl.l %d2,%d1:%d0
+    move.l  (%sp)+,%d2
+    rts
+zs_UDivMod32:
+    move.l  %d2,-(%sp)
+    move.l  %d1,%d2
+    divul.l %d2,%d1:%d0
+    move.l  (%sp)+,%d2
+    rts
+/* the math libraries (bmath.c): CFM sets the condition codes from zm_cc (N, Z of the answer), CFT from d0's sign
+ * (the compares and tests: GT, EQ, LT as the autodocs say) */
+.macro CFM name, fn, n, r1=%d0, r2=%d0, r3=%d0, r4=%d0
+    CF  \name\()_c, \fn, \n, \r1, \r2, \r3, \r4
+    .globl  \name
+\name:
+    bsr.s   \name\()_c
+    move.w  zm_cc+2,%ccr
+    rts
+.endm
+.macro CFT name, fn, n, r1=%d0, r2=%d0, r3=%d0, r4=%d0
+    CF  \name\()_c, \fn, \n, \r1, \r2, \r3, \r4
+    .globl  \name
+\name:
+    bsr.s   \name\()_c
+    tst.l   %d0
+    rts
+.endm
+    /* mathffp, mathtrans */
+    CFT zs_SPFix, c_SPFix, 1, %d0
+    CFM zs_SPFlt, c_SPFlt, 1, %d0
+    CFT zs_SPCmp, c_SPCmp, 2, %d1, %d0
+    CFT zs_SPTst, c_SPTst, 1, %d1
+    CFM zs_SPAbs, c_SPAbs, 1, %d0
+    CFM zs_SPNeg, c_SPNeg, 1, %d0
+    CFM zs_SPAdd, c_SPAdd, 2, %d1, %d0
+    CFM zs_SPSub, c_SPSub, 2, %d1, %d0
+    CFM zs_SPMul, c_SPMul, 2, %d1, %d0
+    CFM zs_SPDiv, c_SPDiv, 2, %d1, %d0
+    CFM zs_SPFloor, c_SPFloor, 1, %d0
+    CFM zs_SPCeil, c_SPCeil, 1, %d0
+    CFM zs_SPAtan, c_SPAtan, 1, %d0
+    CFM zs_SPSin, c_SPSin, 1, %d0
+    CFM zs_SPCos, c_SPCos, 1, %d0
+    CFM zs_SPTan, c_SPTan, 1, %d0
+    CFM zs_SPSincos, c_SPSincos, 2, %d1, %d0
+    CFM zs_SPSinh, c_SPSinh, 1, %d0
+    CFM zs_SPCosh, c_SPCosh, 1, %d0
+    CFM zs_SPTanh, c_SPTanh, 1, %d0
+    CFM zs_SPExp, c_SPExp, 1, %d0
+    CFM zs_SPLog, c_SPLog, 1, %d0
+    CFM zs_SPPow, c_SPPow, 2, %d1, %d0
+    CFM zs_SPSqrt, c_SPSqrt, 1, %d0
+    CFM zs_SPTieee, c_SPTieee, 1, %d0
+    CFM zs_SPFieee, c_SPFieee, 1, %d0
+    CFM zs_SPAsin, c_SPAsin, 1, %d0
+    CFM zs_SPAcos, c_SPAcos, 1, %d0
+    CFM zs_SPLog10, c_SPLog10, 1, %d0
+    /* mathieeesingbas, mathieeesingtrans */
+    CFT zs_SFix, c_SFix, 1, %d0
+    CFM zs_SFlt, c_SFlt, 1, %d0
+    CFT zs_SCmp, c_SCmp, 2, %d0, %d1
+    CFT zs_STst, c_STst, 1, %d0
+    CFM zs_SAbs, c_SAbs, 1, %d0
+    CFM zs_SNeg, c_SNeg, 1, %d0
+    CFM zs_SAdd, c_SAdd, 2, %d0, %d1
+    CFM zs_SSub, c_SSub, 2, %d0, %d1
+    CFM zs_SMul, c_SMul, 2, %d0, %d1
+    CFM zs_SDiv, c_SDiv, 2, %d0, %d1
+    CFM zs_SFloor, c_SFloor, 1, %d0
+    CFM zs_SCeil, c_SCeil, 1, %d0
+    CFM zs_SAtan, c_SAtan, 1, %d0
+    CFM zs_SSin, c_SSin, 1, %d0
+    CFM zs_SCos, c_SCos, 1, %d0
+    CFM zs_STan, c_STan, 1, %d0
+    CFM zs_SSincos, c_SSincos, 2, %a0, %d0
+    CFM zs_SSinh, c_SSinh, 1, %d0
+    CFM zs_SCosh, c_SCosh, 1, %d0
+    CFM zs_STanh, c_STanh, 1, %d0
+    CFM zs_SExp, c_SExp, 1, %d0
+    CFM zs_SLog, c_SLog, 1, %d0
+    CFM zs_SPow, c_SPow, 2, %d1, %d0
+    CFM zs_SSqrt, c_SSqrt, 1, %d0
+    CFM zs_STieee, c_STieee, 1, %d0
+    CFM zs_SFieee, c_SFieee, 1, %d0
+    CFM zs_SAsin, c_SAsin, 1, %d0
+    CFM zs_SAcos, c_SAcos, 1, %d0
+    CFM zs_SLog10, c_SLog10, 1, %d0
+    /* mathieeedoubbas, mathieeedoubtrans: a double in d0 (high) and d1 (low), the second in d2/d3 */
+    CFT zs_DFix, c_DFix, 2, %d0, %d1
+    CFM zs_DFlt, c_DFlt, 1, %d0
+    CFT zs_DCmp, c_DCmp, 4, %d0, %d1, %d2, %d3
+    CFT zs_DTst, c_DTst, 2, %d0, %d1
+    CFM zs_DAbs, c_DAbs, 2, %d0, %d1
+    CFM zs_DNeg, c_DNeg, 2, %d0, %d1
+    CFM zs_DAdd, c_DAdd, 4, %d0, %d1, %d2, %d3
+    CFM zs_DSub, c_DSub, 4, %d0, %d1, %d2, %d3
+    CFM zs_DMul, c_DMul, 4, %d0, %d1, %d2, %d3
+    CFM zs_DDiv, c_DDiv, 4, %d0, %d1, %d2, %d3
+    CFM zs_DFloor, c_DFloor, 2, %d0, %d1
+    CFM zs_DCeil, c_DCeil, 2, %d0, %d1
+    CFM zs_DAtan, c_DAtan, 2, %d0, %d1
+    CFM zs_DSin, c_DSin, 2, %d0, %d1
+    CFM zs_DCos, c_DCos, 2, %d0, %d1
+    CFM zs_DTan, c_DTan, 2, %d0, %d1
+    CFM zs_DSincos, c_DSincos, 3, %a0, %d0, %d1
+    CFM zs_DSinh, c_DSinh, 2, %d0, %d1
+    CFM zs_DCosh, c_DCosh, 2, %d0, %d1
+    CFM zs_DTanh, c_DTanh, 2, %d0, %d1
+    CFM zs_DExp, c_DExp, 2, %d0, %d1
+    CFM zs_DLog, c_DLog, 2, %d0, %d1
+    CFM zs_DPow, c_DPow, 4, %d2, %d3, %d0, %d1
+    CFM zs_DSqrt, c_DSqrt, 2, %d0, %d1
+    CFM zs_DTieee, c_DTieee, 2, %d0, %d1
+    CFM zs_DFieee, c_DFieee, 1, %d0
+    CFM zs_DAsin, c_DAsin, 2, %d0, %d1
+    CFM zs_DAcos, c_DAcos, 2, %d0, %d1
+    CFM zs_DLog10, c_DLog10, 2, %d0, %d1
 /* zb_libcall(fn, a6, d0, a0, d1, a1): a library's vector or init code called as exec calls it; d2-d7/a2-a6 kept */
     .globl  zb_libcall
 zb_libcall:

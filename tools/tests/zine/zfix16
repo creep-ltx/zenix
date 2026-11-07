@@ -1,0 +1,7 @@
+# ZINE's Top 100 fixes (docs/d29-zine.md 16.12), run by tools/tests/zine-null-test.txt as one short line (the
+# console shell's history grows its heap with every long line typed, which the test's memory check would count)
+zine /tests/zine/zcrunch; echo zcrunch-rc=$?
+zine /tests/zine/zsuper; echo zsuper-rc=$?
+zine /tests/zine/zcalls one two TO=dest NUM 42 QUIET; echo zcalls-rc=$?
+zine /tests/zinebig/zbig; echo zbig-rc=$?
+mkdir /tmp/zl; cp /tests/zine/zhello "/tmp/zl/$(printf 'h\351llo')"; zine "/tmp/zl/$(printf 'h\351llo')"; echo zlatin-rc=$?; rm -r /tmp/zl

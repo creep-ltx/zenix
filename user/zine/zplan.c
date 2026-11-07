@@ -70,7 +70,7 @@ int zp_plan(const struct zp_in *in, struct zp_out *o)
     if (e)
         return e;
     o->npiece = o->nchunk = 0;
-    o->save = o->chip_free = o->fast_free = o->fast_total = o->fast_largest = 0;
+    o->save = o->chip_free = o->fast_free = o->fast_total = o->fast_largest = o->fast_prog = 0;
     o->nsum = ZP_FIXSUMS;
     o->why = ZP_OK;
     if ((e = piece(o, 0, ZP_LOW)))      /* low memory, whole */
@@ -97,10 +97,25 @@ int zp_plan(const struct zp_in *in, struct zp_out *o)
             if (!r)
                 break;
             last = r->hi;
+            zu32 run = r->lo;           /* chip: where the program's run since the last kept block starts */
             for (zu32 k = 0; k < r->n; k++) {
                 const struct zp_blk *b = &in->blk[r->first + k];
                 if (b->used)
                     o->nsum++;
+                if (b->used == ZP_KEEP) {   /* the program's own already (d29 16.12): neither saved nor given */
+                    if (chip) {
+                        if ((e = piece(o, b->addr, ZP_HDR)))    /* its header, which the program never writes */
+                            return e;
+                        if (b->addr > run) {
+                            if ((e = chunk(o, run, b->addr - run, g)))
+                                return e;
+                            o->chip_free += b->addr - run;
+                        }
+                        run = b->addr + b->size;
+                    } else
+                        o->fast_prog += b->size;
+                    continue;
+                }
                 if (chip) {             /* saved: a used block whole, a free one's header */
                     if ((e = piece(o, b->addr, b->used ? b->size : ZP_HDR)))
                         return e;
@@ -112,10 +127,10 @@ int zp_plan(const struct zp_in *in, struct zp_out *o)
                         o->fast_largest = b->size;
                 }
             }
-            if (chip) {                 /* the whole range is the program's */
-                if ((e = chunk(o, r->lo, r->hi - r->lo, g)))
+            if (chip && r->hi > run) {  /* the whole range is the program's (but its kept blocks) */
+                if ((e = chunk(o, run, r->hi - run, g)))
                     return e;
-                o->chip_free += r->hi - r->lo;
+                o->chip_free += r->hi - run;
             }
         }
     }
@@ -123,7 +138,7 @@ int zp_plan(const struct zp_in *in, struct zp_out *o)
     o->block = (blk + 15) & ~15u;
     if (!o->fast_total)
         o->why = ZP_NOFAST;
-    else if (o->fast_free < o->fast_total / 2)
+    else if (o->fast_free + o->fast_prog < o->fast_total / 2)
         o->why = ZP_HOLDS;
     return 0;
 }

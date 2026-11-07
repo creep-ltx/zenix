@@ -5,11 +5,15 @@ relocations) written as an AmigaOS hunk executable with one code hunk: HUNK_HEAD
 section .ovldata, the way crunchers use the overlay mechanism (Spaceballs' Peek, docs/d29-zine.md 16.7): after the
 root, HUNK_OVERLAY with a table of two longwords (the data's length, the length - 1), HUNK_BREAK, then those bytes.
 
+With -c (and .ovldata) the other cruncher's form (Love, Boogietown, Closer...: docs/d29-zine.md 16.12): the header
+lists two hunks, the second of size 0, only the first comes before HUNK_OVERLAY, whose table is one longword
+(HUNK_BREAK's number), then the data.
+
 With -r the code may hold absolute 32-bit addresses (a library's RomTag and tables: docs/d29-zine.md 16.8): the
 object is linked at 0 with its relocations kept (ld -q), and each R_68K_32 in the code becomes a HUNK_RELOC32 entry
 to the hunk itself.
 
-usage: mkhunktest.py [-r] in.o out
+usage: mkhunktest.py [-r | -c] in.o out
 """
 import os
 import struct
@@ -19,7 +23,8 @@ import tempfile
 
 args = sys.argv[1:]
 reloc = args[:1] == ["-r"]
-if reloc:
+crunch = args[:1] == ["-c"]
+if reloc or crunch:
     args = args[1:]
 src, out = args[:2]
 prefix = os.environ.get("TOOLPREFIX", "m68k-elf-")
@@ -54,13 +59,18 @@ with tempfile.TemporaryDirectory() as d:
     data = open(o, "rb").read() if os.path.exists(o) else b""
 code += bytes(-len(code) % 4)
 n = len(code) // 4
-h = struct.pack(">IIIIII", 0x3F3, 0, 1, 0, 0, n)          # HUNK_HEADER: no names, 1 hunk, first 0, last 0, its size
+if crunch:                                                  # two hunks listed, the second of size 0
+    h = struct.pack(">IIIIIII", 0x3F3, 0, 2, 0, 1, n, 0)
+else:                                                       # HUNK_HEADER: no names, 1 hunk, first 0, last 0, its size
+    h = struct.pack(">IIIIII", 0x3F3, 0, 1, 0, 0, n)
 h += struct.pack(">II", 0x3E9, n) + code
 if offs:                                                    # HUNK_RELOC32: the offsets, all to hunk 0
     h += struct.pack(">III", 0x3EC, len(offs), 0) + b"".join(struct.pack(">I", o) for o in sorted(offs))
     h += struct.pack(">I", 0)
 h += struct.pack(">I", 0x3F2)
-if data:                                                    # HUNK_OVERLAY, length 1 (2 longwords follow), HUNK_BREAK
+if data and crunch:                                         # HUNK_OVERLAY, length 0: one longword, HUNK_BREAK's number
+    h += struct.pack(">III", 0x3F5, 0, 0x3F6) + data
+elif data:                                                  # HUNK_OVERLAY, length 1 (2 longwords follow), HUNK_BREAK
     h += struct.pack(">IIII", 0x3F5, 1, len(data), len(data) - 1) + struct.pack(">I", 0x3F6) + data
 open(out, "wb").write(h)
 os.chmod(out, 0o755)

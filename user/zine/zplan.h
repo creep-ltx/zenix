@@ -23,8 +23,11 @@ struct zp_region {                      /* a memory region as bootinfo gives it 
     zu32 attrs, lower, upper;
 };
 struct zp_blk {                         /* one Zenix block, header included */
-    zu32 addr, size, used;
+    zu32 addr, size, used;              /* used: 0 free, 1 Zenix's, ZP_KEEP the program's already (d29 16.12: its
+                                         * hunks `zine` loaded; chip ones are neither saved nor given away, fast ones
+                                         * count as the program's for the half-the-fast-RAM rule) */
 };
+#define ZP_KEEP 2
 struct zp_range {                       /* one pool range [lo, hi) and its blocks, blk[first] .. blk[first + n - 1] */
     zu32 lo, hi, chip, first, n;
 };
@@ -51,6 +54,7 @@ struct zp_out {
     zu32 save;                          /* bytes saved (all pieces) */
     zu32 chip_free, fast_free;          /* what the program gets */
     zu32 fast_total, fast_largest;
+    zu32 fast_prog;                     /* fast bytes in ZP_KEEP blocks */
     zu32 nsum;                          /* checksum table entries */
     zu32 block;                         /* the ZINE block's bytes */
     int why;                            /* ZP_OK, or why ZINE refuses on this machine now */

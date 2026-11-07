@@ -47,6 +47,11 @@ part_tables() {
         -e 's/^\(#define ZO_FileLock_fl_Volume\) 16/\1 18/' user/zine/amigaofs.h >"$OUT/bad-ofs.h"
     n=$(python3 -I tools/zine-tables.py check "$ZENIX_MANUALS" "$OUT/bad-ofs.h" 2>&1 | grep -c '^FAIL amigaofs.h')
     [ "$n" = 3 ] && echo "PASS zine-test: three wrong offsets are caught" || bad "the check caught $n of 3 wrong offsets"
+    # 16.12: the NDK 3.2's names (lvo40.c) when ZENIX_NDK_FD names its FD folder; ZINE's topaz 8 (zfont.h) always
+    if [ -n "$ZENIX_NDK_FD" ] && [ -d "$ZENIX_NDK_FD" ]; then
+        python3 -I tools/zine-ndk-names.py check "$ZENIX_NDK_FD" >/dev/null 2>&1 && echo "PASS zine-test: lvo40.c is what the NDK's .fd files make" || bad "lvo40.c differs from the NDK's .fd files"
+    else echo "SKIPPED zine-test: lvo40.c (ZENIX_NDK_FD does not name the NDK 3.2's FD folder)"; fi
+    python3 tools/mkzfont.py --check tools/font_8x8.c user/zine/zfont.h && echo "PASS zine-test: zfont.h is what font_8x8.c makes" || bad "zfont.h differs from what tools/font_8x8.c makes"
 }
 
 part_m68k() {

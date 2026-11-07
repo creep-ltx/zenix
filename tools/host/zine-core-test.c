@@ -80,8 +80,70 @@ static void free_all(struct zh_seg *s, int n, struct halloc *a)
         h_free(a, &s[i]);
 }
 
+/* the file reader of zh_check_rd (16.12): from F, counting the reads; fail_at: the read that fails */
+static int rd_reads, rd_fail_at = -1;
+static int rd_read(void *u, zu32 off, zu8 *buf, zu32 n)
+{
+    (void)u;
+    if (rd_reads++ == rd_fail_at || off > FL || n > FL - off)
+        return -1;
+    memcpy(buf, F + off, n);
+    return 0;
+}
+
+static void test_hunk_rd(void)
+{
+    char msg[160];
+    struct zh_info a, b;
+    static zu8 win[64];
+    struct zh_rd rd = { rd_read, 0, win, sizeof win };
+    for (int form = 0; form < 3; form++) {
+        build(form, 1, 1);
+        int r1 = zh_check(F, FL, "prog", &a, msg, sizeof msg);
+        int r2 = zh_check_rd(F, 48, FL, &rd, "prog", &b, msg, sizeof msg);
+        CHECK(r1 == 0 && r2 == 0 && !memcmp(&a, &b, sizeof a), "hunk rd form %d: the same check from the file (%s)", form, msg);
+        struct halloc h1 = { 0, -1, 0, {0}, 0x00200000 }, h2 = { 0, -1, 0, {0}, 0x00200000 };
+        struct zh_ops o1 = { h_alloc, h_free, &h1 }, o2 = { h_alloc, h_free, &h2 };
+        struct zh_seg s1[3], s2[3];
+        zu32 l1, l2;
+        r1 = zh_load(F, FL, &a, &o1, s1, &l1);
+        r2 = zh_load_rd(F, 48, FL, &rd, &b, &o2, s2, &l2);
+        int same = r1 == 0 && r2 == 0 && l1 == l2;
+        for (int i = 0; same && i < 3; i++)
+            same = s1[i].size == s2[i].size && !memcmp(s1[i].p, s2[i].p, s1[i].size);
+        CHECK(same, "hunk rd form %d: the same load from the file", form);
+        if (!r1) free_all(s1, 3, &h1);
+        if (!r2) free_all(s2, 3, &h2);
+        /* a read that fails anywhere: refused (or, past the hunks, taken), never a crash */
+        for (int k = 0; k < 40; k++) {
+            rd_reads = 0, rd_fail_at = k;
+            struct halloc h3 = { 0, -1, 0, {0}, 0x00200000 };
+            struct zh_ops o3 = { h_alloc, h_free, &h3 };
+            if (zh_check_rd(F, 48, FL, &rd, "prog", &b, msg, sizeof msg) == 0) {
+                rd_reads = 0;
+                if (zh_load_rd(F, 48, FL, &rd, &b, &o3, s2, &l2) == 0)
+                    free_all(s2, 3, &h3);
+            }
+            CHECK(h3.live == 0, "hunk rd: a failed read at %d frees everything", k);
+        }
+        rd_fail_at = -1;
+    }
+    /* every prefix through the reader: the same answers as in memory */
+    build(0, 0, 1);
+    unsigned good = FL;
+    int diff = 0;
+    for (unsigned n = 0; n < good; n++) {
+        FL = n;
+        int r1 = zh_check(F, n, "p", &a, msg, sizeof msg), r2 = zh_check_rd(F, 48, n, &rd, "p", &b, msg, sizeof msg);
+        diff += (r1 == 0) != (r2 == 0);
+    }
+    FL = good;
+    CHECK(!diff, "hunk rd: every prefix answered as in memory (%d differ)", diff);
+}
+
 static void test_hunk(void)
 {
+    test_hunk_rd();
     char msg[160];
     struct zh_info inf;
     for (int form = 0; form < 4; form++)
@@ -142,7 +204,7 @@ static void test_hunk(void)
         CHECK(rr == -ZE_NOEXEC && strstr(msg, want), "hunk refusal %s: got \"%s\"", desc, msg); } while (0)
     unsigned end = good - 12;                    /* the BSS block: HUNK_BSS, size, HUNK_END */
     REF("overlay table cut", (FL = good, L(HUNK_OVERLAY), L(0)), "prog is damaged (its overlay table ends early)");
-    REF("overlay before the last hunk", (FL = end, L(HUNK_OVERLAY), L(0), L(0)), "ends before its last hunk");
+    REF("break before the last hunk", (FL = end, L(HUNK_BREAK)), "ends before its last hunk");
     REF("break without a table", (FL = good, L(HUNK_BREAK)), "HUNK_BREAK without an overlay table");
     REF("ext", (FL = end, L(HUNK_EXT), L(0)), "prog has external references");
     REF("relreloc", (FL = end, L(HUNK_RELRELOC32), L(0)), "relative relocations");
@@ -158,6 +220,41 @@ static void test_hunk(void)
     REF("one hunk more", (FL = good, L(HUNK_BSS), L(1), L(HUNK_END)), "more hunks than its header lists");
     REF("ends early", (FL = good - 4 - 12), "ends before its last hunk");
     REF("huge", (FL = 20, L(0x3FFFFFFF)), "too big");
+    /* a cruncher's form (d29 16.12): two hunks listed, the second of size 0, one before HUNK_OVERLAY (a table of one
+     * longword), then the packed data the program reads itself: taken, the second hunk allocated empty */
+    {
+        unsigned char k2[8192];
+        FL = 0;
+        L(HUNK_HEADER); L(0); L(2); L(0); L(1); L(3); L(0);
+        L(HUNK_CODE); L(3); L(0x11); L(0x22); L(0x33);
+        L(HUNK_RELOC32); L(1); L(1); L(4); L(0);
+        L(HUNK_END);
+        L(HUNK_OVERLAY); L(0); L(HUNK_BREAK);
+        unsigned dat = FL;
+        L(0x12345678); L(0x9abcdef0);
+        memcpy(k2, F, FL);
+        int r = zh_check(F, FL, "crunch", &inf, msg, sizeof msg);
+        CHECK(r == 0 && inf.nhunks == 2 && inf.ovl && inf.ovl_words == 1 && inf.end == dat && inf.nodes == 0,
+              "hunk: the cruncher's overlay form taken (%s)", msg);
+        struct halloc a = { 0, -1, 0, {0}, 0x00200000 };
+        struct zh_ops ops = { h_alloc, h_free, &a };
+        struct zh_seg s2[2];
+        zu32 sl;
+        r = r ? r : zh_load(F, FL, &inf, &ops, s2, &sl);
+        CHECK(r == 0 && a.live == 2 && zbe32(s2[0].p) == 20 && zbe32(s2[1].p) == 8 && zbe32(s2[0].p + 4) == (s2[1].addr + 4) >> 2 &&
+              zbe32(s2[0].p + 12) == 0x22 + s2[1].addr + 8 && zbe32(s2[1].p + 4) == 0,
+              "hunk: the cruncher's form loaded, its second hunk empty and relocated to");
+        if (!r)
+            free_all(s2, 2, &a);
+        /* a node's hunks still all come before its HUNK_BREAK: the same form inside a node is refused (zovl's
+         * nodes), and a root ending with the file before its last hunk (Animotion) stays refused */
+        memcpy(F, k2, dat);
+        FL = dat - 12;
+        CHECK(zh_check(F, FL, "cut", &inf, msg, sizeof msg) == -ZE_NOEXEC && strstr(msg, "ends before its last hunk"),
+              "hunk: the root cut after its first hunk refused (%s)", msg);
+    }
+    build(0, 0, 1);
+    memcpy(keep, F, FL);
     /* the walk is safe on every prefix and every one-byte change; whatever the check accepts loads */
     int accepted = 0, refused = 0, mismatch = 0;
     for (unsigned n = 0; n < good; n++) {
@@ -372,7 +469,7 @@ static void test_vol(void)
           !zv_twin(b, 0) && !zv_twin(b, 999), "vol: zv_twin names the earlier of two names the same but for case");
     CHECK(zv_add(b, data, "Arte", 0, 0644, 0, 0, 0) > 0, "vol: the same name in another directory");
     CHECK(zv_add(b, 0, "a:b", 0, 0644, 0, 0, 0) == ZV_E_NAME && zv_add(b, 0, "\xe6\x97\xa5", 0, 0644, 0, 0, 0) == ZV_E_NAME &&
-          zv_add(b, 0, ".", 0, 0644, 0, 0, 0) == ZV_E_NAME && zv_add(b, 0, "\xc3", 0, 0644, 0, 0, 0) == ZV_E_NAME &&
+          zv_add(b, 0, ".", 0, 0644, 0, 0, 0) == ZV_E_NAME && zv_add(b, 0, "\x81x", 0, 0644, 0, 0, 0) == ZV_E_NAME &&
           zv_add(b, 0, "", 0, 0644, 0, 0, 0) == ZV_E_NAME, "vol: names outside AmigaDOS's rules left out");
     char lng[120];
     memset(lng, 'x', 108); lng[108] = 0;
@@ -386,6 +483,10 @@ static void test_vol(void)
     CHECK(zv_ent(b, mod)->prot == (ZV_FIBF_WRITE | ZV_FIBF_DELETE | ZV_FIBF_EXECUTE) && zv_ent(b, rk)->prot == (ZV_FIBF_READ | ZV_FIBF_EXECUTE) &&
           zv_ent(b, mod)->days == 0, "vol: r-- and -w- bits, a date before 1978");
     CHECK(!strcmp(zv_ent(b, rk)->name, "R\xe4ksm\xf6rg\xe5s"), "vol: UTF-8 made Latin-1");
+    /* 16.12: a name that is not UTF-8 (copied byte for byte from an AmigaDOS disk) is taken as Latin-1 as it is */
+    int raw = zv_add(b, c, "Cr\xe8me \xe0 la Demo", 0, 0644, 0, 0, 0), raw2 = zv_add(b, c, "\xc3", 0, 0644, 0, 0, 0);
+    CHECK(raw > 0 && !strcmp(zv_ent(b, raw)->name, "Cr\xe8me \xe0 la Demo") && raw2 > 0 &&
+          !strcmp(zv_ent(b, raw2)->name, "\xc3"), "vol: a Latin-1 name that is not UTF-8 taken byte for byte");
     CHECK(zv_check(b, sz) == 0, "vol: zv_check takes it");
     zu32 o;
 #define FIND(cur, p, want, res) do { o = 99; int rr = zv_find(b, cur, p, &o); \
@@ -440,8 +541,9 @@ static void test_vol(void)
     ((struct zv_ent *)(h + 1))[2].parent = 0;
     ((struct zv_ent *)(h + 1))[1].off = sz;
     CHECK(zv_check(b, sz) == -ZE_INVAL && zv_check(b, sz - 4) == -ZE_INVAL, "vol: data outside, a wrong length refused");
-    CHECK(zv_fits(500, 16u << 20, 64u << 20) && !zv_fits(501, 1, 64u << 20) && !zv_fits(1, (16u << 20) + 1, 64u << 20) &&
-          !zv_fits(1, 3u << 20, 5u << 20), "vol: the limits (500 files, 16 MB, half the free fast RAM)");
+    CHECK(zv_fits(500, 48u << 20, 64u << 20) && !zv_fits(501, 1, 64u << 20) && !zv_fits(1, (48u << 20) + 1, 64u << 20) &&
+          !zv_fits(1, 3u << 20, (3u << 20) - 1) && zv_fits(1, 3u << 20, 3u << 20),
+          "vol: the limits (500 files, 48 MB, the budget given)");
     CHECK(zv_init(b, sz, 1, "a:b") == 0 && !strcmp(h->volname, "ZINE") && zv_add(b, 0, "x", 0, 0644, 0, 0, 0) == ZV_E_FULL,
           "vol: a volume name that is no AmigaDOS name, a full table");
 }
@@ -534,6 +636,32 @@ static void test_plan(void)
     zu32 ff = 0x200 + (FASTLO + FASTSZ - 0x20000 - (kend + 0x400 + 0x200 + 0x100 + 0x800));
     CHECK(o.fast_free == ff && o.fast_largest == ff - 0x200 && o.fast_total == FASTSZ, "plan: fast: exactly Zenix's free blocks");
     CHECK(o.block % 16 == 0 && o.block >= 20000 + o.save + 3 * (16u << 10), "plan: the ZINE block's size (%u)", o.block);
+    /* 16.12: blocks that are the program's already (its hunks loaded by zine): a chip one neither saved (but its
+     * header) nor given, the chunks split around it; a fast one counted as the program's for the half rule */
+    {
+        zu32 cf = o.chip_free;
+        blk[0].used = ZP_KEEP;
+        blk[nb - 3].used = ZP_KEEP;     /* the big free fast block as a program's region */
+        memset(&o, 0, sizeof o);
+        o.piece = pc, o.piece_cap = 80, o.chunk = ch, o.chunk_cap = 80;
+        int rk = zp_plan(&in, &o);
+        int inchunk = 0, insaved = 0, hdr = 0;
+        for (zu32 i = 0; i < o.nchunk; i++)
+            if (ch[i].addr < blk[0].addr + blk[0].size && blk[0].addr < ch[i].addr + ch[i].len)
+                inchunk++;
+        for (zu32 i = 0; i < o.npiece; i++) {
+            if (pc[i].addr == blk[0].addr && pc[i].len == 16)
+                hdr++;
+            else if (pc[i].addr < blk[0].addr + blk[0].size && blk[0].addr < pc[i].addr + pc[i].len)
+                insaved++;
+        }
+        CHECK(rk == 0 && o.why == ZP_OK && !inchunk && !insaved && hdr == 1 && o.chip_free == cf - blk[0].size &&
+              o.fast_prog == blk[nb - 3].size, "plan: the program's own blocks kept out (%d, why %d)", rk, o.why);
+        blk[0].used = 1;
+        blk[nb - 3].used = 0;
+        memset(&o, 0, sizeof o);
+        o.piece = pc, o.piece_cap = 80, o.chunk = ch, o.chunk_cap = 80;
+    }
     /* refusals and bad walks */
     blk[nb - 3].used = 1;
     CHECK(zp_plan(&in, &o) == 0 && o.why == ZP_HOLDS, "plan: Zenix holding more than half the fast RAM is refused");

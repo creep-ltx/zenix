@@ -360,9 +360,9 @@ revision 2's FFS image and device: AmigaOS's own filesystem is not running, so Z
   `SYS:`, `PROGDIR:` and the volume name are its root; `C:`, `S:`, `L:`, `LIBS:`, `DEVS:`, `FONTS:` its subdirectories
   where they exist; the current directory at the start is the program's. The owner's CPU library (10.1) is added as
   `LIBS:68060.library`.
-- **Limits:** if the directory holds more than 16 MB, more than half the free fast RAM, or more than 500 files, only the
-  program goes in, with a warning ("only NAME was copied: its directory holds 23 MB; a program that loads files may not
-  find them: give it a directory of its own").
+- **Limits:** as built since 16.12: at most 500 entries (more: only the program goes in, said), 48 MB, and half the fast
+  RAM the program leaves free; over that, archives and disk images and then the largest files are left out, each
+  named (16.12).
 - **Writes** (owner answer 3, and 2026-11-04 "not all demos write to the same location"): as built (16.9), a file
   written on any path (`RAM:`, `T:`, `ENV:`, the program's own folder, `SYS:`, `DH0:`) lives in the program's own
   memory for the session (it can be read back by that path, loaded and deleted; it stands in front of the volume's
@@ -1514,6 +1514,99 @@ prefix of a line, the limits, `zx_known`. Not yet: HOG itself, on the owner's A1
 Sizes (the 68020-60 build): the blob 42,112 -> 46,752 bytes (memory 47,476 -> 52,724: the parser and the command
 list 1.1 KB, the run 2.6 KB, the messages); `/bin/zine` and the kernel unchanged. Each command's Execute takes about
 1.4 KB of its caller's stack.
+
+### 16.12 The Top 100's blockers (2026-11-07, branch zinefix)
+
+The scene's Top 100 lists (500 productions) were run through ZINE in FS-UAE ([zine-top100-findings.md](zine-top100-findings.md)
+ranks what stopped them). Fixed here, biggest win first (*read*: the RKRM Includes and Autodocs, the AmigaDOS Manual,
+the NDK 3.2's include and `.fd` files for names and numbers; nothing from AmigaOS code):
+
+- **exec `SuperState` (-150) and `UserState` (-156)** (20 productions): from user mode `SuperState` traps to ZINE's
+  privilege handler, which goes on in supervisor mode on the caller's own stack (its return address popped, the
+  caller's SR but S) and answers the system stack without the trap's frame in d0; in supervisor mode it does nothing
+  and answers 0. `UserState(d0)` makes the stack it runs on the user stack, the system stack d0 again, and returns
+  in user mode; from user mode it does nothing (blobs.S).
+- **The cruncher's overlay form** (14: Love, Closer, Boogietown, Fullmoon, Real, faktory...): a header that lists two
+  hunks (the second of size 0) with only the first before `HUNK_OVERLAY`, whose table is one longword (`$3F6`), then
+  the packed data. The root's hunks that the file does not give before `HUNK_OVERLAY` are now allocated as the
+  header sizes them and stay empty, as a loader that allocates the header's hunks first leaves them; the rest is
+  16.6/16.7 (the overlay handle, the program reads its data through it). A node's hunks must still all come before
+  its `HUNK_BREAK`, and a file that ends before its last hunk (Animotion, really cut short) is still refused.
+- **Memory: the program loaded from its file** (the 7-26 MB AGA demos "cannot be read"; "does not fit" when the file
+  and its hunks did not fit together). `zine` no longer reads the whole file into its own memory: the check walks it
+  with only its first 16 KB (the header) in memory and a 4 KB window for the rest (`zh_check_rd`, hunk.h). When the
+  file and its hunks fit in Zenix's free memory together (path A) the file is read once, straight into the volume,
+  and the blob loads it in the session as before (overlaid programs, programs that read their own file). Otherwise
+  (path B) `zine` loads the hunks itself before the hand-over, reading each hunk's data straight from the file into
+  its place (`zh_load_rd`), into at most 8 regions of its own (`SYS_memalloc`, planned before the load, the largest
+  hunks first: fast and any hunks in fast RAM, chip hunks in chip RAM, each region as large as what is left to place,
+  halved down to the largest hunk left when that cannot be had; after the volume, the blob and the ZINE block have
+  their fast RAM, which a fast region taken first could push into chip RAM, the program's), relocated
+  to their real addresses; the volume's header names the segment list and the regions. For the blob those regions
+  are the program's memory (`ZP_KEEP` in the planner, zplan.h): a chip one is neither saved nor given away (its
+  header saved), a fast one counts as the program's for the half-the-fast-RAM rule; `LoadSeg` is skipped. The file
+  is not kept: zine says so ("NAME is loaded from its file now ...; its file is not kept during the session"). Path
+  B cannot hold an overlaid program (its parts come from its file) or chip hunks larger than the chip RAM Zenix has
+  free at that moment (a chip hunk loaded in the session can have nearly all chip RAM, one loaded before cannot);
+  each refusal says which.
+- **The volume's limit: decided (owner's delegation, 2026-11-07).** Reading data files from the real folder on demand
+  is not possible within D29: Zenix is paused during the session (owner answer 2), its filesystem servers do not run
+  and ZINE has no disk driver of its own, nor may it write a disk Zenix's servers own; the volume stays in memory.
+  What changed is the rule: at most 500 entries and 48 MB (was 16 MB: the block stays one `SYS_memalloc`), in **half
+  the fast RAM the program leaves free** (its fast and any hunks, and its file in path A; was half the free fast
+  RAM whatever the program needed): a demo usually reads its data files into memory of its own, so as much again
+  stays for that. A folder over that is no longer all-or-nothing: its archives and disk images (`.lha`, `.lzx`,
+  `.zip`, `.dms`, `.adf`, ...: what a download carries, never a file the program reads) are left out first, then
+  the largest files, until the rest fits (every file of one size in or out together); each file left out is named
+  (the first 5, then a count) and the line says the program will not find them. Only more than 500 entries still
+  leaves only the program.
+- **Calls** (bmore.c, bmath.c, blibs.c): exec `RawIOInit`, `RawMayGetChar`, `RawPutChar` (the debug serial port at the
+  speed Zenix set; a timed wait), `CreateIORequest`, `DeleteIORequest`, `AddPort`, `RemPort`, `FindPort`; dos
+  `IsInteractive` (the console's own handles are), `FRead`, `FWrite`, `GetProgramName`, `GetArgStr`, `ReadArgs` and
+  `FreeArgs` (the template's /A /K /S /T /N /M /F, keywords and aliases, `KEY=value`, quotes and their `*`
+  escapes, a /M giving back to /A items after it, the program's arguments or the RDArgs' CSource; errors 114-118 in
+  `IoErr`), `AllocDosObject`/`FreeDosObject` (a FileInfoBlock, an RDArgs); graphics `OpenFont` (topaz 8: ZINE's
+  stand-in for the ROM font, drawn from Zenix's own console glyphs, tools/mkzfont.py; any other name 0, said),
+  `CloseFont`, `SetFont`, `AskFont`, `TextLength`, `Text` (the CPU into the RastPort's BitMap: JAM1, JAM2,
+  COMPLEMENT, INVERSVID, the Mask), `Move`, `SetAPen`, `SetBPen`, `SetDrMd`, `RectFill`, `SetRast`, `InitRastPort`
+  and a screen's RastPort with the default font, `GfxBase->DefaultFont`, and the V39 `SetChipRev` (the bits the
+  chips have), `GetBitMapAttr`, `BestModeIDA` (the native mode for the size, depth and DIPF flags asked); intuition
+  `LockPubScreen` (NULL or "Workbench": a 640-wide hires stand-in of 2 planes, made once, never shown),
+  `UnlockPubScreen`, `AllocScreenBuffer`, `FreeScreenBuffer`, `ChangeScreenBuffer` (the buffer's BitMap shown; the
+  DBufInfo's two messages replied at once). **utility.library** (version 40): the tag calls (`FindTagItem`,
+  `GetTagData`, `NextTagItem`, `PackBoolTags`, `TagInArray`, `AllocateTagItems`, `CloneTagItems`, `FreeTagItems`),
+  `CallHookPkt`, `SMult32`, `UMult32`, `SDivMod32`, `UDivMod32`, `SMult64`, `UMult64`, `Stricmp`, `Strnicmp`,
+  `ToUpper`, `ToLower`, `Amiga2Date`, `Date2Amiga`, `CheckDate`, `GetUniqueID`. **The math libraries** (version 40):
+  mathffp, mathtrans, mathieeesingbas/-singtrans and mathieeedoubbas/-doubtrans, every function of their `.fd`
+  files, in software on every CPU (gcc's soft float; the transcendental functions ZINE's own), the condition codes
+  set as the autodocs say for the compares and tests. FFP's two-argument calls take d1 and d0 as the autodocs word
+  them (SPCmp "GT: fnum2 > fnum1", SPPow "fnum2 raised to the fnum1 power"), so `SPSub` and `SPDiv` answer d0 - d1
+  and d0 / d1: *read*, not measured on AmigaOS.
+- **Names for every offset:** `zine` names a stopping call from the NDK 3.2's `.fd` files when the RKRM's V37 table
+  has none (`user/zine/lvo40.c`, made by `tools/zine-ndk-names.py`): graphics -888 SetChipRev, -960 GetBitMapAttr,
+  -1050 BestModeIDA, intuition -768 AllocScreenBuffer, exec -912 (a private slot: `execPrivate33`), and the calls of
+  utility and the math libraries (their numbers in the block's `lib`, kernel/zine.h).
+- **Latin-1 file names:** a name on the Zenix disk that is not UTF-8 at all (copied byte for byte from an AmigaDOS
+  disk) is taken as Latin-1 as it is; UTF-8 names are converted as before (zvol.c).
+
+Not done: disk fonts (diskfont.library; display/server/amifont.c reads them, but OpenDiskFont is not ZINE's yet),
+the 040/060-only and disk-image-only productions (out of scope), and every call still missing (the stop line names
+it).
+
+*Verified* in FS-UAE (`tools/zine-emu-test.sh`, A1200 68020 4 MB fast): `zsuper` (SuperState from user mode: the
+same stack, S set, d0 not 0; again in supervisor mode: 0; UserState back; UserState from user mode: nothing);
+`zcrunch` (zpkt.S as the cruncher's form, `tools/mkhunktest.py -c`: loaded, its data read through the overlay handle
+with packets); `zcalls` (every call above called and its answer checked: the 'A' glyph's rows read back from a
+BitMap, ReadArgs on its own arguments and on a CSource, 3 * 3, sqrt and sin in double, 10 / 2 and a compare in FFP,
+the transcendental libraries, a line through RawPutChar on the serial port); `zbig` (`tools/mkbigtest.py`: a 1.5 MB
+chip and a 1.25 MB fast data hunk and a BSS hunk, whose file and hunks do not fit together: loaded by zine, every
+hunk's contents and memory type checked; its folder too big: the archive and the large file left out and named, the
+small file found); a program whose file name is Latin-1 runs. On the PC (`tools/host/zine-test.sh`): the cruncher's
+form and a cut root, the check and load from a file through a 64-byte window the same as in memory (three forms,
+every prefix, a read that fails anywhere), the planner's kept blocks, the Latin-1 names, the volume's limits,
+`lvo40.c` against the NDK's `.fd` files (with `ZENIX_NDK_FD`) and `zfont.h` against `font_8x8.c`.
+
+Sizes (the 68020-60 build): the blob image 46,772 -> 76,232 bytes (memory 52,744 -> 85,768: the math libraries with gcc's soft float about 16 KB, utility.library, ReadArgs, the font and text about 8 KB, the stubs 4 KB); `/bin/zine` 30,872 -> 38,432 bytes (memory 33,132 -> 44,808: the NDK's names 3 KB, the file reader's 4 KB window, the volume's rules); the hunk core 5,225 -> 5,956 bytes at -Os; the kernel unchanged (183,508 bytes).
 
 ## 17. Questions for the owner (what ZINE should be)
 

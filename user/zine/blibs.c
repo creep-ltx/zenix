@@ -230,6 +230,10 @@ u32 c_OpenLibrary(const char *name, u32 version)
             l->opencnt++;
             return (u32)l;
         }
+    /* utility and the math libraries, ZINE's own (16.12) */
+    u32 x = name ? zb_more_open(name, version) : 0;
+    if (x)
+        return x;
     /* one a program added or ZINE loaded from LIBS: (blibload.c, 16.8); else named in the program's output and 0,
      * as AmigaOS answers when it has none */
     return name ? zb_lib_open(name, version) : 0;
@@ -257,6 +261,8 @@ void c_CloseLibrary(struct zlib *l)
                 l->opencnt--;
             return;
         }
+    if (zb_more_close((u32)l))
+        return;
     zb_lib_close((u32)l);               /* its own Close vector (blibload.c) */
 }
 
@@ -1514,6 +1520,7 @@ void c_InitRastPort(u8 *rp)
     rp[30] = 15;
     *(u16 *)(rp + 32) = 1;              /* FRST_DOT */
     *(u16 *)(rp + 34) = 0xFFFF;
+    zb_rp_font(rp);                     /* the default font, topaz 8 (16.12) */
 }
 
 /* AllocBitMap (V39): the struct and its planes (one chip block each, cleared with BMF_CLEAR or not: always cleared
@@ -1758,6 +1765,7 @@ u32 c_OpenScreenTagList(const u8 *ns, const u32 *tags)
     sc[SC_RastPort + RP_Mask] = 0xFF;
     sc[SC_RastPort + RP_FgPen] = 1;
     sc[SC_RastPort + RP_DrawMode] = 1;  /* JAM2 */
+    zb_rp_font(sc + SC_RastPort);
     sc[SC_SIZEOF] = custom ? 1 : 0;     /* CloseScreen frees only planes it allocated */
     *(u16 *)(sc + SC_ViewPort + VP_Modes) = (u16)modes;
     if (!behind)
@@ -2008,6 +2016,105 @@ u32 c_OpenWindow(const u8 *nw) { return c_OpenWindowTagList(nw, 0); }
 void c_CloseWindow(u8 *win) { if (win) zx_FreeMem((u32)win, WIN_SIZEOF + MP_SIZEOF); }
 u32 c_ModifyIDCMP(u8 *win, u32 f) { if (win) *(u32 *)(win + 82) = f; return 1; }
 void c_SetPointer(u32 win) { (void)win; }
+/* ---- intuition: the public screen and screen buffers (16.12) ----
+ * LockPubScreen(name a0) (-510): ZINE has no Workbench, but programs lock "the default public screen" to read its
+ * size, mode and font before they open their own; NULL or "Workbench" gives a stand-in made once and never shown: a
+ * hires screen of the display's width and height (640 x 256 PAL, 200 NTSC), 2 planes. Any other name: 0, said once.
+ * UnlockPubScreen (-516) does nothing (the stand-in stays until the session ends). */
+static u8 *pubscr;
+u32 c_LockPubScreen(const char *name)
+{
+    if (name && !(name[0] == 'W' && streq(name, "Workbench"))) {
+        static u8 said;
+        if (!said++)
+            zb_say_text("ZINE: no public screen \"", (u32)name, "\" (ZINE has only the Workbench stand-in)\n");
+        return 0;
+    }
+    if (!pubscr) {
+        u32 tags[] = { 0x80000023, 640, 0x80000024, Z.pal ? 256u : 200u, 0x80000025, 2, 0x80000032,
+                       (Z.pal ? 0x00021000u : 0x00011000u) | 0x8000, 0x80000037, 1, 0 };
+        pubscr = (u8 *)c_OpenScreenTagList(0, tags);
+        if (pubscr)
+            *(u16 *)(pubscr + SC_ViewPort + VP_Modes) = 0x8000;    /* HIRES */
+    }
+    return (u32)pubscr;
+}
+void c_UnlockPubScreen(const char *name, u32 scr) { (void)name, (void)scr; }
+
+/* AllocScreenBuffer(sc a0, bm a1, flags d0) (-768, V39; intuition/screens.h: struct ScreenBuffer { sb_BitMap,
+ * sb_DBufInfo }, SB_SCREEN_BITMAP 1, SB_COPY_BITMAP 2): the screen's own BitMap, the program's, or a new one like the
+ * screen's (its planes copied with SB_COPY_BITMAP); sb_DBufInfo a cleared DBufInfo (graphics/view.h, 84 bytes: its
+ * dbi_SafeMessage at 8 and dbi_DispMessage at 40, which ChangeScreenBuffer replies at once to the ports the program
+ * put in them). FreeScreenBuffer (-774) frees what AllocScreenBuffer made. ChangeScreenBuffer (-780) shows the
+ * buffer's BitMap: the screen's RastPort and RasInfo take it and the shown screen's planes come from it. */
+#define SB_SIZE 12                      /* sb_BitMap, sb_DBufInfo, then ZINE's: 1 when the BitMap is its own */
+#define DBI_SIZE 84
+u32 c_AllocScreenBuffer(u8 *sc, u32 bm, u32 flags)
+{
+    if (!sc)
+        return 0;
+    u8 *sbm = *(u8 **)(sc + SC_SIZEOF + 76) ? *(u8 **)(sc + SC_SIZEOF + 76) : sc + SC_BitMap;
+    u32 *sb = (u32 *)zx_AllocMem(SB_SIZE, MEMF_PUBLIC | MEMF_CLEAR);
+    u32 dbi = zx_AllocMem(DBI_SIZE, MEMF_PUBLIC | MEMF_CLEAR);
+    if (!sb || !dbi) {
+        if (sb) zx_FreeMem((u32)sb, SB_SIZE);
+        if (dbi) zx_FreeMem(dbi, DBI_SIZE);
+        return 0;
+    }
+    sb[1] = dbi;
+    if (flags & 1)
+        sb[0] = (u32)sbm;
+    else if (bm)
+        sb[0] = bm;
+    else {
+        u32 w = *(u16 *)(sbm + ZO_BitMap_BytesPerRow) * 8u, h = *(u16 *)(sbm + ZO_BitMap_Rows), d = sbm[ZO_BitMap_Depth];
+        u8 *nb = (u8 *)c_AllocBitMap(w, h, d, 0, 0);
+        if (!nb) {
+            zx_FreeMem((u32)sb, SB_SIZE);
+            zx_FreeMem(dbi, DBI_SIZE);
+            return 0;
+        }
+        if (flags & 2)
+            for (u32 i = 0; i < d && i < 8; i++)
+                zmemcpy(*(void **)(nb + ZO_BitMap_Planes + 4 * i), *(void **)(sbm + ZO_BitMap_Planes + 4 * i),
+                        RASSIZE(w, h));
+        sb[0] = (u32)nb;
+        sb[2] = 1;
+    }
+    return (u32)sb;
+}
+void c_FreeScreenBuffer(u8 *sc, u32 *sb)
+{
+    (void)sc;
+    if (!sb)
+        return;
+    if (sb[2])
+        c_FreeBitMap((u8 *)sb[0]);
+    if (sb[1])
+        zx_FreeMem(sb[1], DBI_SIZE);
+    zx_FreeMem((u32)sb, SB_SIZE);
+}
+static void port_put(u8 *mp, struct znode *m, u8 type);
+u32 c_ChangeScreenBuffer(u8 *sc, u32 *sb)
+{
+    if (!sc || !sb || !sb[0])
+        return 0;
+    *(u32 *)(sc + SC_SIZEOF + 76) = sb[0];
+    *(u32 *)(sc + SC_RastPort + RP_BitMap) = sb[0];
+    u8 *ri = *(u8 **)(sc + SC_ViewPort + VP_RasInfo);
+    if (ri)
+        *(u32 *)(ri + 4) = sb[0];
+    if (Z.shown == (u32)sc)
+        zb_screen_frame();              /* the planes from the new BitMap, from the next frame on */
+    u8 *dbi = (u8 *)sb[1];
+    for (u32 o = 8; dbi && o <= 40; o += 32) {
+        u8 *rp = *(u8 **)(dbi + o + 14);    /* the message's mn_ReplyPort */
+        if (rp && c_TypeOfMem((u32)rp))
+            port_put(rp, (struct znode *)(dbi + o), 7);
+    }
+    return 1;
+}
+
 u32 c_ViewPortAddress(const u8 *win)
 {
     u32 scr = win ? *(const u32 *)(win + 46) : 0;
@@ -2041,13 +2148,21 @@ F(InitStruct); F(MakeLibrary); F(MakeFunctions); F(FindResident); F(InitResident
 F(SumLibrary); F(AddResource); F(InitSemaphore); F(ObtainSemaphore); F(ReleaseSemaphore); F(AttemptSemaphore);
 F(DeleteFile); F(AudioBeginIO); F(AudioAbortIO);
 X(Supervisor); X(Disable); X(Enable); X(Forbid); X(Permit); X(SetSR); X(GetCC); X(CacheClearU); X(ColdReboot); X(Exit);
+X(SuperState); X(UserState);
+F(RawIOInit); F(RawMayGetChar); F(RawPutChar); F(CreateIORequest); F(DeleteIORequest); F(AddPort); F(RemPort);
+F(FindPort); F(IsInteractive); F(FRead); F(FWrite); F(GetProgramName); F(GetArgStr); F(ReadArgs); F(FreeArgs);
+F(AllocDosObject); F(FreeDosObject); F(OpenFont); F(CloseFont); F(SetFont); F(AskFont); F(TextLength); F(Text);
+F(Move); F(SetAPen); F(SetBPen); F(SetDrMd); F(RectFill); F(SetRast); F(SetChipRev); F(GetBitMapAttr);
+F(BestModeIDA); F(LockPubScreen); F(UnlockPubScreen); F(AllocScreenBuffer); F(FreeScreenBuffer);
+F(ChangeScreenBuffer);
 
 /* the offsets: the RKRM's Function Offset Reference (V37), the pools and ColdReboot from the NDK 3.2's exec_lib.fd */
 static const u16 exec_lvo[] = { 30, 108, 114, 120, 126, 132, 138, 144, 162, 168, 174, 198, 204, 210, 216, 234, 240,
     246, 252, 258, 264, 270, 276, 294, 300, 306, 318, 324, 330, 336, 408, 414, 420, 444, 450, 498, 522, 528, 534, 552,
     624, 630, 636, 642, 648, 684, 690, 696, 702, 708, 714, 726, 732, 810, 366, 372, 378, 384, 666, 672, 456, 462, 468,
     474, 480, 180,
-    78, 84, 90, 96, 102, 396, 402, 426, 486, 558, 564, 570, 576, 678, 720 };
+    78, 84, 90, 96, 102, 396, 402, 426, 486, 558, 564, 570, 576, 678, 720,
+    150, 156, 504, 510, 516, 654, 660, 354, 360, 390 };
 static void (*const exec_fn[])(void) = { zx_Supervisor, zs_Alert, zs_rts, zx_Disable, zx_Enable, zx_Forbid,
     zx_Permit, zx_SetSR, zs_SetIntVector, zs_AddIntServer, zs_RemIntServer, zs_AllocMem, zs_AllocAbs, zs_FreeMem,
     zs_AvailMem, zs_Insert, zs_AddHead, zs_AddTail, zs_Remove, zs_RemHead, zs_RemTail, zs_Enqueue, zs_FindName,
@@ -2060,20 +2175,28 @@ static void (*const exec_fn[])(void) = { zx_Supervisor, zs_Alert, zs_rts, zx_Dis
     zs_Cause,
     zs_InitStruct, zs_MakeLibrary, zs_MakeFunctions, zs_FindResident, zs_InitResident, zs_AddLibrary, zs_RemLibrary,
     zs_SumLibrary, zs_AddResource, zs_InitSemaphore, zs_ObtainSemaphore, zs_ReleaseSemaphore, zs_AttemptSemaphore,
-    zs_ObtainSemaphore, zs_AttemptSemaphore };
-static const u16 gfx_lvo[] = { 192, 222, 228, 270, 288, 384, 456, 462, 390, 492, 498, 918, 924, 882, 852, 198 };
+    zs_ObtainSemaphore, zs_AttemptSemaphore,
+    zx_SuperState, zx_UserState, zs_RawIOInit, zs_RawMayGetChar, zs_RawPutChar, zs_CreateIORequest,
+    zs_DeleteIORequest, zs_AddPort, zs_RemPort, zs_FindPort };
+static const u16 gfx_lvo[] = { 192, 222, 228, 270, 288, 384, 456, 462, 390, 492, 498, 918, 924, 882, 852, 198,
+    72, 78, 66, 474, 54, 60, 240, 342, 348, 354, 306, 234, 888, 960, 1050 };
 static void (*const gfx_fn[])(void) = { zs_LoadRGB4, zs_LoadView, zs_WaitBlit, zs_WaitTOF, zs_SetRGB4, zs_VBeamPos,
     zs_OwnBlitter, zs_DisownBlitter, zs_InitBitMap, zs_AllocRaster, zs_FreeRaster, zs_AllocBitMap, zs_FreeBitMap,
-    zs_LoadRGB32, zs_SetRGB32, zs_InitRastPort };
+    zs_LoadRGB32, zs_SetRGB32, zs_InitRastPort,
+    zs_OpenFont, zs_CloseFont, zs_SetFont, zs_AskFont, zs_TextLength, zs_Text, zs_Move, zs_SetAPen, zs_SetBPen,
+    zs_SetDrMd, zs_RectFill, zs_SetRast, zs_SetChipRev, zs_GetBitMapAttr, zs_BestModeIDA };
 static const u16 dos_lvo[] = { 42, 48, 54, 60, 132, 144, 198, 312, 342, 354, 360, 462, 948, 954, 30, 36, 66, 150,
-    156, 222, 72 };
+    156, 222, 72, 216, 324, 330, 576, 534, 798, 858, 228, 234 };
 static void (*const dos_fn[])(void) = { zs_Read, zs_Write, zs_Input, zs_Output, zs_IoErr, zx_Exit, zs_Delay,
     zs_FPutC, zs_FPuts, zs_VFPrintf, zs_Flush, zs_SetIoErr, zs_PutStr, zs_VPrintf, zs_Open, zs_Close, zs_Seek,
-    zs_LoadSeg, zs_UnLoadSeg, zs_Execute, zs_DeleteFile };
-static const u16 int_lvo[] = { 78, 210, 612, 198, 66, 252, 246, 606, 204, 72, 150, 270, 60, 300 };
+    zs_LoadSeg, zs_UnLoadSeg, zs_Execute, zs_DeleteFile, zs_IsInteractive, zs_FRead, zs_FWrite, zs_GetProgramName,
+    zs_GetArgStr, zs_ReadArgs, zs_FreeArgs, zs_AllocDosObject, zs_FreeDosObject };
+static const u16 int_lvo[] = { 78, 210, 612, 198, 66, 252, 246, 606, 204, 72, 150, 270, 60, 300,
+    510, 516, 768, 774, 780 };
 static void (*const int_fn[])(void) = { zs_CloseWorkBench, zs_OpenWorkBench, zs_OpenScreenTagList, zs_OpenScreen,
     zs_CloseScreen, zs_ScreenToFront, zs_SetPointer, zs_OpenWindowTagList, zs_OpenWindow, zs_CloseWindow,
-    zs_ModifyIDCMP, zs_SetPointer, zs_SetPointer, zs_ViewPortAddress };
+    zs_ModifyIDCMP, zs_SetPointer, zs_SetPointer, zs_ViewPortAddress,
+    zs_LockPubScreen, zs_UnlockPubScreen, zs_AllocScreenBuffer, zs_FreeScreenBuffer, zs_ChangeScreenBuffer };
 _Static_assert(sizeof exec_lvo / 2 == sizeof exec_fn / sizeof exec_fn[0], "exec table");
 _Static_assert(sizeof gfx_lvo / 2 == sizeof gfx_fn / sizeof gfx_fn[0], "graphics table");
 _Static_assert(sizeof dos_lvo / 2 == sizeof dos_fn / sizeof dos_fn[0], "dos table");
@@ -2587,5 +2710,6 @@ void zb_libs_init(void)
     if (Z.aga)
         crb |= 4 | 8;                   /* GFXF_AA_ALICE, GFXF_AA_LISA (the NDK's graphics/gfxbase.h) */
     *(u8 *)(gb + ZO_GfxBase_ChipRevBits0) = crb;
+    zb_more_init(take);                 /* utility, the math libraries, topaz 8 (bmore.c, 16.12) */
     *(volatile u32 *)4 = ZEXEC;         /* only now does address 4 point at an ExecBase (7.3 step 3) */
 }

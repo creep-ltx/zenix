@@ -92,10 +92,19 @@ static int in_fast(u32 a, u32 n)
 }
 
 #define ZHDR_MAGIC 0x5A4D454Du          /* kernel/mem.c's block header: size | used, prev, owner, "ZMEM" */
-#define AREA  (24u << 10)               /* the libraries, their tables, the process (in the ZINE block) */
+#define AREA  (32u << 10)               /* the libraries, their tables, the process (in the ZINE block) */
 #define STACK (16u << 10)
 
 static u32 align16(u32 a) { return (a + 15) & ~15u; }
+
+/* 1 when a lies in one of the walk's chip ranges */
+static int rng_chip(const struct zp_range *r, u32 n, u32 a)
+{
+    for (u32 i = 0; i < n; i++)
+        if (a >= r[i].lo && a < r[i].hi)
+            return r[i].chip != 0;
+    return 0;
+}
 
 long zb_prepare(const struct zine_args *a)
 {
@@ -140,6 +149,25 @@ long zb_prepare(const struct zine_args *a)
         }
         rng[i].n = nblk - rng[i].first;
     }
+    /* a program zine loaded itself (16.12): the blocks of its regions are the program's (ZP_KEEP), whole regions of
+     * used blocks only, as the volume names them */
+    const struct zv_hdr *vh = (const struct zv_hdr *)a->vol;
+    if (a->vol_size < sizeof *vh || vh->nkeep > ZV_NKEEP)
+        return -ZE_INVAL;
+    for (u32 k = 0; k < vh->nkeep; k++) {
+        u32 found = 0;
+        for (u32 i = 0; i < nblk; i++)
+            if (wb[i].used && wb[i].addr + 16 == vh->keep[k].addr && vh->keep[k].size <= wb[i].size - 16) {
+                wb[i].used = ZP_KEEP;
+                found = 1;
+            }
+        if (!found)
+            return -ZE_INVAL;
+    }
+    /* the volume is the program's files: the program's for the half-the-fast-RAM rule too (16.12) */
+    for (u32 i = 0; i < nblk; i++)
+        if (wb[i].used == 1 && wb[i].addr + 16 == a->vol && !rng_chip(rng, a->nranges, wb[i].addr))
+            wb[i].used = ZP_KEEP;
     p = (u8 *)&wb[nblk];
     p = (u8 *)align16((u32)p);
     struct zp_out o;
@@ -301,8 +329,14 @@ void zb_run(void)
     zb_flush();
     /* the program (6) */
     const void *vol = (const void *)Z.a.vol;
-    u32 idx;
-    if (zv_check(vol, Z.a.vol_size) || zv_find(vol, 0, b->name, &idx))
+    u32 idx, seg;
+    if (zv_check(vol, Z.a.vol_size))
+        zb_stop(ZH_LOAD, ZS_NOFILE);
+    if (((const struct zv_hdr *)vol)->pre_seg) {    /* loaded by zine from its file (16.12) */
+        seg = ((const struct zv_hdr *)vol)->pre_seg;
+        goto loaded;
+    }
+    if (zv_find(vol, 0, b->name, &idx))
         zb_stop(ZH_LOAD, ZS_NOFILE);
     const struct zv_ent *e = zv_ent(vol, idx);
     const zu8 *f = (const zu8 *)vol + e->off;
@@ -312,12 +346,12 @@ void zb_run(void)
         zb_stop(ZH_LOAD, ZS_BADFILE);
     struct zh_seg *work = (struct zh_seg *)zx_AllocMem(inf.nhunks * sizeof *work + 8, MEMF_PUBLIC);
     struct zh_ops ops = { zb_hunk_alloc, zb_hunk_free, 0 };
-    u32 seg;
     if (!work || zh_load(f, e->size, &inf, &ops, work, &seg))
         zb_stop(ZH_LOAD, ZS_NOMEM);
     if (inf.ovl && zb_ovl_root(idx, f, &inf, work, seg, b->name))     /* an overlaid program (16.6) */
         zb_stop(ZH_LOAD, ZS_NOMEM);
     zx_FreeMem((u32)work, inf.nhunks * sizeof *work + 8);
+loaded:
     Z.seglist = seg;
     u32 stack = b->stack ? (b->stack + 3) & ~3u : 65536;
     u32 sp = zx_AllocMem(stack, MEMF_PUBLIC);
@@ -552,9 +586,10 @@ void zb_back(void)
                 ;
             CUSTOM(0x030) = 0x10A;
         }
-        for (u32 i = 0; i < 4; i++) {
-            const struct zlib *l = (const struct zlib *)Z.lib[i];
-            if (slot < (u32)l && (u32)l - slot <= l->negsize) {
+        b->lib = 99;                    /* a library not ZINE's own (one loaded from a file) */
+        for (u32 i = 0; i < 4 + ZB_NXLIB; i++) {
+            const struct zlib *l = (const struct zlib *)(i < 4 ? Z.lib[i] : zb_xlib[i - 4]);
+            if (l && slot < (u32)l && (u32)l - slot <= l->negsize) {
                 b->lib = i;
                 b->lvo = (u32)l - slot;
             }

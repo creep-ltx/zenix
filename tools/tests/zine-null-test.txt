@@ -43,6 +43,8 @@ send zine /tests/zine/zpkt; echo zpkt-rc=$?\r
 wait zpkt-rc= 60
 send zine /tests/zine/zpkt u; echo zpktu-rc=$?\r
 wait zpktu-rc= 60
+send sh /tests/zine/zfix16; echo zfix16-done\r
+wait (?m)^zfix16-done 300
 send zine /tests/zine/zlibs; echo zlibs-rc=$?\r
 wait zlibs-rc= 90
 send mkdir -p /tmp/zwref; cp /tests/zine/zexit /tests/zine/zhello /tests/zine/zbadcall /tmp/zwref/; zine /tests/zine/zwrite; echo zwrite-rc=$?\r

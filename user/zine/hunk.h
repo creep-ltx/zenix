@@ -74,6 +74,23 @@ struct zh_ops {
  * yet"; "NAME is not an AmigaOS program (unknown hunk 0x3F9 at byte 1234)"); cap is msg's size (64 or more). */
 int zh_check(const zu8 *f, zu32 len, const char *name, struct zh_info *inf, char *msg, zu32 cap);
 
+/* The same check and load with only the file's first hlen bytes in memory (f) and the rest read from the file as the
+ * walk goes (d29 16.12: a program bigger than the memory beside its hunks is loaded by `zine` straight from its
+ * file). The header's size table must lie within hlen (16 KB holds any header ZH_MAXHUNKS allows); win (wcap bytes,
+ * 64 or more) is the window the walk reads blocks into; a hunk's data is read straight into its memory. read: 0, or
+ * not 0 when the n bytes at off could not be read. An overlaid file is checked to its overlay table only (inf->ovl
+ * set, its parts not walked): such a file stays in memory whole for the session, and is checked there again. */
+struct zh_rd {
+    int (*read)(void *u, zu32 off, zu8 *buf, zu32 n);
+    void *u;
+    zu8 *win;
+    zu32 wcap;
+};
+int zh_check_rd(const zu8 *f, zu32 hlen, zu32 len, const struct zh_rd *rd, const char *name, struct zh_info *inf,
+                char *msg, zu32 cap);
+int zh_load_rd(const zu8 *f, zu32 hlen, zu32 len, const struct zh_rd *rd, const struct zh_info *inf,
+               const struct zh_ops *ops, struct zh_seg *work, zu32 *seglist);
+
 /* The size (bytes) and memory attributes of hunk i (i < inf->nhunks) as the header gives them */
 zu32 zh_hunk_size(const zu8 *f, const struct zh_info *inf, zu32 i, zu32 *memf);
 

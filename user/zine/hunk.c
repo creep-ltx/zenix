@@ -30,7 +30,7 @@ static void mnum(struct msg *m, zu32 v, int hex)
 
 /* the walk's state */
 struct walk {
-    const zu8 *f;
+    const zu8 *f;                       /* the file's first hlen bytes (in memory: all of it) */
     zu32 len, pos;
     const char *name;
     struct msg m;
@@ -39,7 +39,38 @@ struct walk {
     zu8 *tab;                           /* load of an overlay node: the hunk table (its ancestors' segments) */
     zu32 start;                         /* the node's first byte */
     int node;                           /* an overlay node: ends with HUNK_BREAK, relocates to earlier hunks too */
+    zu32 hlen;                          /* bytes at f (len: the whole file is in memory) */
+    const struct zh_rd *rd;             /* the rest read from the file (zh_check_rd), else 0 */
+    zu32 wpos, wlen;                    /* its window: bytes wpos.. in rd->win */
 };
+
+/* n (at most 16) bytes at pos: in memory, or through the window (refilled at pos when they are not in it); 0 when
+ * the file cannot be read there */
+static const zu8 *at(struct walk *w, zu32 pos, zu32 n)
+{
+    if (pos <= w->hlen && n <= w->hlen - pos)
+        return w->f + pos;
+    if (!w->rd)
+        return 0;
+    if (pos >= w->wpos && pos - w->wpos <= w->wlen && n <= w->wlen - (pos - w->wpos))
+        return w->rd->win + (pos - w->wpos);
+    zu32 k = w->len - pos < w->rd->wcap ? w->len - pos : w->rd->wcap;
+    if (k < n || w->rd->read(w->rd->u, pos, w->rd->win, k))
+        return 0;
+    w->wpos = pos, w->wlen = k;
+    return w->rd->win;
+}
+
+/* n bytes at pos into d (a hunk's data): from memory, or read straight from the file */
+static int copy(struct walk *w, zu8 *d, zu32 pos, zu32 n)
+{
+    zu32 m = pos < w->hlen ? (w->hlen - pos < n ? w->hlen - pos : n) : 0;
+    for (zu32 i = 0; i < m; i++)
+        d[i] = w->f[pos + i];
+    if (m == n)
+        return 0;
+    return w->rd ? w->rd->read(w->rd->u, pos + m, d + m, n - m) : -1;
+}
 
 static int fail(struct walk *w, const char *what, zu32 type)
 {
@@ -60,18 +91,20 @@ static int fail(struct walk *w, const char *what, zu32 type)
 /* the next longword (getw: word), or 0 at the end of the file */
 static int get(struct walk *w, zu32 *v)
 {
-    if (w->len - w->pos < 4)
+    const zu8 *p;
+    if (w->len - w->pos < 4 || !(p = at(w, w->pos, 4)))
         return 0;
-    *v = zbe32(w->f + w->pos);
+    *v = zbe32(p);
     w->pos += 4;
     return 1;
 }
 
 static int getw(struct walk *w, zu32 *v)
 {
-    if (w->len - w->pos < 2)
+    const zu8 *p;
+    if (w->len - w->pos < 2 || !(p = at(w, w->pos, 2)))
         return 0;
-    *v = zbe16(w->f + w->pos);
+    *v = zbe16(p);
     w->pos += 2;
     return 1;
 }
@@ -153,11 +186,12 @@ static int relocs(struct walk *w, zu32 t, zu32 first, zu32 n, zu32 cur, zu32 cur
     /* the short form's padding (the Guru Book: a word to the next longword boundary, "must"; files without it exist):
      * taken when the stream ends off a longword and either the file ends after the word or the word read as the
      * start of the next block would not be a block type, while the padded reading is */
-    if (sh && (w->pos & 2) && w->len - w->pos >= 2 && zbe16(w->f + w->pos) == 0) {
+    const zu8 *q = sh && (w->pos & 2) && w->len - w->pos >= 2 ? at(w, w->pos, w->len - w->pos >= 6 ? 6 : 2) : 0;
+    if (q && zbe16(q) == 0) {
         if (w->len - w->pos == 2)
             w->pos += 2;
         else if (w->len - w->pos >= 6) {
-            zu32 un = zbe32(w->f + w->pos) & 0x1FFFFFFFu, pad = zbe32(w->f + w->pos + 2) & 0x1FFFFFFFu;
+            zu32 un = zbe32(q) & 0x1FFFFFFFu, pad = zbe32(q + 2) & 0x1FFFFFFFu;
             if ((un < HUNK_NAME || un > HUNK_RELRELOC32) && pad >= HUNK_NAME && pad <= HUNK_RELRELOC32)
                 w->pos += 2;
         }
@@ -183,6 +217,8 @@ static int walk(struct walk *w, struct zh_info *inf)
     if (tab > ZH_MAXTAB)
         return fail(w, " is too big (its hunk table has more than 16384 slots)", ~0u);
     zu32 n = last - first + 1, tot = 0;
+    if (w->rd && (w->pos > w->hlen || (w->hlen - w->pos) / 8 < n))
+        return fail(w, " is damaged (its header is larger than any hunk table)", ~0u);
     if (inf) {
         zu8 *z = (zu8 *)inf;
         for (zu32 i = 0; i < sizeof *inf; i++)
@@ -234,11 +270,8 @@ static int walk(struct walk *w, struct zh_info *inf)
                 zu32 at = w->pos;
                 if (!skip(w, words))
                     return fail(w, " is damaged (a hunk ends early)", ~0u);
-                if (w->seg) {
-                    zu8 *d = w->seg[cur].p + 8;
-                    for (zu32 i = 0; i < words * 4; i++)
-                        d[i] = w->f[at + i];
-                }
+                if (w->seg && copy(w, w->seg[cur].p + 8, at, words * 4))
+                    return fail(w, " cannot be read (a hunk's data)", ~0u);
             }
             body = 1;
             break;
@@ -277,10 +310,13 @@ static int walk(struct walk *w, struct zh_info *inf)
         case HUNK_BREAK:
             if (body)
                 body = 0, cur++;
-            if (cur < n)
+            /* the root's hunks the header lists but its file does not give before HUNK_OVERLAY (a cruncher's form:
+             * two hunks listed, the second of size 0, one before the table) are allocated as the header sizes
+             * them and stay empty, as a loader that allocates the header's hunks first leaves them (d29 16.12) */
+            if (cur < n && (w->node || t == HUNK_BREAK))
                 return fail(w, " is damaged (it ends before its last hunk)", ~0u);
             w->pos -= 4;                /* the block is read after the loop */
-            break;
+            goto after;
         case HUNK_EXT:
             return fail(w, " has external references (an object file, not a program)", ~0u);
         case HUNK_RELRELOC32:
@@ -289,9 +325,11 @@ static int walk(struct walk *w, struct zh_info *inf)
             return fail(w, " is not an AmigaOS program (unknown hunk ", v);
         }
     }
+after:
     /* after the last hunk. The root: its overlay table, or nothing more that ZINE reads (other bytes are ignored,
      * another hunk is refused). An overlay node: HUNK_BREAK or the end of the file. */
-    zu32 t = w->len - w->pos >= 4 ? zbe32(w->f + w->pos) & 0x1FFFFFFFu : 0;
+    const zu8 *tp = w->len - w->pos >= 4 ? at(w, w->pos, 4) : 0;
+    zu32 t = tp ? zbe32(tp) & 0x1FFFFFFFu : 0;
     if (w->node) {
         if (t == HUNK_BREAK)
             w->pos += 4;
@@ -318,9 +356,10 @@ static int walk(struct walk *w, struct zh_info *inf)
     return 0;
 }
 
-int zh_node(const zu8 *f, zu32 len, zu32 start, const char *name, struct zh_info *inf, char *msg, zu32 cap)
+static int node_rd(const zu8 *f, zu32 hlen, zu32 len, const struct zh_rd *rd, zu32 start, const char *name,
+                   struct zh_info *inf, char *msg, zu32 cap)
 {
-    struct walk w = { f, len, 0, name, { msg, 0, cap }, 0, 0, 0, start, 1 };
+    struct walk w = { f, len, 0, name, { msg, 0, cap }, 0, 0, 0, start, 1, hlen, rd, 0, 0 };
     if (cap)
         msg[0] = 0;
     if (start > len)
@@ -328,19 +367,34 @@ int zh_node(const zu8 *f, zu32 len, zu32 start, const char *name, struct zh_info
     return walk(&w, inf);
 }
 
+int zh_node(const zu8 *f, zu32 len, zu32 start, const char *name, struct zh_info *inf, char *msg, zu32 cap)
+{
+    return node_rd(f, len, len, 0, start, name, inf, msg, cap);
+}
+
 int zh_check(const zu8 *f, zu32 len, const char *name, struct zh_info *inf, char *msg, zu32 cap)
 {
-    struct walk w = { f, len, 0, name, { msg, 0, cap }, 0, 0, 0, 0, 0 };
+    return zh_check_rd(f, len, len, 0, name, inf, msg, cap);
+}
+
+int zh_check_rd(const zu8 *f, zu32 hlen, zu32 len, const struct zh_rd *rd, const char *name, struct zh_info *inf,
+                char *msg, zu32 cap)
+{
+    if (hlen > len)
+        hlen = len;
+    struct walk w = { f, len, 0, name, { msg, 0, cap }, 0, 0, 0, 0, 0, hlen, rd, 0, 0 };
     if (cap)
         msg[0] = 0;
     int e = walk(&w, inf);
-    if (e || !inf->ovl)
+    if (e || !inf->ovl || rd)           /* from the file: the parts are not walked (the caller reads such a file
+                                         * whole and checks it again in memory) */
         return e;
     /* an overlaid program: every node after the table, each inside the root's hunk table */
     zu32 p = inf->end;
-    while (len - p >= 4 && zbe32(f + p) == HUNK_HEADER) {
+    const zu8 *hp;
+    while (len - p >= 4 && (hp = at(&w, p, 4)) && zbe32(hp) == HUNK_HEADER) {
         struct zh_info ni;
-        e = zh_node(f, len, p, name, &ni, msg, cap);
+        e = node_rd(f, hlen, len, rd, p, name, &ni, msg, cap);
         if (e)
             return e;
         if (ni.first <= inf->last || ni.last >= inf->tabsize || ni.end <= p) {
@@ -357,8 +411,8 @@ int zh_check(const zu8 *f, zu32 len, const char *name, struct zh_info *inf, char
     return 0;
 }
 
-static int load(const zu8 *f, zu32 len, const struct zh_info *inf, const struct zh_ops *ops, struct zh_seg *work,
-                zu8 *tab, int node, zu32 *seglist)
+static int load(const zu8 *f, zu32 hlen, zu32 len, const struct zh_rd *rd, const struct zh_info *inf,
+                const struct zh_ops *ops, struct zh_seg *work, zu8 *tab, int node, zu32 *seglist)
 {
     zu32 n = inf->nhunks, i;
     for (i = 0; i < n; i++) {
@@ -377,7 +431,7 @@ static int load(const zu8 *f, zu32 len, const struct zh_info *inf, const struct 
         zput32(work[i].p, work[i].size);
         zput32(work[i].p + 4, i + 1 < n ? (work[i + 1].addr + 4) >> 2 : 0);
     }
-    struct walk w = { f, len, 0, "", { 0, 0, 0 }, inf, work, tab, inf->start, node };
+    struct walk w = { f, len, 0, "", { 0, 0, 0 }, inf, work, tab, inf->start, node, hlen > len ? len : hlen, rd, 0, 0 };
     int e = walk(&w, 0);
     if (e) {
         for (i = 0; i < n; i++)
@@ -391,7 +445,13 @@ static int load(const zu8 *f, zu32 len, const struct zh_info *inf, const struct 
 int zh_load(const zu8 *f, zu32 len, const struct zh_info *inf, const struct zh_ops *ops, struct zh_seg *work,
             zu32 *seglist)
 {
-    return load(f, len, inf, ops, work, 0, 0, seglist);
+    return load(f, len, len, 0, inf, ops, work, 0, 0, seglist);
+}
+
+int zh_load_rd(const zu8 *f, zu32 hlen, zu32 len, const struct zh_rd *rd, const struct zh_info *inf,
+               const struct zh_ops *ops, struct zh_seg *work, zu32 *seglist)
+{
+    return load(f, hlen, len, rd, inf, ops, work, 0, 0, seglist);
 }
 
 void zh_table(const struct zh_info *inf, const struct zh_seg *work, zu8 *tab, zu32 tabn)
@@ -407,7 +467,7 @@ int zh_load_node(const zu8 *f, zu32 len, const struct zh_info *inf, const struct
 {
     if (!inf->first || inf->last >= tabn - 1 || tabn < 2)
         return -ZE_NOEXEC;              /* outside the table (whose last entry stays 0) */
-    int e = load(f, len, inf, ops, work, tab, 1, seglist);
+    int e = load(f, len, len, 0, inf, ops, work, tab, 1, seglist);
     if (!e)
         zh_table(inf, work, tab, tabn);
     return e;

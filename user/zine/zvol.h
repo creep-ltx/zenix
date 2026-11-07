@@ -12,11 +12,12 @@
 #include "zcore.h"
 
 #define ZV_MAGIC    0x5a564f4cu         /* "ZVOL" */
-#define ZV_VERSION  1u
+#define ZV_VERSION  2u
 #define ZV_NAMEMAX  107                 /* bytes of a name (fib_FileName holds 108 with its end) */
 #define ZV_VOLMAX   30                  /* bytes of the volume's name */
 #define ZV_MAXFILES 500u                /* section 5.6's limits: more, and only the program goes in */
-#define ZV_MAXBYTES (16u << 20)
+#define ZV_MAXBYTES (48u << 20)         /* the files' bytes (d29 16.12; was 16 MB): the block stays one SYS_memalloc */
+#define ZV_NKEEP    8u                  /* regions of a program `zine` loaded itself (16.12) */
 
 /* AmigaDOS protection bits (dos/dos.h): the low four are set to forbid */
 #define ZV_FIBF_DELETE  1u
@@ -30,6 +31,11 @@ struct zv_hdr {
     zu32 size;                          /* the whole block's bytes */
     zu32 data, used;                    /* where the data starts (from the block's start), bytes of it used */
     char volname[ZV_VOLMAX + 2];        /* Latin-1, 0-ended */
+    /* d29 16.12: a program `zine` loaded from its file itself (too big to be kept beside its hunks): its segment list
+     * (a BPTR; 0: the program is the volume's file, loaded by the blob) and the SYS_memalloc regions its hunks are in
+     * (the program's own memory: the blob neither saves nor gives them; zine frees them afterwards) */
+    zu32 pre_seg, nkeep;
+    struct { zu32 addr, size; } keep[ZV_NKEEP];
 };
 struct zv_ent {
     zu32 parent;                        /* its directory's entry (the root: 0) */
@@ -44,9 +50,9 @@ struct zv_ent {
 
 /* the bytes a block needs for n entries (the root included) and the files' bytes */
 zu32 zv_need(zu32 n, zu32 bytes, zu32 nfiles);
-/* 1 when a directory of nfiles files and bytes bytes may go in whole with free_fast bytes of fast RAM free (5.6:
- * at most 500 files, 16 MB and half the free fast RAM), else 0: only the program goes in */
-int zv_fits(zu32 nfiles, zu32 bytes, zu32 free_fast);
+/* 1 when nfiles files of bytes bytes may go in with budget bytes for them (16.12: at most 500 files, 48 MB and the
+ * budget `zine` works out: half the fast RAM the program's hunks leave), else 0 */
+int zv_fits(zu32 nfiles, zu32 bytes, zu32 budget);
 
 /* Builder (in `zine`). zv_init: an empty volume in blk (size bytes, room for cap entries, the root included); the
  * volume's name from name (UTF-8; "ZINE" if it is no AmigaDOS name). 0 or a negative errno. */

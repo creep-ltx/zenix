@@ -187,5 +187,17 @@ void zb_audio_beginio(u8 *io);
 void zb_audio_abort(u8 *io);
 int zb_audio_pending(u8 *io);
 void zb_audio_init(u32 base);
+/* bmore.c, bmath.c (d29 16.12): the libraries beyond the four (utility and the math ones), the ROM font */
+#define ZB_NXLIB 7                      /* utility, mathffp, mathtrans, mathieeedoubbas/-doubtrans, -singbas/-singtrans */
+extern u32 zb_xlib[ZB_NXLIB];           /* their bases: zine_blk lib numbers 4 and on (kernel/zine.h) */
+void zb_more_init(u32 (*take)(u32));
+u32 zb_more_open(const char *name, u32 version);
+int zb_more_close(u32 lib);
+void zb_rp_font(u8 *rp);                /* a RastPort's font the default one (topaz 8) */
+u32 c_AllocVec(u32 size, u32 attrs);
+void c_FreeVec(u32 p);
+u32 c_Write(u32 fh, const char *buf, s32 n);
+u32 c_Read(u32 fh, char *buf, s32 n);
+void c_AddTail(struct zlist *l, struct znode *n);
 void *zmemset(void *d, int c, u32 n);
 void *zmemcpy(void *d, const void *s, u32 n);

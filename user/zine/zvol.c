@@ -21,9 +21,9 @@ zu32 zv_need(zu32 n, zu32 bytes, zu32 nfiles)
     return sizeof(struct zv_hdr) + n * sizeof(struct zv_ent) + bytes + 3 * nfiles;
 }
 
-int zv_fits(zu32 nfiles, zu32 bytes, zu32 free_fast)
+int zv_fits(zu32 nfiles, zu32 bytes, zu32 budget)
 {
-    return nfiles <= ZV_MAXFILES && bytes <= ZV_MAXBYTES && bytes <= free_fast / 2;
+    return nfiles <= ZV_MAXFILES && bytes <= ZV_MAXBYTES && bytes <= budget;
 }
 
 static zu8 up(zu8 c)
@@ -42,14 +42,30 @@ int zv_same(const char *a, zu32 n, const char *b)
     return i == n && !b[i];
 }
 
-/* UTF-8 to Latin-1 into out (max bytes); the length, or a ZV_E_ code */
+/* 1 when s is well-formed UTF-8 (any code point) */
+static int is_utf8(const zu8 *p)
+{
+    while (*p) {
+        zu32 c = *p++, k = c < 0x80 ? 0 : (c & 0xE0) == 0xC0 ? 1 : (c & 0xF0) == 0xE0 ? 2 : (c & 0xF8) == 0xF0 ? 3 : 9;
+        if (k == 9 || (k == 1 && c < 0xC2))
+            return 0;
+        while (k--)
+            if ((*p++ & 0xC0) != 0x80)
+                return 0;
+    }
+    return 1;
+}
+
+/* A name as Zenix holds it to Latin-1 into out (max bytes); the length, or a ZV_E_ code. UTF-8 (how Zenix writes
+ * names) is converted, and refused outside Latin-1; a name that is not UTF-8 at all is taken as Latin-1 bytes as
+ * they are (one copied from an AmigaDOS disk byte for byte: d29 16.12) */
 static int latin1(const char *s, char *out, int max)
 {
-    int n = 0;
+    int n = 0, raw = !is_utf8((const zu8 *)s);
     const zu8 *p = (const zu8 *)s;
     while (*p) {
         zu32 c = *p++;
-        if (c >= 0x80) {
+        if (c >= 0x80 && !raw) {
             if ((c != 0xC2 && c != 0xC3) || (*p & 0xC0) != 0x80)
                 return ZV_E_NAME;       /* outside Latin-1, or not UTF-8 */
             c = (c & 0x1F) << 6 | (*p++ & 0x3F);
@@ -78,6 +94,7 @@ int zv_init(void *blk, zu32 size, zu32 cap, const char *name)
     h->size = size;
     h->data = zv_need(cap, 0, 0);
     h->used = 0;
+    h->pre_seg = h->nkeep = 0;
     if (latin1(name, h->volname, ZV_VOLMAX) < 0) {
         const char *z = "ZINE";
         int i = 0;
@@ -150,7 +167,7 @@ int zv_check(const void *blk, zu32 len)
     const struct zv_hdr *h = H(blk);
     if (len < sizeof *h || h->magic != ZV_MAGIC || h->version != ZV_VERSION || h->size != len || !h->cap ||
         h->nent < 1 || h->nent > h->cap || zv_need(h->cap, 0, 0) == 0 || h->data != zv_need(h->cap, 0, 0) ||
-        h->data > len || h->used > len - h->data || !E(blk, 0)->dir)
+        h->data > len || h->used > len - h->data || !E(blk, 0)->dir || h->nkeep > ZV_NKEEP)
         return -ZE_INVAL;
     for (zu32 i = 0; i < h->nent; i++) {
         const struct zv_ent *e = E(blk, i);

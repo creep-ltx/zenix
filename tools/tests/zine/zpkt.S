@@ -7,7 +7,8 @@
  * an action no handler knows (DOSFALSE, ERROR_ACTION_NOT_KNOWN), and ACTION_WRITE through Output()'s handle. Then
  * Execute("run >nil: setpatch") (DOSTRUE: not run, the output names it). Exit 0 when everything held; else the
  * return code names the step. With an argument starting with u it calls dos Rename("RAM:zpkt-gone", ...) first,
- * which ZINE lacks: the stop line names the call and the output its first argument. Position-independent code, one hunk. */
+ * which ZINE lacks: the stop line names the call and the output its first argument. Position-independent code, one hunk.
+ * Built with -DCRUNCH it is zcrunch, the other cruncher's form (mkhunktest.py -c, docs/d29-zine.md 16.12). */
 #include "zt.i"
 #define LVO_FindTask    -294
 #define LVO_SetSignal   -306
@@ -67,7 +68,11 @@ main:
     move.l  ovfh(%pc),%d0
     beq     f21
     move.l  ovtab(%pc),%a0      /* the table copy: the data's length first */
+#ifdef CRUNCH                           /* zcrunch (mkhunktest.py -c): the one longword is HUNK_BREAK's number */
+    cmp.l   #0x3F6,(%a0)
+#else
     cmp.l   #DATALEN,(%a0)
+#endif
     bne     f21
     moveq   #-1,%d0             /* the reply port, built by hand as Peek does */
     jsr     LVO_AllocSignal(%a6)

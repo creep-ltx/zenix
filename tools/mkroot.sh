@@ -84,8 +84,9 @@ if [ -f "$B/zine.blob" ] && [ -f "$T/bin/zine" ]; then mkdir -p "$T/lib/zine" &&
 if [ -z "$NOTESTS" ] && [ -f "$B/zine-null.blob" ] && [ -d "$B/zinetests" ]; then
     mkdir -p "$T/tests/zine" && cp "$B/zine-null.blob" "$T/tests/zine/null.blob" && { [ ! -f "$B/zine-trace.blob" ] || cp "$B/zine-trace.blob" "$T/tests/zine/trace.blob"; } && cp "$B"/zinetests/z[a-z]* "$T/tests/zine/"
     rm -f "$T"/tests/zine/*.o
-    cp "$(dirname "$0")/tests/zine/null20" "$T/tests/zine/"
+    cp "$(dirname "$0")/tests/zine/null20" "$(dirname "$0")/tests/zine/zfix16" "$T/tests/zine/"
     cp "$B/zinetests/zexit" "$T/tests/zine/zexit-with-a-name-longer-than-31-bytes"   # the name in full (2026-10-31)
+    if [ -d "$B/zinetests/big" ]; then mkdir -p "$T/tests/zinebig" && cp "$B"/zinetests/big/* "$T/tests/zinebig/"; fi   # d29 16.12
 fi
 # zinstall's boot partition programs (DESIGN D35) on the full images, as its package (the RAM disk of the install floppies has them on the set)
 if [ -z "$NOMAN" ] && [ -f "$T/bin/zinstall" ] && [ -f "$B/zenixboot" ]; then

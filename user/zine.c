@@ -115,7 +115,12 @@ static u32 load_blob(u32 *size)
     return (u32)b;
 }
 
-static const char *const libs[4] = { "exec.library", "graphics.library", "dos.library", "intuition.library" };
+/* ZINE's own libraries by their number in the block's lib (kernel/zine.h): the four, then those of d29 16.12 */
+#define NLIBS 11
+static const char *const libs[NLIBS] = { "exec.library", "graphics.library", "dos.library", "intuition.library",
+    "utility.library", "mathffp.library", "mathtrans.library", "mathieeedoubbas.library",
+    "mathieeedoubtrans.library", "mathieeesingbas.library", "mathieeesingtrans.library" };
+const char *zl_name40(const char *lib, unsigned offset);    /* user/zine/lvo40.c: the NDK 3.2's names */
 
 static const char *vecname(u32 v)
 {
@@ -154,10 +159,35 @@ static const char *fpu_missing(u32 w)
 static struct {
     char path[400];                     /* the Zenix path being read */
     u32 top;                            /* bytes of the program's directory with its '/' (names shown from there) */
-    u32 n, bytes;                       /* pass 1: entries (files and directories) and bytes found */
-    int over;                           /* pass 1: past the limits, stopped */
+    u32 n, bytes;                       /* pass 1: entries (files and directories) and bytes found (saturated) */
+    int over;                           /* pass 1: more than 500 entries, stopped */
+    u32 *sz, nsz;                       /* pass 1: every file's size, ZA_ARCH set for an archive or a disk image */
     u8 *vol;                            /* pass 2: the volume being filled */
+    int noarch;                         /* pass 2: archives and disk images left out */
+    u32 thr;                            /* pass 2: files larger than this left out (16.12) */
+    u32 left, leftbytes;                /* pass 2: files left out by the two rules above */
 } W;
+#define ZA_ARCH 0x80000000u
+
+/* an archive or a disk image by its name's end: what a production's folder carries as it was downloaded, never a
+ * file the program reads (16.12) */
+static int is_archive(const char *n)
+{
+    static const char *const ext[] = { ".lha", ".lzh", ".lzx", ".zip", ".dms", ".adf", ".adz", ".hdf", ".7z", ".rar",
+                                       ".tar", ".gz", ".tgz", ".bz2", ".xz", ".iso" };
+    u32 l = strlen(n);
+    for (u32 i = 0; i < sizeof ext / sizeof ext[0]; i++) {
+        u32 k = strlen(ext[i]);
+        if (l > k) {
+            u32 j = 0;
+            while (j < k && (n[l - k + j] | 0x20) == ext[i][j])
+                j++;
+            if (j == k)
+                return 1;
+        }
+    }
+    return 0;
+}
 
 /* a volume name (Latin-1) as UTF-8 into o (room for 2 * 107 + 1) */
 static void utf8_of(char *o, const char *s)
@@ -201,14 +231,23 @@ static void walk(u32 plen, u32 parent, int depth)
         }
         if (!W.vol) {
             W.n++;
-            if (!dir && st.size > ZV_MAXBYTES - W.bytes)
-                W.over = 1;
-            else if (!dir)
-                W.bytes += st.size;
+            if (!dir) {
+                W.bytes = st.size > 0xFFFFFFFFu - W.bytes ? 0xFFFFFFFFu : W.bytes + st.size;
+                if (W.sz && W.nsz < ZV_MAXFILES)
+                    W.sz[W.nsz++] = (st.size < ZA_ARCH ? st.size : ZA_ARCH - 1) | (is_archive(de.name) ? ZA_ARCH : 0);
+            }
             if (W.n > ZV_MAXFILES)
                 W.over = 1;
             if (dir && !W.over)
                 walk(plen + 1 + l, 0, depth + 1);
+            continue;
+        }
+        if (!dir && ((W.noarch && is_archive(de.name)) || st.size > W.thr)) {
+            if (W.left < 5)
+                dprintf(2, "zine: %s left out (%u KB)%s\n", W.path + W.top, (st.size + 1023) >> 10,
+                        W.noarch && is_archive(de.name) ? ": an archive or a disk image" : "");
+            W.left++;
+            W.leftbytes += st.size;
             continue;
         }
         u8 *data;
@@ -244,6 +283,103 @@ static void walk(u32 plen, u32 parent, int depth)
     W.path[plen] = 0;
 }
 
+/* the program's file, read where the check and the loader ask (zh_rd, 16.12) */
+#define ZHEAD (16u << 10)               /* the header in memory: any header ZH_MAXHUNKS allows */
+static int pfd = -1;
+static u8 rdwin[4096];
+static int rd_file(void *u, zu32 off, zu8 *buf, zu32 n)
+{
+    (void)u;
+    if (sys_lseek(pfd, (int)off, 0) != (int)off)
+        return -1;
+    while (n) {
+        int k = sys_read(pfd, buf, n > 0x100000u ? 0x100000u : n);
+        if (k <= 0)
+            return -1;
+        buf += k, n -= (u32)k;
+    }
+    return 0;
+}
+
+/* path B's memory (16.12): at most ZV_NKEEP regions of zine's own (SYS_memalloc), planned before the load, the
+ * largest hunks first: chip hunks in chip RAM, fast and any hunks in fast RAM; each region as large as what is left to
+ * place of its kind when that can be had, else halved down to the largest hunk left, and filled largest first. The
+ * loader then takes each hunk's planned place in turn. The volume names the regions to the blob, for which they are
+ * the program's memory. */
+static struct {
+    struct { u32 base, size; } r[ZV_NKEEP];
+    u32 n, *at, *sz, next, nh, chip_end;
+} P;
+static void *region(u32 want, int chip)
+{
+    void *m = chip ? sys_memalloc_chip(want) : sys_memalloc(want);
+    if (m && !chip && (u32)m < P.chip_end) {    /* fast asked, chip given (the allocator's fall-back) */
+        sys_memfree(m);
+        m = 0;
+    }
+    return m;
+}
+static int pre_plan(const u8 *head, const struct zh_info *inf)
+{
+    u32 n = inf->nhunks;
+    P.nh = n;
+    P.at = malloc(n * 4 + 4), P.sz = malloc(n * 4 + 4);
+    u8 *kind = malloc(n + 1);
+    if (!P.at || !P.sz || !kind)
+        return -ENOMEM;
+    for (u32 i = 0; i < n; i++) {
+        zu32 memf;
+        P.sz[i] = (zh_hunk_size(head, inf, i, &memf) + 8 + 15) & ~15u;
+        kind[i] = (memf & ZMEMF_CHIP) ? 1 : 0;
+        P.at[i] = 0;
+    }
+    for (int k = 1; k >= 0; k--)
+        for (;;) {
+            u32 big = n, rem = 0;       /* the largest hunk of this kind not placed, and all of them */
+            for (u32 i = 0; i < n; i++)
+                if (kind[i] == k && !P.at[i]) {
+                    rem += P.sz[i];
+                    if (big == n || P.sz[i] > P.sz[big])
+                        big = i;
+                }
+            if (big == n)
+                break;
+            if (P.n == ZV_NKEEP)
+                return -ENOMEM;
+            u32 want = rem;
+            void *m;
+            while (!(m = region(want, k)) && want > P.sz[big])
+                want = want / 2 > P.sz[big] ? (want / 2 + 15) & ~15u : P.sz[big];
+            if (!m)
+                return -ENOMEM;
+            P.r[P.n].base = (u32)m, P.r[P.n].size = want;
+            P.n++;
+            u32 used = 0;
+            for (;;) {                  /* the largest that still fit, in turn */
+                u32 b = n;
+                for (u32 i = 0; i < n; i++)
+                    if (kind[i] == k && !P.at[i] && P.sz[i] <= want - used && (b == n || P.sz[i] > P.sz[b]))
+                        b = i;
+                if (b == n)
+                    break;
+                P.at[b] = (u32)m + used;
+                used += P.sz[b];
+            }
+        }
+    free(kind);
+    return 0;
+}
+static int pre_alloc(void *u, zu32 size, zu32 memf, struct zh_seg *out)
+{
+    (void)u, (void)memf;
+    if (P.next >= P.nh || ((size + 15) & ~15u) != P.sz[P.next])
+        return -ENOEXEC;                /* not the walk the plan was made from */
+    out->p = (zu8 *)P.at[P.next];
+    out->addr = P.at[P.next++];
+    return 0;
+}
+static void pre_free(void *u, const struct zh_seg *s) { (void)u, (void)s; }   /* the regions go with zine */
+
 int main(int argc, char **argv)
 {
     if (argc > 3 && !strcmp(argv[1], "--blob")) {     /* the tests' other blobs (/tests/zine/null.blob): root only */
@@ -263,14 +399,20 @@ int main(int argc, char **argv)
             getenv("USER") ? getenv("USER") : "NAME");
     const char *path = argv[1];
     name = strrchr(path, '/') ? strrchr(path, '/') + 1 : path;
+    /* the file is read as it is checked (16.12): only its first 16 KB (the header) are in zine's memory, the rest
+     * through a window; the whole file goes into memory only when it is kept in the volume (path A below) */
     struct ustat st;
-    u32 len;
-    u8 *file = slurp(path, &len, &st);
-    if (!file)
+    pfd = sys_open(path, 0);
+    if (pfd < 0 || sys_fstat(pfd, &st) || !may_read(&st) || (st.mode & S_IFMT) != S_IFREG)
         die("zine: %s", zwhy("cannot be read"));
+    u32 len = st.size, hlen = len < ZHEAD ? len : ZHEAD;
+    u8 *head = malloc(hlen ? hlen : 1);
+    if (!head || rd_file(0, 0, head, hlen))
+        die("zine: %s", zwhy("cannot be read"));
+    struct zh_rd rd = { rd_file, 0, rdwin, sizeof rdwin };
     struct zh_info inf;
     char msg[128];
-    if (zh_check(file, len, name, &inf, msg, sizeof msg))
+    if (zh_check_rd(head, hlen, len, &rd, name, &inf, msg, sizeof msg))
         die("zine: %s", msg);
     struct uzine_info info;
     int r = zine_sys(ZINE_INFO, &info, sizeof info);
@@ -280,25 +422,36 @@ int main(int argc, char **argv)
         die("ZINE needs fast RAM (this machine has only chip RAM)%s", "");
     if (info.layout != ZINE_LAYOUT)
         die("zine: ZINE's files and the kernel are from different versions: %s", "finish the update first");
-    /* memory (d29 16.6): during the session the whole file is in ZINE's volume (an overlaid program loads its
-     * later parts from there) and its hunks are loaded beside it: the root's, and for an overlaid program at
-     * least its largest part. Less than that free in all of Zenix's pools can never run. */
+    /* memory (d29 16.6, 16.12). Path A: the whole file in ZINE's volume (an overlaid program loads its later parts
+     * from there, a program may read its own file) and its hunks loaded beside it in the session, when both fit in
+     * all of Zenix's free memory. Path B, else: zine loads the hunks itself now, from the file, into memory of its
+     * own that becomes the program's (fast and any hunks in fast RAM, chip ones in the chip RAM Zenix has free now),
+     * and the file is not kept; an overlaid program cannot be loaded so. */
     u32 hunks = inf.bytes[0] + inf.bytes[1] + inf.bytes[2] + inf.node_max +
                 (inf.ovl ? inf.ovl_words * 4 + (inf.tabsize + 1) * 4 : 0);
     u32 avail = info.chip_free + info.fast_free;
-    if (len > avail || hunks > avail - len) {
-        dprintf(2, "zine: %s does not fit in memory: its file (%u KB, all in memory during the session) and its "
-                "hunks (%u KB) need more than the %u KB free\n", name, len >> 10, hunks >> 10, avail >> 10);
+    int whole = len <= avail && hunks <= avail - len;
+    if (!whole && inf.ovl) {
+        dprintf(2, "zine: %s does not fit in memory: its file (%u KB, all in memory during the session: it is "
+                "overlaid) and its hunks (%u KB) need more than the %u KB free\n", name, len >> 10, hunks >> 10,
+                avail >> 10);
         return 1;
     }
-    if (inf.ovl && inf.nodes)
-        dprintf(1, "ZINE: %s is overlaid: %u later parts (%u KB together, the largest %u KB), loaded from memory "
-                "when it asks for them\n", name, inf.nodes, (inf.node_all + 1023) >> 10, (inf.node_max + 1023) >> 10);
-    else if (inf.ovl)                   /* a cruncher's data container (Spaceballs' Peek): d29 16.7 */
-        dprintf(1, "ZINE: %s keeps %u KB of data after its overlay table and reads it itself through its overlay "
-                "file, from memory\n", name, (len - inf.end + 1023) >> 10);
-    /* the volume (5.6): the program's directory with its subdirectories (16.10), when it fits (at most 500 entries,
-     * 16 MB and half the free fast RAM); else the program alone */
+    if (!whole && hunks > avail) {
+        dprintf(2, "zine: %s does not fit in memory: its hunks need %u KB, more than the %u KB free\n", name,
+                hunks >> 10, avail >> 10);
+        return 1;
+    }
+    if (!whole && inf.bytes[1] > info.chip_free) {
+        dprintf(2, "zine: %s does not fit in memory: it is loaded from its file before the hand-over (its file and "
+                "its hunks do not fit together), and its chip RAM hunks (%u KB) need more than the %u KB of chip RAM "
+                "Zenix has free now\n", name, inf.bytes[1] >> 10, info.chip_free >> 10);
+        return 1;
+    }
+    /* the volume (5.6, 16.12): the program's directory with its subdirectories (16.10), at most 500 entries and
+     * 48 MB, in half the fast RAM the program leaves free (its hunks, and its file in path A: a program reads its
+     * data files into memory of its own, so as much again stays for that). Over that: archives and disk images left
+     * out first, then the largest files until the rest fits; each left out file is named (the first 5). */
     u32 dl = (u32)(name - path);
     if (dl >= sizeof W.path - 64)
         dl = 0;
@@ -308,35 +461,120 @@ int main(int argc, char **argv)
         strcpy(W.path, "./");
     W.top = strlen(W.path);
     W.path[--W.top] = 0;                /* without its '/' (the walk puts one before each name) */
+    W.sz = malloc(ZV_MAXFILES * sizeof *W.sz);
     walk(W.top, 0, 0);                  /* pass 1: count */
     W.top++;
-    u32 nent = W.n;
-    if (W.over || !zv_fits(nent + 1, W.bytes + len, info.fast_free)) {
-        dprintf(2, "zine: only %s goes into ZINE's volume: its directory holds %s%u files and directories and %u KB "
-                "(ZINE takes at most 500, 16 MB and half the free fast RAM, %u KB): a program that loads files may "
-                "not find them; give it a directory of its own\n", name, W.over ? "at least " : "", nent,
-                (W.bytes + 1023) >> 10, info.fast_free >> 11);
-        nent = 0, W.bytes = 0;
+    u32 nent = W.n, fneed = inf.bytes[0] + inf.bytes[2] + (whole ? len : 0);
+    u32 budget = info.fast_free > fneed ? (info.fast_free - fneed) / 2 : 0;
+    W.thr = 0xFFFFFFFFu;
+    u32 vbytes = W.bytes;
+    if (!W.over && W.sz && !zv_fits(nent + 1, vbytes, budget)) {
+        u32 na = 0;                     /* without the archives and disk images */
+        for (u32 i = 0; i < W.nsz; i++)
+            if (!(W.sz[i] & ZA_ARCH))
+                na += W.sz[i];
+        W.noarch = 1;
+        vbytes = na;
+        if (!zv_fits(nent + 1, na, budget)) {   /* the smallest files first: the largest size that still fits */
+            for (u32 i = 1; i < W.nsz; i++)     /* (a few hundred at most: insertion sort) */
+                for (u32 j = i; j && W.sz[j - 1] > W.sz[j]; j--) {
+                    u32 t = W.sz[j];
+                    W.sz[j] = W.sz[j - 1], W.sz[j - 1] = t;
+                }
+            u32 sum = 0, i = 0;
+            W.thr = 0;
+            while (i < W.nsz && !(W.sz[i] & ZA_ARCH)) {
+                u32 k = i, add = 0;     /* all files of this size, or none */
+                while (k < W.nsz && W.sz[k] == W.sz[i])
+                    add += W.sz[k++];
+                if (add > ZV_MAXBYTES || sum + add > budget || sum + add > ZV_MAXBYTES)
+                    break;
+                sum += add;
+                W.thr = W.sz[i];
+                i = k;
+            }
+            vbytes = sum;
+        }
+        dprintf(2, "zine: %s's directory holds %u KB, more than ZINE's volume takes on this machine now (%u KB: "
+                "half the fast RAM the program leaves free); %s are left out, a program that loads them will not "
+                "find them\n", name, (W.bytes + 1023) >> 10, budget >> 10,
+                W.thr == 0xFFFFFFFFu ? "its archives and disk images" : "its archives, disk images and largest files");
     }
-    u32 vsize = zv_need(nent + 2, W.bytes + len, nent + 1);
+    if (W.over) {
+        dprintf(2, "zine: only %s goes into ZINE's volume: its directory holds more than 500 files and directories: "
+                "a program that loads files may not find them; give it a directory of its own\n", name);
+        nent = 0, vbytes = 0;
+    }
+    u32 pf = whole ? len : 0;           /* the program's file in the volume */
+    u32 vsize = zv_need(nent + 2, vbytes + pf, nent + 1);
     u8 *data;
     W.vol = sys_memalloc(vsize);
-    if (!W.vol || zv_init(W.vol, vsize, nent + 2, "ZINE") || zv_add(W.vol, 0, name, 0, st.mode, st.mtime, len, &data) < 0)
+    if (!W.vol || zv_init(W.vol, vsize, nent + 2, "ZINE"))
         die("zine: not enough memory for %s", name);
-    memcpy(data, file, len);
-    free(file);
+    if (whole) {                        /* path A: the file read straight into the volume */
+        if (zv_add(W.vol, 0, name, 0, st.mode, st.mtime, len, &data) < 0)
+            die("zine: not enough memory for %s", name);
+        if (rd_file(0, 0, data, len))
+            die("zine: %s", zwhy("cannot be read"));
+        if (inf.ovl) {                  /* checked again whole, its parts too (16.6) */
+            if (zh_check(data, len, name, &inf, msg, sizeof msg))
+                die("zine: %s", msg);
+            hunks = inf.bytes[0] + inf.bytes[1] + inf.bytes[2] + inf.node_max + inf.ovl_words * 4 +
+                    (inf.tabsize + 1) * 4;
+            if (hunks > avail - len) {
+                dprintf(2, "zine: %s does not fit in memory: its file (%u KB, all in memory during the session) and "
+                        "its hunks (%u KB) need more than the %u KB free\n", name, len >> 10, hunks >> 10, avail >> 10);
+                return 1;
+            }
+        }
+    }
+    if (inf.ovl && inf.nodes)
+        dprintf(1, "ZINE: %s is overlaid: %u later parts (%u KB together, the largest %u KB), loaded from memory "
+                "when it asks for them\n", name, inf.nodes, (inf.node_all + 1023) >> 10, (inf.node_max + 1023) >> 10);
+    else if (inf.ovl)                   /* a cruncher's data container (Spaceballs' Peek): d29 16.7 */
+        dprintf(1, "ZINE: %s keeps %u KB of data after its overlay table and reads it itself through its overlay "
+                "file, from memory\n", name, (len - inf.end + 1023) >> 10);
     if (nent) {
         W.path[W.top - 1] = 0;
         walk(W.top - 1, 0, 0);          /* pass 2: fill */
+        if (W.left > 5)
+            dprintf(2, "zine: and %u more files left out (%u KB together)\n", W.left - 5, (W.leftbytes + 1023) >> 10);
     }
     u8 *vol = W.vol;
     u32 bsize, blob = load_blob(&bsize);
     /* the ZINE block: the saved chip RAM (Zenix's used chip blocks, low memory), the plan, the stack, the libraries */
     u32 ksize = info.chip_total - info.chip_free + (256u << 10);
-    struct zine_blk *b = 0;
+    struct zine_blk *b = sys_memalloc(ksize);
+    if (!b)
+        die("zine: not enough memory for ZINE's own %s", "block");
+    /* path B: the hunks loaded now, after the volume, the blob and the ZINE block have their fast RAM (else they
+     * could only be had in chip RAM, which is the program's) */
+    if (!whole) {
+        zu32 preseg = 0;
+        struct zh_seg *work = malloc(inf.nhunks * sizeof *work + 8);
+        P.chip_end = info.chip_total;
+        struct zh_ops ops = { pre_alloc, pre_free, 0 };
+        int e = !work ? -ENOMEM : pre_plan(head, &inf);
+        if (!e)
+            e = zh_load_rd(head, hlen, len, &rd, &inf, &ops, work, &preseg);
+        if (e) {
+            dprintf(2, "zine: %s could not be loaded from its file: %s\n", name, e == -ENOMEM ?
+                    "not enough memory in one piece for its hunks" : "its file changed, or a read failed");
+            return 1;
+        }
+        free(work);
+        dprintf(1, "ZINE: %s is loaded from its file now (its file, %u KB, and its hunks, %u KB, do not fit in memory "
+                "together); its file is not kept during the session\n", name, len >> 10, hunks >> 10);
+        struct zv_hdr *vh = (struct zv_hdr *)vol;
+        vh->pre_seg = preseg;
+        vh->nkeep = P.n;
+        for (u32 i = 0; i < P.n; i++)
+            vh->keep[i].addr = P.r[i].base, vh->keep[i].size = P.r[i].size;
+    }
+    sys_close(pfd);
+    free(head);
     for (int tries = 0; tries < 2; tries++) {
-        b = sys_memalloc(ksize);
-        if (!b)
+        if (tries && !(b = sys_memalloc(ksize)))
             die("zine: not enough memory for ZINE's own %s", "block");
         memset(b, 0, sizeof *b);
         b->magic = ZB_MAGIC;
@@ -405,8 +643,10 @@ int main(int argc, char **argv)
         dprintf(1, "ZINE: %s asked to restart the machine; Zenix is back instead\n", name);
         break;
     case ZH_UNSUP: {
-        const char *lib = b->lib < 4 ? libs[b->lib] : "a library";
-        const char *fn = b->lib < 4 ? zl_name(lib, b->lvo) : 0;
+        const char *lib = b->lib < NLIBS ? libs[b->lib] : "a library";
+        const char *fn = b->lib < NLIBS ? zl_name(lib, b->lvo) : 0;
+        if (!fn && b->lib < NLIBS)
+            fn = zl_name40(lib, b->lvo);
         dprintf(1, "ZINE: %s called %s %s%s(offset -%u, from %08x), which ZINE does not support yet: stopped\n",
                 name, lib, fn ? fn : "", fn ? " " : "", b->lvo, b->pc);
         break;
