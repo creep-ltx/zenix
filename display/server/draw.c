@@ -699,3 +699,43 @@ void bm_text(struct bm *b, int x, int y, const u8 *glyph, int fg, int bg, int at
         }
     }
 }
+
+/* a text run of the desktop's font (font.c builds it in fast RAM): rows of mask bytes, mask[0] at the bitmap's byte
+ * column bx0, line y0, ms bytes a row; pixels x0..x1-1 written in pens fg (mask 1) on bg (mask 0). One write a byte
+ * a plane, as bm_text's whole cell: only the two edge bytes of a row are read (chip RAM is slow to read). Clipped to
+ * the bitmap here. */
+void bm_mask(struct bm *b, int bx0, int y0, int rows, const u8 *mask, int ms, int x0, int x1, int fg, int bg)
+{
+    struct rect c = { (s16)x0, (s16)y0, (s16)x1, (s16)(y0 + rows) };
+    if (!b->p || !clip_bm(b, &c) || c.x0 < bx0 * 8 || c.x1 > (bx0 + ms) * 8)
+        return;
+    if (b == &scr)
+        dirty_add(&c);
+    if (use_blit)
+        blit_idle();
+    npix += (u32)(c.x1 - c.x0) * (u32)(c.y1 - c.y0);
+    u8 m1[8], m2[8];
+    for (int k = 0; k < b->depth && k < 8; k++) {
+        int f = fg >> k & 1, bk = bg >> k & 1;
+        m1[k] = f != bk ? 0xFF : 0;
+        m2[k] = bk ? 0xFF : 0;
+    }
+    int q0 = c.x0 >> 3, q1 = (c.x1 - 1) >> 3;
+    u8 lm = (u8)(0xFF >> (c.x0 & 7)), rm = (u8)(0xFF << (7 - ((c.x1 - 1) & 7)));
+    if (q0 == q1)
+        lm &= rm;
+    for (int y = c.y0; y < c.y1; y++) {
+        const u8 *g = mask + (u32)(y - y0) * (u32)ms;   /* g[q - bx0]: the mask's byte for the column byte q */
+        u8 *l = b->p + (u32)y * b->stride;
+        for (int k = 0; k < b->depth; k++, l += b->bpr) {
+            u8 a = m1[k], z = m2[k];
+            int q = q0;
+            l[q] = (u8)((l[q] & ~lm) | (((g[q - bx0] & a) ^ z) & lm));
+            if (q0 == q1)
+                continue;
+            for (q++; q < q1; q++)
+                l[q] = (u8)((g[q - bx0] & a) ^ z);
+            l[q] = (u8)((l[q] & ~rm) | (((g[q - bx0] & a) ^ z) & rm));
+        }
+    }
+}

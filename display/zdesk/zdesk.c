@@ -10,6 +10,13 @@
 
 struct zw zws[NZW];
 int cur_ws = 1, focus_id, bar_id, desk_id, bar_h = 11, depth = 4, verbose;
+struct dpyfont uf;
+int fh = 8;
+int tw(const char *s, int n) { return dpy_textw(&uf, s, n); }
+void utext(int win, int x, int y, int fg, int bg, int attr, const char *s, int n)
+{
+    dpy_textf(win, &uf, x, y, fg, bg, attr, s, n);
+}
 volatile int quit;
 static int ndrag = 0;                  /* the drag mode for DPY_WM_DRAG (DRAG_OUTLINE or 0) */
 static int gad_img[NGAD];
@@ -382,6 +389,18 @@ int main(int argc, char **argv)
     }
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
+    /* the desktop's font: a taller one makes the bar and the title bars taller by the difference (a shorter one keeps
+     * them, the text centred in its room) */
+    dpy_font(DPYF_UI, &uf);
+    fh = uf.height ? uf.height : 8;
+    if (fh > 8) {
+        int d = fh - 8;
+        bar_h += d;
+        if (th.st.title && th.st.title + d <= 64 && th.st.top + d <= 64) {
+            th.st.title = (unsigned char)(th.st.title + d);
+            th.st.top = (unsigned char)(th.st.top + d);
+        }
+    }
     /* the style: the theme's pens as this screen shows them, its gadgets as images */
     struct dpystyle st = th.st;
     if (depth < 4) {
@@ -430,8 +449,8 @@ int main(int argc, char **argv)
     grabs_set(0);
     bar_init();
     bar_draw();
-    dprintf(1, "zdesk: running, theme %s, %d keys, %d icons, drag %s\n", th.name, nkeys, nicons,
-            ndrag ? "outline" : "whole");
+    dprintf(1, "zdesk: running, theme %s, %d keys, %d icons, drag %s, font %s (%d lines: bar %d, title bar %d)\n",
+            th.name, nkeys, nicons, ndrag ? "outline" : "whole", uf.name[0] ? uf.name : "8x8", fh, bar_h, th.st.title);
     while (!quit) {
         struct pollfd p[17];
         int n = 1;

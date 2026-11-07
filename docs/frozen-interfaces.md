@@ -126,6 +126,13 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   0xFF; the answer the mode now, -EBUSY, -ENOMEM, -EINVAL), `EV_SCREEN` 10 (w, h the screen's size, arg the mode),
   libdisplay's `dpy_mode`; `/etc/zdesk/screen` (`mode hires|hires-lace|auto`, `#` comments; read by displayd at its
   start).
+- **D38 "Fonts" (branch fonts, 2026-11-07):** `DPY_FONT_INFO` 16 (a[0] the font: 0 the 8 x 8, `DPYF_UI` 1 the
+  desktop's; a[1] `struct dpyfont`, first size 304: id, height, baseline, xsize, flags `DPYFF_PROP` 1 and
+  `DPYFF_BUILTIN` 2, other (the width past 255), name[32], adv[256]; -EINVAL another font), O_TEXT's font word (0
+  the 8 x 8, 1 the desktop's font, another number the 8 x 8; the text's box x .. x + its width, y .. y + the font's
+  height), `DPY_FONT` with a[0] 0 (the desktop's font); libdisplay's `dpy_font`, `dpy_textw`, `dpy_textf`;
+  `/etc/zdesk/screen`'s `font NAME SIZE` and `font builtin`; `/usr/share/fonts/amiga/` holding AmigaOS bitmap
+  fonts as they are (`NAME.font`, `NAME/SIZE`: the AmigaOS formats, read, not ours).
 - **D25 revision 3 (the demo floppy, branch demo, 2026-11-05):** `/etc/dlogin`'s `autologin NAME SESSION` (SESSION a
   label of its `session` lines; never root; once while `/tmp/.dlogin-autologin` does not exist); `login -s PROGRAM`'s
   PROGRAM may carry arguments split at spaces (at most 7 words in 127 bytes). Not frozen: the demo disk's layout and

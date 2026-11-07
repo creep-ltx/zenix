@@ -1,1 +1,3 @@
 AmigaOS bitmap fonts: copy them here exactly as in FONTS: (NAME.font and the NAME folder).
+The desktop uses one of them when /etc/zdesk/screen has a line "font NAME SIZE" (for example
+"font helvetica 11"), from the next start of the desktop (man zdesk, FILES).

@@ -66,7 +66,7 @@ zenix/
   `/tests/tuitest`).
 - **`display/`, Zenix Desktop (DESIGN D38):** `proto.h` (the display protocol, frozen), `display.h` (libdisplay's
   calls), `server/` (displayd: `displayd.c` the clients, the requests and the input, `win.c` the windows, regions,
-  frames and kept copies, `draw.c` the blitter's and the CPU's drawing, `font.c` Topaz and the Unicode supplement),
+  frames and kept copies, `draw.c` the blitter's and the CPU's drawing, `font.c` Topaz and the Unicode supplement and the desktop's font, `amifont.c` the AmigaOS bitmap font reader),
   `lib/libdisplay.c` (the client library, linked into each client), `test/dpytest.c` (the test client), `zdesk/`
   (the window manager: `zdesk.c` the windows, workspaces and keys, `bar.c` the bar, menus and blocks, `desk.c` the
   icons and About, `conf.c` the settings and themes), `term/` (the terminal window: `term.c`, and `model.c`, which

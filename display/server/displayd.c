@@ -186,6 +186,11 @@ static void default_style(void)
     style.left = style.right = style.bottom = 1;
     style.top = 12;
     style.title = 11;
+    int fh = font_h(font_id(DPYF_UI));  /* a taller desktop font: the title bar as much taller (as zdesk's themes) */
+    if (fh > 8) {
+        style.top = (u8)(style.top + fh - 8);
+        style.title = (u8)(style.title + fh - 8);
+    }
     style.shadow = 1;
     style.border[0] = style.border[1] = 1;
     style.bar[0] = 5; style.bar[1] = 4;
@@ -350,7 +355,10 @@ static const char *const arrow[16] = {
 
 /* ---- screen modes (D38 "Screen modes"): hires or hires interlaced, PAL or NTSC as the console is ---- */
 #define LACE_SPARE (512u << 10)         /* chip RAM left after an interlaced screen: drags, copies, sound, disks */
-/* /etc/zdesk/screen's "mode hires|hires-lace|auto" -> DPYM_LACE or DPYM_HIRES (no file, no line, auto: hires) */
+/* /etc/zdesk/screen's "mode hires|hires-lace|auto" -> DPYM_LACE or DPYM_HIRES (no file, no line, auto: hires); its
+ * "font NAME SIZE" (the desktop's font, docs/d38-desktop.md "Fonts") into font_name and font_size (none: "" and 0) */
+static char font_name[32];
+static int font_size;
 static int mode_file(void)
 {
     static char b[2048];                /* the shipped file with its comments is about 600 bytes (2026-11-07: a 512-byte
@@ -373,12 +381,38 @@ static int mode_file(void)
             l++;
         if (!*l || *l == '#')
             continue;
+        char *e2 = l + strlen(l);
+        while (e2 > l && (e2[-1] == ' ' || e2[-1] == '\t' || e2[-1] == '\r'))
+            *--e2 = 0;
         if (!strcmp(l, "mode hires") || !strcmp(l, "mode auto"))
             mode = DPYM_HIRES;
         else if (!strcmp(l, "mode hires-lace"))
             mode = DPYM_LACE;
-        else
-            dprintf(2, "displayd: /etc/zdesk/screen line %d: not understood (mode hires|hires-lace|auto): %s\n", ln, l);
+        else if (!strcmp(l, "font builtin") || !strcmp(l, "font topaz 8")) {
+            font_name[0] = 0;           /* the 8 x 8: Topaz 8 is the ROM's, already there */
+            font_size = 0;
+        } else if (!strncmp(l, "font ", 5)) {
+            char *n = l + 5, *sz = strrchr(n, ' ');
+            while (*n == ' ' || *n == '\t')
+                n++;
+            int v = 0;
+            if (sz && sz > n) {
+                char *q = sz + 1;
+                while (*q >= '0' && *q <= '9' && v < 1000)
+                    v = v * 10 + (*q++ - '0');
+                if (q == sz + 1 || *q)
+                    v = 0;
+                *sz = 0;
+            }
+            if (v <= 0 || strlen(n) >= sizeof font_name || strchr(n, ' ')) {
+                dprintf(2, "displayd: /etc/zdesk/screen line %d: not understood (font NAME SIZE): %s\n", ln, l);
+                continue;
+            }
+            strcpy(font_name, n);
+            font_size = v;
+        } else
+            dprintf(2, "displayd: /etc/zdesk/screen line %d: not understood (mode hires|hires-lace|auto, font NAME SIZE): %s\n",
+                    ln, l);
     }
     return mode;
 }
@@ -460,6 +494,8 @@ static int screen_up(int con)
     chip_used = 0;
     grabbed = 1;
     font_init(topaz);
+    if (font_name[0])
+        font_ui_load(font_name, font_size);
     /* the fixed part of the Copper list; the part that changes (the planes, and playfield 2 while a window is dragged
      * by the chips) is one of two buffers of a list a field in dynmem, jumped to with COP2LC and COPJMP2 (D38
      * "Dragging with the chips", "Screen modes") */
@@ -935,8 +971,23 @@ static int req(struct umsg *m)
         }
         return 0;
     }
-    case DPY_FONT:
-        return 0 << 16 | 8 << 8 | 8;    /* one font in version 1: the console's, 8 x 8 */
+    case DPY_FONT: {                    /* a[0] 0: the desktop's font; any name: the 8 x 8 (the terminals') */
+        struct dpyfont fi;
+        font_info(a[0] ? 0 : DPYF_UI, &fi);
+        return (int)((u32)fi.id << 16 | (u32)(fi.xsize & 0xFF) << 8 | fi.height);
+    }
+    case DPY_FONT_INFO: {
+        struct dpyfont *d = (struct dpyfont *)a[1];
+        if (a[0] > DPYF_UI)
+            return -EINVAL;
+        if (peer(m, PEER_WR, a[1], DPYFONT_FIRST) < 0 || d->size < DPYFONT_FIRST)
+            return -EFAULT;
+        struct dpyfont fi;
+        font_info((int)a[0], &fi);
+        fi.size = d->size;
+        memcpy(d, &fi, DPYFONT_FIRST);
+        return 0;
+    }
     case DPY_IMAGE: {
         struct dpyimage *d = (struct dpyimage *)a[0];
         if (peer(m, PEER_RD, a[0], DPYIMAGE_FIRST) < 0 || d->size < DPYIMAGE_FIRST)

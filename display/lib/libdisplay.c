@@ -150,7 +150,46 @@ void dpy_xor(int win, int x, int y, int w, int h)
     unsigned short *o = order(win, O_XLINE, 5);
     if (o) { o[0] = (unsigned short)x; o[1] = (unsigned short)y; o[2] = (unsigned short)w; o[3] = (unsigned short)h; }
 }
-void dpy_text(int win, int x, int y, int fg, int bg, int attr, const char *s, int n)
+/* the next code point of n bytes of UTF-8 (displayd's rule: a broken sequence is its first byte, as Latin-1) */
+static unsigned next_cp(const unsigned char *s, int n, int *i)
+{
+    unsigned cp = s[*i];
+    int k = cp < 0x80 ? 1 : cp >= 0xC2 && cp <= 0xDF ? 2 : cp >= 0xE0 && cp <= 0xEF ? 3 : cp >= 0xF0 && cp <= 0xF4 ? 4 : 1;
+    if (k > 1 && *i + k <= n) {
+        for (int j = 1; j < k; j++)
+            if ((s[*i + j] & 0xC0) != 0x80)
+                k = 1;
+        if (k > 1) {
+            cp &= 0x7Fu >> k;
+            for (int j = 1; j < k; j++)
+                cp = cp << 6 | (s[*i + j] & 0x3F);
+        }
+    } else
+        k = 1;
+    *i += k;
+    return cp;
+}
+int dpy_textw(const struct dpyfont *f, const char *s, int n)
+{
+    int w = 0;
+    for (int i = 0; i < n;) {
+        unsigned cp = next_cp((const unsigned char *)s, n, &i);
+        w += !f ? 8 : cp < 256 ? f->adv[cp] : f->other;
+    }
+    return w;
+}
+int dpy_font(int font, struct dpyfont *f)
+{
+    memset(f, 0, sizeof *f);
+    f->size = sizeof *f;
+    int r = dpy_call(DPY_FONT_INFO, (u32)font, (u32)f, 0, 0);
+    if (r < 0) {                        /* an older server: the 8 x 8 */
+        f->id = 0; f->height = 8; f->baseline = 6; f->xsize = 8; f->flags = DPYFF_BUILTIN; f->other = 8;
+        memset(f->adv, 8, sizeof f->adv);
+    }
+    return r;
+}
+void dpy_textf(int win, const struct dpyfont *f, int x, int y, int fg, int bg, int attr, const char *s, int n)
 {
     while (n > 0) {
         int k = n > 200 ? 200 : n;      /* an order is at most 255 words */
@@ -160,17 +199,17 @@ void dpy_text(int win, int x, int y, int fg, int bg, int attr, const char *s, in
         unsigned short *o = order(win, O_TEXT, (unsigned)(7 + (k + 1) / 2));
         if (!o)
             return;
-        o[0] = (unsigned short)x; o[1] = (unsigned short)y; o[2] = 0;
+        o[0] = (unsigned short)x; o[1] = (unsigned short)y; o[2] = (unsigned short)(f ? f->id : 0);
         o[3] = (unsigned short)(fg | bg << 8); o[4] = (unsigned short)attr; o[5] = (unsigned short)k;
         memcpy(&o[6], s, (u32)k);
-        int cols = 0;
-        for (int i = 0; i < k; i++)
-            if (((unsigned char)s[i] & 0xC0) != 0x80)
-                cols++;
-        x += 8 * cols;
+        x += dpy_textw(f, s, k);
         s += k;
         n -= k;
     }
+}
+void dpy_text(int win, int x, int y, int fg, int bg, int attr, const char *s, int n)
+{
+    dpy_textf(win, 0, x, y, fg, bg, attr, s, n);
 }
 void dpy_copy(int win, int sx, int sy, int w, int h, int dx, int dy)
 {

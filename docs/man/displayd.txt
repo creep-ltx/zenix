@@ -28,6 +28,15 @@ DESCRIPTION
     Test, Use and Cancel): the windows are kept on the new screen and
     drawn again, and every program is told the new size (EV_SCREEN).
 
+    Text is drawn in one of two fonts: the 8 x 8 (Topaz from the ROM and
+    the Unicode supplement, the terminals' cells) and the desktop's font,
+    an AmigaOS bitmap font named by /etc/zdesk/screen's "font NAME SIZE"
+    and read once from /usr/share/fonts/amiga when it starts (proportional
+    fonts, kerning, Latin-1; a character the font lacks is drawn by the
+    8 x 8; a colour font in one colour). A damaged or missing font is one
+    line on its standard error and the 8 x 8 is used. Programs ask a
+    font's widths with DPY_FONT_INFO (libdisplay's dpy_font).
+
     Smart refresh: a window that is partly covered keeps a copy of its
     inside in chip RAM, so raising, uncovering and moving it never ask its
     program to draw again. Those copies have a budget of 256 KB; past it a

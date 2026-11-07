@@ -72,6 +72,12 @@ struct zw {
 };
 extern struct zw zws[NZW];
 extern int cur_ws, focus_id, bar_id, desk_id, bar_h, depth, verbose;
+/* the desktop's font (DPY_FONT_INFO DPYF_UI: /etc/zdesk/screen's "font NAME SIZE", or the 8 x 8): the bar, the menus,
+ * the labels; fh its height. Taller than 8 lines, the bar and the title bars grow by the difference */
+extern struct dpyfont uf;
+extern int fh;
+int tw(const char *s, int n);   /* n bytes of UTF-8: their width in it */
+void utext(int win, int x, int y, int fg, int bg, int attr, const char *s, int n);
 extern volatile int quit;
 void own_window(int id, const char *title, int x, int y, int w, int h);   /* one of zdesk's own: placed, focused */
 struct zw *zw_get(int id);

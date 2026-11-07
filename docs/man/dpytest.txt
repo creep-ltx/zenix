@@ -16,6 +16,10 @@ DESCRIPTION
                            a window W x H filled with PEN, its name in
                            it; X Y the place it asks for
         text NAME X Y S    text at X, Y
+        utext NAME X Y S   the same in the desktop's font
+        font               the desktop's font (DPY_FONT_INFO): its id,
+                           height, baseline, width, flags, name and the
+                           widths of A D W . and space
         hole NAME X Y W H  a rectangle of pen 0 inside, kept when drawn
                            again (the chips' drag test)
         pens NAME          a patch of all 16 pens in it, kept when drawn
