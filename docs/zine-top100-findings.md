@@ -337,8 +337,26 @@ not ZINE targets, and are not counted as failures.
 productions round 2 left stopped at a missing call and the 29 with a black screen at the limit (68 productions, some
 in both), **38 now run or end cleanly** (Love, sumea, cathode, superkewl, supercool, Trauma, Klone, Neonsky, Last Train
 To Danzig, switchback, New World Order, Fortocalypse, Rubbur, blumen kraft, Second Rodeo, Colombia, D-Funk, Undated,
-Inside the Machine...). The full rerun of every production that did not run (both machines) is still to be done;
-its numbers replace these.
+Inside the Machine...).
+
+**The full rerun** (all 500 productions, both machines, the same harness; the 68030 pass ran the blocked ones again,
+the 68020 pass the whole list; "before" is round 2's result, "after" is this round's):
+
+- **68EC020, 8 MB** (FS-UAE A1200, 2 MB chip + 8 MB fast): ran or ended cleanly **242 before, 259 after**.
+- **68030 + 68882, 16 MB**: ran or ended cleanly **285 before, 311 after** (where round 2 had no result for a
+  production, its 68020 result is used).
+- **Boot disk, not a ZINE target: 73** (the same on both machines; not counted as failures).
+- **Top 10 blockers on the 68030** (productions each one stopped):
+  1. black screen at the limit, still in precalc or hung (29)
+  2. could not be loaded: not enough memory (18)
+  3. does not fit in memory, file plus hunks bigger than the free RAM (18)
+  4. ended early with return code 1 (8)
+  5. ended early, a data file not found (7)
+  6. could not be loaded from its file: not enough memory in one piece for its hunks (7)
+  7. crashed: line F, MOVE16 (a 68040/060 instruction) (7)
+  8. crashed: illegal instruction (6)
+  9. missing: exec.library `execPrivate33` (-912) (2)
+  10. crashed: line F, another instruction (2)
 
 **The black screens, one by one** (the trace blob: the calls, the names opened, the PC and its bytes every 5 s):
 
