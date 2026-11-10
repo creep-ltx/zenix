@@ -301,7 +301,7 @@ u32 c_OpenDevice(const char *name, u32 unit, u8 *io, u32 flags)
     if (name && timer_base && streq(name, "timer.device")) {
         if (io) {
             *(u32 *)(io + ZO_IORequest_io_Device) = timer_base;
-            *(u32 *)(io + 24) = 0;      /* io_Unit */
+            *(u32 *)(io + 24) = unit <= 4 ? unit : 0;   /* io_Unit: the unit's number (16.13: TimerBeginIO reads it) */
             io[31] = 0;                 /* io_Error */
         }
         return 0;
@@ -3131,7 +3131,22 @@ void c_TimerBeginIO(u8 *io)
     io[8] = 5;                          /* NT_MESSAGE: in progress */
     io[31] = 0;
     if (cmd == TR_ADDREQUEST) {
-        u32 n = tv[0] * hz() + (tv[1] * hz() + 999999u) / 1000000u;
+        /* the units (devices/timer.h; 16.13): MICROHZ 0 and VBLANK 1 a time from now, WAITUNTIL 2 a system time
+         * (GetSysTime's), ECLOCK 3 E-clock ticks from now, WAITECLOCK 4 an E-clock value (ReadEClock's); in frames */
+        u32 unit = *(u32 *)(io + 24), now = ticks(), n;
+        if (unit == 3 || unit == 4) {
+            u32 e = Z.a.eclock_hz / hz();       /* E-clock ticks a frame (ReadEClock's scale) */
+            u32 q = ~0u;                /* (hi:lo) / e, in two 16-bit steps (hi < e < 65536: no 64-bit division) */
+            if (e && tv[0] < e) {
+                u32 a = tv[0] << 16 | tv[1] >> 16, b = (a % e) << 16 | (tv[1] & 0xFFFF);
+                q = (a / e) << 16 | b / e;
+            }
+            n = unit == 3 ? q : q > now ? q - now : 0;
+        } else {
+            n = tv[0] > 0x7FFFFFFFu / hz() ? 0x7FFFFFFFu : tv[0] * hz() + (tv[1] % 1000000u * hz() + 999999u) / 1000000u;
+            if (unit == 2)
+                n = n > now ? n - now : 0;
+        }
         for (int i = 0; i < NTREQ; i++)
             if (!treq[i]) {
                 treq[i] = io;

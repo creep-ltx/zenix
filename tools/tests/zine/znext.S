@@ -76,6 +76,15 @@
 #define LVO_Fault -468
 #define LVO_PrintFault -474
 #define LVO_SumKickData -612
+#define LVO_CreateMsgPort -666
+#define LVO_DeleteMsgPort -672
+#define LVO_CreateIORequest -654
+#define LVO_DeleteIORequest -660
+#define LVO_OpenDevice -444
+#define LVO_CloseDevice -450
+#define LVO_DoIO -456
+#define LVO_ReadEClock -60
+#define LVO_Delay -198
 #define MODE_OLDFILE 1005
 #define SHARED_LOCK -2
 /* the variables (at vars) */
@@ -112,7 +121,9 @@
 #define V_cm    1276
 #define V_dbi   1280
 #define V_rgb   1284            /* GetRGB32's three longs */
-#define V_end   1296
+#define V_io    1296
+#define V_ev    1300            /* two EClockVals */
+#define V_end   1316
 
 .macro CALL lib, lvo
     move.l  \lib(%a4),%a6
@@ -695,6 +706,60 @@ main:
     jsr     LVO_SumKickData(%a6)
     tst.l   %d0
     bne     fail
+    STEP    28                  /* timer.device UNIT_WAITECLOCK: an E-clock time 0.1 s ahead, 2 s into the session */
+    move.l  #100,%d1
+    CALL    V_dos, LVO_Delay
+    move.l  4.w,%a6
+    jsr     LVO_CreateMsgPort(%a6)
+    move.l  %d0,%d5
+    beq     fail
+    move.l  %d0,%a0
+    moveq   #40,%d0
+    jsr     LVO_CreateIORequest(%a6)
+    move.l  %d0,V_io(%a4)
+    beq     fail
+    lea     tdname(%pc),%a0
+    moveq   #4,%d0              /* UNIT_WAITECLOCK */
+    move.l  V_io(%a4),%a1
+    moveq   #0,%d1
+    jsr     LVO_OpenDevice(%a6)
+    tst.l   %d0
+    bne     fail
+    move.l  V_io(%a4),%a1
+    move.l  20(%a1),%a6         /* io_Device: timer's base */
+    lea     V_ev(%a4),%a0
+    jsr     LVO_ReadEClock(%a6)
+    move.l  %d0,%d4             /* E-clock ticks a second */
+    divu.l  #10,%d0
+    move.l  V_io(%a4),%a1
+    move.l  V_ev(%a4),32(%a1)
+    move.l  V_ev+4(%a4),%d1
+    add.l   %d0,%d1
+    move.l  %d1,36(%a1)
+    bcc.s   1f
+    addq.l  #1,32(%a1)
+1:  move.w  #9,28(%a1)          /* TR_ADDREQUEST */
+    move.l  4.w,%a6
+    jsr     LVO_DoIO(%a6)
+    move.l  V_io(%a4),%a1
+    move.l  20(%a1),%a6
+    lea     V_ev+8(%a4),%a0
+    jsr     LVO_ReadEClock(%a6)
+    move.l  V_ev+12(%a4),%d0
+    sub.l   V_ev+4(%a4),%d0     /* the ticks it took */
+    move.l  %d4,%d1
+    divu.l  #20,%d1
+    cmp.l   %d1,%d0             /* at least 0.05 s (a frame's grain) */
+    bcs     fail
+    cmp.l   %d4,%d0             /* under a second */
+    bcc     fail
+    move.l  4.w,%a6
+    move.l  V_io(%a4),%a1
+    jsr     LVO_CloseDevice(%a6)
+    move.l  V_io(%a4),%a0
+    jsr     LVO_DeleteIORequest(%a6)
+    move.l  %d5,%a0
+    jsr     LVO_DeleteMsgPort(%a6)
     SAY     m_more
     /* ---- intuition ---- */
     STEP    16                  /* WBenchToFront (none: FALSE), ActivateWindow, Remember lists freed whole */
@@ -914,9 +979,10 @@ m_dos:    .asciz "znext: Lock, Examine, ExNext, NameFromLock, ParentDir, Current
 m_gfx:    .asciz "znext: GetVPModeID, ModeNotAvailable, VideoControl, QueryOverscan, BltClear, sprites, Draw, DrawBorder answered\n"
 m_int:    .asciz "znext: intuition's Remember lists, requester and alert answered\n"
 m_font:   .asciz "znext: diskfont opened fonts from FONTS: and the program's own folder; AvailFonts listed them\n"
-m_more:   .asciz "znext: the second batch (pixels, ColorMaps, a View of its own, DBufInfo, FilePart, Fault) answered\n"
+m_more:   .asciz "znext: the second batch (pixels, ColorMaps, a View of its own, DBufInfo, FilePart, Fault, timer units) answered\n"
 m_fail:   .asciz "znext: a step failed\n"
 p_part:   .asciz "a/b/c.txt"
+tdname:   .asciz "timer.device"
 s_datasub: .asciz "Data/Sub"
 s_x:      .asciz "x"
 s_fault:  .asciz "x: object not found"

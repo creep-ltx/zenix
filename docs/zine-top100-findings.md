@@ -321,3 +321,43 @@ the machine itself (no FPU: 37; hunks larger than its memory: 47; not enough mem
 bigger machine the next ZINE gaps are graphics `GetVPModeID` (9), dos `Lock` (6), exec `Allocate` (6),
 intuition `QueryOverscan` (5), graphics `VideoControl` (4), intuition `RethinkDisplay` (3), 4 MOVE16 (68040/060
 only), and 29 black screens at the limit (still in precalc, or hung: not yet looked at one by one).
+
+## Round 3 (2026-11-10, branch zine2, d29 16.13)
+
+Fixed in this round: the calls the bigger machine stopped at after round 2 and their neighbours (exec `Allocate`,
+dos `Lock` and the lock and directory calls, `DateStamp`, `FilePart`, `PrintFault`; graphics `GetVPModeID`,
+`VideoControl`, `BltClear`, `ScrollVPort`, `FreeSprite`, `GetColorMap`, `WaitBOVP`, `AllocDBufInfo`, `WritePixel`
+and a View of the program's own; intuition `QueryOverscan`, `RethinkDisplay`, `RemakeDisplay`, `MoveScreen`,
+`WBenchToFront`, `ActivateWindow`, `DisplayAlert`, `EasyRequestArgs`, `AllocRemember`, `DrawBorder`; exec
+`FindSemaphore`, `SumKickData`), diskfont.library with Zenix's /usr/share/fonts/amiga, a disk's name taken as the
+program's folder, the math libraries on the FPU, timer.device's units. Disk-image-only productions are boot disks,
+not ZINE targets, and are not counted as failures.
+
+**Targeted reruns** (the 68030 + 68882, 16 MB machine, the same harness, limits of 50-120 s of PC time): of the 47
+productions round 2 left stopped at a missing call and the 29 with a black screen at the limit (68 productions, some
+in both), **38 now run or end cleanly** (Love, sumea, cathode, superkewl, supercool, Trauma, Klone, Neonsky, Last Train
+To Danzig, switchback, New World Order, Fortocalypse, Rubbur, blumen kraft, Second Rodeo, Colombia, D-Funk, Undated,
+Inside the Machine...). The full rerun of every production that did not run (both machines) is still to be done;
+its numbers replace these.
+
+**The black screens, one by one** (the trace blob: the calls, the names opened, the PC and its bytes every 5 s):
+
+| Production | What it was | ZINE's fault? |
+|---|---|---|
+| Love, sumea (Virtual Dreams) | Open of `Love:...`/`sumea:...` (their disk's name) in an endless retry | yes: fixed (the disk's name is its folder); Love plays to its end |
+| cathode (Unique), superkewl, supercool (Supergroup); Trauma (Unique) | precalc through the math libraries, in software on a 68882 machine | yes: fixed (FPU); all end cleanly |
+| Second Rodeo, Colombia, D-Funk, Undated, Doodle-Doo, Inside the Machine | precalc longer than the 68020 run's limit | no: they run on the 68030 (Second Rodeo after 4,067 s emulated) |
+| Software Failure's 7 intros (Electromathesis, Antelogium, Insomniac Contemplation, Ephemeral Permanence, Dual Panoply, Binary Roads, Blue Artifact) | "Please wait while I count electric sheep...": precalc in their own integer loops (interrupts off after Disable), still going at 120 s | no: precalc made for 68060s |
+| Point of No Return, Cruisin', Bantam, Hex Junkie, Tunnel Vision, 4k-Wavy | their own decrunch or precalc loops with their own interrupts | no (as far as seen): still busy at the limit |
+| Fetish (Ozone) | OldOpenLibrary("CrM.library") in an endless retry: the folder does not carry it | no: needs CrM.library in its LIBS |
+| Beam Riders, Signals (Haujobb/Ghostown), Serenity (Elude), Deep, lux aeterna | loading hundreds of files and precalc, with their music or data left out of the volume (7-12 MB) | no: the test machine's memory |
+| J (Ephidrena) | waits in `Wait` for a signal its own interrupt code should send (after a CIA resource vector and a device request) | not settled |
+| Lola (Fresh Prince) | its own loop right after `AllocAbs`, interrupts on | not settled |
+| total triple trouble (Rebels) | took the machine at once (no calls at all) | not settled |
+| killer (Carillon & Cyberiad) | now a crash: illegal instruction | not settled |
+
+**What blocks the rest** (of the reruns): data left out of the volume on this machine (Elude's demos, 7-24 MB of
+`.dat`/`.wav`), 4 MOVE16 (68040/060 only), dos `CreateNewProc` (a second task: Dust), graphics `UCopperListInit`
+(user Copper lists: The Morning Trip), a call through a null base (Gift), cybergraphics.library (Shake Off The Dust),
+and the black screens above that are not ZINE's. Alcatraz's Odyssey shows an alert "Execbase in chip memory !" and
+quits: ZINE keeps ExecBase at $800 by design.

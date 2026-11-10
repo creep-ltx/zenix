@@ -1671,6 +1671,9 @@ autodocs, include and `.fd` files for names, numbers and documented behaviour; n
   volume's budget and its 500 entries; else it says they were left out. A font that is not found is named in the
   program's output with its size and where to put it ("ZINE: NAME needs xen.font size 8: copy it into
   /usr/share/fonts/amiga ..."); a damaged one with its reason.
+- **timer.device's units:** a request's unit was not looked at (every TR_ADDREQUEST a time from now); now
+  UNIT_WAITUNTIL is a system time (GetSysTime's), UNIT_ECLOCK E-clock ticks from now and UNIT_WAITECLOCK an E-clock
+  value (ReadEClock's), as devices/timer.h has them (`OpenDevice` keeps the unit's number in `io_Unit`).
 - **The math libraries on the FPU** (bfpu.S): on a machine with an FPU (AttnFlags AFF_68881, AFF_68882 or AFF_FPU40)
   the arithmetic and conversions of bmath.c's soft float (libgcc's `__adddf3` ... `__fixsfsi`, 14 calls, through ld's
   `--wrap`) are one FPU instruction each (FADD, FSUB, FMUL, FDIV, FMOVE; FMOVE.L under round-to-zero for the
@@ -1692,7 +1695,7 @@ scope), a font file over 256 KB or taller than 64 lines (the reader's limits: re
 `zfix17` in a folder with Data/Sub/f.txt and a Fonts folder of its own) calls each of the above and checks the answer:
 Allocate/Deallocate on a MemHeader of its own, Lock/Examine/ExNext/NameFromLock/ParentDir, a name relative to
 CurrentDir opened and read, a disk's name found as its folder (T: not), WritePixel/ReadPixel, a ColorMap's colours, a
-View of its own loaded and merged, ChangeVPBitMap, FilePart/PathPart/AddPart, Fault and PrintFault's texts, GetVPModeID $29000, VideoControl's tags read back, QueryOverscan's rectangles, BltClear,
+View of its own loaded and merged, ChangeVPBitMap, a UNIT_WAITECLOCK request 0.1 s ahead (0.05-1 s), FilePart/PathPart/AddPart, Fault and PrintFault's texts, GetVPModeID $29000, VideoControl's tags read back, QueryOverscan's rectangles, BltClear,
 the pixels Draw, DrawBorder and PolyDraw set, the Remember list freed whole (AvailMem as before), the requester's and
 the alert's lines; OpenDiskFont of a font in /usr/share/fonts/amiga (the proportional widths TextLength gives), of
 one in the program's own Fonts folder, a missing one (the line), a damaged one (refused, its reason), a size the font
