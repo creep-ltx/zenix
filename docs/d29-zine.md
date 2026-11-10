@@ -1703,7 +1703,7 @@ lacks (the nearest, said; refused with FPF_DESIGNED); AvailFonts. On the 68040 (
 math checks pass on the FPU path. The Top 100 productions these calls stopped were run again
 (zine-top100-findings.md "Round 3").
 
-Sizes (the 68020-60 build, *measured*): the blob image 76,232 -> 97,176 bytes (memory 85,768 -> 109,160: the locks and
+Sizes (the 68020-60 build, *measured*): the blob image 76,232 -> 97,328 bytes (memory 85,768 -> 109,316: the locks and
 directories about 3 KB, the display and intuition calls 5 KB, diskfont 2.5 KB and the desktop's font reader 4.4 KB,
 the FPU wrappers 0.4 KB); `/bin/zine` 38,432 -> 40,152 bytes (memory 44,808 -> 46,932: the fonts' walk and the
 volume's lookups); the kernel unchanged (182,820 bytes). ZINE is not on the DD demo floppy; the floppy's displayd
