@@ -116,10 +116,10 @@ static u32 load_blob(u32 *size)
 }
 
 /* ZINE's own libraries by their number in the block's lib (kernel/zine.h): the four, then those of d29 16.12 */
-#define NLIBS 11
+#define NLIBS 12
 static const char *const libs[NLIBS] = { "exec.library", "graphics.library", "dos.library", "intuition.library",
     "utility.library", "mathffp.library", "mathtrans.library", "mathieeedoubbas.library",
-    "mathieeedoubtrans.library", "mathieeesingbas.library", "mathieeesingtrans.library" };
+    "mathieeedoubtrans.library", "mathieeesingbas.library", "mathieeesingtrans.library", "diskfont.library" };
 const char *zl_name40(const char *lib, unsigned offset);    /* user/zine/lvo40.c: the NDK 3.2's names */
 
 static const char *vecname(u32 v)
@@ -166,7 +166,10 @@ static struct {
     int noarch;                         /* pass 2: archives and disk images left out */
     u32 thr;                            /* pass 2: files larger than this left out (16.12) */
     u32 left, leftbytes;                /* pass 2: files left out by the two rules above */
+    int fonts;                          /* the walk of Zenix's Amiga fonts (16.13): at the top only NAME.font files and
+                                         * folders; merged into the volume's FONTS, the program's own files first */
 } W;
+#define FONTDIR "/usr/share/fonts/amiga"
 #define ZA_ARCH 0x80000000u
 
 /* an archive or a disk image by its name's end: what a production's folder carries as it was downloaded, never a
@@ -208,7 +211,7 @@ static void walk(u32 plen, u32 parent, int depth)
     if (sys_stat(W.path[0] ? W.path : "/", &st) || !may_read(&st) || (dfd = sys_open(W.path[0] ? W.path : "/", 0)) < 0)
         return;
     while (!W.over && sys_readdir(dfd, &de) > 0) {
-        if (de.name[0] == '.' || (!depth && !strcmp(de.name, name)))
+        if (de.name[0] == '.' || (!depth && !W.fonts && !strcmp(de.name, name)))
             continue;
         u32 l = strlen(de.name);
         if (plen + 1 + l >= sizeof W.path) {
@@ -224,6 +227,14 @@ static void walk(u32 plen, u32 parent, int depth)
         int dir = (st.mode & S_IFMT) == S_IFDIR;
         if (!dir && (st.mode & S_IFMT) != S_IFREG)
             continue;
+        if (W.fonts && !depth && !dir && (l < 6 || strcmp(de.name + l - 5, ".font")))
+            continue;                   /* the fonts' folder: NAME.font and NAME/ only (not its README) */
+        zu32 have;
+        if (W.fonts && W.vol && !zv_find(W.vol, parent, de.name, &have)) {
+            if (dir && zv_ent(W.vol, have)->dir)
+                walk(plen + 1 + l, have, depth + 1);    /* the program's own folder of that font: merged */
+            continue;                   /* a file the program brings itself comes first */
+        }
         if (dir && depth + 1 >= ZV_DEPTH) {
             if (W.vol)
                 dprintf(2, "zine: %s left out: deeper than %u directories\n", W.path + W.top, ZV_DEPTH);
@@ -505,11 +516,32 @@ int main(int argc, char **argv)
                 "a program that loads files may not find them; give it a directory of its own\n", name);
         nent = 0, vbytes = 0;
     }
+    /* Zenix's Amiga fonts (16.13): /usr/share/fonts/amiga goes into the volume's FONTS (diskfont's OpenDiskFont looks
+     * there), when it fits in what the program's files leave of the budget and the 500 entries; else left out, said */
+    u32 fn = 0, fbytes = 0;
+    static char wpath[sizeof W.path];
+    {
+        u32 n0 = W.n, b0 = W.bytes, *sz0 = W.sz, top0 = W.top;
+        memcpy(wpath, W.path, sizeof wpath);
+        int over0 = W.over;
+        W.n = W.bytes = 0, W.over = 0, W.sz = 0, W.fonts = 1;
+        strcpy(W.path, FONTDIR);
+        W.top = sizeof FONTDIR;
+        walk(sizeof FONTDIR - 1, 0, 0);
+        fn = W.n, fbytes = W.bytes;
+        if (fn && (W.over || !zv_fits(nent + fn + 2, vbytes + fbytes, budget))) {
+            dprintf(2, "zine: the Amiga fonts in " FONTDIR " (%u KB) are left out: ZINE's volume has no room for them "
+                    "on this machine now; a program that opens one of them will not find it\n", (fbytes + 1023) >> 10);
+            fn = fbytes = 0;
+        }
+        W.n = n0, W.bytes = b0, W.sz = sz0, W.top = top0, W.over = over0, W.fonts = 0;
+        memcpy(W.path, wpath, sizeof wpath);
+    }
     u32 pf = whole ? len : 0;           /* the program's file in the volume */
-    u32 vsize = zv_need(nent + 2, vbytes + pf, nent + 1);
+    u32 vsize = zv_need(nent + fn + 3, vbytes + fbytes + pf, nent + fn + 1);
     u8 *data;
     W.vol = sys_memalloc(vsize);
-    if (!W.vol || zv_init(W.vol, vsize, nent + 2, "ZINE"))
+    if (!W.vol || zv_init(W.vol, vsize, nent + fn + 3, "ZINE"))
         die("zine: not enough memory for %s", name);
     if (whole) {                        /* path A: the file read straight into the volume */
         if (zv_add(W.vol, 0, name, 0, st.mode, st.mtime, len, &data) < 0)
@@ -540,7 +572,23 @@ int main(int argc, char **argv)
         if (W.left > 5)
             dprintf(2, "zine: and %u more files left out (%u KB together)\n", W.left - 5, (W.leftbytes + 1023) >> 10);
     }
+    if (fn) {                           /* the fonts into FONTS (the program's own, or one made for them) */
+        zu32 fd;
+        int e = zv_find(W.vol, 0, "FONTS:", &fd);
+        if (e)
+            e = zv_add(W.vol, 0, "Fonts", 1, S_IFDIR | 0755, sys_time(), 0, 0);
+        else
+            e = (int)fd;
+        if (e > 0) {
+            W.fonts = 1, W.thr = 0xFFFFFFFFu, W.noarch = 0, W.left = 0;
+            strcpy(W.path, FONTDIR);
+            W.top = sizeof FONTDIR;
+            walk(sizeof FONTDIR - 1, (u32)e, 0);
+            W.fonts = 0;
+        }
+    }
     u8 *vol = W.vol;
+    ((struct zv_hdr *)vol)->now = sys_time();  /* dos DateStamp's clock (16.13) */
     u32 bsize, blob = load_blob(&bsize);
     /* the ZINE block: the saved chip RAM (Zenix's used chip blocks, low memory), the plan, the stack, the libraries */
     u32 ksize = info.chip_total - info.chip_free + (256u << 10);

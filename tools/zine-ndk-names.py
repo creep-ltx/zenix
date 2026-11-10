@@ -3,7 +3,7 @@
 # ZINE's second offset table (docs/d29-zine.md 16.12): the function names user/zine/lvo.c (the RKRM's V37 tables)
 # does not have, from the NDK 3.2's .fd files (names and numbers only; owner answer 4, 2026-10-30): exec, dos,
 # graphics and intuition past their V37 ends, and the libraries ZINE has of its own beyond the four (utility, the
-# math libraries). So `zine` names a call such as graphics -888 (SetChipRev) when it stops a program there.
+# math libraries, diskfont: 16.13). So `zine` names a call such as graphics -888 (SetChipRev) when it stops a program there.
 #   tools/zine-ndk-names.py FDDIR OUT.c      write user/zine/lvo40.c
 #   tools/zine-ndk-names.py check FDDIR      the committed lvo40.c is what FDDIR makes
 # FDDIR: the NDK 3.2's FD folder (ZENIX_NDK_FD in the tests; the owner's private notes say where).
@@ -13,7 +13,7 @@ LIBS = [("exec", "exec.library"), ("dos", "dos.library"), ("graphics", "graphics
         ("intuition", "intuition.library"), ("utility", "utility.library"), ("mathffp", "mathffp.library"),
         ("mathtrans", "mathtrans.library"), ("mathieeedoubbas", "mathieeedoubbas.library"),
         ("mathieeedoubtrans", "mathieeedoubtrans.library"), ("mathieeesingbas", "mathieeesingbas.library"),
-        ("mathieeesingtrans", "mathieeesingtrans.library")]
+        ("mathieeesingtrans", "mathieeesingtrans.library"), ("diskfont", "diskfont.library")]
 LAST = 1200                         # offsets past V40 (3.1.4/3.2 additions) are left out: ZINE reports V40
 # the first offset lvo.c does not name (its V37 tables end there): the four libraries' names start after it
 FROM = {"exec": 786, "dos": 990, "graphics": 828, "intuition": 732}

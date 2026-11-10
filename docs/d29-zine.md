@@ -1608,6 +1608,105 @@ every prefix, a read that fails anywhere), the planner's kept blocks, the Latin-
 
 Sizes (the 68020-60 build): the blob image 46,772 -> 76,232 bytes (memory 52,744 -> 85,768: the math libraries with gcc's soft float about 16 KB, utility.library, ReadArgs, the font and text about 8 KB, the stubs 4 KB); `/bin/zine` 30,872 -> 38,432 bytes (memory 33,132 -> 44,808: the NDK's names 3 KB, the file reader's 4 KB window, the volume's rules); the hunk core 5,225 -> 5,956 bytes at -Os; the kernel unchanged (183,508 bytes).
 
+### 16.13 The Top 100's third round: the next calls, disk fonts, the black screens (2026-11-10, branch zine2)
+
+The calls the 68030 + 68882 run of the Top 100 stopped at after 16.12 ([zine-top100-findings.md](zine-top100-findings.md)
+"Round 3"), and their neighbours, as the owner decided (*read*: the RKRM Includes and Autodocs, the NDK 3.2's
+autodocs, include and `.fd` files for names, numbers and documented behaviour; nothing from AmigaOS code):
+
+- **exec** `Allocate`/`Deallocate` (a program's own MemHeader and chunk list: the first free block large enough, 8-byte
+  blocks, a block given back only inside the header's bounds; blob.c shares the chunk code with AllocMem/FreeMem),
+  `FindSemaphore`, `SumKickData` (0: ZINE has no KickMem or KickTag lists).
+- **dos locks and directories** (blibs.c): `Lock`, `UnLock`, `DupLock`, `Examine`, `ExNext`, `Info`, `CurrentDir`,
+  `ParentDir`, `DupLockFromFH`, `OpenFromLock`, `ParentOfFH`, `ExamineFH`, `NameFromLock`, `SameLock` (and `FilePart`,
+  `PathPart`, `AddPart`; `Fault` and `PrintFault` with the texts of the commonest codes, else "error N"), on the volume's
+  files and folders, the memory files (16.9) and RAM:'s top. A lock is a FileLock (20 bytes) in the program's
+  memory; ZINE keeps which it gave (64 at once), so a lock it never gave is ERROR_INVALID_LOCK. `ExNext` lists a
+  folder of the volume as it was at the start (a file written during the session is kept but not listed there;
+  RAM:'s top lists the memory files written there), then ERROR_NO_MORE_ENTRIES. `Info` says the volume is
+  write-protected (its writes go to memory). `CurrentDir` to a folder of the volume or RAM: makes every name without
+  a device relative to it (turned into "SYS:folder/name" before anything else looks at it, so the memory files'
+  keys stay one per file). `DateStamp`: Zenix's clock at the hand-over (`zine` puts it in the volume's header,
+  `ZV_VERSION` 3) and the frames since.
+- **A disk's name the program asks for** ("Love:FLT-Lve2.Skl", "sumea:beams.sum": Virtual Dreams' demos open their files
+  on the volume they came on, and wait for it forever when it is not there): a volume or device ZINE does not have is
+  taken as the program's own folder when the path is there, as "Assign Love: <its folder>" would make it under
+  AmigaOS; said once a name. Not T:, ENV:, ENVARC:, CLIPS: or the stream devices. This answers the open item that
+  the volume is named "ZINE", not after the program's disk, for the demos that name their disk.
+- **graphics** `GetVPModeID` (ZINE's screens keep their display ID in a V39 ColorMap's `cm_VPModeID`, with `cm_vp`;
+  another ViewPort's from its `vp_Modes` and the PAL or NTSC monitor), `ModeNotAvailable` (the native PAL/NTSC modes
+  0, other monitors DI_AVAIL_NOMONITOR), `VideoControl` (border blank and border sprites, the sprite resolution, the
+  playfields' sprite priority, the sprites' colour bases: BPLCON2-4 of the shown screen; the ColorMap's ViewPort and
+  mode ID; VTAG_IMMEDIATE's flag cleared; a _GET tag answered in its own ti_Data; the genlock tags taken and
+  changing nothing), `ScrollVPort`, `MakeVPort`, `MrgCop` (the shown screen shown again; every frame the screen's
+  planes now come from its ViewPort's RasInfo: its BitMap, if the program set another, and RxOffset/RyOffset, the
+  part of RxOffset below a word as BPLCON1's delay), `BltClear` (by the processor after the blitter, only in the
+  program's memory), `GetSprite`/`FreeSprite` (numbers handed out), `Draw`, `PolyDraw`, `WritePixel`, `ReadPixel`,
+  `WaitBOVP` (the beam below the ViewPort, at most a frame), the V39 double buffers `AllocDBufInfo`, `FreeDBufInfo`
+  and `ChangeVPBitMap` (the ViewPort's RasInfo shows the BitMap; the two messages replied at once, as
+  ChangeScreenBuffer's), ColorMaps (`GetColorMap`: a V39 one with its colour and low-nibble tables; `FreeColorMap`,
+  `GetRGB4`, `SetRGB4CM`, `GetRGB32`, `SetRGB32CM`), `InitView`, `InitVPort`, and **a View of the program's own**:
+  `LoadView` of a View that is not intuition's shows its first ViewPort as ZINE shows a screen (a screen of ZINE's
+  own made for it: the ViewPort's BitMap, Modes and height; its RasInfo's offsets and BitMap every frame; the
+  ColorMap's colours), `MrgCop` and `MakeVPort` show it again; until 16.13 such a View stopped the program. User
+  Copper lists (`UCopperListInit`, `CMove`, `CWait`) are not shown yet.
+- **intuition** `QueryOverscan` (ZINE's own rectangles: text 320 x 256 lowres pixels (NTSC 200), standard 352 x 283 from
+  -16, -14, max and video 368 x 283 from -24, -14, scaled to the mode; under AmigaOS the user's Overscan preferences
+  decide them), `RethinkDisplay`, `RemakeDisplay`, `MakeScreen` (the shown screen shown again), `MoveScreen` (ZINE's
+  screens stay at the top), `WBenchToFront`/`WBenchToBack` (FALSE: no Workbench), `ActivateWindow`,
+  `AllocRemember`/`FreeRemember`, `DrawBorder`, `EasyRequestArgs` (the requester's title, text and gadgets, its
+  format strings filled as RawDoFmt does, in the program's output; the leftmost gadget chosen: 1, or 0 when there is
+  one), `DisplayAlert` (its text in the output; FALSE, as the right mouse button).
+- **Disk fonts: diskfont.library** (bfont.c; the library's number 11 in the block's `lib`). `OpenDiskFont` looks for a
+  font in memory of that name and size (`OpenFont` now finds every font on graphics' list, nearest size), else
+  `NAME.font` in FONTS: (a name with a path from there, else from FONTS: by its last part): the contents file is read
+  by the desktop's reader (display/server/amifont.c `af_contents`), the font file checked by `af_load` in a check-only
+  form (every length, offset, relocation and glyph; a hostile file gives its reason and nothing else), then loaded
+  with LoadSeg as AmigaOS loads it and its TextFont named and put on graphics' list. A size the font lacks: the
+  nearest it lists is given and said (AmigaOS would scale a bitmap), unless FPF_DESIGNED is asked. `Text` and
+  `TextLength` now draw proportional fonts (CharSpace and CharKern, glyphs up to 64 pixels wide). `AvailFonts` lists
+  the memory fonts and every size of FONTS:'s `.font` files. Where the fonts come from: `zine` puts Zenix's
+  `/usr/share/fonts/amiga` (NAME.font files and their folders, as in FONTS:) into the volume's FONTS folder,
+  merged with the program's own (its own files first), when they fit in what the program's files leave of the
+  volume's budget and its 500 entries; else it says they were left out. A font that is not found is named in the
+  program's output with its size and where to put it ("ZINE: NAME needs xen.font size 8: copy it into
+  /usr/share/fonts/amiga ..."); a damaged one with its reason.
+- **The math libraries on the FPU** (bfpu.S): on a machine with an FPU (AttnFlags AFF_68881, AFF_68882 or AFF_FPU40)
+  the arithmetic and conversions of bmath.c's soft float (libgcc's `__adddf3` ... `__fixsfsi`, 14 calls, through ld's
+  `--wrap`) are one FPU instruction each (FADD, FSUB, FMUL, FDIV, FMOVE; FMOVE.L under round-to-zero for the
+  conversion to int, as the 68040 has no FINTRZ; FP0 kept for the caller); without one, libgcc as before. The black
+  screens of Unique's cathode and Supergroup's superkewl and supercool were their precalc in ZINE's soft-float
+  math on a machine with a 68882.
+- **The trace build** (tests only): its table of traced slots held 256, fewer than the slots ZINE had since 16.12 (it
+  wrote past its end); now 512, and a slot past it is left untraced. It also writes `P` and the interrupted PC every
+  250 frames from the vertical blank (when the program has not taken level 3 itself) and `C` with an address in the
+  blob's code, so a run that shows nothing can be told apart: in a ZINE call, in the program's own loop, or no
+  vertical blank of ZINE's at all; `Q` and the 16 bytes at that PC when it is the program's; `O` and each name Open is
+  asked for; the program's output on the serial line as it is written. (Its slot table is searched on every call:
+  a program that calls the math libraries a million times runs far slower in the trace build.)
+
+Not done: the calls still missing (each stop line names it), disk images and 68040/060-only productions (out of
+scope), a font file over 256 KB or taller than 64 lines (the reader's limits: refused, said).
+
+*Verified* in FS-UAE (`tools/zine-emu-test.sh`, A1200 68020 4 MB fast): `znext` (tools/tests/zine/znext.S, run by
+`zfix17` in a folder with Data/Sub/f.txt and a Fonts folder of its own) calls each of the above and checks the answer:
+Allocate/Deallocate on a MemHeader of its own, Lock/Examine/ExNext/NameFromLock/ParentDir, a name relative to
+CurrentDir opened and read, a disk's name found as its folder (T: not), WritePixel/ReadPixel, a ColorMap's colours, a
+View of its own loaded and merged, ChangeVPBitMap, FilePart/PathPart/AddPart, Fault and PrintFault's texts, GetVPModeID $29000, VideoControl's tags read back, QueryOverscan's rectangles, BltClear,
+the pixels Draw, DrawBorder and PolyDraw set, the Remember list freed whole (AvailMem as before), the requester's and
+the alert's lines; OpenDiskFont of a font in /usr/share/fonts/amiga (the proportional widths TextLength gives), of
+one in the program's own Fonts folder, a missing one (the line), a damaged one (refused, its reason), a size the font
+lacks (the nearest, said; refused with FPF_DESIGNED); AvailFonts. On the 68040 (FS-UAE's, with its FPU) `zcalls`'
+math checks pass on the FPU path. The Top 100 productions these calls stopped were run again
+(zine-top100-findings.md "Round 3").
+
+Sizes (the 68020-60 build, *measured*): the blob image 76,232 -> 97,176 bytes (memory 85,768 -> 109,160: the locks and
+directories about 3 KB, the display and intuition calls 5 KB, diskfont 2.5 KB and the desktop's font reader 4.4 KB,
+the FPU wrappers 0.4 KB); `/bin/zine` 38,432 -> 40,152 bytes (memory 44,808 -> 46,932: the fonts' walk and the
+volume's lookups); the kernel unchanged (182,820 bytes). ZINE is not on the DD demo floppy; the floppy's displayd
+carries the font reader's check-only form (a few bytes): the DD floppy was already 512 bytes over before this
+branch (main at 064777e: `make demo-dd` refuses it, packed stream 882,711 bytes; 882,790 here).
+
 ## 17. Questions for the owner (what ZINE should be)
 
 1. Owner answer 1 allowed "the Amiga's own console or through Wasabi". Typing into the console through Wasabi counts

@@ -481,6 +481,12 @@ u32 c_RawDoFmt(const char *f, const u8 *data, u32 proc, u32 a3)
 /* ---- dos (5.4, the first set): the output into the ring `zine` shows after the session ---- */
 u32 zb_out(const char *s, u32 n)
 {
+    extern u32 zb_tracing;
+    for (u32 i = 0; zb_tracing && i < n; i++) {     /* the trace build: the output on the serial line as it comes */
+        while (!(CUSTOM(0x018) & 0x2000))
+            ;
+        CUSTOM(0x030) = (u16)(0x100 | (u8)s[i]);
+    }
     struct zine_blk *b = Z.blk;
     u32 k = n < ZB_OUTMAX - b->outlen ? n : ZB_OUTMAX - b->outlen;
     zmemcpy(b->out + b->outlen, s, k);
@@ -632,15 +638,59 @@ static int key_of(const char *path, char *k)
     return za_key(path, ((const struct zv_hdr *)Z.a.vol)->volname, k, ZPATH);
 }
 
+/* dos CurrentDir (16.13): a name without a device is relative to the current directory, which a program may set
+ * with CurrentDir to one of the volume's directories or to RAM:. Such a name is turned into one from the volume's top
+ * ("SYS:dir/sub/name", or "RAM:name") before anything else looks at it; 0 the volume's top, as ZINE starts. */
+static u32 cd_ent;                      /* the volume's directory entry, or CD_RAM */
+#define CD_RAM 0xFFFFFFFFu
+static char cdbuf[ZPATH];
+static const char *cd_path(const char *name)
+{
+    if (!cd_ent || !name)
+        return name;
+    for (const char *c = name; *c; c++)
+        if (*c == ':')
+            return name;
+    char t[ZPATH];
+    u32 n = 0, k = slen(name);
+    if (cd_ent == CD_RAM) {
+        zmemcpy(t, "RAM:", 4);
+        n = 4;
+    } else {
+        const void *vol = (const void *)Z.a.vol;
+        u32 pos = ZPATH;                /* the directories' names from the back */
+        for (u32 e = cd_ent, d = 0; e && d < 64; e = zv_ent(vol, e)->parent, d++) {
+            const struct zv_ent *en = zv_ent(vol, e);
+            if (en->namelen + 1u > pos)
+                return name;
+            pos -= en->namelen + 1;
+            zmemcpy(t + pos, en->name, en->namelen);
+            t[pos + en->namelen] = '/';
+        }
+        if (pos < 4)
+            return name;
+        zmemcpy(t, "SYS:", 4);
+        n = 4;
+        for (u32 i = pos; i < ZPATH; i++)
+            t[n++] = t[i];
+    }
+    if (n + k + 1 > ZPATH)
+        return name;
+    zmemcpy(t + n, name, k + 1);
+    zmemcpy(cdbuf, t, n + k + 1);
+    return cdbuf;
+}
+
 /* where a path names a file now: 1 a memory file (*r), 2 a volume entry (*ent: a file or a directory), 0 none, with
  * *nodev 1 when every path it stands for lies on a device ZINE has not (NIL:, DH0:) and holds no memory file; *r a
  * memory file marked gone that hid the path (else -1) */
 static char hit[ZPATH];                 /* the path locate found its file as */
-static int locate(const char *name, u32 *ent, int *r, int *nodev)
+static int locate1(const char *name, u32 *ent, int *r, int *nodev)
 {
     int dev = 0, seen = 0, g = -1;
     char k[ZPATH];
     *nodev = 0;
+    name = cd_path(name);
     for (u32 i = 0; za_expand(&assigns, name, i, hit, sizeof hit); i++) {
         seen = 1;
         int m = key_of(hit, k) ? ram_find(k) : -1;
@@ -665,6 +715,51 @@ static int locate(const char *name, u32 *ent, int *r, int *nodev)
     return 0;
 }
 
+/* 16.13: a volume or device ZINE does not have ("Love:FLT-Lve2.Skl": the name of the disk the demo came on) is taken as
+ * the program's own folder when the path is there, as the user's "Assign Love: <its folder>" would make it under
+ * AmigaOS (Virtual Dreams' Love and sumea wait for their disk forever otherwise); said once a name. Not for the
+ * devices that are not a disk of the program's (T:, ENV:, ENVARC:, CLIPS:, the streams). */
+static int locate(const char *name, u32 *ent, int *r, int *nodev)
+{
+    int w = locate1(name, ent, r, nodev);
+    if (w || !*nodev)
+        return w;
+    const char *c = name;
+    while (*c && *c != ':')
+        c++;
+    u32 dl = (u32)(c - name);
+    static const char *const keep[] = { "T", "ENV", "ENVARC", "CLIPS" };
+    if (!*c || !dl || stream_dev(name))
+        return 0;
+    for (u32 i = 0; i < sizeof keep / sizeof keep[0]; i++)
+        if (zv_same(name, dl, keep[i]))
+            return 0;
+    char p[ZPATH];
+    u32 n = slen(c + 1);
+    if (4 + n + 1 > ZPATH)
+        return 0;
+    zmemcpy(p, "SYS:", 4);
+    zmemcpy(p + 4, c + 1, n + 1);
+    int nd;
+    w = locate1(p, ent, r, &nd);
+    static char said[4][32];
+    if (w && dl < 31) {
+        int i = 0;
+        while (i < 4 && said[i][0] && !zv_same(name, dl, said[i]))
+            i++;
+        if (i < 4 && !said[i][0]) {
+            zmemcpy(said[i], name, dl);
+            said[i][dl] = 0;
+            say3("ZINE: ", Z.blk->name, " asks for the volume ");
+            say3(said[i], ":, which ZINE takes as the program's own folder (as \"Assign ", said[i]);
+            say3(": <its folder>\" would)\n", "", "");
+        }
+    }
+    if (w)
+        *nodev = 0;
+    return w;
+}
+
 /* a file's bytes for loading: 0 and *f, *size, *ent (~0 for a RAM: file), or -ZE_NOENT */
 static int file_bytes(const char *name, const zu8 **f, u32 *size, u32 *ent)
 {
@@ -680,6 +775,19 @@ static int file_bytes(const char *name, const zu8 **f, u32 *size, u32 *ent)
         return 0;
     }
     return -ZE_NOENT;
+}
+
+/* (bfont.c, 16.13) a file's bytes by its name, assigns and the current directory followed: 0, or -ZE_NOENT */
+int zb_file_bytes(const char *name, const u8 **f, u32 *size)
+{
+    u32 ent;
+    return file_bytes(name, f, size, &ent);
+}
+/* a directory of the volume by its name: 1 and its entry */
+int zb_dir_ent(const char *name, u32 *ent)
+{
+    int r, nodev;
+    return locate(name, ent, &r, &nodev) == 2 && zv_ent((const void *)Z.a.vol, *ent)->dir;
 }
 
 int zb_file_exists(const char *name, char *where, u32 max)
@@ -717,12 +825,32 @@ static u32 fh_new(u32 ent, int sink, int ram)
 
 u32 c_Open(const char *name, s32 mode)
 {
+    extern u32 zb_tracing;
+    if (zb_tracing && name && c_TypeOfMem((u32)name)) {     /* the trace build: what is opened (16.13) */
+        u32 n = 0;
+        while (n < 60 && name[n] >= 32 && name[n] < 127)
+            n++;
+        for (u32 k = 0; k <= n; k++) {
+            while (!(CUSTOM(0x018) & 0x2000))
+                ;
+            CUSTOM(0x030) = (u16)(0x100 | (u8)(k == 0 ? 'O' : name[k - 1]));
+        }
+        while (!(CUSTOM(0x018) & 0x2000))
+            ;
+        CUSTOM(0x030) = 0x10A;
+    }
     if (!name) {
         Z.ioerr = 205;                  /* ERROR_OBJECT_NOT_FOUND */
         return 0;
     }
     if ((name[0] == '*' && !name[1]) || zv_same(name, 4, "CON:") || zv_same(name, 4, "RAW:"))
         return mode == MODE_OLDFILE ? Z.in_fh : Z.out_fh;
+    char cdn[ZPATH];
+    const char *cdp = cd_path(name);
+    if (cdp != name) {
+        zmemcpy(cdn, cdp, slen(cdp) + 1);
+        name = cdn;
+    }
     u32 ent = 0;
     int r = -1, nodev = 0;
     int w = locate(name, &ent, &r, &nodev);
@@ -846,6 +974,12 @@ s32 c_Seek(u32 fh, s32 pos, s32 mode)
  * refused, said in the output. */
 u32 c_DeleteFile(const char *name)
 {
+    char cdn[ZPATH];
+    const char *cdp = cd_path(name);
+    if (cdp != name) {
+        zmemcpy(cdn, cdp, slen(cdp) + 1);
+        name = cdn;
+    }
     u32 ent = 0;
     int r = -1, nodev = 0;
     int w = name ? locate(name, &ent, &r, &nodev) : 0;
@@ -880,6 +1014,363 @@ u32 c_DeleteFile(const char *name)
     }
     Z.ioerr = 205;                      /* ERROR_OBJECT_NOT_FOUND */
     return 0;
+}
+
+/* ---- dos locks and directories (16.13): Lock, UnLock, DupLock, Examine, ExNext, Info, CurrentDir, ParentDir,
+ * DupLockFromFH, OpenFromLock, ExamineFH, NameFromLock, SameLock, ParentOfFH, on the volume's files and directories,
+ * ZINE's memory files and RAM:'s top (the autodocs; FileLock 20 bytes, FileInfoBlock 260, InfoData 36). A lock is a
+ * FileLock in the program's memory, its BPTR given; ZINE keeps which are its own, so a lock it never gave is refused
+ * (ERROR_INVALID_LOCK). ExNext lists a directory of the volume as it was at the start (a file written during the
+ * session into it is not listed; RAM:'s top lists the memory files written there). ---- */
+#define NLOCK 64
+#define LK_VOL 1                        /* a volume entry (a file or a directory) */
+#define LK_RAM 2                        /* a memory file */
+#define LK_RAMDIR 3                     /* RAM:'s top */
+#define ERROR_INVALID_LOCK 211
+#define ERROR_NO_MORE_ENTRIES 232
+#define ERROR_OBJECT_WRONG_TYPE 212
+#define ERROR_OBJECT_NOT_FOUND 205
+static struct { u32 fl; u8 kind; u32 ent; } locks[NLOCK];       /* fl: the FileLock's address, 0 free */
+
+static int lock_of(u32 lock)
+{
+    u32 a = lock << 2;
+    for (int i = 0; lock && i < NLOCK; i++)
+        if (locks[i].fl == a)
+            return i;
+    return -1;
+}
+
+static u32 lock_new(u8 kind, u32 ent, s32 mode)
+{
+    for (int i = 0; i < NLOCK; i++)
+        if (!locks[i].fl) {
+            u32 fl = zx_AllocMem(ZO_FileLock_SIZEOF, MEMF_PUBLIC | MEMF_CLEAR);
+            if (!fl)
+                break;
+            *(u32 *)(fl + ZO_FileLock_fl_Key) = kind == LK_RAMDIR ? 0 : ent;
+            *(s32 *)(fl + ZO_FileLock_fl_Access) = mode == -1 ? -1 : -2;    /* EXCLUSIVE_LOCK, else SHARED_LOCK */
+            *(u32 *)(fl + ZO_FileLock_fl_Task) = Z.hport;
+            locks[i].fl = fl, locks[i].kind = kind, locks[i].ent = ent;
+            if (kind == LK_RAM)
+                ramf[ent].open++;       /* not deleted while locked (ERROR_OBJECT_IN_USE) */
+            return fl >> 2;
+        }
+    say3("ZINE: the program holds more than 64 locks at once (ZINE keeps 64): a Lock answered 0\n", "", "");
+    Z.ioerr = 103;                      /* ERROR_NO_FREE_STORE */
+    return 0;
+}
+
+static int is_ramdir(const char *name)
+{
+    const char *r = za_ram(name);
+    return r && !*r;
+}
+
+/* Lock(name d1, mode d2) (-84) */
+u32 c_Lock(const char *name, s32 mode)
+{
+    if (!name || !c_TypeOfMem((u32)name)) {
+        Z.ioerr = ERROR_OBJECT_NOT_FOUND;
+        return 0;
+    }
+    if (!*name)                         /* "": the current directory */
+        return cd_ent == CD_RAM ? lock_new(LK_RAMDIR, 0, mode) : lock_new(LK_VOL, cd_ent, mode);
+    if (is_ramdir(cd_path(name)))
+        return lock_new(LK_RAMDIR, 0, mode);
+    u32 ent = 0;
+    int r = -1, nodev = 0;
+    int w = locate(name, &ent, &r, &nodev);
+    if (w == 1)
+        return lock_new(LK_RAM, (u32)r, mode);
+    if (w == 2)
+        return lock_new(LK_VOL, ent, mode);
+    Z.ioerr = ERROR_OBJECT_NOT_FOUND;
+    return 0;
+}
+
+/* UnLock(lock d1) (-90) */
+void c_UnLock(u32 lock)
+{
+    int i = lock_of(lock);
+    if (i < 0)
+        return;
+    if (locks[i].kind == LK_RAM && ramf[locks[i].ent].open)
+        ramf[locks[i].ent].open--;
+    if (Z.proc && *(u32 *)(Z.proc + ZO_Process_pr_CurrentDir) == lock)
+        *(u32 *)(Z.proc + ZO_Process_pr_CurrentDir) = 0;    /* stays the current directory, as a name */
+    zx_FreeMem(locks[i].fl, ZO_FileLock_SIZEOF);
+    locks[i].fl = 0;
+}
+
+/* DupLock(lock d1) (-96): 0 duplicates to 0 (the volume's top, as AmigaDOS's 0 lock) */
+u32 c_DupLock(u32 lock)
+{
+    if (!lock)
+        return 0;
+    int i = lock_of(lock);
+    if (i < 0) {
+        Z.ioerr = ERROR_INVALID_LOCK;
+        return 0;
+    }
+    return lock_new(locks[i].kind, locks[i].ent, -2);
+}
+
+/* a FileInfoBlock for a lock's kind and entry */
+static void fib_fill(u8 *fib, u8 kind, u32 ent)
+{
+    zmemset(fib, 0, ZO_FileInfoBlock_SIZEOF);
+    const void *vol = (const void *)Z.a.vol;
+    char *nm = (char *)fib + ZO_FileInfoBlock_fib_FileName;
+    s32 type = -3;                      /* ST_FILE */
+    u32 size = 0, prot = 0, *date = (u32 *)(fib + ZO_FileInfoBlock_fib_Date);
+    if (kind == LK_VOL) {
+        const struct zv_ent *e = zv_ent(vol, ent);
+        const char *src = ent ? e->name : ((const struct zv_hdr *)vol)->volname;
+        u32 n = slen(src) < 107 ? slen(src) : 107;
+        zmemcpy(nm, src, n);
+        type = e->dir ? (ent ? 2 : 1) : -3;     /* ST_USERDIR, ST_ROOT */
+        size = e->size, prot = e->prot;
+        date[0] = e->days, date[1] = e->mins, date[2] = e->ticks;
+    } else {
+        const char *src = "Ram Disk";
+        if (kind == LK_RAM) {
+            src = ramf[ent].name;
+            for (const char *c = ramf[ent].name; *c; c++)
+                if (*c == ':' || *c == '/')
+                    src = c + 1;
+            size = ramf[ent].size;
+        } else
+            type = 1;
+        u32 n = slen(src) < 107 ? slen(src) : 107;
+        zmemcpy(nm, src, n);
+        c_DateStamp(date);
+    }
+    *(u32 *)(fib + ZO_FileInfoBlock_fib_DiskKey) = kind == LK_RAMDIR ? 0 : ent;
+    *(s32 *)(fib + ZO_FileInfoBlock_fib_DirEntryType) = type;
+    *(s32 *)(fib + ZO_FileInfoBlock_fib_EntryType) = type;
+    *(u32 *)(fib + ZO_FileInfoBlock_fib_Protection) = prot;
+    *(u32 *)(fib + ZO_FileInfoBlock_fib_Size) = size;
+    *(u32 *)(fib + ZO_FileInfoBlock_fib_NumBlocks) = (size + 511) / 512;
+}
+
+/* Examine(lock d1, fib d2) (-102); a 0 lock is the volume's top */
+u32 c_Examine(u32 lock, u8 *fib)
+{
+    int i = lock_of(lock);
+    if ((lock && i < 0) || !fib || !c_TypeOfMem((u32)fib)) {
+        Z.ioerr = ERROR_INVALID_LOCK;
+        return 0;
+    }
+    fib_fill(fib, lock ? locks[i].kind : LK_VOL, lock ? locks[i].ent : 0);
+    return (u32)-1;
+}
+
+/* ExNext(lock d1, fib d2) (-108): the entry after the one fib_DiskKey names (Examine leaves the directory's own key:
+ * the first one then); ERROR_NO_MORE_ENTRIES at the end */
+u32 c_ExNext(u32 lock, u8 *fib)
+{
+    int i = lock_of(lock);
+    if ((lock && i < 0) || !fib || !c_TypeOfMem((u32)fib)) {
+        Z.ioerr = ERROR_INVALID_LOCK;
+        return 0;
+    }
+    u8 kind = lock ? locks[i].kind : LK_VOL;
+    u32 dir = lock ? locks[i].ent : 0, key = *(u32 *)(fib + ZO_FileInfoBlock_fib_DiskKey);
+    if (kind == LK_VOL) {
+        const void *vol = (const void *)Z.a.vol;
+        if (!zv_ent(vol, dir)->dir) {
+            Z.ioerr = ERROR_OBJECT_WRONG_TYPE;
+            return 0;
+        }
+        u32 after = key && key < ((const struct zv_hdr *)vol)->nent && zv_ent(vol, key)->parent == dir && key != dir ?
+                    key : 0;
+        u32 n = zv_next(vol, dir, after);
+        if (n) {
+            fib_fill(fib, LK_VOL, n);
+            return (u32)-1;
+        }
+    } else if (kind == LK_RAMDIR) {     /* the memory files on RAM:'s top; the key their index + 1 */
+        for (u32 r = key < NRAM ? key : NRAM; r < NRAM; r++) {
+            const char *rest = ramf[r].name && !ramf[r].gone ? za_ram(ramf[r].name) : 0;
+            int top = rest != 0;
+            for (const char *c = rest; top && *c; c++)
+                if (*c == '/')
+                    top = 0;
+            if (top) {
+                fib_fill(fib, LK_RAM, r);
+                *(u32 *)(fib + ZO_FileInfoBlock_fib_DiskKey) = r + 1;
+                return (u32)-1;
+            }
+        }
+    }
+    Z.ioerr = ERROR_NO_MORE_ENTRIES;
+    return 0;
+}
+
+/* Info(lock d1, infoData d2) (-114): the volume, write-protected (writes go to memory), its blocks of 512 bytes */
+u32 c_Info(u32 lock, u32 *id)
+{
+    if ((lock && lock_of(lock) < 0) || !id || !c_TypeOfMem((u32)id)) {
+        Z.ioerr = ERROR_INVALID_LOCK;
+        return 0;
+    }
+    const struct zv_hdr *h = (const struct zv_hdr *)Z.a.vol;
+    zmemset(id, 0, 36);
+    id[2] = 80;                         /* id_DiskState: ID_WRITE_PROTECTED */
+    id[3] = h->size / 512;
+    id[4] = h->size / 512;
+    id[5] = 512;
+    id[6] = 0x444F5300;                 /* ID_DOS_DISK */
+    return (u32)-1;
+}
+
+/* CurrentDir(lock d1) (-126): the old one back; 0 is the volume's top */
+u32 c_CurrentDir(u32 lock)
+{
+    u32 old = *(u32 *)(Z.proc + ZO_Process_pr_CurrentDir);
+    int i = lock_of(lock);
+    if (!lock)
+        cd_ent = 0;
+    else if (i >= 0 && locks[i].kind == LK_RAMDIR)
+        cd_ent = CD_RAM;
+    else if (i >= 0 && locks[i].kind == LK_VOL && zv_ent((const void *)Z.a.vol, locks[i].ent)->dir)
+        cd_ent = locks[i].ent;
+    else
+        return old;                     /* not a directory ZINE gave: nothing changes */
+    *(u32 *)(Z.proc + ZO_Process_pr_CurrentDir) = lock;
+    return old;
+}
+
+/* ParentDir(lock d1) (-210): the directory it is in; 0 (IoErr 0) for the volume's top */
+u32 c_ParentDir(u32 lock)
+{
+    int i = lock_of(lock);
+    Z.ioerr = 0;
+    if (!lock || i < 0) {
+        if (lock)
+            Z.ioerr = ERROR_INVALID_LOCK;
+        return 0;
+    }
+    if (locks[i].kind == LK_VOL)
+        return locks[i].ent ? lock_new(LK_VOL, zv_ent((const void *)Z.a.vol, locks[i].ent)->parent, -2) : 0;
+    if (locks[i].kind == LK_RAM && za_ram(ramf[locks[i].ent].name))
+        return lock_new(LK_RAMDIR, 0, -2);
+    return locks[i].kind == LK_RAM ? lock_new(LK_VOL, 0, -2) : 0;
+}
+
+/* the lock kind and entry of an open file */
+static int fh_obj(u32 fh, u8 *kind, u32 *ent)
+{
+    int s = slot_of(fh);
+    if (s < 0 || files[s].sink)
+        return 0;
+    *kind = files[s].ram ? LK_RAM : LK_VOL;
+    *ent = files[s].ram ? files[s].ram - 1u : files[s].ent;
+    return 1;
+}
+
+/* DupLockFromFH(fh d1) (-372), ParentOfFH(fh d1) (-384), ExamineFH(fh d1, fib d2) (-390) */
+u32 c_DupLockFromFH(u32 fh)
+{
+    u8 k;
+    u32 e;
+    return fh_obj(fh, &k, &e) ? lock_new(k, e, -2) : 0;
+}
+u32 c_ParentOfFH(u32 fh)
+{
+    u32 l = c_DupLockFromFH(fh), p = l ? c_ParentDir(l) : 0;
+    c_UnLock(l);
+    return p;
+}
+u32 c_ExamineFH(u32 fh, u8 *fib)
+{
+    u8 k;
+    u32 e;
+    if (!fh_obj(fh, &k, &e) || !fib || !c_TypeOfMem((u32)fib)) {
+        Z.ioerr = ERROR_OBJECT_WRONG_TYPE;
+        return 0;
+    }
+    fib_fill(fib, k, e);
+    return (u32)-1;
+}
+
+/* OpenFromLock(lock d1) (-378): the file opened, the lock taken over (gone) */
+u32 c_OpenFromLock(u32 lock)
+{
+    int i = lock_of(lock);
+    if (i < 0 || locks[i].kind == LK_RAMDIR ||
+        (locks[i].kind == LK_VOL && zv_ent((const void *)Z.a.vol, locks[i].ent)->dir)) {
+        Z.ioerr = i < 0 ? ERROR_INVALID_LOCK : ERROR_OBJECT_WRONG_TYPE;
+        return 0;
+    }
+    u32 fh = locks[i].kind == LK_RAM ? fh_new(0, 0, (int)locks[i].ent + 1) : fh_new(locks[i].ent, 0, 0);
+    if (fh)
+        c_UnLock(lock);
+    return fh;
+}
+
+/* NameFromLock(lock d1, buffer d2, len d3) (-402): "VOLUME:dir/name", a memory file by its path, "Ram Disk:" */
+u32 c_NameFromLock(u32 lock, char *buf, u32 len)
+{
+    int i = lock_of(lock);
+    if ((lock && i < 0) || !buf || !len) {
+        Z.ioerr = ERROR_INVALID_LOCK;
+        return 0;
+    }
+    char t[ZPATH];
+    u32 n = 0;
+    u8 kind = lock ? locks[i].kind : LK_VOL;
+    if (kind == LK_VOL) {
+        const void *vol = (const void *)Z.a.vol;
+        u32 pos = ZPATH - 1;
+        t[pos] = 0;
+        for (u32 e = lock ? locks[i].ent : 0, d = 0; e && d < 64; e = zv_ent(vol, e)->parent, d++) {
+            const struct zv_ent *en = zv_ent(vol, e);
+            if (en->namelen + 1u > pos)
+                goto long_;
+            if (t[pos])
+                t[--pos] = '/';
+            pos -= en->namelen;
+            zmemcpy(t + pos, en->name, en->namelen);
+        }
+        const char *vn = ((const struct zv_hdr *)vol)->volname;
+        u32 vl = slen(vn);
+        if (vl + 2 + (ZPATH - 1 - pos) > ZPATH)
+            goto long_;
+        char u[ZPATH];
+        zmemcpy(u, vn, vl);
+        u[vl] = ':';
+        zmemcpy(u + vl + 1, t + pos, ZPATH - pos);
+        n = slen(u);
+        zmemcpy(t, u, n + 1);
+    } else {
+        const char *src = kind == LK_RAM ? ramf[locks[i].ent].name : "Ram Disk:";
+        n = slen(src);
+        if (n + 1 > ZPATH)
+            goto long_;
+        zmemcpy(t, src, n + 1);
+    }
+    if (n + 1 > len)
+        goto long_;
+    zmemcpy(buf, t, n + 1);
+    return (u32)-1;
+long_:
+    Z.ioerr = 120;                      /* ERROR_LINE_TOO_LONG */
+    if (len)
+        buf[0] = 0;
+    return 0;
+}
+
+/* SameLock(l1 d1, l2 d2) (-420): LOCK_SAME 0, LOCK_SAME_VOLUME 1, LOCK_DIFFERENT -1 */
+s32 c_SameLock(u32 a, u32 b)
+{
+    int i = lock_of(a), j = lock_of(b);
+    if (i < 0 || j < 0)
+        return -1;
+    if (locks[i].kind == locks[j].kind && locks[i].ent == locks[j].ent)
+        return 0;
+    return (locks[i].kind == LK_VOL) == (locks[j].kind == LK_VOL) ? 1 : -1;
 }
 
 /* ---- LoadSeg and overlays (docs/d29-zine.md 16.6; the Guru Book 17.1.76, 19.3.2.2, 22.2.10; the AmigaDOS Manual's
@@ -1472,11 +1963,12 @@ void c_WaitTOF(void)
     }
 }
 
+static int view_show(const u8 *view);
 void c_LoadView(u32 view)
 {
-    if (view && view != IB_VIEWLORD(Z.lib[3]))
-        zb_stop(ZH_STOP, ZS_VIEW);      /* a View of graphics' own: not in the first version */
     *(u32 *)(Z.lib[1] + ZO_GfxBase_ActiView) = view;
+    if (view && view != IB_VIEWLORD(Z.lib[3]) && view_show((const u8 *)view))
+        return;                         /* a View of the program's own (16.13): its first ViewPort shown */
     zb_blank_view();
 }
 
@@ -1617,6 +2109,9 @@ void c_SetRGB32(u32 vp, u32 n, u32 r, u32 g, u32 b) { (void)vp; rgb32(n, r, g, b
 /* the screen shown (5.5, the screens' first form): its BitMap's planes from the top, the standard display window
  * (320 or 640 wide, 256 or 200 lines), lowres, hires, HAM or EHB from its mode; colours stay what the program set */
 #define VP_Modes 32
+static u16 vc_con2 = 0x0024, vc_con3 = 0x0C00, vc_con4 = 0x0011;   /* BPLCON2-4 as VideoControl leaves them */
+static u8 vc_full;                      /* VTAG_FULLPALETTE */
+static u32 shown_depth;                 /* plane pointers in the shown screen's Copper list */
 static void show_screen(u8 *sc)
 {
     u8 *bm = *(u8 **)(sc + SC_SIZEOF + 76) ? *(u8 **)(sc + SC_SIZEOF + 76) : sc + SC_BitMap;
@@ -1658,30 +2153,32 @@ static void show_screen(u8 *sc)
                      (modes & 0x0800) | (modes & 0x0004));             /* HAM, LACE as the mode asks */
     *l++ = 0x100, *l++ = con0;
     *l++ = 0x102, *l++ = 0;
-    *l++ = 0x104, *l++ = 0x0024;
+    *l++ = 0x104, *l++ = vc_con2;
     u16 mod = (u16)(bpr > shown ? bpr - shown : 0);
     *l++ = 0x108, *l++ = mod;
     *l++ = 0x10A, *l++ = mod;
     if (Z.aga) {
         *l++ = 0x1FC, *l++ = (u16)(f3 ? 3 : 0);
-        *l++ = 0x106, *l++ = (u16)(0x0C00 | (modes & 0x0080 ? 0 : 0));
-        *l++ = 0x10C, *l++ = 0x0011;
+        *l++ = 0x106, *l++ = vc_con3;
+        *l++ = 0x10C, *l++ = vc_con4;
     }
     *(u16 **)(sc + SC_SIZEOF + 72) = l;  /* where the plane pointers are: zb_screen_frame renews them */
+    shown_depth = depth < 8 ? depth : 8;
     for (u32 i = 0; i < depth && i < 8; i++) {
         u32 p = *(u32 *)(bm + ZO_BitMap_Planes + 4 * i);
         *l++ = (u16)(0xE0 + 4 * i), *l++ = (u16)(p >> 16);
         *l++ = (u16)(0xE2 + 4 * i), *l++ = (u16)p;
     }
     *l++ = 0xFFFF, *l++ = 0xFFFE;
+    Z.shown = (u32)sc;
+    zb_screen_frame();                  /* the RasInfo's offsets and BitMap (16.13) */
     COP1LC = (u32)c;
     COPJMP1 = 0;
-    Z.shown = (u32)sc;
 }
 
 u32 c_OpenScreenTagList(const u8 *ns, const u32 *tags)
 {
-    u32 w = 320, h = Z.pal ? 256 : 200, depth = 1, custom = 0, modes = 0, behind = 0;
+    u32 w = 320, h = Z.pal ? 256 : 200, depth = 1, custom = 0, modes = 0, behind = 0, id = ~0u;
     if (ns) {
         if (*(const s16 *)(ns + 4) > 0) w = (u32)*(const s16 *)(ns + 4);
         if (*(const s16 *)(ns + 6) > 0) h = (u32)*(const s16 *)(ns + 6);
@@ -1708,7 +2205,7 @@ u32 c_OpenScreenTagList(const u8 *ns, const u32 *tags)
         if (tag == 0x80000024 && (s32)d > 0) h = d;
         if (tag == 0x80000025) depth = d;
         if (tag == 0x8000002E) custom = d;
-        if (tag == 0x80000032) modes = d;           /* SA_DisplayID: the mode bits ViewPort.Modes has too */
+        if (tag == 0x80000032) modes = id = d;      /* SA_DisplayID: the mode bits ViewPort.Modes has too */
         if (tag == 0x80000037) behind = d;          /* SA_Behind */
     }
     extern u32 zb_tracing;
@@ -1760,6 +2257,9 @@ u32 c_OpenScreenTagList(const u8 *ns, const u32 *tags)
     *(u32 *)(ri + 4) = (u32)bm;
     *(u32 *)(sc + SC_ViewPort + VP_RasInfo) = (u32)ri;
     *(u16 *)(cm + CM_Count) = (u16)(1u << (depth < 5 ? depth : 5));
+    cm[1] = 2;                          /* cm_Type COLORMAP_TYPE_V39: cm_vp (20) and cm_VPModeID (36) hold (16.13) */
+    *(u32 *)(cm + 20) = (u32)(sc + SC_ViewPort);
+    *(u32 *)(cm + 36) = id != ~0u ? id : zb_mode_id(modes);
     *(u32 *)(sc + SC_ViewPort + VP_ColorMap) = (u32)cm;
     *(u32 *)(sc + SC_RastPort + RP_BitMap) = (u32)bm;
     sc[SC_RastPort + RP_Mask] = 0xFF;
@@ -1802,6 +2302,261 @@ u32 c_CloseScreen(u8 *sc)
 
 void c_ScreenToFront(u8 *sc) { if (sc) show_screen(sc); }
 
+/* ---- d29 16.13: the display calls the Top 100 asked for next. RethinkDisplay (-390), RemakeDisplay (-384),
+ * MakeScreen(screen a0) (-378), graphics MrgCop(view a1) (-210) and MakeVPort(view a0, vp a1) (-216): the screen ZINE
+ * shows is shown again from its BitMap, mode and RasInfo (as AmigaOS rebuilds its Copper lists); MoveScreen(screen
+ * a0, dx d0, dy d1) (-162): ZINE's screens stay at the top; ScrollVPort(vp a0) (-588): the RasInfo's offsets and
+ * BitMap taken at once (zb_screen_frame takes them every frame too). ---- */
+u32 c_RethinkDisplay(void)
+{
+    if (Z.shown)
+        show_screen((u8 *)Z.shown);
+    return 0;
+}
+void c_MakeScreen(u8 *sc)
+{
+    if (sc && (u32)sc == Z.shown)
+        show_screen(sc);
+}
+void c_MoveScreen(u8 *sc, s32 dx, s32 dy) { (void)sc, (void)dx, (void)dy; }
+
+/* a View of the program's own (graphics' InitView/InitVPort/MakeVPort/MrgCop/LoadView, 16.13): its first ViewPort shown
+ * as ZINE shows a screen, from a screen of ZINE's own made for it (the ViewPort copied in: its RasInfo, BitMap,
+ * Modes, DHeight; the RasInfo's offsets and BitMap taken every frame), its ColorMap's colours loaded; 0 when the View
+ * has no ViewPort with a BitMap (the display blanked) */
+static u8 *vscr;                        /* the screen made for a View */
+static const u8 *vsrc;                  /* the ViewPort it shows */
+static int view_show(const u8 *view)
+{
+    const u8 *vp = c_TypeOfMem((u32)view) ? *(const u8 *const *)view : 0;
+    const u8 *ri = vp && c_TypeOfMem((u32)vp) ? *(const u8 *const *)(vp + VP_RasInfo) : 0;
+    const u8 *bm = ri && c_TypeOfMem((u32)ri) ? *(const u8 *const *)(ri + 4) : 0;
+    if (!bm || !c_TypeOfMem((u32)bm))
+        return 0;
+    if (!vscr && !(vscr = (u8 *)zx_AllocMem(SC_SIZEOF + ZSCR_EXTRA, MEMF_PUBLIC | MEMF_CLEAR)))
+        return 0;
+    zmemcpy(vscr + SC_ViewPort, vp, 40);
+    *(u32 *)(vscr + SC_SIZEOF + 76) = (u32)bm;
+    *(u16 *)(vscr + SC_Height) = *(const u16 *)(vp + VP_DHeight);
+    vscr[SC_SIZEOF] = 1;                /* its BitMap is the program's */
+    vsrc = vp;
+    const u8 *cm = *(const u8 *const *)(vp + VP_ColorMap);
+    const u16 *ct = cm && c_TypeOfMem((u32)cm) ? *(const u16 *const *)(cm + CM_ColorTable) : 0;
+    if (ct && c_TypeOfMem((u32)ct))
+        for (u32 i = 0; i < *(const u16 *)(cm + CM_Count) && i < 32; i++)
+            COLOR(i) = ct[i];
+    show_screen(vscr);
+    return 1;
+}
+void c_MakeVPort(u32 view, u8 *vp)
+{
+    (void)view;
+    if (vp && Z.shown && vp == (u8 *)Z.shown + SC_ViewPort)
+        show_screen((u8 *)Z.shown);
+}
+void c_MrgCop(u32 view)
+{
+    if (Z.shown && (u32)vscr == Z.shown && view == *(u32 *)(Z.lib[1] + ZO_GfxBase_ActiView))
+        view_show((const u8 *)view);
+    else
+        c_RethinkDisplay();
+}
+void c_ScrollVPort(u8 *vp)
+{
+    if (vp && Z.shown && (vp == (u8 *)Z.shown + SC_ViewPort || ((u32)vscr == Z.shown && vp == vsrc)))
+        zb_screen_frame();
+}
+
+/* graphics' ColorMaps and ViewPorts (16.13): GetColorMap(entries d0) (-570) a V39 ColorMap (cm_Type 2) with its
+ * colour table (12-bit) and the low nibbles' table, FreeColorMap(cm a0) (-576), GetRGB4(cm a0, entry d0) (-582),
+ * SetRGB4CM(cm a0, n d0, r d1, g d2, b d3) (-630), GetRGB32(cm a0, first d0, n d1, table a1) (-900), SetRGB32CM(cm
+ * a0, n d0, r d1, g d2, b d3) (-996); InitVPort(vp a0) (-204), InitView(view a1) (-360) cleared as the autodocs say */
+u32 c_GetColorMap(u32 n)
+{
+    if (n > 256)
+        n = 256;
+    u8 *cm = (u8 *)zx_AllocMem(52 + 4 * n, MEMF_PUBLIC | MEMF_CLEAR);
+    if (!cm)
+        return 0;
+    cm[1] = 2;
+    *(u16 *)(cm + CM_Count) = (u16)n;
+    *(u32 *)(cm + CM_ColorTable) = (u32)(cm + 52);
+    *(u32 *)(cm + 12) = (u32)(cm + 52 + 2 * n);     /* LowColorBits */
+    *(u32 *)(cm + 36) = ~0u;                        /* VPModeID: none yet */
+    return (u32)cm;
+}
+void c_FreeColorMap(u8 *cm)
+{
+    if (cm && c_TypeOfMem((u32)cm) && cm[1] == 2 && *(u32 *)(cm + CM_ColorTable) == (u32)(cm + 52))
+        zx_FreeMem((u32)cm, 52 + 4u * *(u16 *)(cm + CM_Count));
+}
+static u16 *cm_tab(const u8 *cm, u32 i, int low)
+{
+    if (!cm || !c_TypeOfMem((u32)cm) || i >= *(const u16 *)(cm + CM_Count))
+        return 0;
+    u16 *t = *(u16 *const *)(cm + (low ? 12 : CM_ColorTable));
+    return t && c_TypeOfMem((u32)t) && (!low || cm[1] >= 2) ? t + i : 0;
+}
+s32 c_GetRGB4(const u8 *cm, u32 i)
+{
+    u16 *t = cm_tab(cm, i, 0);
+    return t ? (s32)(*t & 0xFFF) : -1;
+}
+void c_SetRGB4CM(u8 *cm, u32 i, u32 r, u32 g, u32 b)
+{
+    u16 *t = cm_tab(cm, i, 0), *lo = cm_tab(cm, i, 1);
+    if (t)
+        *t = (u16)((r & 15) << 8 | (g & 15) << 4 | (b & 15));
+    if (lo && t)
+        *lo = *t;
+}
+void c_SetRGB32CM(u8 *cm, u32 i, u32 r, u32 g, u32 b)
+{
+    u16 *t = cm_tab(cm, i, 0), *lo = cm_tab(cm, i, 1);
+    if (t)
+        *t = (u16)((r >> 20 & 0xF00) | (g >> 24 & 0xF0) | (b >> 28));
+    if (lo)
+        *lo = (u16)((r >> 16 & 0xF00) | (g >> 20 & 0xF0) | (b >> 24 & 0xF));
+}
+void c_GetRGB32(const u8 *cm, u32 first, u32 n, u32 *out)
+{
+    for (u32 k = 0; out && c_TypeOfMem((u32)out) && k < n && k < 256; k++) {
+        u16 *t = cm_tab(cm, first + k, 0), *lo = cm_tab(cm, first + k, 1);
+        u32 hi = t ? *t : 0, lw = lo ? *lo : hi;
+        for (int c = 0; c < 3; c++) {
+            u32 v = (hi >> (8 - 4 * c) & 15) << 4 | (lw >> (8 - 4 * c) & 15);
+            out[3 * k + c] = v * 0x01010101u;
+        }
+    }
+}
+void c_InitVPort(u8 *vp)
+{
+    if (vp && c_TypeOfMem((u32)vp))
+        zmemset(vp, 0, 40);
+}
+void c_InitView(u8 *v)
+{
+    if (!v || !c_TypeOfMem((u32)v))
+        return;
+    zmemset(v, 0, 18);
+    *(s16 *)(v + 12) = 0x2C;            /* DyOffset, DxOffset: the standard display's top left */
+    *(s16 *)(v + 14) = 0x81;
+}
+
+/* VideoControl(colorMap a0, tags a1) (-708; graphics/videocontrol.h): the tags ZINE's display has (border blank and
+ * border sprites, the sprite resolution, the playfields' priority against the sprites, the sprites' colour bases:
+ * BPLCON2-4, from the next time the screen is shown, at once when the ColorMap is the shown screen's), the ColorMap's
+ * ViewPort and mode ID, VTAG_IMMEDIATE's flag cleared (everything is immediate); a _GET tag's answer in its own
+ * ti_Data. Genlock tags (chroma key, bitplane key) are taken and change nothing. 0: no error. */
+static u32 pf2of(u32 base)              /* BPLCON3's PF2OF field for a colour base 0, 2, 4 ... 128 */
+{
+    u32 k = 0;
+    while (k < 7 && (2u << k) <= base)
+        k++;
+    return base ? k : 0;
+}
+u32 c_VideoControl(u8 *cm, u32 *tags)
+{
+    int ok = cm && c_TypeOfMem((u32)cm), changed = 0;
+    u32 *t = tags, *ti;
+    for (u32 n = 0; n < 256 && (ti = (u32 *)c_NextTagItem(&t)); n++) {
+        if (!c_TypeOfMem((u32)ti))
+            break;
+        u32 d = ti[1];
+        u16 c2 = vc_con2, c3 = vc_con3, c4 = vc_con4;
+        switch (ti[0]) {
+        case 0x80000004: vc_con3 &= (u16)~0x20; break;                  /* VTAG_BORDERBLANK_CLR */
+        case 0x80000005: vc_con3 |= 0x20; break;                        /* _SET */
+        case 0x80000017: ti[1] = (vc_con3 & 0x20) != 0; break;          /* _GET */
+        case 0x8000002E: ti[1] = (vc_con3 & 0x02) != 0; break;          /* VTAG_BORDERSPRITE_GET */
+        case 0x8000002F: vc_con3 |= 0x02; break;
+        case 0x80000030: vc_con3 &= (u16)~0x02; break;
+        case 0x80000031:                                                /* VTAG_SPRITERESN_SET (-1: the default) */
+            vc_con3 = (u16)((vc_con3 & ~0xC0) | ((s32)d < 0 ? 0 : (d & 3) << 6));
+            if (ok)
+                cm[17] = (u8)d;
+            break;
+        case 0x80000032: ti[1] = (vc_con3 >> 6) & 3; break;
+        case 0x8000003B: if (ok) cm[18] = (u8)d; break;                 /* VTAG_DEFSPRITERESN_SET */
+        case 0x8000003C: ti[1] = ok ? cm[18] : 0; break;
+        case 0x80000033: vc_con2 = (u16)((vc_con2 & ~7) | (d & 7)); break;              /* PF1_TO_SPRITEPRI */
+        case 0x80000034: ti[1] = vc_con2 & 7; break;
+        case 0x80000035: vc_con2 = (u16)((vc_con2 & ~0x38) | (d & 7) << 3); break;      /* PF2_TO_SPRITEPRI */
+        case 0x80000036: ti[1] = (vc_con2 >> 3) & 7; break;
+        case 0x8000002B: vc_con3 = (u16)((vc_con3 & ~0x1C00) | pf2of(d) << 10); break; /* VTAG_PF2_BASE_SET */
+        case 0x80000027: { u32 k = (vc_con3 >> 10) & 7; ti[1] = k ? 1u << k : 0; break; }
+        case 0x80000026: ti[1] = 0; break;                              /* VTAG_PF1_BASE_GET */
+        case 0x8000002C: vc_con4 = (u16)((vc_con4 & ~0xF0) | (d >> 4 & 15) << 4); break;    /* SPEVEN_BASE */
+        case 0x8000002D: vc_con4 = (u16)((vc_con4 & ~0x0F) | (d >> 4 & 15)); break;         /* SPODD_BASE */
+        case 0x80000028: ti[1] = (u32)(vc_con4 >> 4 & 15) << 4; break;
+        case 0x80000029: ti[1] = (u32)(vc_con4 & 15) << 4; break;
+        case 0x8000000B: if (ok) *(u32 *)(cm + 20) = d; break;          /* VTAG_ATTACH_CM_SET */
+        case 0x8000001B: ti[1] = ok ? *(u32 *)(cm + 20) : 0; break;
+        case 0x80000021: if (ok && cm[1] == 2) *(u32 *)(cm + 36) = d; break;    /* VTAG_VPMODEID_SET */
+        case 0x80000020: ti[1] = ok && cm[1] == 2 ? *(u32 *)(cm + 36) : ok ? c_GetVPModeID(*(u8 **)(cm + 20)) :
+                                 ~0u; break;
+        case 0x80000037: if (d && c_TypeOfMem(d)) *(u32 *)d = 0; break; /* VTAG_IMMEDIATE */
+        case 0x80000038: vc_full = 1; break;
+        case 0x8000003A: vc_full = 0; break;
+        case 0x80000039: ti[1] = vc_full; break;
+        }
+        if (c2 != vc_con2 || c3 != vc_con3 || c4 != vc_con4)
+            changed = 1;
+    }
+    if (changed && Z.shown && cm == *(u8 **)(Z.shown + SC_ViewPort + VP_ColorMap))
+        show_screen((u8 *)Z.shown);
+    return 0;
+}
+
+/* EasyRequestArgs(window a0, easyStruct a1, idcmp a2, args a3) (-588): the requester's title, text and gadgets (its
+ * format strings filled from args as RawDoFmt does) in the program's output, and the leftmost gadget chosen (1; 0
+ * when it has one gadget: the autodoc numbers them 1, 2 ... from the left and the rightmost 0) */
+struct zbuf { char *b; u32 n, max; };
+static void buf_put(void *u, u32 c)
+{
+    struct zbuf *z = u;
+    if (c && z->n + 1 < z->max)
+        z->b[z->n++] = (char)c;
+}
+static void say_fmt(const char *f, const u8 **args, char *b, u32 max)
+{
+    struct zbuf z = { b, 0, max };
+    if (f && c_TypeOfMem((u32)f))
+        *args = fmt(f, *args, buf_put, &z);
+    b[z.n] = 0;
+    for (u32 i = 0; i < z.n; i++)
+        if ((u8)b[i] < 32)
+            b[i] = ' ';
+}
+u32 c_EasyRequestArgs(u32 win, const u8 *es, u32 idcmp, const u8 *args)
+{
+    (void)win, (void)idcmp;
+    if (!es || !c_TypeOfMem((u32)es))
+        return 0;
+    char t[200];
+    static const u8 none[8];
+    const u8 *a = args && c_TypeOfMem((u32)args) ? args : none;
+    zb_say("ZINE: the program asks (a requester)");
+    const char *title = *(const char *const *)(es + 8);
+    if (title && c_TypeOfMem((u32)title)) {
+        zb_say(" \"");
+        say_fmt(title, &(const u8 *){ none }, t, sizeof t);
+        zb_say(t);
+        zb_say("\"");
+    }
+    say_fmt(*(const char *const *)(es + 12), &a, t, sizeof t);
+    zb_say(": ");
+    zb_say(t);
+    say_fmt(*(const char *const *)(es + 16), &a, t, sizeof t);
+    u32 bars = 0;
+    for (u32 i = 0; t[i]; i++)
+        bars += t[i] == '|';
+    zb_say(" [");
+    zb_say(t);
+    zb_say(bars ? "]: answered with the leftmost gadget\n" : "]: answered with its gadget\n");
+    return bars ? 1 : 0;
+}
+
 /* the trace build: the shown screen's BitMap at the end (bytes per row, rows, depth, the planes, a sum of plane 0) */
 void zb_screen_report(void)
 {
@@ -1839,8 +2594,28 @@ void zb_screen_frame(void)
         return;
     u16 *l = *(u16 **)(sc + SC_SIZEOF + 72);
     u8 *bm = *(u8 **)(sc + SC_SIZEOF + 76) ? *(u8 **)(sc + SC_SIZEOF + 76) : sc + SC_BitMap;
-    for (u32 i = 0; i < bm[ZO_BitMap_Depth] && i < 8; i++, l += 4) {
-        u32 p = *(u32 *)(bm + ZO_BitMap_Planes + 4 * i);
+    /* the ViewPort's RasInfo (16.13: ScrollVPort, double buffers): its BitMap, if the program set another, and its
+     * offsets: RyOffset rows and RxOffset's words down the planes, the rest of RxOffset BPLCON1's delay */
+    const u8 *ri = *(const u8 *const *)(sc + SC_ViewPort + VP_RasInfo);
+    u32 off = 0, fine = 0;
+    if (ri && c_TypeOfMem((u32)ri)) {
+        const u8 *rb = *(const u8 *const *)(ri + 4);
+        if (rb && c_TypeOfMem((u32)rb))
+            bm = (u8 *)rb;
+        s32 rx = *(const s16 *)(ri + 8), ry = *(const s16 *)(ri + 10);
+        if (rx > 0 && ry >= 0) {
+            off = (u32)ry * *(u16 *)(bm + ZO_BitMap_BytesPerRow) + (u32)(rx >> 4) * 2;
+            fine = (u32)(15 - ((rx - 1) & 15));
+            if (fine)
+                off += 2;
+        } else if (ry > 0)
+            off = (u32)ry * *(u16 *)(bm + ZO_BitMap_BytesPerRow);
+    }
+    u16 *c = *(u16 **)(sc + SC_SIZEOF + 68);
+    if (c && c[42] == 0x102)            /* BPLCON1 (show_screen's 22nd move) */
+        c[43] = (u16)(fine | fine << 4);
+    for (u32 i = 0; i < bm[ZO_BitMap_Depth] && i < shown_depth; i++, l += 4) {
+        u32 p = *(u32 *)(bm + ZO_BitMap_Planes + 4 * i) + off;
         l[1] = (u16)(p >> 16);
         l[3] = (u16)p;
     }
@@ -2115,6 +2890,26 @@ u32 c_ChangeScreenBuffer(u8 *sc, u32 *sb)
     return 1;
 }
 
+/* AllocDBufInfo(vp a0) (-966, V39), FreeDBufInfo(dbi a1) (-972), ChangeVPBitMap(vp a0, bm a1, dbi a2) (-942): the
+ * ViewPort's RasInfo shows the BitMap (the shown screen's planes from the next frame), the DBufInfo's two messages
+ * replied at once (16.13) */
+u32 c_AllocDBufInfo(u8 *vp) { (void)vp; return zx_AllocMem(DBI_SIZE, MEMF_PUBLIC | MEMF_CLEAR); }
+void c_FreeDBufInfo(u32 dbi) { if (dbi) zx_FreeMem(dbi, DBI_SIZE); }
+void c_ChangeVPBitMap(u8 *vp, u32 bm, u8 *dbi)
+{
+    u8 *ri = vp && c_TypeOfMem((u32)vp) ? *(u8 **)(vp + VP_RasInfo) : 0;
+    if (!ri || !bm || !c_TypeOfMem((u32)ri))
+        return;
+    *(u32 *)(ri + 4) = bm;
+    if (Z.shown && vp == (u8 *)Z.shown + SC_ViewPort)
+        zb_screen_frame();
+    for (u32 o = 8; dbi && c_TypeOfMem((u32)dbi) && o <= 40; o += 32) {
+        u8 *rp = *(u8 **)(dbi + o + 14);
+        if (rp && c_TypeOfMem((u32)rp))
+            port_put(rp, (struct znode *)(dbi + o), 7);
+    }
+}
+
 u32 c_ViewPortAddress(const u8 *win)
 {
     u32 scr = win ? *(const u32 *)(win + 46) : 0;
@@ -2155,6 +2950,16 @@ F(AllocDosObject); F(FreeDosObject); F(OpenFont); F(CloseFont); F(SetFont); F(As
 F(Move); F(SetAPen); F(SetBPen); F(SetDrMd); F(RectFill); F(SetRast); F(SetChipRev); F(GetBitMapAttr);
 F(BestModeIDA); F(LockPubScreen); F(UnlockPubScreen); F(AllocScreenBuffer); F(FreeScreenBuffer);
 F(ChangeScreenBuffer);
+/* d29 16.13 */
+F(Allocate); F(Deallocate); F(FindSemaphore); F(GetVPModeID); F(ModeNotAvailable); F(BltClear); F(GetSprite);
+F(FreeSprite); F(Draw); F(PolyDraw); F(VideoControl); F(ScrollVPort); F(MakeVPort); F(MrgCop); F(QueryOverscan);
+F(WBenchTo); F(ActivateWindow); F(DisplayAlert); F(AllocRemember); F(FreeRemember); F(DrawBorder);
+F(EasyRequestArgs); F(RethinkDisplay); F(MakeScreen); F(MoveScreen); F(Lock); F(UnLock); F(DupLock); F(Examine);
+F(ExNext); F(Info); F(CurrentDir); F(ParentDir); F(DateStamp); F(DupLockFromFH); F(OpenFromLock); F(ParentOfFH);
+F(ExamineFH); F(NameFromLock); F(SameLock);
+F(GetColorMap); F(FreeColorMap); F(GetRGB4); F(SetRGB4CM); F(SetRGB32CM); F(GetRGB32); F(InitVPort); F(InitView);
+F(SumKickData); F(Fault); F(PrintFault); F(WaitBOVP); F(WritePixel); F(ReadPixel);
+F(AllocDBufInfo); F(FreeDBufInfo); F(ChangeVPBitMap); F(FilePart); F(PathPart); F(AddPart);
 
 /* the offsets: the RKRM's Function Offset Reference (V37), the pools and ColdReboot from the NDK 3.2's exec_lib.fd */
 static const u16 exec_lvo[] = { 30, 108, 114, 120, 126, 132, 138, 144, 162, 168, 174, 198, 204, 210, 216, 234, 240,
@@ -2162,7 +2967,8 @@ static const u16 exec_lvo[] = { 30, 108, 114, 120, 126, 132, 138, 144, 162, 168,
     624, 630, 636, 642, 648, 684, 690, 696, 702, 708, 714, 726, 732, 810, 366, 372, 378, 384, 666, 672, 456, 462, 468,
     474, 480, 180,
     78, 84, 90, 96, 102, 396, 402, 426, 486, 558, 564, 570, 576, 678, 720,
-    150, 156, 504, 510, 516, 654, 660, 354, 360, 390 };
+    150, 156, 504, 510, 516, 654, 660, 354, 360, 390,
+    186, 192, 594, 612 };
 static void (*const exec_fn[])(void) = { zx_Supervisor, zs_Alert, zs_rts, zx_Disable, zx_Enable, zx_Forbid,
     zx_Permit, zx_SetSR, zs_SetIntVector, zs_AddIntServer, zs_RemIntServer, zs_AllocMem, zs_AllocAbs, zs_FreeMem,
     zs_AvailMem, zs_Insert, zs_AddHead, zs_AddTail, zs_Remove, zs_RemHead, zs_RemTail, zs_Enqueue, zs_FindName,
@@ -2177,26 +2983,41 @@ static void (*const exec_fn[])(void) = { zx_Supervisor, zs_Alert, zs_rts, zx_Dis
     zs_SumLibrary, zs_AddResource, zs_InitSemaphore, zs_ObtainSemaphore, zs_ReleaseSemaphore, zs_AttemptSemaphore,
     zs_ObtainSemaphore, zs_AttemptSemaphore,
     zx_SuperState, zx_UserState, zs_RawIOInit, zs_RawMayGetChar, zs_RawPutChar, zs_CreateIORequest,
-    zs_DeleteIORequest, zs_AddPort, zs_RemPort, zs_FindPort };
+    zs_DeleteIORequest, zs_AddPort, zs_RemPort, zs_FindPort,
+    zs_Allocate, zs_Deallocate, zs_FindSemaphore, zs_SumKickData };
 static const u16 gfx_lvo[] = { 192, 222, 228, 270, 288, 384, 456, 462, 390, 492, 498, 918, 924, 882, 852, 198,
-    72, 78, 66, 474, 54, 60, 240, 342, 348, 354, 306, 234, 888, 960, 1050 };
+    72, 78, 66, 474, 54, 60, 240, 342, 348, 354, 306, 234, 888, 960, 1050,
+    792, 798, 300, 408, 414, 246, 336, 708, 588, 216, 210, 966, 972, 942,
+    570, 576, 582, 630, 996, 900, 204, 360, 402, 324, 318 };
 static void (*const gfx_fn[])(void) = { zs_LoadRGB4, zs_LoadView, zs_WaitBlit, zs_WaitTOF, zs_SetRGB4, zs_VBeamPos,
     zs_OwnBlitter, zs_DisownBlitter, zs_InitBitMap, zs_AllocRaster, zs_FreeRaster, zs_AllocBitMap, zs_FreeBitMap,
     zs_LoadRGB32, zs_SetRGB32, zs_InitRastPort,
     zs_OpenFont, zs_CloseFont, zs_SetFont, zs_AskFont, zs_TextLength, zs_Text, zs_Move, zs_SetAPen, zs_SetBPen,
-    zs_SetDrMd, zs_RectFill, zs_SetRast, zs_SetChipRev, zs_GetBitMapAttr, zs_BestModeIDA };
+    zs_SetDrMd, zs_RectFill, zs_SetRast, zs_SetChipRev, zs_GetBitMapAttr, zs_BestModeIDA,
+    zs_GetVPModeID, zs_ModeNotAvailable, zs_BltClear, zs_GetSprite, zs_FreeSprite, zs_Draw, zs_PolyDraw,
+    zs_VideoControl, zs_ScrollVPort, zs_MakeVPort, zs_MrgCop, zs_AllocDBufInfo, zs_FreeDBufInfo, zs_ChangeVPBitMap,
+    zs_GetColorMap, zs_FreeColorMap, zs_GetRGB4, zs_SetRGB4CM, zs_SetRGB32CM, zs_GetRGB32, zs_InitVPort, zs_InitView,
+    zs_WaitBOVP, zs_WritePixel, zs_ReadPixel };
 static const u16 dos_lvo[] = { 42, 48, 54, 60, 132, 144, 198, 312, 342, 354, 360, 462, 948, 954, 30, 36, 66, 150,
-    156, 222, 72, 216, 324, 330, 576, 534, 798, 858, 228, 234 };
+    156, 222, 72, 216, 324, 330, 576, 534, 798, 858, 228, 234,
+    84, 90, 96, 102, 108, 114, 126, 210, 192, 372, 378, 384, 390, 402, 420, 870, 876, 882, 468, 474 };
 static void (*const dos_fn[])(void) = { zs_Read, zs_Write, zs_Input, zs_Output, zs_IoErr, zx_Exit, zs_Delay,
     zs_FPutC, zs_FPuts, zs_VFPrintf, zs_Flush, zs_SetIoErr, zs_PutStr, zs_VPrintf, zs_Open, zs_Close, zs_Seek,
     zs_LoadSeg, zs_UnLoadSeg, zs_Execute, zs_DeleteFile, zs_IsInteractive, zs_FRead, zs_FWrite, zs_GetProgramName,
-    zs_GetArgStr, zs_ReadArgs, zs_FreeArgs, zs_AllocDosObject, zs_FreeDosObject };
+    zs_GetArgStr, zs_ReadArgs, zs_FreeArgs, zs_AllocDosObject, zs_FreeDosObject,
+    zs_Lock, zs_UnLock, zs_DupLock, zs_Examine, zs_ExNext, zs_Info, zs_CurrentDir, zs_ParentDir, zs_DateStamp,
+    zs_DupLockFromFH, zs_OpenFromLock, zs_ParentOfFH, zs_ExamineFH, zs_NameFromLock, zs_SameLock, zs_FilePart,
+    zs_PathPart, zs_AddPart, zs_Fault, zs_PrintFault };
 static const u16 int_lvo[] = { 78, 210, 612, 198, 66, 252, 246, 606, 204, 72, 150, 270, 60, 300,
-    510, 516, 768, 774, 780 };
+    510, 516, 768, 774, 780,
+    474, 342, 336, 450, 90, 396, 408, 108, 588, 390, 384, 378, 162 };
 static void (*const int_fn[])(void) = { zs_CloseWorkBench, zs_OpenWorkBench, zs_OpenScreenTagList, zs_OpenScreen,
     zs_CloseScreen, zs_ScreenToFront, zs_SetPointer, zs_OpenWindowTagList, zs_OpenWindow, zs_CloseWindow,
     zs_ModifyIDCMP, zs_SetPointer, zs_SetPointer, zs_ViewPortAddress,
-    zs_LockPubScreen, zs_UnlockPubScreen, zs_AllocScreenBuffer, zs_FreeScreenBuffer, zs_ChangeScreenBuffer };
+    zs_LockPubScreen, zs_UnlockPubScreen, zs_AllocScreenBuffer, zs_FreeScreenBuffer, zs_ChangeScreenBuffer,
+    zs_QueryOverscan, zs_WBenchTo, zs_WBenchTo, zs_ActivateWindow, zs_DisplayAlert, zs_AllocRemember,
+    zs_FreeRemember, zs_DrawBorder, zs_EasyRequestArgs, zs_RethinkDisplay, zs_RethinkDisplay, zs_MakeScreen,
+    zs_MoveScreen };
 _Static_assert(sizeof exec_lvo / 2 == sizeof exec_fn / sizeof exec_fn[0], "exec table");
 _Static_assert(sizeof gfx_lvo / 2 == sizeof gfx_fn / sizeof gfx_fn[0], "graphics table");
 _Static_assert(sizeof dos_lvo / 2 == sizeof dos_fn / sizeof dos_fn[0], "dos table");
@@ -2254,6 +3075,8 @@ static u32 ticks(void)                  /* frames since the program started, mon
 }
 
 static u32 hz(void) { return Z.pal ? 50 : 60; }
+u32 zb_ticks50(void) { u32 t = ticks(); return Z.pal ? t : t / 6 * 5 + t % 6 * 5 / 6; }    /* in 1/50 s */
+void zb_say(const char *s) { zb_out(s, slen(s)); }
 
 static void tv_now(u32 *tv)
 {
@@ -2577,6 +3400,9 @@ void zb_libs_init(void)
                 CUSTOM(0x030) = (u16)(0x100 | (u8)t[k]);
             }
         }
+        extern void zb_serial_hex(char tag, const u32 *v, int n);
+        u32 code = (u32)zb_libs_init;   /* where the blob's code is (a 'P' sample near it: inside a ZINE call) */
+        zb_serial_hex('C', &code, 1);
     }
     for (int c = 0; c < 2; c++) {       /* the CIAs' resources: 4 vectors and a Library each */
         static const u16 clvo[] = { 6, 12, 18, 24 };

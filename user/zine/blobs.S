@@ -75,6 +75,7 @@ zv_spurious:
     .globl  zv_irq
 zv_irq:
     movem.l %d0-%d1/%a0-%a1/%a5-%a6,-(%sp)
+    move.l  26(%sp),zb_irq_pc       /* the interrupted PC (the trace build samples it, 16.13) */
     moveq   #0,%d0
     move.w  30(%sp),%d0             /* the format/vector word: 24 bytes of registers, SR, PC */
     and.w   #0x0FFF,%d0
@@ -687,6 +688,69 @@ zs_AllocBitMap:
     CF  zs_AllocScreenBuffer, c_AllocScreenBuffer, 3, %a0, %a1, %d0
     CF  zs_FreeScreenBuffer, c_FreeScreenBuffer, 2, %a0, %a1
     CF  zs_ChangeScreenBuffer, c_ChangeScreenBuffer, 2, %a0, %a1
+/* ---- docs/d29-zine.md 16.13: the next calls (bnext.c, blibs.c) ---- */
+    CF  zs_Allocate, c_Allocate, 2, %a0, %d0
+    CF  zs_Deallocate, c_Deallocate, 3, %a0, %a1, %d0
+    CF  zs_FindSemaphore, c_FindSemaphore, 1, %a1
+    CF  zs_GetVPModeID, c_GetVPModeID, 1, %a0
+    CF  zs_ModeNotAvailable, c_ModeNotAvailable, 1, %d0
+    CF  zs_BltClear, c_BltClear, 3, %a1, %d0, %d1
+    CF  zs_GetSprite, c_GetSprite, 2, %a0, %d0
+    CF  zs_FreeSprite, c_FreeSprite, 1, %d0
+    CF  zs_Draw, c_Draw, 3, %a1, %d0, %d1
+    CF  zs_PolyDraw, c_PolyDraw, 3, %a1, %d0, %a0
+    CF  zs_VideoControl, c_VideoControl, 2, %a0, %a1
+    CF  zs_ScrollVPort, c_ScrollVPort, 1, %a0
+    CF  zs_MakeVPort, c_MakeVPort, 2, %a0, %a1
+    CF  zs_MrgCop, c_MrgCop, 1, %a1
+    CF  zs_GetColorMap, c_GetColorMap, 1, %d0
+    CF  zs_FreeColorMap, c_FreeColorMap, 1, %a0
+    CF  zs_GetRGB4, c_GetRGB4, 2, %a0, %d0
+    CF  zs_SetRGB4CM, c_SetRGB4CM, 5, %a0, %d0, %d1, %d2, %d3
+    CF  zs_SetRGB32CM, c_SetRGB32CM, 5, %a0, %d0, %d1, %d2, %d3
+    CF  zs_GetRGB32, c_GetRGB32, 4, %a0, %d0, %d1, %a1
+    CF  zs_InitVPort, c_InitVPort, 1, %a0
+    CF  zs_InitView, c_InitView, 1, %a1
+    CF  zs_SumKickData, c_SumKickData, 0
+    CF  zs_Fault, c_Fault, 4, %d1, %d2, %d3, %d4
+    CF  zs_PrintFault, c_PrintFault, 2, %d1, %d2
+    CF  zs_WaitBOVP, c_WaitBOVP, 1, %a0
+    CF  zs_WritePixel, c_WritePixel, 3, %a1, %d0, %d1
+    CF  zs_ReadPixel, c_ReadPixel, 3, %a1, %d0, %d1
+    CF  zs_QueryOverscan, c_QueryOverscan, 3, %a0, %a1, %d0
+    CF  zs_WBenchTo, c_WBenchTo, 0
+    CF  zs_ActivateWindow, c_ActivateWindow, 1, %a0
+    CF  zs_DisplayAlert, c_DisplayAlert, 3, %d0, %a0, %d1
+    CF  zs_AllocRemember, c_AllocRemember, 3, %a0, %d0, %d1
+    CF  zs_FreeRemember, c_FreeRemember, 2, %a0, %d0
+    CF  zs_DrawBorder, c_DrawBorder, 4, %a0, %a1, %d0, %d1
+    CF  zs_EasyRequestArgs, c_EasyRequestArgs, 4, %a0, %a1, %a2, %a3
+    CF  zs_RethinkDisplay, c_RethinkDisplay, 0
+    CF  zs_MakeScreen, c_MakeScreen, 1, %a0
+    CF  zs_MoveScreen, c_MoveScreen, 3, %a0, %d0, %d1
+    CF  zs_Lock, c_Lock, 2, %d1, %d2
+    CF  zs_UnLock, c_UnLock, 1, %d1
+    CF  zs_DupLock, c_DupLock, 1, %d1
+    CF  zs_Examine, c_Examine, 2, %d1, %d2
+    CF  zs_ExNext, c_ExNext, 2, %d1, %d2
+    CF  zs_Info, c_Info, 2, %d1, %d2
+    CF  zs_CurrentDir, c_CurrentDir, 1, %d1
+    CF  zs_ParentDir, c_ParentDir, 1, %d1
+    CF  zs_DateStamp, c_DateStamp, 1, %d1
+    CF  zs_DupLockFromFH, c_DupLockFromFH, 1, %d1
+    CF  zs_OpenFromLock, c_OpenFromLock, 1, %d1
+    CF  zs_ParentOfFH, c_ParentOfFH, 1, %d1
+    CF  zs_ExamineFH, c_ExamineFH, 2, %d1, %d2
+    CF  zs_NameFromLock, c_NameFromLock, 3, %d1, %d2, %d3
+    CF  zs_SameLock, c_SameLock, 2, %d1, %d2
+    CF  zs_AllocDBufInfo, c_AllocDBufInfo, 1, %a0
+    CF  zs_FreeDBufInfo, c_FreeDBufInfo, 1, %a1
+    CF  zs_ChangeVPBitMap, c_ChangeVPBitMap, 3, %a0, %a1, %a2
+    CF  zs_FilePart, c_FilePart, 1, %d1
+    CF  zs_PathPart, c_PathPart, 1, %d1
+    CF  zs_AddPart, c_AddPart, 3, %d1, %d2, %d3
+    CF  zs_OpenDiskFont, c_OpenDiskFont, 1, %a0
+    CF  zs_AvailFonts, c_AvailFonts, 3, %a0, %d0, %d1
     /* utility.library */
     CF  zs_FindTagItem, c_FindTagItem, 2, %d0, %a0
     CF  zs_GetTagData, c_GetTagData, 3, %d0, %d1, %a0
@@ -891,8 +955,11 @@ zb_jumptable:
     move.w  (%a2)+,%d1
     move.l  %a0,%a1
     sub.l   %d1,%a1
+#define ZTR_MAX 512                     /* the trace build: traced slots (every library's, about 360 in 16.13) */
 #ifdef ZINE_TRACE
     move.l  ztr_n,%d1               /* the trace build: the slot calls zx_trace, which names it and goes on */
+    cmp.l   #ZTR_MAX,%d1
+    bcc.s   5f                      /* the table full (16.13: it held 256, fewer than the slots): not traced */
     lsl.l   #3,%d1
     lea     ztr_tab,%a3
     add.l   %d1,%a3
@@ -911,6 +978,15 @@ zb_jumptable:
     addq.l  #1,ztr_n
     move.w  #0x4EB9,(%a1)+          /* jsr abs.l */
     move.l  #zx_trace,(%a1)
+    bra.s   4f
+5:  move.w  #0x4EF9,(%a1)+
+    move.l  32(%sp),%d1
+    move.l  36(%sp),%d2
+    sub.l   %d0,%d2
+    subq.l  #1,%d2
+    lsl.l   #2,%d2
+    move.l  %d1,%a3
+    move.l  0(%a3,%d2.l),(%a1)
 #else
     move.w  #0x4EF9,(%a1)+          /* jmp abs.l */
     move.l  (%a3)+,(%a1)
@@ -922,6 +998,9 @@ zb_jumptable:
     .data
     .globl  zb_attn                 /* AttnFlags (a long, the low word used), set by zb_prepare */
 zb_attn:
+    .long   0
+    .globl  zb_irq_pc
+zb_irq_pc:
     .long   0
     .globl  zb_tracing              /* 1 in the trace build: zb_back also writes the code before a bad call */
 zb_tracing:
@@ -937,7 +1016,7 @@ zb_tracing:
     .bss
     .even
 ztr_n:   .space 4
-ztr_tab: .space 8 * 256
+ztr_tab: .space 8 * ZTR_MAX
     .text
 zx_trace:
     movem.l %d0-%d3/%a0-%a1,-(%sp)

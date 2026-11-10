@@ -5,3 +5,5 @@ zine /tests/zine/zsuper; echo zsuper-rc=$?
 zine /tests/zine/zcalls one two TO=dest NUM 42 QUIET; echo zcalls-rc=$?
 zine /tests/zinebig/zbig; echo zbig-rc=$?
 mkdir /tmp/zl; cp /tests/zine/zhello "/tmp/zl/$(printf 'h\351llo')"; zine "/tmp/zl/$(printf 'h\351llo')"; echo zlatin-rc=$?; rm -r /tmp/zl
+# d29 16.13's test, from here (a line typed more at the console would grow the shell's heap)
+sh /tests/zine/zfix17

@@ -149,6 +149,18 @@ void zb_stop(u32 how, u32 why) __attribute__((noreturn));
 void zb_libs_init(void);
 u32 zb_out(const char *s, u32 n);
 int zb_say_text(const char *pre, u32 p, const char *post);
+void zb_say(const char *s);             /* a line of ZINE's own into the program's output */
+u32 zb_ticks50(void);                   /* 1/50 s since the program started */
+u32 zb_mode_id(u32 modes);              /* bnext.c: the display ID of a ViewPort's mode bits */
+u32 c_DateStamp(u32 *ds);
+u32 c_GetVPModeID(const u8 *vp);
+u32 c_Output(void);
+int zb_file_bytes(const char *name, const u8 **f, u32 *size);
+int zb_dir_ent(const char *name, u32 *ent);
+u32 c_OpenFont(const u8 *ta);
+void c_CloseFont(u8 *tf);
+void zb_font_add(u8 *tf);               /* bmore.c: a TextFont onto graphics' list (OpenFont finds it) */
+u32 c_NextTagItem(u32 **pp);
 u32 c_TypeOfMem(u32 a);                 /* blob.c: the memory attributes of a, 0 outside the program's memory */
 u32 zb_cia_irq(int c, u32 icr);
 void zb_screen_frame(void);
@@ -188,7 +200,8 @@ void zb_audio_abort(u8 *io);
 int zb_audio_pending(u8 *io);
 void zb_audio_init(u32 base);
 /* bmore.c, bmath.c (d29 16.12): the libraries beyond the four (utility and the math ones), the ROM font */
-#define ZB_NXLIB 7                      /* utility, mathffp, mathtrans, mathieeedoubbas/-doubtrans, -singbas/-singtrans */
+#define ZB_NXLIB 8                      /* utility, mathffp, mathtrans, mathieeedoubbas/-doubtrans, -singbas/-singtrans,
+                                         * diskfont (16.13) */
 extern u32 zb_xlib[ZB_NXLIB];           /* their bases: zine_blk lib numbers 4 and on (kernel/zine.h) */
 void zb_more_init(u32 (*take)(u32));
 u32 zb_more_open(const char *name, u32 version);

@@ -704,8 +704,17 @@ void zb_irq(u32 vec)
         if ((icr & 8) && !(done & 8))
             kbd();                      /* the keyboard while no program's handler takes it */
     }
-    if (lv == 3 && (pend & 0x0020))
+    if (lv == 3 && (pend & 0x0020)) {
         zb_screen_frame();
+        extern u32 zb_tracing, zb_irq_pc;
+        static u32 frames;
+        if (zb_tracing && ++frames % 250 == 0) {    /* the trace build: where the program is, every 5 s, and the
+                                                 * 16 bytes there (16.13) */
+            zb_serial_hex('P', &zb_irq_pc, 1);
+            if (!(zb_irq_pc & 1) && c_TypeOfMem(zb_irq_pc) && c_TypeOfMem(zb_irq_pc + 15))
+                zb_serial_hex('Q', (const u32 *)zb_irq_pc, 4);
+        }
+    }
     if (lv == 6 && (pend & 0x2000))
         zb_cia_irq(1, CIAB(CIA_ICR));
     for (u32 bit = 0; bit < 15; bit++) {
@@ -748,6 +757,37 @@ u32 zx_AllocMem(u32 size, u32 attrs)
     return r;
 }
 
+/* n bytes (a multiple of 8) from header h's chunks: the first that fits (the last with MEMF_REVERSE); 0 if none */
+static u32 hdr_alloc(struct zmh *h, u32 n, u32 attrs)
+{
+    struct zchunk **pp, **best = 0, *c;
+    for (pp = &h->first; (c = *pp); pp = &c->next)
+        if (c->bytes >= n) {
+            best = pp;
+            if (!(attrs & MEMF_REVERSE))
+                break;
+        }
+    if (!best)
+        return 0;
+    c = *best;
+    u32 r;
+    if (c->bytes == n) {
+        r = (u32)c;
+        *best = c->next;
+    } else if (attrs & MEMF_REVERSE) {
+        c->bytes -= n;
+        r = (u32)c + c->bytes;
+    } else {
+        struct zchunk *nc = (struct zchunk *)((u32)c + n);
+        nc->next = c->next;
+        nc->bytes = c->bytes - n;
+        *best = nc;
+        r = (u32)c;
+    }
+    h->free -= n;
+    return r;
+}
+
 static u32 alloc(u32 size, u32 attrs)
 {
     u32 n = (size + 7) & ~7u, req = attrs & MEMF_REQ;
@@ -756,31 +796,9 @@ static u32 alloc(u32 size, u32 attrs)
     for (struct zmh *h = (struct zmh *)MEMLIST->head; h->node.succ; h = (struct zmh *)h->node.succ) {
         if ((h->attrs & req) != req)
             continue;
-        struct zchunk **pp, **best = 0, *c;
-        for (pp = &h->first; (c = *pp); pp = &c->next)
-            if (c->bytes >= n) {
-                best = pp;
-                if (!(attrs & MEMF_REVERSE))
-                    break;
-            }
-        if (!best)
+        u32 r = hdr_alloc(h, n, attrs);
+        if (!r)
             continue;
-        c = *best;
-        u32 r;
-        if (c->bytes == n) {
-            r = (u32)c;
-            *best = c->next;
-        } else if (attrs & MEMF_REVERSE) {
-            c->bytes -= n;
-            r = (u32)c + c->bytes;
-        } else {
-            struct zchunk *nc = (struct zchunk *)((u32)c + n);
-            nc->next = c->next;
-            nc->bytes = c->bytes - n;
-            *best = nc;
-            r = (u32)c;
-        }
-        h->free -= n;
         if (attrs & MEMF_CLEAR)
             zmemset((void *)r, 0, n);
         return r;
@@ -796,15 +814,10 @@ static struct zmh *header_of(u32 p, u32 n)
     return 0;
 }
 
-void zx_FreeMem(u32 p, u32 size)
+/* n bytes at p (both multiples of 8) back into header h's chunks, joined with their neighbours; a block that overlaps
+ * a free one is freed twice: AN_FreeTwice */
+static void hdr_free(struct zmh *h, u32 p, u32 n)
 {
-    if (!p || !size)
-        return;
-    u32 n = (size + (p & 7) + 7) & ~7u;
-    p &= ~7u;
-    struct zmh *h = header_of(p, n);
-    if (!h)
-        c_Alert(AT_DeadEnd | AN_BadFreeAddr);
     struct zchunk **pp = &h->first, *prev = 0, *c;
     while ((c = *pp) && (u32)c < p) {
         prev = c;
@@ -825,6 +838,40 @@ void zx_FreeMem(u32 p, u32 size)
     } else
         *pp = nc;
     h->free += n;
+}
+
+void zx_FreeMem(u32 p, u32 size)
+{
+    if (!p || !size)
+        return;
+    u32 n = (size + (p & 7) + 7) & ~7u;
+    p &= ~7u;
+    struct zmh *h = header_of(p, n);
+    if (!h)
+        c_Alert(AT_DeadEnd | AN_BadFreeAddr);
+    hdr_free(h, p, n);
+}
+
+/* Allocate(memHeader a0, byteSize d0) (-186), Deallocate(memHeader a0, memoryBlock a1, byteSize d0) (-192): a
+ * program's own pool, a MemHeader and its chunk list as exec keeps them (the autodocs: 8-byte blocks, the first free
+ * block large enough). The header is the program's: only a block inside its mh_Lower..mh_Upper is given back. */
+u32 c_Allocate(struct zmh *h, u32 size)
+{
+    u32 n = (size + 7) & ~7u;
+    if (!h || !size || n < size || n > h->free)
+        return 0;
+    return hdr_alloc(h, n, 0);
+}
+
+void c_Deallocate(struct zmh *h, u32 p, u32 size)
+{
+    if (!h || !p || !size)
+        return;
+    u32 n = (size + (p & 7) + 7) & ~7u;
+    p &= ~7u;
+    if (p < h->lower || p >= h->upper || n > h->upper - p)
+        return;
+    hdr_free(h, p, n);
 }
 
 u32 c_AllocAbs(u32 size, u32 loc)

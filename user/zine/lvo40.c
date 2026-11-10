@@ -49,6 +49,10 @@ static const char n_mathieeesingtrans[] =
     "IEEESPAtan\0IEEESPSin\0IEEESPCos\0IEEESPTan\0IEEESPSincos\0IEEESPSinh\0IEEESPCosh\0IEEESPTanh\0"
     "IEEESPExp\0IEEESPLog\0IEEESPPow\0IEEESPSqrt\0IEEESPTieee\0IEEESPFieee\0IEEESPAsin\0IEEESPAcos\0"
     "IEEESPLog10\0";
+static const char n_diskfont[] =
+    "OpenDiskFont\0AvailFonts\0NewFontContents\0DisposeFontContents\0NewScaledDiskFont\0GetDiskFontCtrl\0"
+    "SetDiskFontCtrlA\0EOpenEngine\0ECloseEngine\0ESetInfoA\0EObtainInfoA\0EReleaseInfoA\0OpenOutlineFont\0"
+    "CloseOutlineFont\0WriteFontContents\0WriteDiskFontHeaderA\0ObtainCharsetInfo\0";
 
 static const struct zl_lib t40[] = {
     { "exec.library", 786, 22, n_exec },
@@ -62,6 +66,7 @@ static const struct zl_lib t40[] = {
     { "mathieeedoubtrans.library", 30, 17, n_mathieeedoubtrans },
     { "mathieeesingbas.library", 30, 12, n_mathieeesingbas },
     { "mathieeesingtrans.library", 30, 17, n_mathieeesingtrans },
+    { "diskfont.library", 30, 17, n_diskfont },
 };
 
 const char *zl_name40(const char *lib, unsigned offset)

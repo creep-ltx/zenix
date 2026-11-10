@@ -12,7 +12,7 @@
 #include "zcore.h"
 
 #define ZV_MAGIC    0x5a564f4cu         /* "ZVOL" */
-#define ZV_VERSION  2u
+#define ZV_VERSION  3u
 #define ZV_NAMEMAX  107                 /* bytes of a name (fib_FileName holds 108 with its end) */
 #define ZV_VOLMAX   30                  /* bytes of the volume's name */
 #define ZV_MAXFILES 500u                /* section 5.6's limits: more, and only the program goes in */
@@ -36,6 +36,7 @@ struct zv_hdr {
      * (the program's own memory: the blob neither saves nor gives them; zine frees them afterwards) */
     zu32 pre_seg, nkeep;
     struct { zu32 addr, size; } keep[ZV_NKEEP];
+    zu32 now;                           /* d29 16.13: Zenix's clock at the hand-over (Unix seconds; 0 unknown) */
 };
 struct zv_ent {
     zu32 parent;                        /* its directory's entry (the root: 0) */

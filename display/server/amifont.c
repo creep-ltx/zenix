@@ -369,6 +369,8 @@ const char *af_load(const u8 *d, unsigned n, struct af_font *f, void *(*alloc)(u
         f->nglyphs++;
     }
     f->nbytes = total;
+    if (!alloc)
+        return 0;                                       /* checked only (ZINE's diskfont loads the file itself) */
     f->bits = total ? alloc(total) : 0;
     if (total && !f->bits)
         return "no memory for its glyphs";

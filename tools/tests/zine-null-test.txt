@@ -15,6 +15,8 @@ wait zenix:/# 20
 sleep 2
 send cat /tmp/zn.after\r
 wait typed-after 20
+send sh /tests/zine/zprep17\r
+wait zenix:/# 20
 send echo disk-ok > /home/zn.disk; sync; cat /home/zn.disk 2>/dev/null || (echo disk-ok > /tmp/zn.disk; cat /tmp/zn.disk)\r
 wait (?m)^disk-ok 20
 send free\r
@@ -44,7 +46,7 @@ wait zpkt-rc= 60
 send zine /tests/zine/zpkt u; echo zpktu-rc=$?\r
 wait zpktu-rc= 60
 send sh /tests/zine/zfix16; echo zfix16-done\r
-wait (?m)^zfix16-done 300
+wait (?m)^zfix16-done 400
 send zine /tests/zine/zlibs; echo zlibs-rc=$?\r
 wait zlibs-rc= 90
 send mkdir -p /tmp/zwref; cp /tests/zine/zexit /tests/zine/zhello /tests/zine/zbadcall /tmp/zwref/; zine /tests/zine/zwrite; echo zwrite-rc=$?\r

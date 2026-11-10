@@ -573,19 +573,36 @@ static int name_eq(const char *a, const char *b)
     return !*a && !*b;
 }
 
+void zb_font_add(u8 *tf) { c_AddTail((struct zlist *)(Z.lib[1] + ZO_GfxBase_TextFonts), (struct znode *)tf); }
+
+/* OpenFont(textAttr a0) (-72): a font in memory (graphics' list: topaz 8, and the ones diskfont loaded, 16.13) of the
+ * name, the size asked first, else the nearest size of the name; any size of topaz is topaz 8 */
 u32 c_OpenFont(const u8 *ta)
 {
     static u8 said;
     const char *n = ta ? *(const char *const *)(ta + ZO_TextAttr_ta_Name) : 0;
     if (!n || !c_TypeOfMem((u32)n))
         return 0;
+    u32 want = *(const u16 *)(ta + ZO_TextAttr_ta_YSize), best = 0, bd = 0xFFFF;
+    struct zlist *fl = (struct zlist *)(Z.lib[1] + ZO_GfxBase_TextFonts);
+    for (struct znode *f = fl->head; f && f->succ; f = f->succ) {
+        if (!f->name || !name_eq(f->name, n))
+            continue;
+        u32 ys = *(u16 *)((u8 *)f + TF_(tf_YSize)), d = ys > want ? ys - want : want - ys;
+        if (d < bd)
+            bd = d, best = (u32)f;
+    }
+    if (best && (bd == 0 || !name_eq(n, topaz_name))) {
+        (*(u16 *)(best + TF_(tf_Accessors)))++;
+        return best;
+    }
     if (name_eq(n, topaz_name)) {
         (*(u16 *)(topaz + TF_(tf_Accessors)))++;
         return (u32)topaz;
     }
     if (said < 4) {
         said++;
-        zb_say_text("ZINE: no font \"", (u32)n, "\" (ZINE has topaz 8 only; fonts on disk need diskfont.library)\n");
+        zb_say_text("ZINE: no font \"", (u32)n, "\" in memory (topaz 8 and the fonts diskfont.library opened)\n");
     }
     return 0;
 }
@@ -621,12 +638,34 @@ void c_AskFont(u8 *rp, u8 *ta)
     ta[ZO_TextAttr_ta_Flags] = tf[TF_(tf_Style) + 1];
 }
 
-/* TextLength(rp a1, string a0, count d0) (-54): the font is fixed-width */
+/* a character of a font: its strike's bit offset and width, where it is drawn (kern) and how far the pen then moves
+ * (16.13: a disk font may be proportional, FPF_PROPORTIONAL 0x20 and a CharSpace table; the RKM's rule) */
+static void glyph(const u8 *tf, u32 ch, u32 *bit, u32 *w, s32 *kern, s32 *adv)
+{
+    u8 lo = tf[TF_(tf_LoChar)], hi = tf[TF_(tf_HiChar)];
+    u32 c = ch >= lo && ch <= hi ? ch - lo : (u32)(hi - lo + 1);
+    const u32 *loc = *(const u32 *const *)(tf + TF_(tf_CharLoc));
+    const s16 *sp = *(const s16 *const *)(tf + TF_(tf_CharSpace)), *kn = *(const s16 *const *)(tf + TF_(tf_CharKern));
+    *bit = loc ? loc[c] >> 16 : 0;
+    *w = loc ? loc[c] & 0xFFFF : 0;
+    *kern = kn ? kn[c] : 0;
+    *adv = (tf[TF_(tf_Style) + 1] & 0x20) && sp ? sp[c] + *kern : *(const u16 *)(tf + TF_(tf_XSize));
+}
+
+/* TextLength(rp a1, string a0, count d0) (-54): the pen's movement over the text */
 u32 c_TextLength(u8 *rp, const char *s, u32 n)
 {
-    (void)s;
     u8 *tf = rp ? *(u8 **)(rp + RP_Font) : 0;
-    return n * (tf ? *(u16 *)(tf + TF_(tf_XSize)) : 8u);
+    if (!tf || !s)
+        return n * 8u;
+    s32 x = 0;
+    for (u32 i = 0; i < n; i++) {
+        u32 bit, w;
+        s32 k, a;
+        glyph(tf, (u8)s[i], &bit, &w, &k, &a);
+        x += a;
+    }
+    return (u32)x;
 }
 
 void c_Move(u8 *rp, u32 x, u32 y)
@@ -689,24 +728,27 @@ u32 c_Text(u8 *rp, const u8 *s, u32 n)
     if (!tf)
         return 0;
     s32 x = *(s16 *)(rp + RP_cp_x), y = *(s16 *)(rp + RP_cp_y) - *(s16 *)(tf + TF_(tf_Baseline));
-    u32 h = *(u16 *)(tf + TF_(tf_YSize)), mod = *(u16 *)(tf + TF_(tf_Modulo)), xs = *(u16 *)(tf + TF_(tf_XSize));
+    u32 h = *(u16 *)(tf + TF_(tf_YSize)), mod = *(u16 *)(tf + TF_(tf_Modulo));
     const u8 *cd = *(const u8 **)(tf + TF_(tf_CharData));
-    const u32 *loc = *(const u32 **)(tf + TF_(tf_CharLoc));
-    u8 lo = tf[TF_(tf_LoChar)], hi = tf[TF_(tf_HiChar)];
-    for (u32 i = 0; i < n; i++, x += (s32)xs) {
-        if (!bm || !cd || !loc)
-            continue;
-        u32 c = s[i] >= lo && s[i] <= hi ? (u32)(s[i] - lo) : (u32)(hi - lo + 1);
-        u32 l = loc[c], bit = l >> 16, w = l & 0xFFFF;
-        if (w > 8)
-            w = 8;
-        for (u32 r = 0; r < h; r++) {
+    for (u32 i = 0; i < n; i++) {
+        u32 bit, w;
+        s32 kern, adv;
+        glyph(tf, s[i], &bit, &w, &kern, &adv);
+        if (w > 64)
+            w = 64;
+        for (u32 r = 0; bm && cd && r < h; r++) {
             const u8 *row = cd + r * mod;
-            u32 b = 0;
-            for (u32 k = 0; k < w; k++)     /* the glyph's bits from the strip, any bit offset */
-                b |= ((row[(bit + k) >> 3] >> (7 - ((bit + k) & 7))) & 1u) << (7 - k);
-            put8(bm, x, y + (s32)r, b, w ? w : 8, rp[RP_FgPen], rp[RP_BgPen], rp[RP_DrawMode], rp[RP_Mask]);
+            for (u32 k0 = 0; k0 < w || (!w && !k0 && adv > 0); k0 += 8) {   /* 8 pixels at a time, any bit offset */
+                u32 b = 0, nb = w - k0 < 8 ? w - k0 : 8;
+                for (u32 k = 0; k < nb; k++)
+                    b |= ((row[(bit + k0 + k) >> 3] >> (7 - ((bit + k0 + k) & 7))) & 1u) << (7 - k);
+                put8(bm, x + kern + (s32)k0, y + (s32)r, b, nb ? nb : (u32)(adv < 8 ? adv : 8), rp[RP_FgPen],
+                     rp[RP_BgPen], rp[RP_DrawMode], rp[RP_Mask]);
+                if (!w)
+                    break;
+            }
         }
+        x += adv;
     }
     *(s16 *)(rp + RP_cp_x) = (s16)x;
     return 0;
@@ -998,7 +1040,11 @@ extern const struct zb_mlib zb_mlibs[6];
 
 u32 zb_xlib[ZB_NXLIB];                  /* the bases, by number - 4 (kernel/zine.h ZINE_LIB_ numbers) */
 static const char *const xname[ZB_NXLIB] = { "utility.library", "mathffp.library", "mathtrans.library",
-    "mathieeedoubbas.library", "mathieeedoubtrans.library", "mathieeesingbas.library", "mathieeesingtrans.library" };
+    "mathieeedoubbas.library", "mathieeedoubtrans.library", "mathieeesingbas.library", "mathieeesingtrans.library",
+    "diskfont.library" };
+extern const u16 *const zb_df_lvo;      /* bfont.c (16.13) */
+extern void (*const *const zb_df_fn)(void);
+extern const u16 zb_df_n;
 
 static u32 xlib(u32 (*take)(u32), const char *name, u16 slots, const u16 *lvo, void (*const *fn)(void), u16 n)
 {
@@ -1021,6 +1067,14 @@ void zb_more_init(u32 (*take)(u32))
     zb_xlib[0] = xlib(take, xname[0], 45, ut_lvo, ut_fn, sizeof ut_lvo / 2);
     for (int i = 0; i < 6; i++)
         zb_xlib[1 + i] = xlib(take, xname[1 + i], zb_mlibs[i].slots, zb_mlibs[i].lvo, zb_mlibs[i].fn, zb_mlibs[i].n);
+    zb_xlib[7] = xlib(take, xname[7], 22, zb_df_lvo, zb_df_fn, zb_df_n);     /* diskfont_lib.fd: 18 + 4 */
+    extern u8 zm_fpu;                   /* bfpu.S: the math libraries' arithmetic on the FPU (16.13) */
+    zm_fpu = (Z.attn & 0x70) != 0;      /* AFF_68881, AFF_68882, AFF_FPU40 */
+    extern u32 zb_tracing;
+    extern void zb_serial_hex(char tag, const u32 *v, int n);
+    if (zb_tracing)                     /* the trace build: these libraries' bases too (X: utility, the math ones,
+                                         * diskfont, in that order) */
+        zb_serial_hex('X', zb_xlib, ZB_NXLIB);
     zb_font_init(take);
 }
 

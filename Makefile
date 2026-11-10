@@ -1031,29 +1031,38 @@ $(BUILD)/zine.uo: user/zine.c $(ZINEH) user/pw.h user/libz.h user/usys.h | $(BUI
 ZINECMD := $(BUILD)/zine.uo $(BUILD)/pw.uo $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-lvo.uo $(BUILD)/zc-lvo40.uo
 $(BUILD)/zine.uelf: $(ZINECMD) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(ZINECMD) $(BUILD)/libz.uo $(LIBGCC) -o $@
-ZBLOBOBJS := $(BUILD)/zb-blobs.o $(BUILD)/zb-blob.o $(BUILD)/zb-blibs.o $(BUILD)/zb-blibload.o $(BUILD)/zb-bmore.o $(BUILD)/zb-bmath.o $(BUILD)/zc-zpath.uo $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-zplan.uo
+ZBLOBOBJS := $(BUILD)/zb-blobs.o $(BUILD)/zb-blob.o $(BUILD)/zb-blibs.o $(BUILD)/zb-blibload.o $(BUILD)/zb-bmore.o $(BUILD)/zb-bmath.o $(BUILD)/zb-bnext.o $(BUILD)/zb-bfont.o $(BUILD)/zb-amifont.o $(BUILD)/zb-bfpu.o $(BUILD)/zc-zpath.uo $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-zplan.uo
 $(BUILD)/zb-blobs.o: user/zine/blobs.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 # the blob writes low memory (the vectors at 0, ExecBase at 0x800): addresses near 0 are not null pointers to it
 ZBFLAGS := -Os -fno-delete-null-pointer-checks --param=min-pagesize=0
 $(BUILD)/zb-%.o: user/zine/%.c $(ZINEH) | $(BUILD)
 	$(CC) $(UCFLAGS) $(ZBFLAGS) -c $< -o $@
+# the math libraries on the FPU when there is one (16.13): the soft-float calls wrapped (bfpu.S)
+ZBCOMMA := ,
+ZBWRAP := $(patsubst %,-Wl$(ZBCOMMA)--wrap=__%,adddf3 subdf3 muldf3 divdf3 addsf3 subsf3 mulsf3 divsf3 floatsidf floatsisf extendsfdf2 truncdfsf2 fixdfsi fixsfsi)
+$(BUILD)/zb-bfpu.o: user/zine/bfpu.S | $(BUILD)
+	$(CC) $(ASFLAGS) -m68881 $< -o $@
+# diskfont (16.13) checks fonts with the desktop's reader
+$(BUILD)/zb-amifont.o: display/server/amifont.c display/server/amifont.h | $(BUILD)
+	$(CC) $(UCFLAGS) $(ZBFLAGS) -c $< -o $@
+$(BUILD)/zb-bfont.o: display/server/amifont.h
 $(BUILD)/zine-blob.elf: $(ZBLOBOBJS) link/user.ld
-	$(CC) $(UCFLAGS) $(ULDFLAGS) $(ZBLOBOBJS) $(LIBGCC) -o $@
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(ZBWRAP) $(ZBLOBOBJS) $(LIBGCC) -o $@
 $(BUILD)/zine.blob: $(BUILD)/zine-blob.elf tools/mkzexe.py tools/mkzblob.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@.zx
 	python3 tools/mkzblob.py $@.zx $@
 # the trace build (tests only, /tests/zine/trace.blob): every library call named on the serial port
-ZTBLOBOBJS := $(BUILD)/zt-blobs.o $(BUILD)/zb-blob.o $(BUILD)/zb-blibs.o $(BUILD)/zb-blibload.o $(BUILD)/zb-bmore.o $(BUILD)/zb-bmath.o $(BUILD)/zc-zpath.uo $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-zplan.uo
+ZTBLOBOBJS := $(BUILD)/zt-blobs.o $(BUILD)/zb-blob.o $(BUILD)/zb-blibs.o $(BUILD)/zb-blibload.o $(BUILD)/zb-bmore.o $(BUILD)/zb-bmath.o $(BUILD)/zb-bnext.o $(BUILD)/zb-bfont.o $(BUILD)/zb-amifont.o $(BUILD)/zb-bfpu.o $(BUILD)/zc-zpath.uo $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-zplan.uo
 $(BUILD)/zt-blobs.o: user/zine/blobs.S | $(BUILD)
 	$(CC) $(ASFLAGS) -DZINE_TRACE $< -o $@
 $(BUILD)/zine-trace.elf: $(ZTBLOBOBJS) link/user.ld
-	$(CC) $(UCFLAGS) $(ULDFLAGS) $(ZTBLOBOBJS) $(LIBGCC) -o $@
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(ZBWRAP) $(ZTBLOBOBJS) $(LIBGCC) -o $@
 $(BUILD)/zine-trace.blob: $(BUILD)/zine-trace.elf tools/mkzexe.py tools/mkzblob.py
 	tools/mkzexe.py $< $@.zx
 	python3 tools/mkzblob.py $@.zx $@
-ZINETESTS := zexit zhello ztake zcrash zbadcall zalloc zscreen zmmu zfpu zovl zpkt zlibs zwrite zcase zexec zpart zcrunch zsuper zcalls
+ZINETESTS := zexit zhello ztake zcrash zbadcall zalloc zscreen zmmu zfpu zovl zpkt zlibs zwrite zcase zexec zpart zcrunch zsuper zcalls znext
 # the null blob (step 2's tests): the pause and the resume with nothing in between (user/zine/nullblob.S)
 $(BUILD)/zb-nullblob.o: user/zine/nullblob.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@

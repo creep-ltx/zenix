@@ -35,5 +35,6 @@ struct af_font {
 const char *af_contents(const unsigned char *d, unsigned n, int ysize, char *file, unsigned filesz, char *sizes,
                         unsigned sizessz);
 /* the font file d (n bytes) -> 0 and f filled, f->bits from alloc (its size f->nbytes; the caller frees it); or the
- * reason (nothing allocated) */
+ * reason (nothing allocated). With alloc 0 the file is only checked (every check made, f->bits not converted): ZINE's
+ * diskfont (user/zine/bfont.c) then loads the file as AmigaOS does. */
 const char *af_load(const unsigned char *d, unsigned n, struct af_font *f, void *(*alloc)(unsigned));

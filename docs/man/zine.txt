@@ -95,7 +95,27 @@ DESCRIPTION
     ZINE also has utility.library and the math libraries (mathffp,
     mathtrans, mathieeesingbas/-singtrans, mathieeedoubbas/-doubtrans,
     computed in software), and topaz 8 as the ROM font (its glyphs are
-    Zenix's own); fonts on disk are not supported.
+    Zenix's own).
+
+    Fonts on disk (diskfont.library): copy AmigaOS bitmap fonts into
+    /usr/share/fonts/amiga as they are in FONTS: (NAME.font and its NAME
+    folder). zine puts them into the program's FONTS (its own Fonts
+    folder, if it has one, comes first) when they fit beside its files;
+    else it says they were left out. A font the program asks for and
+    does not find is named with its size and where to put it, e.g.
+    "ZINE: demo needs xen.font size 8: copy it into
+    /usr/share/fonts/amiga". A size the font lacks: the nearest is
+    given and said (AmigaOS would scale it). A damaged font file is
+    refused with its reason.
+
+    The program's folder is read-only: Lock, Examine and ExNext list
+    it as it was at the start (files written during the session are
+    kept, but not listed there); CurrentDir changes where names
+    without a device are found.
+    A disk name the program asks for that ZINE does not have (a demo
+    that opens "Love:data") is taken as the program's own folder, as
+    "Assign Love: <its folder>" would; zine says so once.
+    On a machine with an FPU the math libraries compute on it.
 
     ZINE is being built (DESIGN D29): real demos run in FS-UAE.
 

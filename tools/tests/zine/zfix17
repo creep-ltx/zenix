@@ -1,0 +1,3 @@
+# ZINE's third Top 100 round (docs/d29-zine.md 16.13), run from zfix16 (no line typed more): znext in /tmp/zn, which
+# zprep17 made before the memory mark
+zine /tmp/zn/znext; echo znext-rc=$?

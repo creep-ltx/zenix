@@ -1,0 +1,7 @@
+# ZINE's third Top 100 round (docs/d29-zine.md 16.13): what znext's run (zfix17) needs, made before the test's memory
+# mark (files and folders made in the RAM disk and on the disk keep a little of the servers' memory): ztest and zbad
+# (the test fonts of tools/mkamifont.py) in Zenix's /usr/share/fonts/amiga; /tmp/zn with znext, Data/Sub/f.txt and a
+# Fonts folder of its own (zfixed)
+cp -r /tests/fonts/ztest /tests/fonts/ztest.font /tests/fonts/zbad /tests/fonts/zbad.font /usr/share/fonts/amiga/
+mkdir -p /tmp/zn/Data/Sub /tmp/zn/Fonts; cp /tests/zine/znext /tmp/zn/; printf 'hello\n' > /tmp/zn/Data/Sub/f.txt
+cp -r /tests/fonts/zfixed /tests/fonts/zfixed.font /tmp/zn/Fonts/
