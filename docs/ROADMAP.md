@@ -92,7 +92,7 @@ PFS3 8 GB), to /dev/null and on the screen, in the text console and in zdesk's t
 
 **ZINE, open (2026-11-06):** the program's volume is named "ZINE", not after its folder as d29 5.6 says, so a demo that opens `<its disk's name>:data/...` fails. (2026-11-10, branch zine2: a volume name ZINE does not have is now taken as the program's folder when the path is there, d29 16.13; the volume itself is still named "ZINE".)
 
-**ZINE, open (2026-11-11, branch zine5, d29 16.15; approved by the owner 2026-11-12, docs/decisions.md: build it):** a program's second process (dos CreateNewProc, Elude's sound
+**ZINE, open (2026-11-11, branch zine5, d29 16.15; approved by the owner 2026-11-11, docs/decisions.md: build it):** a program's second process (dos CreateNewProc, Elude's sound
 process) is refused with AmigaOS's answer, so those demos run silent; running it needs task switching in ZINE, which
 d29 8.4 rules out: the owner's decision (16.15 says what a minimal version takes). The Top 100's full rerun after
 round 5 is still to do.
