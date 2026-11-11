@@ -95,6 +95,7 @@ int zv_init(void *blk, zu32 size, zu32 cap, const char *name)
     h->data = zv_need(cap, 0, 0);
     h->used = 0;
     h->pre_seg = h->nkeep = h->now = 0;
+    h->sp[0] = h->sp[1] = h->sp_size[0] = h->sp_size[1] = 0;
     if (latin1(name, h->volname, ZV_VOLMAX) < 0) {
         const char *z = "ZINE";
         int i = 0;

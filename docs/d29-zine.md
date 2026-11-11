@@ -1710,6 +1710,80 @@ volume's lookups); the kernel unchanged (182,820 bytes). ZINE is not on the DD d
 carries the font reader's check-only form (a few bytes): the DD floppy was already 512 bytes over before this
 branch (main at 064777e: `make demo-dd` refuses it, packed stream 882,711 bytes; 882,790 here).
 
+### 16.14 The 68040/060's missing instructions, and the early quits (2026-11-11, branch zine4)
+
+**What a 68040 or 68060 lacks** (the CPUs' user's manuals): the FPU's transcendental and other instructions (FSIN,
+FCOS, FTAN, FATAN, FETOX, FLOGN, FSINH, FTWOTOX, FMOD, FREM, FSCALE, FGETEXP, FGETMAN; on the 68040 also FINT and
+FINTRZ; FMOVECR), packed decimal, denormalised and unnormalised operands, on the 68060 some effective addresses (an
+immediate double or extended, FMOVEM with a register list in a data register) and the integer unit's 64-bit
+MULU.L/MULS.L/DIVU.L/DIVS.L, MOVEP, CAS2, CHK2/CMP2 and a misaligned CAS. They trap (line F, the unimplemented data
+type, effective address and integer vectors); AmigaOS's 68040.library and 68060.library emulate them. Until 16.14
+ZINE named them in the crash line (16.5).
+
+**Built:** Motorola's own packages, as the Linux kernel carries them (`user/zine/msp`, notice `msp/NOTICE`: Motorola's
+licence allows use, change and distribution with the notice kept and changed versions named; GPL-2.0 compatible; the
+Linux kernel, GPL-2.0, ships the same files): the M68060 Software Package's FPU and integer kernel modules (`fpsp.sa`,
+`isp.sa`, Motorola's hex images, with its source and documentation) and the M68040 Floating Point Software Package
+(its source in the GNU assembler's form). ZINE writes only the call-outs: `user/zine/zsp060.S` (the 060's 128-byte
+call-out tables before each package, as its documentation lays them out) and `zsp040.S` (in place of the package's
+sample skeleton: its handling of the FPU state's E1/E3 flags and the 68040 inexact bug, then ZINE's handlers).
+- **Two files, loaded on demand:** `/lib/zine/sp060` (61,340 bytes) and `/lib/zine/sp040` (41,016 bytes), ZEXE images
+  with a "ZSPK" header (the CPU, the hooks' address, the vector entries, an entry marked "FPU" only with one). `zine`
+  loads and relocates them only on a 68040/060 (AttnFlags): the 060's on a 68060, both when AttnFlags say 68040 (a
+  68060 without 68060.library at boot says so); not on Emu68, which runs every instruction itself. Their memory is
+  zine's (Zenix's), named to the blob in the volume's header (`zv_hdr.sp`, ZV_VERSION 4); a 68020/030 loads nothing.
+  A file missing or damaged is said and the session goes on without it. They are in the root image and ZINE's zup
+  package, not on the demo floppies (their root is a RAM disk on every machine: 102 KB more RAM, 46 KB of the HD
+  floppy, for the 040/060 alone).
+- **The blob** (`sp_install`, before the program starts): on a 68060 (PCR read by zb_mmu_save) the 060 package, on a
+  68040 with an FPU the 040 one; the header checked (every address inside the file, in fast RAM), the hooks set to
+  ZINE's line-F handler (so the 030 MMU no-ops of 16.5 still work: the package passes an F-line that is no FPU
+  instruction on) and its crash handler, the vectors 11, 48-55, 60, 61 pointed at the entry points. The FPU is
+  "there" when `fmove.l fpcr` answers (zb_mmu_save's probe) or the 68060's PCR says a full 68060 (ID $0430; $0431 is
+  the EC/LC part): FS-UAE's 68060 starts with the FPU switched off in PCR (DFP), as a 68060 does before 68060.library,
+  and the package's "FPU disabled" call-out switches it on at the first FPU instruction (zb_mmu_back puts Zenix's PCR
+  back after). An EC/LC 68060 gets the integer package only, said with the PCR. The program's output says it once:
+  "ZINE: the 68060's missing instructions are emulated (Motorola's M68060 Software Package)".
+- An FP exception the program enabled in FPCR, after the package's IEEE handling, ends at ZINE's crash handler (no
+  task trap handler in ZINE; AmigaOS's default one shows an alert); zine names the vectors 48-55, 60 and 61 now.
+- **The Zenix kernel** needs none of this: Zenix's programs are built `-msoft-float -m68020-60` (no FPU instruction, no
+  64-bit MULU.L), and the kernel keeps no FPU state.
+- **FS-UAE's CPUs** (*verified*, the PCR as the blob read it): `uae_cpu_model = 68060` alone is the EC/LC part (no
+  FPU, PCR $04310103); with `uae_fpu_model = 68060` (or `cpu = 68060` and `fpu = 68060` in FS-UAE's own words) it is a
+  full 68060 (PCR $04300103, DFP set). `uae_cpu_model = 68040` alone has no FPU; `uae_fpu_model = 68040` adds it.
+  The test machines with FPUs are `fsuae/zine/a1200-040fpu.fs-uae` and `a1200-060fpu.fs-uae` (outside the matrix).
+
+**The early quits of the Top 100 on the 68030** (zine-top100-findings.md "Round 4"): of the 50 that ended by themselves
+with an error code, most ended after their full run (a return code left in d0: clean ends) or for want of memory on
+the 16 MB test machine; the ZINE gaps found and filled here:
+- **console.device** (blibload.c): a unit on a window as old programs open it (The Juggler): `OpenDevice` gives a
+  ConUnit of ZINE's (its window, an 8 x 8 grid: cu_XMax, cu_YMax, the tab stops, the pens); CMD_WRITE's text goes into
+  the program's output with the control sequences left out; CMD_READ stays in progress until AbortIO (ZINE gives
+  programs no keys; WaitIO on it waits as Wait does); the other commands done at once; CONU_LIBRARY (-1) for
+  RawKeyConvert, which gives no characters.
+- **intuition ViewAddress** (-294): IntuitionBase's ViewLord.
+- **input.device** (blibload.c): opened by programs that add an input handler (TBL's demo system, seen on the 68060
+  machine once Ocean Machine had the memory): the handler is taken and never called (ZINE gives programs no input
+  events); every command done at once; PeekQualifier 0.
+- **The first large AllocMem that fails** (64 KB or more) is said once: "ZINE: AllocMem of N KB ... refused: the
+  largest free block is K KB (C KB chip, F KB fast RAM free)". Most early quits were this (14-49 MB asked for).
+
+*Verified* in FS-UAE (`tools/zine-emu-test.sh`): `zfpux` (tools/tests/zine/zfpux.S) computes 37 instructions and
+compares each with its known value (FSIN ... FREM, FMOVECR, FSINCOS, a packed decimal and a denormal source, an
+immediate double; MULU.L/DIVU.L with 64 bits, MOVEP.L, CAS2.L, CHK2/CMP2): every answer right on FS-UAE's 68030 +
+68882 (in hardware), its 68040 with FPU (the 040 package) and its 68060 with FPU (the 060 package, the FPU switched on
+by the call-out); `zfpu` (FSIN) returns 0 on both; zcrash and zcalls as before, Zenix's memory as before the sessions. `zcon`
+(tools/tests/zine/zcon.S, on the 68040 machine): console.device's CMD_WRITE in the output without its control
+sequence, a CMD_READ in progress until AbortIO (WaitIO then -2), the ConUnit's 80 x 25 grid; input.device's
+IND_ADDHANDLER and IND_REMHANDLER; ViewAddress; a refused 1 GB AllocMem said.
+One answer is left out of zfpux: FINT of 2.5 (a tie, to 2 under round-to-nearest) came out wrong on all three FS-UAE
+FPUs alike, the 68882 included, so it is FS-UAE's rounding, not the packages' (2.7 to 3 is checked). Not yet on a real
+68040 or 68060 (the Apollo 1260 is the owner's test).
+
+Sizes (*measured*, the 68020-60 build): the blob image 97,328 -> 99,960 bytes (memory 109,316 -> 112,264: the
+installer, console.device, the AllocMem line); `/bin/zine` 40,152 -> 41,392 bytes (memory 46,932 -> 48,172); the two
+packages 61,340 + 41,016 bytes on the disk, in memory only on a 68040/060 during a session; the kernel unchanged.
+
 ## 17. Questions for the owner (what ZINE should be)
 
 1. Owner answer 1 allowed "the Amiga's own console or through Wasabi". Typing into the console through Wasabi counts

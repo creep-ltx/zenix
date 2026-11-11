@@ -36,10 +36,17 @@ DESCRIPTION
 
     On a 68040 or 68060 (and the PiStorm's Emu68) a 68030 MMU
     instruction an old program uses to switch the MMU off (PMOVE,
-    PFLUSH, PTEST) is taken as a no-op, as the MMU is off. FPU
-    instructions those CPUs lack (FSIN, FCOS, FETOX, ...) are not
-    emulated: the crash line names the instruction. CacheControl
-    switches the instruction cache; the data cache stays off.
+    PFLUSH, PTEST) is taken as a no-op, as the MMU is off. On a 68040
+    or 68060 the instructions the CPU lacks are emulated for the
+    session by Motorola's packages, /lib/zine/sp040 and sp060 (FSIN,
+    FCOS, FETOX, FMOVECR, packed decimal, denormals, ...; on the 68060
+    also 64-bit MULU.L/DIVU.L, MOVEP, CAS2, CHK2), as 68040.library and
+    68060.library do under AmigaOS; the program's output says so first.
+    Not on Emu68 (it runs them itself), and not on an EC/LC part
+    without an FPU (only the 68060's integer ones there); a program
+    that needs an FPU then crashes, the crash line naming the
+    instruction. CacheControl switches the instruction cache; the data
+    cache stays off.
 
     Overlaid programs (a root that loads its other parts from its own
     file while it runs, as many demos of the 1990s do) run: the whole
@@ -116,6 +123,12 @@ DESCRIPTION
     that opens "Love:data") is taken as the program's own folder, as
     "Assign Love: <its folder>" would; zine says so once.
     On a machine with an FPU the math libraries compute on it.
+    console.device opened on a window takes the program's text into its
+    output (control sequences left out); it gives no keys, so a read
+    waits; input.device takes a program's input handler and never
+    calls it. The first large AllocMem that fails is said, with the
+    largest free block (a program that quits at once for want of
+    memory shows why).
 
     ZINE is being built (DESIGN D29): real demos run in FS-UAE.
 

@@ -308,6 +308,10 @@ u32 c_OpenDevice(const char *name, u32 unit, u8 *io, u32 flags)
     }
     if (name && streq(name, "audio.device"))
         return zb_audio_open(io, unit, flags);  /* blibload.c: its channels allocated, nothing played (16.8) */
+    if (name && streq(name, "console.device"))
+        return zb_con_open(io, unit, flags);    /* blibload.c: its text into the output, no keys (16.14) */
+    if (name && streq(name, "input.device"))
+        return zb_inp_open(io);         /* blibload.c: handlers taken, no events (16.14) */
     if (name) {
         zb_out(msg, sizeof msg - 1);
         zb_out(name, slen(name));
@@ -324,6 +328,8 @@ void c_CloseDevice(u8 *io)
 {
     if (io && *(u32 *)(io + ZO_IORequest_io_Device) == zb_audio_base)
         zb_audio_close(io);
+    else if (io && zb_con_base && *(u32 *)(io + ZO_IORequest_io_Device) == zb_con_base)
+        zb_con_close(io);
 }
 
 u32 c_SetFunction(u8 *lib, s32 off, u32 fn)
@@ -2910,6 +2916,9 @@ void c_ChangeVPBitMap(u8 *vp, u32 bm, u8 *dbi)
     }
 }
 
+/* ViewAddress (-294): intuition's own View (IntuitionBase's ViewLord), as old programs ask for it (16.14) */
+u32 c_ViewAddress(void) { return IB_VIEWLORD(Z.lib[3]); }
+
 u32 c_ViewPortAddress(const u8 *win)
 {
     u32 scr = win ? *(const u32 *)(win + 46) : 0;
@@ -2941,7 +2950,7 @@ F(Output); F(Input); F(Write); F(Read); F(PutStr); F(VPrintf); F(VFPrintf); F(FP
 F(SetIoErr); F(Delay); F(Execute); F(CloseWorkBench); F(OpenWorkBench); F(rts);
 F(InitStruct); F(MakeLibrary); F(MakeFunctions); F(FindResident); F(InitResident); F(AddLibrary); F(RemLibrary);
 F(SumLibrary); F(AddResource); F(InitSemaphore); F(ObtainSemaphore); F(ReleaseSemaphore); F(AttemptSemaphore);
-F(DeleteFile); F(AudioBeginIO); F(AudioAbortIO);
+F(DeleteFile); F(AudioBeginIO); F(AudioAbortIO); F(ConBeginIO); F(ConAbortIO); F(ConRawKey); F(ViewAddress); F(InpBeginIO);
 X(Supervisor); X(Disable); X(Enable); X(Forbid); X(Permit); X(SetSR); X(GetCC); X(CacheClearU); X(ColdReboot); X(Exit);
 X(SuperState); X(UserState);
 F(RawIOInit); F(RawMayGetChar); F(RawPutChar); F(CreateIORequest); F(DeleteIORequest); F(AddPort); F(RemPort);
@@ -3010,14 +3019,14 @@ static void (*const dos_fn[])(void) = { zs_Read, zs_Write, zs_Input, zs_Output, 
     zs_PathPart, zs_AddPart, zs_Fault, zs_PrintFault };
 static const u16 int_lvo[] = { 78, 210, 612, 198, 66, 252, 246, 606, 204, 72, 150, 270, 60, 300,
     510, 516, 768, 774, 780,
-    474, 342, 336, 450, 90, 396, 408, 108, 588, 390, 384, 378, 162 };
+    474, 342, 336, 450, 90, 396, 408, 108, 588, 390, 384, 378, 162, 294 };
 static void (*const int_fn[])(void) = { zs_CloseWorkBench, zs_OpenWorkBench, zs_OpenScreenTagList, zs_OpenScreen,
     zs_CloseScreen, zs_ScreenToFront, zs_SetPointer, zs_OpenWindowTagList, zs_OpenWindow, zs_CloseWindow,
     zs_ModifyIDCMP, zs_SetPointer, zs_SetPointer, zs_ViewPortAddress,
     zs_LockPubScreen, zs_UnlockPubScreen, zs_AllocScreenBuffer, zs_FreeScreenBuffer, zs_ChangeScreenBuffer,
     zs_QueryOverscan, zs_WBenchTo, zs_WBenchTo, zs_ActivateWindow, zs_DisplayAlert, zs_AllocRemember,
     zs_FreeRemember, zs_DrawBorder, zs_EasyRequestArgs, zs_RethinkDisplay, zs_RethinkDisplay, zs_MakeScreen,
-    zs_MoveScreen };
+    zs_MoveScreen, zs_ViewAddress };
 _Static_assert(sizeof exec_lvo / 2 == sizeof exec_fn / sizeof exec_fn[0], "exec table");
 _Static_assert(sizeof gfx_lvo / 2 == sizeof gfx_fn / sizeof gfx_fn[0], "graphics table");
 _Static_assert(sizeof dos_lvo / 2 == sizeof dos_fn / sizeof dos_fn[0], "dos table");
@@ -3180,13 +3189,20 @@ void c_TimerAbortIO(u8 *io)
 }
 
 /* exec's I/O calls for every device ZINE has (timer.device only) */
-u32 c_CheckIO(u8 *io) { return io && pending(io) < 0 && !zb_audio_pending(io) ? (u32)io : 0; }
+u32 c_CheckIO(u8 *io)
+{
+    return io && pending(io) < 0 && !zb_audio_pending(io) && !zb_con_pending(io) ? (u32)io : 0;
+}
 s32 c_WaitIO(u8 *io)
 {
     if (!io)
         return 0;
     while (pending(io) >= 0)
         timer_step();
+    while (zb_con_pending(io)) {        /* a console read: only an interrupt server could end it (AbortIO) */
+        if (!timer_step() && EB(ZO_ExecBase_IDNestCnt, s8) >= 0)
+            zb_stop(ZH_STOP, ZS_WAIT);
+    }
     u8 *rp = *(u8 **)(io + 14);
     if (rp && !(io[30] & IOF_QUICK))
         c_Remove((struct znode *)io);   /* off the reply port */
@@ -3199,6 +3215,10 @@ void c_SendIO(u8 *io)
         c_TimerBeginIO(io);
     else if (*(u32 *)(io + 20) == zb_audio_base && zb_audio_base)
         zb_audio_beginio(io);
+    else if (*(u32 *)(io + 20) == zb_con_base && zb_con_base)
+        zb_con_beginio(io);
+    else if (*(u32 *)(io + 20) == zb_inp_base && zb_inp_base)
+        zb_inp_beginio(io);
     else {
         io[31] = (u8)-1;
         zb_io_done(io);
@@ -3211,6 +3231,10 @@ s32 c_DoIO(u8 *io)
         c_TimerBeginIO(io);
     else if (*(u32 *)(io + 20) == zb_audio_base && zb_audio_base)
         zb_audio_beginio(io);
+    else if (*(u32 *)(io + 20) == zb_con_base && zb_con_base)
+        zb_con_beginio(io);
+    else if (*(u32 *)(io + 20) == zb_inp_base && zb_inp_base)
+        zb_inp_beginio(io);
     else
         io[31] = (u8)-1;
     return c_WaitIO(io);
@@ -3221,6 +3245,8 @@ void c_AbortIO(u8 *io)
         c_TimerAbortIO(io);
     else if (io && *(u32 *)(io + 20) == zb_audio_base && zb_audio_base)
         zb_audio_abort(io);
+    else if (io && *(u32 *)(io + 20) == zb_con_base && zb_con_base)
+        zb_con_abort(io);
 }
 
 void c_AddTime(u32 *d, const u32 *s2)
@@ -3399,6 +3425,39 @@ void zb_libs_init(void)
         l->version = 40;
         l->idstring = (char *)idstr;
         zb_audio_init(base);
+    }
+    {   /* console.device (blibload.c, 16.14): Open, Close, Expunge, the reserved one, BeginIO, AbortIO, then
+         * console_lib.fd's CDInputHandler (-42) and RawKeyConvert (-48) */
+        static const u16 clvo[] = { 6, 12, 18, 24, 30, 36, 42, 48 };
+        static void (*const cfn[])(void) = { zs_rts, zs_rts, zs_rts, zs_rts, zs_ConBeginIO, zs_ConAbortIO, zs_ConRawKey,
+                                             zs_ConRawKey };
+        static const char cname[] = "console.device";
+        u32 base = take(8 * 6 + 34) + 8 * 6;
+        zb_jumptable(base, 8, clvo, cfn, 8);
+        struct zlib *l = (struct zlib *)base;
+        l->node.type = 3;               /* NT_DEVICE */
+        l->node.name = (char *)cname;
+        l->negsize = 48;
+        l->possize = 34;
+        l->version = 40;
+        l->idstring = (char *)idstr;
+        zb_con_init(base);
+    }
+    {   /* input.device (blibload.c, 16.14): Open, Close, Expunge, the reserved one, BeginIO, AbortIO (nothing is ever
+         * in progress), then input_lib.fd's PeekQualifier (-42: no qualifier keys held) */
+        static const u16 ilvo[] = { 6, 12, 18, 24, 30, 36, 42 };
+        static void (*const ifn[])(void) = { zs_rts, zs_rts, zs_rts, zs_rts, zs_InpBeginIO, zs_rts, zs_ConRawKey };
+        static const char iname[] = "input.device";
+        u32 base = take(7 * 6 + 34) + 7 * 6;
+        zb_jumptable(base, 7, ilvo, ifn, 7);
+        struct zlib *l = (struct zlib *)base;
+        l->node.type = 3;               /* NT_DEVICE */
+        l->node.name = (char *)iname;
+        l->negsize = 42;
+        l->possize = 34;
+        l->version = 40;
+        l->idstring = (char *)idstr;
+        zb_inp_init(base);
     }
     extern u32 zb_tracing;
     if (zb_tracing) {                   /* the trace build: the bases, so the trace's slots can be named */

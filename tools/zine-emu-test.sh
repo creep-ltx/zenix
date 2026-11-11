@@ -124,18 +124,32 @@ echo "$log" | grep -aq '^zgroup2=7' && ok "after gpasswd -a user zine the user r
 echo "$log" | grep -aq '^zgroup3=7' && ok "zine reads a 640 program of the group zine for a user in it as a supplementary group" || no "zine group, a group-readable program: $(echo "$log" | grep -a 'zgroup3' | tail -1)"
 echo "$log" | grep -aq '^zgroup4=1' && ok "zine refuses a 640 program of root's group to that user (it reads only what the user may)" || no "zine group, root's group: $(echo "$log" | grep -a 'zgroup4' | tail -1)"
 echo "$log" | grep -aq '^zine-null-done' || no "the script did not reach its end"
-# 16.4/16.5 on a 68040 with its FPU (the matrix's A1200 040, 8 MB fast): the MMU's registers saved and put back around
-# each session, the 68030 MMU instructions as no-ops, FSIN (which the emulated 040 lacks, as a real one) named; the
-# math libraries computed on the FPU (16.13)
+# 16.4/16.5 on a 68040 with its FPU (the matrix's A1200 040 with FS-UAE's 68040 FPU, fsuae/zine): the MMU's registers
+# saved and put back around each session, the 68030 MMU instructions as no-ops; 16.14: FSIN and zfpux's 36 other
+# instructions the 040 lacks (as a real one) emulated by Motorola's package (/lib/zine/sp040), every answer right
 L4=$OUT/serial-040.log
-ZENIX_BUILD=$BD tools/run-test.sh fsuae/matrix/a1200-040.fs-uae 300 tools/tests/zine-040-test.txt > $L4 2>&1
+ZENIX_BUILD=$BD tools/run-test.sh fsuae/zine/a1200-040fpu.fs-uae 300 tools/tests/zine-040-test.txt > $L4 2>&1
 log4=$(tr -d '\r' < $L4)
 echo "$log4" | grep -aq '^zmmu-rc=0' && echo "$log4" | grep -aq 'ZINE: an MMU instruction (PMOVE, PFLUSH, PTEST) taken as a no-op' && ok "68040: zmmu's 68030 MMU instructions as no-ops" || no "68040 zmmu: $(echo "$log4" | grep -a 'zmmu\|MMU instruction' | tail -2)"
-echo "$log4" | grep -aq 'zfpu crashed: line F instruction at .* (instruction f200 000e: FSIN, ' && echo "$log4" | grep -aq '^zfpu-rc=1' && ok "68040: FSIN (the 040 lacks it) named, from its frame (format 2: the next instruction's PC)" || no "68040 zfpu: $(echo "$log4" | grep -a 'zfpu' | tail -2)"
+echo "$log4" | grep -aq "^ZINE: the 68040's missing FPU instructions are emulated (Motorola's M68040 Floating Point Software Package)" && echo "$log4" | grep -aq '^zfpu-rc=0' && ok "68040: FSIN (the 040 lacks it) emulated by the 68040 package (16.14)" || no "68040 zfpu: $(echo "$log4" | grep -a 'zfpu\|sp040\|68040.s' | tail -2)"
+echo "$log4" | grep -aq '^zfpux: all 37 answers right' && echo "$log4" | grep -aq '^zfpux-rc=0' && ok "68040: zfpux: FSIN ... FREM, FMOVECR, FSINCOS, packed decimal, a denormal, an immediate; MULU.L/DIVU.L 64, MOVEP, CAS2, CHK2: every answer right" || no "68040 zfpux: $(echo "$log4" | grep -a 'zfpux' | tail -3)"
 echo "$log4" | grep -aq '^zcalls: the six math libraries computed' && echo "$log4" | grep -aq '^zcalls-rc=0' && ok "68040: zcalls' math libraries on the FPU (16.13: the soft-float calls wrapped), every answer as without one" || no "68040 zcalls: $(echo "$log4" | grep -a 'zcalls' | tail -2)"
+echo "$log4" | grep -aq '^zcon: written through console.device$' && echo "$log4" | grep -aq '^ZINE: AllocMem of 1048576 KB refused: the largest free block is ' && echo "$log4" | grep -aq '^zcon: all answered' && echo "$log4" | grep -aq '^zcon-rc=0' && ok "zcon (16.14): console.device's CMD_WRITE in the output without its control sequences, a CMD_READ in progress until AbortIO, the ConUnit's 80 x 25 grid; input.device's handler added and removed; ViewAddress; a refused 1 GB AllocMem said" || no "zcon: $(echo "$log4" | grep -a 'zcon\|AllocMem of' | tail -3)"
 echo "$log4" | grep -aq '^ztake-rc=0' && echo "$log4" | grep -aq '^zcrash-rc=1' && ok "68040: ztake and zcrash, Zenix back each time (the MMU registers and caches restored)" || no "68040 ztake/zcrash: $(echo "$log4" | grep -a 'ztake-rc\|zcrash-rc' | tail -2)"
 g1=$(echo "$log4" | grep -a -m1 '^fast RAM free' | tr -dc 0-9); g2=$(echo "$log4" | grep -a '^fast RAM free' | sed -n 2p | tr -dc 0-9)
 [ -n "$g1" ] && [ "$g1" = "$g2" ] && echo "$log4" | grep -aq '^zine-040-done' && echo "$log4" | grep -aq '^disk-ok' && ok "68040: free memory as before, the disk written afterwards" || no "68040: memory $g1 -> $g2 KB, or the end not reached"
 echo "$log4" | grep -aiE 'panic|exception|guru' && no "68040: the kernel log has a panic or exception"
+# 16.14 on a 68060 with its FPU (fsuae/zine: FS-UAE's 68060 FPU, PCR ID 0x0430, switched off at the start as on a real
+# 68060 before 68060.library): Motorola's 68060 package (/lib/zine/sp060) for the FPU's and the integer unit's
+# missing instructions; Zenix back each time, its memory as before
+L6=$OUT/serial-060.log
+ZENIX_BUILD=$BD tools/run-test.sh fsuae/zine/a1200-060fpu.fs-uae 300 tools/tests/zine-060-test.txt > $L6 2>&1
+log6=$(tr -d '\r' < $L6)
+echo "$log6" | grep -aq "^ZINE: the 68060's missing instructions are emulated (Motorola's M68060 Software Package)" && echo "$log6" | grep -aq '^zfpu-rc=0' && ok "68060: FSIN emulated by the 68060 package, the FPU switched on by its call-out" || no "68060 zfpu: $(echo "$log6" | grep -a 'zfpu\|68060.s' | tail -2)"
+echo "$log6" | grep -aq '^zfpux: all 37 answers right' && echo "$log6" | grep -aq '^zfpux-rc=0' && ok "68060: zfpux: the 32 FPU answers and the 5 integer ones (MULU.L/DIVU.L 64, MOVEP, CAS2, CHK2) right" || no "68060 zfpux: $(echo "$log6" | grep -a 'zfpux' | tail -3)"
+echo "$log6" | grep -aq '^zcrash-rc=1' && echo "$log6" | grep -aq '^zcalls-rc=0' && ok "68060: zcrash's crash named and zcalls' answers with the package in place" || no "68060 zcrash/zcalls: $(echo "$log6" | grep -a 'zcrash-rc\|zcalls-rc' | tail -2)"
+h1=$(echo "$log6" | grep -a -m1 '^fast RAM free' | tr -dc 0-9); h2=$(echo "$log6" | grep -a '^fast RAM free' | sed -n 2p | tr -dc 0-9)
+[ -n "$h1" ] && [ "$h1" = "$h2" ] && echo "$log6" | grep -aq '^zine-060-done' && echo "$log6" | grep -aq '^disk-ok' && ok "68060: free memory as before, the disk written afterwards" || no "68060: memory $h1 -> $h2 KB, or the end not reached"
+echo "$log6" | grep -aiE 'panic|exception|guru' && no "68060: the kernel log has a panic or exception"
 echo "$log" | grep -aiE 'panic|exception|guru' && no "the kernel log has a panic or exception"
 exit $((1 - pass))

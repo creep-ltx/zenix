@@ -115,6 +115,50 @@ static u32 load_blob(u32 *size)
     return (u32)b;
 }
 
+/* the CPU support packages (d29 16.14): /lib/zine/sp060 and sp040, ZEXE images (user/zine/zsp060.S, zsp040.S) with
+ * the "ZSPK" header at offset 32, loaded and relocated as the blob is; 0 when the file is not there or not right
+ * (said: the programs then crash on the instructions the CPU lacks, as before) */
+#define ZSPK_MAGIC 0x5A53504Bu
+static u32 load_sp(const char *path, u32 cpu, zu32 *size)
+{
+    struct ustat st;
+    u32 len;
+    *size = 0;
+    u8 *f = slurp(path, &len, &st);
+    const char *why = 0;
+    if (!f)
+        why = "cannot be read";
+    else if (len < 48 || memcmp(f + 4, "ZEXE", 4) || be32(f + 32) != ZSPK_MAGIC || be32(f + 36) != cpu)
+        why = "is not ZINE's support package";
+    u32 image = f ? be32(f + 8) : 0, mem = f ? be32(f + 12) : 0, nrel = f ? be32(f + 16) : 0,
+        roff = f ? be32(f + 20) : 0;
+    if (!why && (image > len || mem < image || image < 48 || roff > len || nrel > (len - roff) / 4))
+        why = "is damaged (its header)";
+    u8 *b = why ? 0 : sys_memalloc(mem);
+    if (!why && !b)
+        why = "does not fit in memory";
+    if (!why) {
+        memcpy(b, f, image);
+        memset(b + image, 0, mem - image);
+        for (u32 i = 0; i < nrel && !why; i++) {
+            u32 o = be32(f + roff + 4 * i);
+            if (o > image - 4 || (o & 1))
+                why = "is damaged (a relocation)";
+            else
+                *(u32 *)(b + o) += (u32)b;
+        }
+    }
+    free(f);
+    if (why) {
+        if (b)
+            sys_memfree(b);
+        dprintf(2, "zine: %s %s: the %u's missing instructions are not emulated\n", path, why, 68000 + cpu);
+        return 0;
+    }
+    *size = mem;
+    return (u32)b;
+}
+
 /* ZINE's own libraries by their number in the block's lib (kernel/zine.h): the four, then those of d29 16.12 */
 #define NLIBS 12
 static const char *const libs[NLIBS] = { "exec.library", "graphics.library", "dos.library", "intuition.library",
@@ -127,7 +171,13 @@ static const char *vecname(u32 v)
     static const char *const n[] = { 0, 0, "bus error", "address error", "illegal instruction", "zero divide",
                                      "CHK instruction", "TRAPV instruction", "privilege violation", "trace",
                                      "line A instruction", "line F instruction" };
-    return v < 12 ? n[v] : 0;
+    static const char *const f[] = { "FPU branch or set on unordered", "FPU inexact result", "FPU divide by zero",
+                                     "FPU underflow", "FPU operand error", "FPU overflow", "FPU signalling NaN",
+                                     "FPU unimplemented data type", 0, 0, 0, 0,
+                                     "unimplemented effective address (68060)",
+                                     "unimplemented integer instruction (68060: 64-bit MULU.L/DIVU.L, MOVEP, CAS2, "
+                                     "CHK2, CMP2)" };
+    return v < 12 ? n[v] : v >= 48 && v <= 61 ? f[v - 48] : 0;
 }
 
 /* a line-F crash: the FPU instructions a 68040 or 68060 does not have in hardware (AmigaOS's 68040.library and
@@ -589,6 +639,14 @@ int main(int argc, char **argv)
     }
     u8 *vol = W.vol;
     ((struct zv_hdr *)vol)->now = sys_time();  /* dos DateStamp's clock (16.13) */
+    /* a 68040 or 68060 (AttnFlags; a 68060 without 68060.library at boot says 68040, so then both): Motorola's
+     * packages for what the CPU lacks (16.14); not on Emu68, which runs every instruction itself */
+    if ((info.attn & 0x88) && !(info.size >= UZINE_INFO_MACHINE && (info.machine & UZI_EMU68))) {
+        struct zv_hdr *vh = (struct zv_hdr *)vol;
+        vh->sp[0] = load_sp("/lib/zine/sp060", 60, &vh->sp_size[0]);
+        if (!(info.attn & 0x80))
+            vh->sp[1] = load_sp("/lib/zine/sp040", 40, &vh->sp_size[1]);
+    }
     u32 bsize, blob = load_blob(&bsize);
     /* the ZINE block: the saved chip RAM (Zenix's used chip blocks, low memory), the plan, the stack, the libraries */
     u32 ksize = info.chip_total - info.chip_free + (256u << 10);
@@ -702,9 +760,10 @@ int main(int argc, char **argv)
     case ZH_CRASH:
         if (b->vec == 11 && fpu_missing(b->addr))
             dprintf(1, "ZINE: %s crashed: line F instruction at %08x (instruction %04x %04x: %s, which this CPU "
-                    "does not have in hardware; AmigaOS's 68040/68060.library emulates it, ZINE does not)\n", name, b->pc,
+                    "does not have in hardware; AmigaOS's 68040/68060.library emulates it, ZINE only on a 68040 or 68060 with an "
+                    "FPU)\n", name, b->pc,
                     b->addr >> 16, b->addr & 0xFFFF, fpu_missing(b->addr));
-        else if (b->vec == 4 || b->vec == 10 || b->vec == 11)
+        else if (b->vec == 4 || b->vec == 10 || b->vec == 11 || b->vec == 61)
             dprintf(1, "ZINE: %s crashed: %s at %08x (instruction %04x %04x)\n", name, vecname(b->vec), b->pc,
                     b->addr >> 16, b->addr & 0xFFFF);
         else if (vecname(b->vec))

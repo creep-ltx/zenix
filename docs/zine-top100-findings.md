@@ -379,3 +379,30 @@ the 68020 pass the whole list; "before" is round 2's result, "after" is this rou
 (user Copper lists: The Morning Trip), a call through a null base (Gift), cybergraphics.library (Shake Off The Dust),
 and the black screens above that are not ZINE's. Alcatraz's Odyssey shows an alert "Execbase in chip memory !" and
 quits: ZINE keeps ExecBase at $800 by design.
+
+## Round 4 (2026-11-11, branch zine4, d29 16.14)
+
+**The early quits on the 68030** (the 50 productions round 3 left "ended by itself" with an error code; traced with the
+trace blob, the program's own output read from the logs, which the harness's result lines leave out):
+
+| Cause | Productions | ZINE's fault? |
+|---|---|---|
+| ended after its full run (82-2,849 s emulated) with a return code left in d0: Ikanim, the tetris intro and Gagrakacka traced to their normal end (the View put back, the libraries closed); lapsuus says "Thank You."; the 4k and 40k intros of Ephidrena, Spaceballs, Loonies, Razor 1911, Passion, Dual Crew Shining, TBL and Logicoma by their length, ZINE saying nothing | 31 | no: clean ends |
+| memory on the 16 MB test machine: AllocMem of 6-49 MB refused (Metropolice, Swansong, Kioea, Fetish 2), parts of 3-4 MB not loadable (Tint, Captured Dreams, Norwegian Kindness), data files of 2-15 MB left out of the volume (Elude's five, Chips don't lie), more than 500 files and 21 MB (Dolor Sit Amet) | 14 | no: the machine's memory (ZINE now says the refused AllocMem) |
+| "Processor: 68030 [68040+ needed]" (Capsule's Tornado: Renouncetro, Brutalism) | 2 | no: they run on the 68060 now |
+| The Juggler: console.device, then intuition ViewAddress | 1 | yes: fixed; it shows its text and waits for a key (ZINE gives programs no keys) |
+| HAM Eager's HD loader reads its own .adf, which the harness's staging left out | 1 | no: the harness (staging now keeps a disk image the program names; it then plays 860 s to a clean end) |
+| Human Target: its "executable" is an installer's slave, not a program | 1 | no |
+
+Fixed in ZINE: console.device on a window, intuition ViewAddress, input.device (seen when TBL's Ocean Machine got
+enough memory on the 68060: it then plays 2,148 s to its end), and the first refused large AllocMem said with the
+largest free block.
+
+**The 68040/060 FPU** (d29 16.14): Motorola's packages emulate what the CPU lacks. The test machine was the cause of the
+"no FPU" crashes in round 3b: FS-UAE's `uae_cpu_model = 68060` alone is the EC/LC 68060 (PCR $0431); `cpu = 68060`
+with `fpu = 68060` (or `uae_fpu_model = 68060`) is the full part, its FPU switched off in PCR at the start as on a real
+68060 before 68060.library. The harness's 060 machine is now that, with 64 MB of fast RAM like the Apollo 1260.
+Targeted reruns on it (60 s of PC time): of 8 productions that crashed on an FPU instruction on the 68020 and ran on
+the 68030 (Starstruck, Ocean Machine, 021, 039 of the AGA demos; 4ks 007 and 010; 64k 025; 40k 053), none crashes:
+7 run or play to their end (Ocean Machine 2,148 s), Starstruck stops at an AllocMem of 48 MB (43 MB free in one
+piece); Renouncetro and Brutalism (Tornado, 68040+) run. Not yet on a real 68060.

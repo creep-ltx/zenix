@@ -91,4 +91,5 @@ All documents: [docs/README.md](docs/README.md).
 ## Licence
 
 GPL-2.0-only ([LICENSE](LICENSE)). Code taken from other projects keeps its own licence: miniz and `user/regex.c`
-are MIT.
+are MIT; Motorola's 68060 and 68040 software packages in `user/zine/msp` (ZINE's FPU emulation) keep Motorola's
+licence (`user/zine/msp/NOTICE`).

@@ -86,7 +86,9 @@ zenix/
   [commands.md](commands.md).
 - **Taken from other projects:** `miniz/` (for `gzip`) and `regex.c` (from CUtils), both MIT; `xfer/` (DESIGN D20 5:
   the Zmodem engine from CTerm, MIT, notice `xfer/LICENSE`, with Zenix's download rules in `rzrules.c`; for `rz`/`sz`,
-  `rz.c`, which telnet starts by itself).
+  `rz.c`, which telnet starts by itself); `zine/msp/`: Motorola's M68060 Software Package and M68040 Floating Point
+  Software Package (Motorola's licence, notice `zine/msp/NOTICE`; from the Linux kernel's tree) for ZINE's CPU support
+  packages (`zine/zsp060.S`, `zsp040.S`, d29 16.14).
 
 ## net/: the network (DESIGN D19, docs/d19-network.md)
 

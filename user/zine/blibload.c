@@ -502,3 +502,187 @@ void zb_audio_abort(u8 *io)
         io[31] = (u8)IOERR_ABORTED;
     }
 }
+
+/* ---- console.device (devices/console.h and conunit.h, NDK 3.2; the RKRM Devices manual, d29 16.14): a unit bound
+ * to a window as old programs open it (The Juggler) for text and keys. ZINE draws no console text: CMD_WRITE's text
+ * goes into the program's output (zine shows it), the control sequences left out; ZINE has no keyboard for programs,
+ * so a CMD_READ stays in progress until AbortIO. io_Unit is a ConUnit of ZINE's (its window and an 8 x 8 grid, as a
+ * program may read cu_XMax and cu_YMax); CONU_LIBRARY (-1) gives only io_Device, for RawKeyConvert. IOStdReq:
+ * io_Unit 24, io_Command 28, io_Flags 30, io_Error 31, io_Actual 32, io_Length 36, io_Data 40. ConUnit: cu_Window 34,
+ * cu_XMax 42, cu_YMax 44, cu_XRSize 46, cu_YRSize 48, cu_TabStops 98 (80 words), cu_FgPen 259, cu_TxHeight 282,
+ * cu_TxWidth 284, cu_TxBaseline 286. ---- */
+#define CON_UNITS 4
+#define CU_SIZE 512                     /* more than struct ConUnit's 296 bytes */
+u32 zb_con_base;
+static u8 *con_read[CON_UNITS];         /* a CMD_READ in progress per unit (until AbortIO) */
+static u8 con_said;
+
+void zb_con_init(u32 base) { zb_con_base = base; }
+
+int zb_con_pending(u8 *io)
+{
+    for (int i = 0; io && i < CON_UNITS; i++)
+        if (con_read[i] == io)
+            return 1;
+    return 0;
+}
+
+u32 zb_con_open(u8 *io, u32 unit, u32 flags)
+{
+    (void)flags;
+    if (!io)
+        return (u32)-1;
+    *(u32 *)(io + ZO_IORequest_io_Device) = zb_con_base;
+    *(u32 *)(io + 24) = 0;
+    io[31] = 0;
+    if ((s32)unit == -1)                /* CONU_LIBRARY */
+        return 0;
+    u8 *cu = (u8 *)zx_AllocMem(CU_SIZE, MEMF_PUBLIC | MEMF_CLEAR);
+    if (!cu) {
+        *(u32 *)(io + ZO_IORequest_io_Device) = 0;
+        io[31] = 0xFF;                  /* IOERR_OPENFAIL */
+        return (u32)-1;
+    }
+    u8 *win = *(u8 **)(io + 40);
+    u16 w = win ? *(u16 *)(win + 8) : 640, h = win ? *(u16 *)(win + 10) : 200;
+    *(u8 **)(cu + 34) = win;
+    *(u16 *)(cu + 42) = (u16)(w >= 16 ? w / 8 - 1 : 0);
+    *(u16 *)(cu + 44) = (u16)(h >= 16 ? h / 8 - 1 : 0);
+    *(u16 *)(cu + 46) = 8;
+    *(u16 *)(cu + 48) = 8;
+    for (int i = 0; i < 80; i++)
+        *(u16 *)(cu + 98 + 2 * i) = i < 79 ? (u16)(8 * i) : 0xFFFF;
+    cu[259] = 1;
+    *(u16 *)(cu + 282) = 8;
+    *(u16 *)(cu + 284) = 8;
+    *(u16 *)(cu + 286) = 6;
+    *(u8 **)(io + 24) = cu;
+    return 0;
+}
+
+static int con_slot(const u8 *io)
+{
+    for (int i = 0; i < CON_UNITS; i++)
+        if (con_read[i] == io)
+            return i;
+    return -1;
+}
+
+void zb_con_abort(u8 *io)
+{
+    int i = con_slot(io);
+    if (io && i >= 0) {
+        con_read[i] = 0;
+        *(u32 *)(io + 32) = 0;
+        io[31] = (u8)IOERR_ABORTED;
+        zb_io_done(io);
+    }
+}
+
+void zb_con_close(u8 *io)
+{
+    zb_con_abort(io);
+    u8 *cu = *(u8 **)(io + 24);
+    if (cu)
+        zx_FreeMem((u32)cu, CU_SIZE);
+    *(u32 *)(io + 24) = 0;
+}
+
+/* CMD_WRITE's text into the output: printable bytes, tabs and line ends; ESC and CSI sequences left out (their
+ * parameters up to the final byte, 0x40-0x7E) */
+static void con_text(const u8 *s, u32 n)
+{
+    static u8 seq;                      /* 1: after ESC, 2: in a CSI sequence (it may go on in the next write) */
+    char buf[64];
+    u32 k = 0;
+    for (u32 i = 0; i < n; i++) {
+        u8 c = s[i];
+        if (seq == 1)
+            seq = c == '[' ? 2 : 0;
+        else if (seq == 2) {
+            if (c >= 0x40 && c <= 0x7E)
+                seq = 0;
+        } else if (c == 0x1B)
+            seq = 1;
+        else if (c == 0x9B)
+            seq = 2;
+        else if (c == '\n' || c == '\t' || (c >= 0x20 && c != 0x7F && (c < 0x80 || c >= 0xA0)))
+            buf[k++] = (char)c;
+        if (k == sizeof buf || (i + 1 == n && k)) {
+            zb_out(buf, k);
+            k = 0;
+        }
+    }
+}
+
+void zb_con_beginio(u8 *io)
+{
+    u16 cmd = *(u16 *)(io + 28);
+    io[8] = 5;                          /* NT_MESSAGE: in progress */
+    io[31] = 0;
+    *(u32 *)(io + 32) = 0;
+    switch (cmd) {
+    case CMD_WRITE: {
+        const u8 *s = *(const u8 **)(io + 40);
+        u32 n = *(u32 *)(io + 36);
+        if (n == 0xFFFFFFFFu)           /* -1: up to its 0 byte */
+            for (n = 0; s && s[n] && n < 65536; n++)
+                ;
+        if (s && n)
+            con_text(s, n);
+        *(u32 *)(io + 32) = s ? n : 0;
+        break;
+    }
+    case CMD_READ: {                    /* no keys for programs: in progress until AbortIO */
+        int i = con_slot(0);
+        if (i >= 0) {
+            con_read[i] = io;
+            io[30] &= (u8)~1;           /* not quick */
+            if (!con_said++)
+                say("ZINE: console.device's CMD_READ waits for keys, which ZINE does not give programs", "", "\n");
+            return;
+        }
+        break;                          /* more than four at once: done with no bytes */
+    }
+    case CMD_CLEAR:
+    case CMD_RESET:
+    case CMD_FLUSH:
+    case CMD_START:
+    case CMD_STOP:
+    case CMD_UPDATE:
+    case 9:                             /* CD_ASKKEYMAP, CD_SETKEYMAP, the default ones: taken, nothing changes */
+    case 10:
+    case 11:
+    case 12:
+        break;
+    default:
+        io[31] = (u8)IOERR_NOCMD;
+    }
+    zb_io_done(io);
+}
+
+/* input.device (devices/input.h, NDK 3.2; 16.14): opened by programs that add an input handler to see the keys and
+ * the mouse first (TBL's demo system). ZINE gives programs no input events, so a handler is taken and never called;
+ * every command (IND_ADDHANDLER 9, IND_REMHANDLER 10, IND_WRITEEVENT 11, the thresholds and the mouse port's ones)
+ * is done at once. */
+u32 zb_inp_base;
+void zb_inp_init(u32 base) { zb_inp_base = base; }
+u32 zb_inp_open(u8 *io)
+{
+    if (!io)
+        return (u32)-1;
+    *(u32 *)(io + ZO_IORequest_io_Device) = zb_inp_base;
+    *(u32 *)(io + 24) = 0;
+    io[31] = 0;
+    return 0;
+}
+void zb_inp_beginio(u8 *io)
+{
+    io[8] = 5;
+    io[31] = 0;
+    *(u32 *)(io + 32) = 0;
+    zb_io_done(io);
+}
+
+/* RawKeyConvert (-48): ZINE gives programs no keys, so no characters (0) */
+u32 zb_con_rawkey(void) { return 0; }

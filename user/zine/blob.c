@@ -295,6 +295,61 @@ void zb_hunk_free(void *u, const struct zh_seg *s)
     zx_FreeMem(s->addr, s->size);
 }
 
+/* the CPU support package (d29 16.14): on a 68060 (PCR read by zb_mmu_save) the 68060 one, on a 68040 with an FPU
+ * the 68040 one, as zine loaded them (the volume names them); its header checked (every address inside it), its two
+ * hooks set to ZINE's line-F and crash handlers, its vectors put in v (an entry marked "FPU" only when there is an
+ * FPU). Said once in the program's output (the 68060's PCR too when it has no FPU). */
+#define ZSPK_MAGIC 0x5A53504Bu
+static void sp_install(u32 *v)
+{
+    const struct zv_hdr *vh = (const struct zv_hdr *)Z.a.vol;
+    if (!(Z.attn & 0x0088))
+        return;
+    int k = Z.mmu[0] & 2 ? 0 : 1, fpu = (Z.mmu[0] & 4) != 0;
+    if (!k && (Z.mmu[8] >> 16) == 0x0430)
+        fpu = 1;                        /* a full 68060 (PCR's ID; 0x0431 is the EC/LC part) whose FPU is switched off
+                                         * (PCR's DFP, as FS-UAE's starts and 68060.library clears): the package's
+                                         * "FPU disabled" call-out switches it on at the first FPU instruction */
+    u32 m = vh->sp[k], size = vh->sp_size[k];
+    if (!m || (k && !fpu))
+        return;
+    const u32 *h = (const u32 *)m;
+    u32 n = h[11];
+    if (size < 48 || !in_fast(m, size) || h[8] != ZSPK_MAGIC || h[9] != (k ? 40u : 60u) || n > 16 ||
+        n * 8 > size - 48 || h[10] < m || h[10] > m + size - 8 || (h[10] & 1))
+        return;
+    for (u32 i = 0; i < n; i++) {
+        u32 vec = h[12 + 2 * i] & 0xFF, a = h[13 + 2 * i];
+        if (vec < 2 || a < m || a >= m + size || (a & 1))
+            return;
+    }
+    extern void zv_crash(void), zv_linef(void);
+    ((u32 *)h[10])[0] = (u32)zv_linef;
+    ((u32 *)h[10])[1] = (u32)zv_crash;
+    for (u32 i = 0; i < n; i++)
+        if (!(h[12 + 2 * i] & 0x100) || fpu)
+            v[h[12 + 2 * i] & 0xFF] = h[13 + 2 * i];
+    static const char m60[] = "ZINE: the 68060's missing instructions are emulated (Motorola's M68060 Software "
+                              "Package)\n",
+                      m60n[] = "ZINE: the 68060's missing integer instructions are emulated (Motorola's M68060 "
+                               "Software Package; this 68060 has no FPU)\n",
+                      m40[] = "ZINE: the 68040's missing FPU instructions are emulated (Motorola's M68040 Floating "
+                              "Point Software Package)\n";
+    if (k)
+        zb_out(m40, sizeof m40 - 1);
+    else if (fpu)
+        zb_out(m60, sizeof m60 - 1);
+    else {
+        zb_out(m60n, sizeof m60n - 2);
+        u32 pcr = Z.mmu[8];
+        char t[16] = " (PCR ";
+        for (int i = 0; i < 8; i++)
+            t[6 + i] = "0123456789abcdef"[pcr >> (28 - 4 * i) & 15];
+        t[14] = ')', t[15] = '\n';
+        zb_out(t, 16);
+    }
+}
+
 void zb_run(void) __attribute__((noreturn));
 void zb_run(void)
 {
@@ -323,6 +378,7 @@ void zb_run(void)
     for (int i = 25; i < 32; i++)
         v[i] = (u32)zv_irq;
     zmemset((void *)0x400, 0, 0xC00);
+    sp_install(v);
     zb_libs_init();                     /* the memory lists, ExecBase, the libraries, the process (blibs.c) */
     chips_for_program();
     zb_setvbr(0);
@@ -413,7 +469,7 @@ void zb_crash(u32 *rb)
                 b->pc -= k;
                 break;
             }
-    if ((b->vec == 4 || b->vec == 10 || b->vec == 11) && !(b->pc & 1) && b->pc >= 0x1000)
+    if ((b->vec == 4 || b->vec == 10 || b->vec == 11 || b->vec == 61) && !(b->pc & 1) && b->pc >= 0x1000)
         b->addr = *(const u32 *)b->pc;  /* illegal, line A/F: no access address; the instruction's first four bytes */
     zr_how = ZH_CRASH;
     extern u32 zb_tracing;
@@ -745,6 +801,41 @@ static u32 alloc(u32 size, u32 attrs);
 static u8 flushing;
 /* AllocMem: when nothing fits, unused libraries loaded from files are expunged first and it is tried again, as
  * AmigaOS's low-memory flush does (blibload.c, d29 16.8) */
+u32 c_AvailMem(u32 attrs);
+static void kb(char *t, u32 *k, const char *s, u32 v, const char *post)    /* s, v (bytes) in KB, post */
+{
+    while (*s)
+        t[(*k)++] = *s++;
+    v = (v + 1023) >> 10;
+    char n[11];
+    int i = 10;
+    do
+        n[--i] = (char)('0' + v % 10), v /= 10;
+    while (v && i);
+    while (i < 10)
+        t[(*k)++] = n[i++];
+    while (*post)
+        t[(*k)++] = *post++;
+}
+
+/* the first large AllocMem that fails, said once (16.14): a program that quits at once for want of memory tells why */
+static void say_refused(u32 size, u32 attrs)
+{
+    static u8 said;
+    if (said || size < (64u << 10))
+        return;
+    said = 1;
+    char t[200];
+    u32 k = 0;
+    kb(t, &k, "ZINE: AllocMem of ", size, attrs & MEMF_CHIP ? " KB of chip RAM" : attrs & MEMF_FAST ?
+       " KB of fast RAM" : " KB");
+    kb(t, &k, " refused: the largest free block is ", c_AvailMem((attrs & (MEMF_CHIP | MEMF_FAST)) | MEMF_LARGEST),
+       " KB (");
+    kb(t, &k, "", c_AvailMem(MEMF_CHIP), " KB chip, ");
+    kb(t, &k, "", c_AvailMem(MEMF_FAST), " KB fast RAM free)\n");
+    zb_out(t, k);
+}
+
 u32 zx_AllocMem(u32 size, u32 attrs)
 {
     u32 r = alloc(size, attrs);
@@ -753,6 +844,8 @@ u32 zx_AllocMem(u32 size, u32 attrs)
         if (zb_lib_flush())
             r = alloc(size, attrs);
         flushing = 0;
+        if (!r)
+            say_refused(size, attrs);
     }
     return r;
 }

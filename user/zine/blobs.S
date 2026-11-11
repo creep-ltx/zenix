@@ -277,9 +277,9 @@ zb_setvbr:
     movec   %d0,%vbr
     rts
 /* zb_mmu_save(m): 040/060 only (AttnFlags bit 3 or 7). TC, ITT0, ITT1, DTT0, DTT1, URP, SRP into m[1..7] and bit 0
- * of m[0]; the 060's PCR into m[8] and bit 1. Probed as zenixboot does, with the illegal-instruction and line-F
- * vectors caught (an EC/LC part may lack the MMU's registers; only a 68060 has PCR, Emu68 reports a 68040).
- * Supervisor mode, interrupts masked. */
+ * of m[0]; the 060's PCR into m[8] and bit 1; bit 2 when an FPU answers (16.14). Probed as zenixboot does, with the
+ * illegal-instruction and line-F vectors caught (an EC/LC part may lack the MMU's registers; only a 68060 has PCR,
+ * Emu68 reports a 68040). Supervisor mode, interrupts masked. */
     .globl  zb_mmu_save, zb_mmu_back
 zb_mmu_save:
     move.l  4(%sp),%a0
@@ -312,7 +312,10 @@ zb_mmu_save:
     .long   0x4E7A0808              /* movec pcr,d0 (68060 only) */
     move.l  %d0,32(%a0)
     or.b    #2,3(%a0)
-2:  move.l  (%sp)+,0x2C(%a1)
+2:  lea     3f(%pc),%a4             /* bit 2: an FPU that answers (16.14; not an EC/LC part, not switched off) */
+    .long   0xF200B000              /* fmove.l fpcr,d0 */
+    or.b    #4,3(%a0)
+3:  move.l  (%sp)+,0x2C(%a1)
     move.l  (%sp)+,0x10(%a1)
     movem.l (%sp)+,%a2-%a4
     rts
@@ -633,6 +636,11 @@ zs_AllocBitMap:
     CF  zs_DeleteFile, c_DeleteFile, 1, %d1
     CF  zs_AudioBeginIO, zb_audio_beginio, 1, %a1
     CF  zs_AudioAbortIO, zb_audio_abort, 1, %a1
+    CF  zs_ConBeginIO, zb_con_beginio, 1, %a1
+    CF  zs_ConAbortIO, zb_con_abort, 1, %a1
+    CF  zs_ConRawKey, zb_con_rawkey, 0
+    CF  zs_ViewAddress, c_ViewAddress, 0
+    CF  zs_InpBeginIO, zb_inp_beginio, 1, %a1
 /* ObtainSemaphore, ReleaseSemaphore and ObtainSemaphoreShared keep every register (the autodocs) */
 .macro CFALL name, fn, r1
     .globl  \name

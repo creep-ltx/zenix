@@ -1,0 +1,27 @@
+[fs-uae]
+accuracy = 1
+amiga_model = A1200
+kickstart_file = $ZENIX_KICKSTART_DIR/kicka1200.rom
+floppy_drive_0 = ../../build/zenix.adf
+floppy_drive_speed = 0
+hard_drive_0 = ../../build/zenix.hdf
+hard_drive_0_controller = ide0
+serial_port = /tmp/zenix-serial
+uae_serial_direct = true
+window_width = 960
+window_height = 768
+zoom = full
+chip_memory = 2048
+fast_memory = 8192
+# DESIGN D37: 64 MB of 32-bit fast RAM at 0x08000000 too (processor-slot RAM, as on an accelerator): the data cache
+# is on for it; the Zorro II 8 MB in the first 16 MB stays uncached
+uae_mbresmem_size = 64
+# FS-UAE seems to honour the transparent translation registers' cache modes only with its MMU model on:
+# without it, with the data cache bit set, the CIA-A tick was lost now and then (D37 section 8)
+uae_mmu_model = 68040
+uae_cpu_model = 68040
+# with its FPU (FS-UAE's fpu_model; without it this 68040 has none): the FPU instructions a real 68040 lacks trap
+# as on the real one (ZINE emulates them, d29 16.14)
+uae_fpu_model = 68040
+joystick_port_0 = none
+joystick_port_1 = none

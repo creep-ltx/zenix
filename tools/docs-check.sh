@@ -48,7 +48,7 @@ done
 # the counts written in the documents
 nprog=$(echo $progs | wc -w)
 nsys=$(grep -cE '^#define SYS_[a-z_0-9]+ +[0-9]+' kernel/kernel.h)
-nmat=$(git ls-files 'fsuae/*.fs-uae' 'fsuae/matrix/*.fs-uae' | grep -v '^fsuae/tools/\|^fsuae/demo/' | sed 's#.*/##; s#\.fs-uae$##' | grep -vxc 'mounts\|zroot')
+nmat=$(git ls-files 'fsuae/*.fs-uae' 'fsuae/matrix/*.fs-uae' | grep -v '^fsuae/tools/\|^fsuae/demo/\|^fsuae/zine/' | sed 's#.*/##; s#\.fs-uae$##' | grep -vxc 'mounts\|zroot')
 count() {    # count <what> <regex with the number as group 1> <real number>
     for f in README.md docs/*.md; do
         case "$f" in docs/audit-*) continue;; esac

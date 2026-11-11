@@ -199,6 +199,18 @@ void zb_audio_beginio(u8 *io);
 void zb_audio_abort(u8 *io);
 int zb_audio_pending(u8 *io);
 void zb_audio_init(u32 base);
+extern u32 zb_con_base;                 /* console.device (blibload.c, 16.14) */
+void zb_con_init(u32 base);
+u32 zb_con_open(u8 *io, u32 unit, u32 flags);
+void zb_con_close(u8 *io);
+void zb_con_beginio(u8 *io);
+void zb_con_abort(u8 *io);
+int zb_con_pending(u8 *io);
+u32 zb_con_rawkey(void);
+extern u32 zb_inp_base;                 /* input.device (blibload.c, 16.14) */
+void zb_inp_init(u32 base);
+u32 zb_inp_open(u8 *io);
+void zb_inp_beginio(u8 *io);
 /* bmore.c, bmath.c (d29 16.12): the libraries beyond the four (utility and the math ones), the ROM font */
 #define ZB_NXLIB 8                      /* utility, mathffp, mathtrans, mathieeedoubbas/-doubtrans, -singbas/-singtrans,
                                          * diskfont (16.13) */

@@ -1,0 +1,18 @@
+wait zenix:/# 120
+sleep 1
+send zine /tests/zine/zexit; echo first-rc=$?\r
+wait first-rc= 60
+send free\r
+wait (?m)^fast RAM free.*\n 20
+send zine /tests/zine/zfpu; echo zfpu-rc=$?\r
+wait zfpu-rc= 60
+send zine /tests/zine/zfpux; echo zfpux-rc=$?\r
+wait zfpux-rc= 60
+send zine /tests/zine/zcrash; echo zcrash-rc=$?\r
+wait zcrash-rc= 60
+send zine /tests/zine/zcalls one two TO=dest NUM 42 QUIET; echo zcalls-rc=$?\r
+wait zcalls-rc= 60
+send free\r
+wait (?m)^fast RAM free.*\n 20
+send echo disk-ok > /home/z60.disk; sync; cat /home/z60.disk; echo zine-060-done\r
+wait zine-060-done 20
