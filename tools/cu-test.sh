@@ -20,7 +20,10 @@ echo "$got" | grep -q 'hello-from-pc' && check "the other computer's line reache
 # the serial log holds what Zenix sent; from the typed cu command on: cu's "abc" + CR comes first, alone (the
 # console's copy is off while cu runs, so neither the PC's line nor cu's screen output is echoed back), then the
 # console's copy again (the prompt, "echo back", "back"). The host test (serial-test.sh) checks the kernel log too.
-after=$(printf '%s\n' "$log" | sed 's/\x1b\[[0-9;:]*[mK]//g' | sed -n '/cu > \/tmp\/cu\.out$/,$p' | sed 1d)
+# The kernel's own notes about the port ("serial: nothing received for 10 s: ...", said at the end of the first console
+# line after 10 s without input, which is the typed cu line) are left out: they can come only before cu opens the
+# port (while a program owns it the log stays in the ring, kernel/serial.c kputc), so they are not "while cu runs".
+after=$(printf '%s\n' "$log" | sed 's/\x1b\[[0-9;:]*[mK]//g' | sed -n '/cu > \/tmp\/cu\.out$/,$p' | sed 1d | grep -v '^serial: ')
 first=$(printf '%s\n' "$after" | head -1)
 case "$first" in abc*) check "keys typed in cu reach the serial port (and nothing else while cu runs)" ok ;;
     *) check "keys typed in cu reach the serial port (first line after cu: '$first')" bad ;; esac

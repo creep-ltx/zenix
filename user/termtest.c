@@ -16,15 +16,18 @@ static void at(int r, int c, const char *s) { dprintf(1, ESC "[%d;%dH%s", r, c, 
 
 static int grab(const char *path);
 
-/* wait for q in raw mode, the cursor hidden or not; g grabs the display (D24, tools/colour-test.sh) */
+/* wait for q in raw mode, the cursor hidden or not; g grabs the display (D24, tools/colour-test.sh) and says
+ * "termtest: grabbed" when the file is written (the script waits for it). Without show the keys are read one at a
+ * time, so what is typed after the q stays for the shell (2026-11-11: a slow grab let q and the next command arrive
+ * in one read, and the command was lost with it). */
 static void keys(int show)
 {
     sys_ttymode(TTY_RAW);
     for (;;) {
         char b[8];
-        int n = sys_read(0, b, sizeof b);
+        int n = sys_read(0, b, show ? sizeof b : 1);
         if (n <= 0 || b[0] == 'q') break;
-        if (b[0] == 'g') { grab("/tmp/grab.zg"); continue; }
+        if (b[0] == 'g') { if (!grab("/tmp/grab.zg")) dprintf(1, "termtest: grabbed\r\n"); continue; }
         if (show) {
             dprintf(1, "key:");
             for (int i = 0; i < n; i++) dprintf(1, " %02x", (unsigned char)b[i]);
