@@ -57,8 +57,8 @@ messages, why ext2, why it boots through Kickstart) are in [docs/why.md](docs/wh
 
 ## Try it
 
-You need the `m68k-elf` cross toolchain (gcc and binutils), Python 3, e2fsprogs and `fakeroot`. For the tests you also
-need FS-UAE and your own Kickstart ROMs.
+You need the `m68k-elf` cross toolchain (gcc and binutils), Python 3, e2fsprogs and `fakeroot`; for the demo floppies
+also libdeflate (its library, for `make demo`'s packer). For the tests you also need FS-UAE and your own Kickstart ROMs.
 
 ```sh
 make              # build/zenix.adf (boot floppy) and build/zenix.hdf (root disk)

@@ -102,7 +102,7 @@ pointers.
   `realpath`; -ELOOP beyond; with only the root mounted the server's own rule: 8 nested), link targets of at most 255
   bytes (-ENAMETOOLONG), pipes of 2 KB, 10 virtual consoles, 8 pseudo-terminals (`NPTY`; -EAGAIN when all are in
   use; a 2 KB output ring each, a window size of at most 32767 x 32767), 80 columns x 32 text rows on PAL (25 on
-  NTSC), 200 scrollback lines per console (32 KB each: a character and a colour byte per cell, allocated when the
+  NTSC; interlaced, `mode hires-lace`: 64 and 50, `TROWS_MAX` 64), 200 scrollback lines per console (32 KB each: a character and a colour byte per cell, allocated when the
   console first scrolls), a cooked tty line of 511 characters (bytes: a Swedish letter is two, DESIGN D28; a key past that rings the bell, and at its end the whole line is refused with
   "tty: the line was too long": nothing of it is handed on, also when the shell's editor took over halfway).
 - UTF-8 in the console (DESIGN D28, architecture.md section 11): the font draws box lines, blocks, braille, CP437's
@@ -115,11 +115,11 @@ pointers.
   Backspace's echo lands one column left, as on Linux's console (a wide character there: one column too many). Widths are Unicode 15.0's (the C library's tables): a few symbols
   newer than that, and emoji written with a variation selector (`❤️`), may take another width in a Linux terminal.
   The font: at most 4,096 glyphs in 255 half-pages, 98,848 bytes, 8 x 8 only, Latin-1 always Topaz's; one for every
-  console. A console that shows a character above U+00FF takes 2,560 bytes more, and 80 bytes for each of its
+  console. A console that shows a character above U+00FF takes 2,560 bytes more (5,120 interlaced), and 80 bytes for each of its
   scrollback lines with such characters (at most 16,200); with no memory for them such characters show as `?`.
 - The screen (DESIGN D14, D28 20, architecture.md section 11): a ring of twice the screen's rows in chip RAM with
   fast RAM (PAL: 40 KB at 1 bitplane, 80 KB at 2, 120 KB at 3, 160 KB at 4), one and a half times without (PAL: 30,
-  60, 90, 120 KB), NTSC's 25 rows less; 7 KB more for the glyphs with more than one plane; up to 32 scrolls (16
+  60, 90, 120 KB), NTSC's 25 rows less, twice all of it interlaced (D28 22: 320 KB at 4 planes with fast RAM); 7 KB more for the glyphs with more than one plane; up to 32 scrolls (16
   without fast RAM) within one frame before a scroll waits for the vertical blank; by default 4 planes
   only on AGA with fast RAM, 3 on OCS/ECS with fast RAM and on every machine with 2 MB of chip RAM and no fast RAM,
   else 1; `/etc/console` chooses 2, 4, 8 or 16 colours (4 planes only on AGA), at init's start, if the chip RAM is

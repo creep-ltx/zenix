@@ -193,8 +193,8 @@ at least (read rate x 2.55, the stream's expansion) about **51-66 KB/s** of outp
 the same code), and it about keeps up with the floppy, so it costs little or no boot time against an LZ4 that would
 have fitted. Shrinkler and xz would leave 250 KB free but double the wait. zstd's and LZMA's speed on a 68020 is not
 known; a stronger method is the way to the HD edition's contents on DD later, measured first. (ZX0, revision 2's other
-candidate, was not measured: its packer is not on this PC.) A deflate encoder that searches harder (zopfli) would gain
-a few percent with the same decoder: not measured.
+candidate, was not measured: its packer is not on this PC.) A deflate encoder that searches harder gains a few percent
+with the same decoder: libdeflate's level 12, *measured* 2026-11-12, 6% on the DD stream (section 10, "Room again").
 
 ## 6. The loader
 
@@ -357,6 +357,19 @@ owner's A1200 (2026-11-05):** the DD disk boots to the desktop from the Gotek (t
 the bootblock's failure colour: Kickstart ran the Gotek as a DD drive (it sought cylinder 1 head 1, a DD track's
 place), so the HD disk's tracks cannot be read there; the bootblock now says so in yellow before reading.
 
+**Room again (2026-11-12, branch pubprep; *measured*):** by 2026-11-11 the DD disk no longer built (`make demo-dd`
+512 bytes over: stream 882,779 bytes). Nothing was taken off the disk; three changes made room, each measured on the
+DD stream:
+- the stream is packed by **libdeflate at its level 12** (its slow, thorough search) instead of Python's zlib at level
+  9: 882,779 -> 829,855 bytes (6% smaller), the same zlib format, so the stage 2's `tinfl` is unchanged (and reads 53
+  KB less from the floppy); libdeflate is a build requirement now (`tools/mkdemo.py` falls back to zlib and says so);
+- the error texts (`user/zerrtab.c`) as one string and a table of bytes, no table of pointers: 372 bytes and 62
+  relocations less in every program that names an error (-7 KB on the disk);
+- libz's printf (`fmt_num`, `vfmt`) at -Os, its character loop no longer copied into every call (-1.8 KB in every
+  program that prints with it; -9 KB on the disk; its speed against the console's drawing is not measured).
+The DD disk then has **68,608 bytes free (67 KB, stream 813,869: kernel 182,896 + RAM disk 2,008 blocks)**, the HD
+disk 415,744 (406 KB). The 8 KB the next desktop changes need are there several times over.
+
 Efforts are rough, in this session's own hours.
 
 1. **The box** (`tools/mkbox.sh`, `make box`): the rename and the dispatcher as prototyped, a ZEXE; an unknown name
@@ -368,7 +381,8 @@ Efforts are rough, in this session's own hours.
    address sanitizer; in FS-UAE, the boot to a shell. Boot code: two reviews, as every deep change of the boot path.
    *About 1-1.5 days.*
 3. **`make demo`** (`tools/mkdemo.sh`): the RAM image by `tools/mkroot.sh` with the demo's list and `/etc`, the stream
-   packed by Python's zlib at level 9 (raw deflate), the table, the ADF; the budget of 4.2 printed every build, over
+   packed by Python's zlib at level 9 (raw deflate; libdeflate's level 12 since 2026-11-12, section 10's "Room
+   again"), the table, the ADF; the budget of 4.2 printed every build, over
    880 KB an error saying by how much. *Test:* the build's size check, e2fsck clean. *About 3 h.*
 4. **The session:** dlogin's `autologin`, `/usr/lib/demo/session`, the welcome, `man demo`, the menu's lines. *Test:*
    `dlogin-test.sh` gains autologin (once a boot, never root, Log out shows the greeter). *About 3 h.*

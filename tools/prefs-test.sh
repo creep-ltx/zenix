@@ -16,8 +16,12 @@
 #    effect (a block character drawn as the box, in the screenshot), /var/run/console written, /etc/console not;
 #    Cancel at once: nothing changes; 4 colours and the font auto, Save: /etc/console's lines replaced, its comments
 #    kept, /var/run/console gone;
-#  - three broken lines added to /etc/console, a reboot: init says one line, the saved settings are in effect (4
-#    colours, the font loaded: the block drawn solid), /var/run/console gone.
+#  - D28 22, the console's mode: `termtest mode 1` (CON_MODE, as conprefs' Test) under `termtest winch` in the
+#    foreground: SIGWINCH and 64 x 80, the kernel's log line, the grid of 64 rows with the text written before, a
+#    block at row 1 and one at row 64 in the interlaced screenshot; conprefs' mode line, hires and Use: hires again;
+#  - three broken lines and "mode hires-lace" added to /etc/console, a reboot: init says one line, the saved
+#    settings are in effect (4 colours, the font loaded: the block drawn solid, interlaced by init),
+#    /var/run/console gone.
 # Pixels are read with tools/dpy-test.py on a geometry from the text console (colour-test.py columns).
 cd "$(dirname "$0")/.." || exit 1
 PART=${1:-desk}
@@ -172,7 +176,29 @@ send s
 sleep 4
 send echo state-4; conprefs -q; grep -v '^#' /etc/console; grep -c '^#' /etc/console; ls /var/run/console\r
 sleep 2
-send cat /tmp/cp.log; printf 'bogus 1\nbogus 2\ncolours 7\n' >> /etc/console; echo con-mid-$((40+2))\r
+send clear; echo lace-text; (sleep 3; termtest mode 1 > /tmp/m1) & termtest winch\r
+sleep 9
+send q
+sleep 2
+send echo state-6; cat /tmp/m1; conprefs -q; termtest screen /dev/tty1 lace-text 5 | grep -c '^row'\r
+sleep 4
+send printf '\033[2J\033[1;1H\342\226\210\033[64;1H\342\226\210\033[2;1H'; sleep 6\r
+sleep 3
+shot lace
+sleep 5
+send conprefs 2>>/tmp/cp.log\r
+sleep 3
+send \x1b[B
+sleep 1
+send \x1b[B
+sleep 1
+send \x1b[C
+sleep 1
+send u
+sleep 4
+send echo state-7; conprefs -q; cat /var/run/console\r
+sleep 2
+send cat /tmp/cp.log; printf 'bogus 1\nbogus 2\ncolours 7\nmode hires-lace\n' >> /etc/console; echo con-mid-$((40+2))\r
 wait con-mid-42 30
 send reboot\r
 wait zenix:/# 120
@@ -200,28 +226,42 @@ awk '{ t = $3 - 7.5 * $4; h = $4 / 2; print $1, $2, t + 7.5 * h, h }' "$OUT/geom
 px() { s=$1 g=$2; shift 2; [ -f "$OUT/p-$s.png" ] || { echo "no screenshot $s"; return 1; }; python3 tools/dpy-test.py px "$OUT/p-$s.png" "$OUT/$g" "$@"; }
 
 if [ "$PART" = con ]; then
-    grep -a -q '^conprefs: colours 16, font auto' "$L"; check "conprefs -q at the start: 16 colours (AGA with fast RAM), the font auto" $?
-    grep -a -q '^conprefs: test: colours 8, font auto$' "$L"; check "8 colours and Test: applied (said on its standard error)" $?
-    [ "$(grep -a -A1 '^state-1' "$L" | tail -1)" = "conprefs: colours 16, font auto" ]; check "Cancel: 16 colours again" $?
-    [ "$(grep -a -A1 '^state-2' "$L" | tail -1)" = "conprefs: colours 8, font none" ]; check "8 colours, no Unicode font, Use: both in effect (conprefs -q)" $?
+    grep -a -q '^conprefs: colours 16, font auto, mode hires$' "$L"; check "conprefs -q at the start: 16 colours (AGA with fast RAM), the font auto, hires" $?
+    grep -a -q '^conprefs: test: colours 8, font auto, mode hires$' "$L"; check "8 colours and Test: applied (said on its standard error)" $?
+    [ "$(grep -a -A1 '^state-1' "$L" | tail -1)" = "conprefs: colours 16, font auto, mode hires" ]; check "Cancel: 16 colours again" $?
+    [ "$(grep -a -A1 '^state-2' "$L" | tail -1)" = "conprefs: colours 8, font none, mode hires" ]; check "8 colours, no Unicode font, Use: both in effect (conprefs -q)" $?
     grep -a -A4 '^state-2' "$L" | grep -q '^console-unchanged' && grep -a -A3 '^state-2' "$L" | grep -q '^font none'
     check "... /var/run/console holds them, /etc/console unchanged" $?
     # a block character (U+2588) at row 0, columns 0-3: without the font the box (its middle empty: the background)
     px nofont geom 3,3,000 11,3,000 3,1,BBB 3,6,BBB > "$OUT/p1"; rc=$?; check "... the block drawn as the box without the font ($(cat "$OUT/p1"))" $rc
-    [ "$(grep -a -A1 '^state-3' "$L" | tail -1)" = "conprefs: colours 8, font none" ]; check "Cancel at once: nothing changes" $?
-    [ "$(grep -a -A1 '^state-4' "$L" | tail -1)" = "conprefs: colours 4, font auto" ]; check "4 colours, the font auto, Save: in effect" $?
+    [ "$(grep -a -A1 '^state-3' "$L" | tail -1)" = "conprefs: colours 8, font none, mode hires" ]; check "Cancel at once: nothing changes" $?
+    [ "$(grep -a -A1 '^state-4' "$L" | tail -1)" = "conprefs: colours 4, font auto, mode hires" ]; check "4 colours, the font auto, Save: in effect" $?
     grep -a -A4 '^state-4' "$L" | grep -q '^colours 4$' && grep -a -A4 '^state-4' "$L" | grep -q '^font auto$' &&
-        grep -a -A4 '^state-4' "$L" | grep -q '^login text$' && grep -a -A6 '^state-4' "$L" | grep -q 'not found'
-    check "... /etc/console's lines replaced, its login line kept, /var/run/console gone" $?
+        grep -a -A6 '^state-4' "$L" | grep -q '^mode hires$' &&
+        grep -a -A6 '^state-4' "$L" | grep -q '^login text$' && grep -a -A7 '^state-4' "$L" | grep -q 'not found'
+    check "... /etc/console's lines replaced (mode hires too), its login line kept, /var/run/console gone" $?
     nc=$(grep -c '^#' rootfs/etc/console)
-    [ "$(grep -a -A5 '^state-4' "$L" | grep -x '[0-9]*' | head -1)" = "$nc" ]; check "... its $nc comment lines kept" $?
-    grep -a -q '^conprefs: save: colours 4, font auto$' "$L"; check "... said on its standard error" $?
+    [ "$(grep -a -A6 '^state-4' "$L" | grep -x '[0-9]*' | head -1)" = "$nc" ]; check "... its $nc comment lines kept" $?
+    grep -a -q '^conprefs: save: colours 4, font auto, mode hires$' "$L"; check "... said on its standard error" $?
+    # D28 22: the console interlaced at run time (termtest mode 1, as conprefs' Test does), then hires by conprefs' Use
+    grep -a -q '^termtest: size 32 x 80' "$L" && grep -a -q '^termtest: winch 64 x 80' "$L"
+    check "CON_MODE interlaced: the foreground (termtest winch) gets SIGWINCH, the console 64 x 80" $?
+    s6=$(grep -a -A3 '^state-6' "$L")
+    echo "$s6" | grep -q '^mode 1$' && echo "$s6" | grep -q '^conprefs: colours 4, font auto, mode hires-lace$' && echo "$s6" | grep -qx 64
+    check "... CON_MODE says so, conprefs -q too, the grid has 64 rows (CON_READ), the text written before kept" $?
+    grep -a -q '^display: AGA chips, 2 bitplanes at 64-bit fetch (FMODE 3), interlaced' "$L"; check "... the kernel says it on its log" $?
+    px lace geom2 3,3,BBB 3,507,BBB 3,250,000 > "$OUT/p3"; rc=$?
+    check "... the screen interlaced: a block at row 1 and one at row 64, black between ($(cat "$OUT/p3"))" $rc
+    s7=$(grep -a -A4 '^state-7' "$L")
+    echo "$s7" | grep -q '^conprefs: colours 4, font auto, mode hires$' && echo "$s7" | grep -q '^mode hires$'
+    check "conprefs' mode line, Use: hires again, /var/run/console says it" $?
     n=$(grep -a -c '^init: /etc/console' "$L")
     grep -a -q '^init: /etc/console: unknown setting bogus (and more lines not understood)$' "$L" && [ "$n" = 1 ]
     check "a broken /etc/console after a reboot: init says one line ($n)" $?
-    [ "$(grep -a -A1 '^state-5' "$L" | tail -1)" = "conprefs: colours 4, font auto" ] && grep -a -A2 '^state-5' "$L" | grep -q 'not found'
-    check "... the saved settings in effect after the reboot (4 colours, the font), /var/run/console gone" $?
-    px font geom 3,3,BBB 11,3,BBB > "$OUT/p2"; rc=$?; check "... the font loaded at boot: the block drawn solid ($(cat "$OUT/p2"))" $rc
+    [ "$(grep -a -A1 '^state-5' "$L" | tail -1)" = "conprefs: colours 4, font auto, mode hires-lace" ] &&
+        grep -a -A2 '^state-5' "$L" | grep -q 'not found'
+    check "... the saved settings in effect after the reboot (4 colours, the font, mode hires-lace by init), /var/run/console gone" $?
+    px font geom2 3,3,BBB 11,3,BBB > "$OUT/p2"; rc=$?; check "... the font loaded at boot: the block drawn solid, interlaced ($(cat "$OUT/p2"))" $rc
     exit $((1 - pass))
 fi
 

@@ -1,7 +1,7 @@
 CONPREFS(8)			Zenix manual
 
 NAME
-    conprefs - the text console's preferences: colours and font
+    conprefs - the text console's preferences: colours, font and mode
 
 SYNOPSIS
     conprefs [-q]
@@ -17,11 +17,18 @@ DESCRIPTION
                   letters): auto (zenix-8x8), none (a box for everything
                   above U+00FF, 11 KB saved) or any
                   /usr/share/consolefonts/NAME.zcf.
+    Screen mode   hires (80 x 32; NTSC 80 x 25) or hires-lace:
+                  interlaced, twice the rows (80 x 64; NTSC 80 x 50)
+                  and twice the screen's chip RAM; it flickers on a TV
+                  or a 15 kHz monitor, steady through a flicker fixer.
+                  Every console keeps its text (from the top) and its
+                  program is told the new size (SIGWINCH). Shown when
+                  the kernel has the mode switch.
 
     Test    applies the choice now; the screen stays, so Cancel can still
             go back.
     Use     applies it until the next boot; nothing is saved.
-    Save    applies it and writes /etc/console's colours and font lines
+    Save    applies it and writes /etc/console's colours, font and mode lines
             (its other lines and comments kept), which init reads at
             every boot.
     Cancel  everything back as it was when conprefs started.
@@ -38,7 +45,7 @@ KEYS
 
 OPTIONS
     -q  print the settings in effect in one line and end:
-        "conprefs: colours 16, font auto"
+        "conprefs: colours 16, font auto, mode hires"
 
 FILES
     /etc/console       the saved settings (init(8))
@@ -49,9 +56,7 @@ EXIT STATUS
     0 done, 1 no memory, 2 a wrong argument.
 
 NOTES
-    The console's mode stays hires (640 x 256, 32 rows; NTSC 25): an
-    interlaced console needs a kernel call there is no room for yet. The
-    font in effect is read from /var/run/console or /etc/console (the
+    The font in effect is read from /var/run/console or /etc/console (the
     kernel does not say which it has). Topaz itself is not replaced.
 
 SEE ALSO

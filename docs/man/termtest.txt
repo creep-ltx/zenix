@@ -6,6 +6,7 @@ NAME
 SYNOPSIS
     termtest [columns|colours|scroll|pcfont [FILE]|rules TTY]
     termtest [conops|rawkeys|text|readline|readraw N|grab FILE|depth N|size]
+    termtest [mode N|winch]
     termtest screen TTY TEXT SECS [TYPE]
 
 DESCRIPTION
@@ -39,7 +40,9 @@ DESCRIPTION
     (root). termtest rules TTY: prints the console rules (CON_RULES
     bits) of the console TTY, such as /dev/tty1 (root, for another
     console), for telnet's tests. In termtest colours, g writes the
-    display to /tmp/grab.zg (as grab below).
+    display to /tmp/grab.zg (as grab below) and then prints "termtest:
+    grabbed"; keys are read one at a time, so what is typed after the q
+    is left for the shell.
 
     The console operations of the remote control (root; tools/con-test.sh,
     DESIGN D24 6.1-6.3): termtest conops draws a page and checks it through
@@ -56,7 +59,10 @@ DESCRIPTION
     "NAME: N failed", exit status 1 on a failure. termtest grab FILE writes
     the shown display through CON_LINE: ZGRB, the width, height and depth (16
     bits each), 16 palette words (0x0RGB), then a pen a pixel. termtest depth
-    N switches the display to N colours (2, 4, 8, 16; CON_COLOURS). termtest
+    N switches the display to N colours (2, 4, 8, 16; CON_COLOURS); termtest
+    mode N switches the console's mode (0 hires, 1 interlaced; CON_MODE) and
+    prints "mode N"; termtest winch prints "termtest: size ROWS x COLS",
+    then "termtest: winch ROWS x COLS" at each SIGWINCH, until q. termtest
     screen TTY TEXT SECS waits (at most SECS seconds) until TEXT is on the
     grid of the console TTY, such as /dev/tty1, and has not changed for 200
     ms, then prints it through CON_READ: "row NN|...|" per row, "attr NN|...|"

@@ -107,7 +107,7 @@ static void put(struct sink *k, char c)
 }
 static void pad(struct sink *k, char c, int n) { while (n-- > 0) put(k, c); }
 
-static void fmt_num(struct sink *k, u32 v, u32 base, int neg, int upper, int width, int prec, int zero, int left, int sign, int space, int alt)
+static __attribute__((optimize("Os"))) void fmt_num(struct sink *k, u32 v, u32 base, int neg, int upper, int width, int prec, int zero, int left, int sign, int space, int alt)
 {
     char t[34]; int i = 0;
     if (!(v == 0 && prec == 0)) do { u32 d = v % base; t[i++] = (char)(d < 10 ? '0' + d : (upper ? 'A' : 'a') + d - 10); v /= base; } while (v);
@@ -125,7 +125,7 @@ static void fmt_num(struct sink *k, u32 v, u32 base, int neg, int upper, int wid
     if (left) pad(k, ' ', width - total);
 }
 
-static void vfmt(struct sink *k, const char *f, va_list ap)
+static __attribute__((optimize("Os"))) void vfmt(struct sink *k, const char *f, va_list ap)
 {
     for (; *f; f++) {
         if (*f != '%') { put(k, *f); continue; }

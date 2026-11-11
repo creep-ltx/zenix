@@ -54,6 +54,12 @@
 # glyph tables and the per-depth glyph code gone, gfx_cells and gfx_jump new; budget 9,200 -> 8,200, bss 2,320 -> 2,300),
 # term 12,946 -> 13,428 and bss 49 -> 121 (the notes, flush, the row table, the run loop; budget 13,000 -> 13,800, bss
 # 64 -> 128); kernel.bin 183,508 -> 182,820.
+# 2026-11-12 (DESIGN D28 22, CON_MODE: the console interlaced, 64 rows): gfx 8,010 -> 8,823 and bss + 132 (two Copper
+# lists, the field's end, the switch for depth and mode in one; rowoff 64 rows), term 13,428 -> 14,426 and bss + 124
+# (the grids allocated for trows, term_regrid, the ring of 64 rows with a whole-row flag each); budget gfx 8,200 ->
+# 8,900, bss 2,300 -> 2,450, term 13,800 -> 14,500, bss 128 -> 256. The room for it: fsd's printf at -Os (user/libz.c
+# fmt_num and vfmt, in every program; fsd.zx 29,372 -> 27,472 in embed): kernel.bin 182,820 -> 182,896 with both (the review's fixes: the old lists and a
+# display server's list named at the field's end, the short field's wait below lastl).
 start     4300   8200
 main      5950   1100
 serial    6100   6500
@@ -70,8 +76,8 @@ proc      9300  21500
 syscall  10150      0
 vfs      11450   1600
 tty       5900    100
-gfx       8200   2300
-term     13800    128
+gfx       8900   2450
+term     14500    256
 confont   3100     32
 kbd       4300    180
 ipc       3950   2150

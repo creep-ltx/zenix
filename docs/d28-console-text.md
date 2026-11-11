@@ -1131,8 +1131,9 @@ console too, with Test, Use, Save and Cancel. The desktop's half is docs/d38-des
 new depth's screen, switches the Copper list and draws every row again (`gfx_set_colours`, built for D14 and used
 only by init until now). Its Unicode font: `CON_UFONT` (root, section 7) swaps the font and draws the shown console
 again. Topaz stays the look of Latin-1 (section 6: a font that replaces it is not promised; `CON_FONT`'s PSF fonts are
-a program's 8-bit mode and end with it, so they are no setting). Its mode: nothing yet (below). So `conprefs` offers
-the colours (auto, 2, 4, 8, 16) and the Unicode font (auto, none, or any `/usr/share/consolefonts/NAME.zcf`).
+a program's 8-bit mode and end with it, so they are no setting). Its mode: `CON_MODE` since 2026-11-12 (below). So
+`conprefs` offers the colours (auto, 2, 4, 8, 16), the Unicode font (auto, none, or any
+`/usr/share/consolefonts/NAME.zcf`) and the mode (hires, hires-lace).
 
 **The program: `conprefs`** (user/conprefs.c, 18 KB on the disk), a text screen in the console's own terms (escape
 sequences, the tty in raw mode; Up and Down a setting, Left and Right its value, `t` `u` `s` `c` the buttons, Return
@@ -1159,21 +1160,55 @@ first is said, once, at the end ("init: /etc/console: unknown setting bogus (and
 every line it does understand still counts, so a broken file is one line and the defaults for what it broke. A
 missing or unreadable font file is init's one line as before; the console then shows the box for what Topaz lacks.
 
-**The console's mode (hires or interlaced): not built, for want of kernel room.** `CON_MODE` as designed in
-docs/d38-desktop.md "Screen modes" ("The text console the same way") needs, read from the code: `gfx_set_colours`
-made one switch for depth and lace (it is 548 bytes; the lace adds the two field lists' line-312 wait and `COP1LC`
-moves to `build_cop`, 528 bytes, and a second set of plane pointers to `cop_point`), and in term.c the grids
-allocated per console instead of `[TROWS_MAX][COLS]` arrays (64 rows statically would add 77 KB of bss for every
-user: ten consoles of 3 x 32 x 80 more bytes), the row ring (`rx`, `lz_c`, 32 by a `_Static_assert`) made 64, every
-console's text moved into its new grid at a switch and `SIGWINCH` sent to each foreground group. Estimated 1.0-1.5 KB
-of kernel code (as D38 said); the room is 1,500 bytes on the mount tests' floppy of which `tools/ksize-budget`'s
-`ROOM` keeps 800, so 700 usable, and 780 under the budget's `TOTAL`: **300-800 bytes short**, and `TROWS_MAX` is in
-kernel.h (the main session's file), and the change is a deep core one (two design reviews, CLAUDE.md). conprefs shows
-no mode line until the kernel has the call; adding it is one line of the program's table (`CON_MODE`'s answer on a
-kernel without it is -EINVAL, the same probe as `CON_UFONT`'s).
+**The console's mode (hires or interlaced): built 2026-11-12 (branch pubprep).** `CON_MODE` as designed in
+docs/d38-desktop.md "Screen modes" ("The text console the same way"), read from the code:
+- **The call:** `SYS_console` op 11 `CON_MODE`, no descriptor (every console's, as `CON_COLOURS`), a2 `CONM_HIRES` 0
+  (32 rows PAL, 25 NTSC) or `CONM_LACE` 1 (64 and 50), `CONM_ASK` 0xFF asks; setting is root's (-EPERM). -> the mode
+  shown, -EBUSY while a display server has the screen (D38), -ENOMEM when the screen's chip RAM or the consoles' grids
+  cannot be had (the display stays as it was), -EINVAL another value (and on a kernel without it: conprefs' probe).
+- **The switch (gfx.c `screen`):** one routine for the depth (`CON_COLOURS`) and the mode: the new ring's chip RAM and
+  Copper lists first, then (a new number of rows) every used console's grids (`term_regrid(rows)`); nothing can be
+  had: all given back, -ENOMEM. Then with interrupts masked the pointers, `trows` and the ring change and `COP1LC`
+  names the new list; at once (interrupts only queue, nothing draws between) each console's text moves into its new
+  grids (`term_regrid(0)`); one frame later the old memory goes and the shown console is drawn again.
+- **Interlaced on the chips** (as displayd, d38 "Interlace on the chips"): two Copper lists, the long field's showing
+  lines 0, 2, 4..., the short field's starting a line (`lstride`) further in; the modulos one line of all planes more,
+  `BPLCON0`'s LACE bit; each list ends naming the long field's list, waits for line 312 (262 NTSC), only a long field
+  has, and there names the short one's (`cop_point` sets the first WAIT of that pair to 255's end, or to 312's low
+  bits when the ring's wrap already waited past 255). The ring of rows (section 20) is the same: 128 rows with fast RAM
+  (64 shown, 64 spare), 96 without; its chip RAM is that of a hires screen of the same rows: 320 KB at 16 colours with
+  fast RAM, 180 KB at 8 colours without. `CON_LINE` gives 512 lines (400 NTSC); `CON_GRAB`'s size stays the frame's
+  (640 x 256 or 200: frozen), a display server sets its own mode.
+- **The grids (term.c):** a console's three grids are one block of 3 x `trows` x 80 bytes (and its high plane
+  `trows` x 80, as before on first use) allocated for the rows shown, not `[TROWS_MAX][COLS]` arrays: 7.5 KB a console
+  hires, 15 KB interlaced. `TROWS_MAX` is 64 (kernel.h): the row table `rx`, the drawing notes' ring `lz_c` (64
+  entries, a whole-row flag in each instead of a 32-bit mask) and gfx's `rowoff` are sized for it. At a switch the text
+  keeps its place from the top; when the cursor's row would not fit (64 -> 32 with the cursor below row 32), the rows
+  above it that do not fit go into the scrollback, so the cursor's row is the last one. The scroll region becomes the
+  whole screen, a scrollback view ends, and each console's foreground gets `SIGWINCH` (`tty_winch_consoles`).
+- **The settings:** `/etc/console`'s `mode hires|hires-lace|auto` (auto or no line: hires), applied by init after the
+  colours; conprefs' third line "Screen mode", shown when `CON_MODE` answers, Use writing `mode` into
+  `/var/run/console`, Save into `/etc/console`; `conprefs -q` adds `mode hires|hires-lace`. The demo floppy keeps
+  hires (no `mode` line).
+- **The Copper's own list changes (the review's findings, fixed):** an interlaced list names a list for the next
+  field itself, so a switch away from interlace first makes the old lists name the new one (else the Copper would go
+  on in freed chip RAM), and while a display server has the screen the kernel's lists name the server's list
+  (`cop_next`; `reclaim` sets them back); the ring's wrap WAIT stays below line 312 (with `DIWV=0x38` the picture ends
+  at 312, which a short field never reaches). The blitter is waited for before the grids are taken, so nothing draws
+  (a timeout's kprintf) between the two steps of `term_regrid`; a console without its new grids is a panic.
+- **Size (measured):** gfx.o +813 bytes, term.o +998, syscall +62, tty +44: kernel.bin +1.9 KB. The room came from
+  fsd's printf (embedded in the kernel image) at -Os (user/libz.c `fmt_num` and `vfmt`, in every program): fsd.zx
+  29,372 -> 27,472 bytes, so kernel.bin went 182,820 -> 182,896 with `CON_MODE`, and the mount tests' floppy has
+  1,424 bytes free (800 kept); its RAM disk has at least 46 free blocks, 20 more than before (the smaller programs), room for
+  a later 1-KB step down of `RAMDISK_MOUNT_K` if the kernel needs it. Speed: write_'s run of printable bytes steps
+  three pointers through the grids (before: one pointer and offsets a grid apart); not measured on a real 68020.
 
 **Tests (FS-UAE):** `tools/prefs-test.sh con` on the stock A1200 with 4 MB fast, typed on the serial line: 8 colours
 and Test (in effect), Cancel (16 again); 8 colours and no font, Use (in effect, the block character drawn as the box in
 the screenshot, `/var/run/console` written, `/etc/console` not); Cancel at once (nothing changes); 4 colours and the
 font, Save (`/etc/console`'s lines replaced, its comments and login line kept); three broken lines added and a reboot:
 init's one line, the saved settings in effect (the block solid: the font loaded at boot), `/var/run/console` gone.
+Since 2026-11-12 also the mode: `termtest mode 1` (`CON_MODE`) under `termtest winch` in the foreground (`SIGWINCH`,
+64 x 80), the kernel's log line, the grid's 64 rows with the text written before (`CON_READ`), a block at row 1 and
+one at row 64 in the interlaced screenshot; conprefs' mode line back to hires with Use (`/var/run/console`); and
+`mode hires-lace` in `/etc/console` applied by init at the reboot (the font's block checked on the interlaced screen).

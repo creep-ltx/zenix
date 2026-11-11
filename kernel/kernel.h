@@ -166,7 +166,8 @@ void kfree(void *p);
 
 /* gfx.c, term.c: display and the virtual consoles */
 #define COLS  80
-#define TROWS_MAX 32                    /* text rows on a PAL display; NTSC shows 25 (trows, measured at boot) */
+#define TROWS_MAX 64                    /* text rows at most: 64 PAL interlaced (D28 22); 32 PAL hires, NTSC 25 or 50
+                                         * (trows: measured at boot, doubled by CON_MODE's interlace) */
 #define NCONS 10                        /* virtual consoles /dev/tty1 .. /dev/tty10 (Amiga+F1..F10) */
 /* DESIGN D20 7.2, D38 step 1: pseudo-terminals. /dev/ptmx opens the master of a free one, /dev/pts/N (N 0..NPTY-1) is
  * its slave; ttys 1..NCONS are the consoles, PTY_FIRST + N the ptys (a slave's st_ino is its tty number, a master's
@@ -187,6 +188,10 @@ extern int gfx_depth;            /* bitplanes: 1 to 4 (DESIGN D14; 0: no display
 extern const u16 gfx_palette[16];       /* the 16 ANSI colours, 12 bits */
 extern const u16 gfx_palette2[4];       /* the four colours of 2 planes */
 int gfx_set_colours(int colours);       /* SYS_console CON_COLOURS: 2, 4, 8, 16 (0: ask) -> the colours shown, or -errno */
+int gfx_set_mode(int mode);             /* SYS_console CON_MODE: CONM_* -> the mode shown, or -errno (D28 22) */
+int term_regrid(int rows);              /* D28 22: rows: every console's grids for that many rows (0 or -ENOMEM), then
+                                         * 0 (trows changed): the text moved into them, the old ones freed */
+void tty_winch_consoles(void);          /* SIGWINCH to each console's foreground (its size changed) */
 void term_redraw(void);                 /* the console shown, drawn again from its grid (a new depth) */
 /* DESIGN D20: a console's loaded 8-bit font (256 glyphs of 8 x 8, PSF1) and the console rules */
 struct gfont;
@@ -968,6 +973,14 @@ struct uconline {            /* CON_LINE: the caller fills size, pens, npens; th
  * mouse's counts beyond THRESHOLD (0..127) along an axis count MULTIPLIER (1..8) times; 1 is none. A grab starts
  * without. -EINVAL out of range, -EBADF not the grab's descriptor */
 #define CON_MOUSE       10
+/* DESIGN D28 22: the text console's mode, every console's (no descriptor; root to set): a2 CONM_HIRES (32 rows PAL,
+ * 25 NTSC) or CONM_LACE (interlaced: 64 and 50), CONM_ASK asks -> the mode shown now. -EBUSY while a display server
+ * has the screen, -ENOMEM (the screen's chip RAM or the consoles' grids), the display as it was. Each console's
+ * foreground gets SIGWINCH. */
+#define CON_MODE        11
+#define CONM_HIRES      0
+#define CONM_LACE       1
+#define CONM_ASK        0xFF
 struct ucongrab {            /* CON_GRAB: the caller fills size .. hoty; the kernel the rest */
     u32 size;                /* UCONGRAB_FIRST or more */
     u32 cop;                 /* the Copper list: the caller's chip RAM, ending 0xFFFF 0xFFFE (at most 4,096 moves);

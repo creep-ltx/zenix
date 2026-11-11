@@ -664,7 +664,8 @@ preferences program (the next step) maps them onto the file and the request:
 A failed request (-ENOMEM, -EBUSY) is shown and the mode stays; the program never writes the file for a mode that
 failed.
 
-**The text console the same way (designed here, not built: the coordinator schedules it).** Today `/etc/console`
+**The text console the same way (designed here; built 2026-11-12 as docs/d28-console-text.md section 22 says, the
+mode only: the font stays CON_UFONT's).** Today `/etc/console`
 (colours, font, login) is read by init at every start and applied with `CON_COLOURS` and the font's load; there is no
 mode. A live mode and font switch for Test/Use/Cancel needs one kernel call, `SYS_console` `CON_MODE` (root; the
 console's lines: hires or interlaced, and the font: Topaz or a PSF/ZCF already loaded), doing what `gfx_init` does for

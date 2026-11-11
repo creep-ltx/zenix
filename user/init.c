@@ -46,8 +46,10 @@ static void start(int n, int again)
 /* /etc/console (D14 section 11): "colours N" (2, 4, 8 or 16; "colors" too) sets the text console's colours, read
  * once here, before anything else takes chip RAM; no file, no such line or "auto": the machine's default. Read at
  * every start of init, so a change counts from the next boot. DESIGN D28 7: "font auto|none|NAME", the console's
- * Unicode font, kept here and loaded after mount -a (font_setup); no file or no such line is "font auto". */
+ * Unicode font, kept here and loaded after mount -a (font_setup); no file or no such line is "font auto". D28 22:
+ * "mode hires|hires-lace|auto" (auto, no line: hires), applied after the colours. */
 static char ufont[24] = "auto";
+static int lace;                        /* D28 22: "mode hires-lace" */
 /* a line not understood: the first said (at the end, with how many more), so a broken file is one line (D28 22) */
 static const char *bad_fmt, *bad_v;     /* the first's message and word (in console_setup's buffer) */
 static int nbad;
@@ -94,12 +96,24 @@ static void console_setup(void)
             else if (strncmp(v, "text", 4)) bad("login %s: text or graphical", v);
             continue;
         }
+        if (!strcmp(w, "mode")) {                       /* D28 22: hires (the default, auto) or hires-lace */
+            if (!strncmp(v, "hires-lace", 10)) lace = 1;
+            else if (strncmp(v, "hires", 5) && strncmp(v, "auto", 4)) bad("mode %s: hires, hires-lace or auto", v);
+            else lace = 0;
+            continue;
+        }
         if (strcmp(w, "colours") && strcmp(w, "colors")) { bad("unknown setting %s", w); continue; }
         if (!strncmp(v, "auto", 4)) continue;
         int c = atoi(v), r = c ? sys_console(CON_COLOURS, c) : -EINVAL;
         if (r == -EINVAL) bad("colours %s: 2, 4, 8 or 16 (or auto)", v);
         else if (r < 0) dprintf(1, "init: /etc/console: colours %d: %s, staying at %d\n", c, zstrerror(r), sys_console(CON_COLOURS, 0));
         else if (r != c) dprintf(1, "init: /etc/console: colours %d: this machine shows %d\n", c, r);
+    }
+    if (lace) {                         /* after the colours: the screen made once more, for the mode */
+        int r = sys_console(CON_MODE, CONM_LACE);
+        if (r < 0)
+            dprintf(1, "init: /etc/console: mode hires-lace: %s, staying hires\n",
+                    r == -EINVAL ? "this kernel has no interlaced console" : zstrerror(r));
     }
     if (nbad) {
         dprintf(1, "init: /etc/console: ");

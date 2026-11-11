@@ -52,9 +52,9 @@
 #define CO_DEF 0x07                     /* colour byte: foreground in the low nibble, background in the high one */
 
 struct term {
-    u8 ch[TROWS_MAX][COLS];
-    u8 at[TROWS_MAX][COLS];
-    u8 co[TROWS_MAX][COLS];
+    u8 *ch, *at, *co;                   /* D28 22: the grids, one block of 3 x n bytes (trows rows of COLS cells): the
+                                         * glyph bytes, the attributes and the colours, n bytes apart */
+    u32 n;
     u16 rx[TROWS_MAX];                  /* D28 21: display row y's first cell in each grid (a scroll turns it) */
     int cx, cy, sx, sy;                 /* cursor and its saved position */
     u8 attr, colour;                    /* attributes and colours for new characters */
@@ -77,7 +77,8 @@ struct term {
     struct gfont *font;                 /* a loaded 8-bit font (CON_FONT), 0: Topaz */
     int fowner, rowner;                 /* who set the font, the rules: dropped when that process ends */
     u32 changes;                        /* raised on every write and font or rules change (CON_READ, D24 6.1) */
-    u8 *hi;                             /* D28: [TROWS_MAX][COLS] high bytes of A_HI cells, allocated on first use */
+    u8 *hi;                             /* D28: n high bytes of A_HI cells (as a grid), allocated on first use */
+    u8 *ng, *nhi;                       /* D28 22: the grids for the next number of rows (term_regrid) */
     struct hpool *hp;                   /* D28: the scrollback's high rows */
     struct udec {                       /* D28: the decoder (8 bytes): the bytes held (a lead and its */
         u8 ub[4];                       /* continuations), how many, how many still wanted, the next byte's */
@@ -113,16 +114,16 @@ int term_eight(int con) { return con >= 1 && con <= NCONS && wsp[con] && eight(w
  * D28 21: the table is the console's own and a ring: a scroll turns the table, so no cell is copied (three moves of
  * 31 rows of 80 bytes a line before). ROW(t, g, y) is row y of grid g (ch, at, co); the high plane uses rx too. */
 #define RX(t, y) ((t)->rx[y])
-#define ROW(t, g, y) ((t)->g[0] + RX(t, y))
-_Static_assert(TROWS_MAX == 32, "the row ring has 32 entries");
+#define ROW(t, g, y) ((t)->g + RX(t, y))
+_Static_assert((TROWS_MAX & (TROWS_MAX - 1)) == 0, "the row ring (lz_c) has a power of two entries");
 
 static void reset_term(struct term *t)
 {
-    for (int y = 0, o = 0; y < TROWS_MAX; y++, o += COLS)
+    for (int y = 0, o = 0; y < trows; y++, o += COLS)
         t->rx[y] = (u16)o;
-    memset(t->ch, ' ', sizeof t->ch);
-    memset(t->at, 0, sizeof t->at);
-    memset(t->co, CO_DEF, sizeof t->co);
+    memset(t->ch, ' ', t->n);
+    memset(t->at, 0, t->n);
+    memset(t->co, CO_DEF, t->n);
     t->cx = t->cy = t->sx = t->sy = 0;
     t->attr = t->sattr = 0;
     t->colour = t->scolour = CO_DEF;
@@ -135,15 +136,26 @@ static void reset_term(struct term *t)
     t->cor = t->scor = 0;               /* ESC c keeps the font and the rules (D20 4.2), not their colour flags */
 }
 
+static void set_grid(struct term *t, u8 *g)     /* the grids of trows rows in block g */
+{
+    t->n = (u32)trows * COLS;
+    t->ch = g;
+    t->at = g + t->n;
+    t->co = g + 2 * t->n;
+}
+
 static struct term *get(int w)
 {
     if (!wsp[w]) {
-        wsp[w] = kmalloc(sizeof *wsp[w]);
-        if (!wsp[w])
+        struct term *t = kmalloc(sizeof *t);
+        u8 *g = kmalloc(3u * (u32)trows * COLS);
+        if (!t || !g)
             panic("term: out of memory");
-        memset(wsp[w], 0, sizeof *wsp[w]);
-        wsp[w]->con = (u8)w;
-        reset_term(wsp[w]);
+        memset(t, 0, sizeof *t);
+        set_grid(t, g);
+        t->con = (u8)w;
+        reset_term(t);
+        wsp[w] = t;
     }
     return wsp[w];
 }
@@ -171,24 +183,24 @@ static void udraw(int row, int x, u32 v, u32 prev, u32 next, u8 a, u8 co, int eb
 
 static inline u32 cellv(const struct term *t, u32 o)       /* a cell's value */
 {
-    u32 c = ((const u8 *)t->ch)[o];
-    return (((const u8 *)t->at)[o] & A_HI) ? (u32)t->hi[o] << 8 | c : c;
+    u32 c = t->ch[o];
+    return (t->at[o] & A_HI) ? (u32)t->hi[o] << 8 | c : c;
 }
 
 static __attribute__((noinline)) void draw_hi(struct term *t, int y, int x, u32 o, u8 a)
 {
-    udraw(y, x, cellv(t, o), x ? cellv(t, o - 1) : 0, x < WCOLS - 1 ? cellv(t, o + 1) : 0, a, ((u8 *)t->co)[o],
+    udraw(y, x, cellv(t, o), x ? cellv(t, o - 1) : 0, x < WCOLS - 1 ? cellv(t, o + 1) : 0, a, t->co[o],
           eight(t));
 }
 
 static void drawx(struct term *t, int y, int x, u8 axor)
 {
     u32 o = RX(t, y) + (u32)x;
-    u8 a = ((u8 *)t->at)[o];
+    u8 a = t->at[o];
     if (a & A_HI)
         draw_hi(t, y, x, o, a ^ axor);
     else
-        gfx_cell(y, x, ((u8 *)t->ch)[o], a ^ axor, ((u8 *)t->co)[o]);
+        gfx_cell(y, x, t->ch[o], a ^ axor, t->co[o]);
 }
 
 /* ---- DESIGN D28 21: drawing deferred to the end of a write ----
@@ -201,8 +213,8 @@ static void drawx(struct term *t, int y, int x, u8 axor)
  * rule wants. Anything that draws at once (the cursor, a region scroll by the blitter) flushes first. The notes
  * are of the shown console only: they are made only while it is written to and is visible (vis), and a write
  * always ends with its flush. */
-static u32 lz_whole;                    /* bit y: row y is drawn whole */
-static struct { u8 x0, x1; } lz_c[TROWS_MAX];   /* cells [x0, x1) of row y to draw (LZ(y)); x1 0: none */
+static struct { u8 x0, x1, w; } lz_c[TROWS_MAX];    /* cells [x0, x1) of row y to draw (LZ(y)); x1 0: none; w: the
+                                                     * row is drawn whole */
 static u8 lz_off;                       /* a ring as rx: LZ(y) is display row y's (a scroll turns it) */
 #define LZ(y) lz_c[((y) + lz_off) & (TROWS_MAX - 1)]
 static u8 lz_n, lz_on, lz_busy;         /* full-screen scrolls pending; anything noted; a flush running */
@@ -219,7 +231,8 @@ static void draw(struct term *t, int y, int x) { (void)t; span(y, x, x + 1); }
 
 static void whole(int y, int n)         /* rows y..y+n-1 to be drawn whole */
 {
-    lz_whole |= (n >= 32 ? ~0u : (1u << n) - 1) << y;
+    while (n-- > 0)
+        LZ(y + n).w = 1;
     lz_on = 1;
 }
 
@@ -269,17 +282,16 @@ static void flush(struct term *t)
             int n = gfx_jump(lz_n);
             lz_n = 0;
             if (n >= trows)
-                lz_whole = ~0u;
+                whole(0, trows);
         }
-        u32 w = lz_whole;
-        lz_whole = 0;
         for (int y = 0, k = 0; y < trows; y++) {
-            int x0 = LZ(y).x0, x1 = LZ(y).x1;
-            LZ(y).x1 = 0;
-            if (w >> y & 1) {                           /* a whole row: filled, then its cells not blank in that */
+            int x0 = LZ(y).x0, x1 = LZ(y).x1, w = LZ(y).w;
+            LZ(y).x1 = LZ(y).w = 0;
+            if (w) {                                    /* a whole row: filled, then its cells not blank in that */
                 u8 c = ROW(t, co, y)[WCOLS - 1];
                 if (!k) {                               /* the rows after it to fill in the same colour */
-                    while (y + k < trows && (w >> (y + k) & 1) && ROW(t, co, y + k)[WCOLS - 1] == c)
+                    k = 1;                              /* (this row's flag is cleared already) */
+                    while (y + k < trows && LZ(y + k).w && ROW(t, co, y + k)[WCOLS - 1] == c)
                         k++;
                     gfx_fill_rows(y, k, c);
                 }
@@ -480,6 +492,78 @@ void term_scroll_view(int delta)
     }
 }
 
+/* ---- DESIGN D28 22: a new number of rows (CON_MODE) ----
+ * term_regrid(rows): every console's grids (and high plane) for that many rows, before the switch; none can be had:
+ * those taken are given back, -ENOMEM. term_regrid(0), right after gfx has changed trows (nothing drawn between):
+ * each console's text into its new grids, top-aligned; when the cursor's row would not fit, the rows above it that
+ * do not go into the scrollback, so the cursor's row is the last one. The scroll region is the whole screen again,
+ * the scrollback view ends, each console's foreground gets SIGWINCH. */
+static int clamp(int v, int lo, int hi);
+int term_regrid(int rows)
+{
+    if (rows) {
+        int bad = 0;
+        for (int w = 1; w <= NCONS; w++) {
+            struct term *t = wsp[w];
+            if (!t || bad)
+                continue;
+            u32 n = (u32)rows * COLS;
+            if (!(t->ng = kmalloc(3 * n)) || (t->hi && !(t->nhi = kmalloc(n))))
+                bad = 1;
+        }
+        if (!bad)
+            return 0;
+        for (int w = 1; w <= NCONS; w++)
+            if (wsp[w]) {
+                kfree(wsp[w]->ng);
+                kfree(wsp[w]->nhi);
+                wsp[w]->ng = wsp[w]->nhi = 0;
+            }
+        return -ENOMEM;
+    }
+    for (int w = 1; w <= NCONS; w++) {
+        struct term *t = wsp[w];
+        if (!t)
+            continue;
+        if (!t->ng || (t->hi && !t->nhi))
+            panic("term: a console without its new grids");     /* (nothing allocates between the two steps) */
+        int orows = (int)(t->n / COLS), drop = t->cy >= trows ? t->cy - trows + 1 : 0;
+        for (int y = 0; y < drop; y++)
+            hist_push(t, y);
+        u8 *och = t->ch, *ohi = t->hi;
+        u16 orx[TROWS_MAX];
+        memcpy(orx, t->rx, sizeof orx);
+        set_grid(t, t->ng);
+        t->hi = t->nhi;
+        t->ng = t->nhi = 0;
+        u32 on = (u32)orows * COLS;
+        for (int y = 0, o = 0; y < trows; y++, o += COLS) {
+            t->rx[y] = (u16)o;
+            int k = drop + y;
+            for (u32 g = 0; g < 4; g++) {               /* ch, at, co (a grid apart), the high plane if any */
+                u8 *d = g < 3 ? t->ch + g * t->n + (u32)o : t->hi ? t->hi + o : 0;
+                if (d && k < orows)
+                    memcpy(d, (g < 3 ? och + g * on : ohi) + orx[k], COLS);
+                else if (d)
+                    memset(d, "\40\0\7"[g], COLS);   /* (a blank cell: a space, no attributes, CO_DEF) */
+            }
+        }
+        kfree(och);
+        kfree(ohi);
+        t->cy -= drop;
+        t->sy = clamp(t->sy - drop, 0, trows - 1);
+        t->top = 0;
+        t->bot = trows - 1;
+        t->back = 0;
+        t->changes++;
+    }
+    for (int y = 0; y < TROWS_MAX; y++)
+        lz_c[y].x1 = lz_c[y].w = 0;
+    lz_n = 0;
+    tty_winch_consoles();
+    return 0;
+}
+
 void term_redraw(void)
 {
     if (!gfx_up())
@@ -525,7 +609,7 @@ static void turn_rows(struct term *t, int top, int bot, int n, int up)
 static int is_tail(const struct term *t, int y, int x)
 {
     u32 o = RX(t, y) + (u32)x;
-    return (((const u8 *)t->at)[o] & A_HI) && ((const u8 *)t->ch)[o] == 0xFF && t->hi[o] == 0xFF;
+    return (t->at[o] & A_HI) && t->ch[o] == 0xFF && t->hi[o] == 0xFF;
 }
 
 static void blank1(struct term *t, int vis, int y, int x)  /* a half blanked: a space, its colour kept */
@@ -585,7 +669,6 @@ static void scroll_up(struct term *t, int vis)          /* the region moves up o
             lz_n++;
         lz_off++;
         LZ(trows - 1).x1 = 0;
-        lz_whole >>= 1;
         whole(trows - 1, 1);
     }
 }
@@ -782,7 +865,7 @@ static __attribute__((noinline)) void csi(struct term *t, int vis, char c)
         }
         u8 *r = ROW(t, ch, t->cy) + t->cx, b = bce(t);
         for (int g = 0; g < (t->hi ? 4 : 3); g++) {     /* ch, at, co, and the high plane: a grid apart (hi its own) */
-            u8 *q = g == 3 ? t->hi + RX(t, t->cy) + t->cx : r + g * sizeof t->ch;
+            u8 *q = g == 3 ? t->hi + RX(t, t->cy) + t->cx : r + (u32)g * t->n;
             memmove(ins ? q + n : q, ins ? q : q + n, (u32)m);
             if (g < 3)
                 memset(ins ? q : q + m, g == 0 ? ' ' : g == 1 ? 0 : b, (u32)n);
@@ -870,21 +953,21 @@ static __attribute__((noinline)) void cell8(struct term *t, int vis, u8 ch)
         t->wrap = 0;
     }
     u32 o = RX(t, t->cy) + (u32)t->cx;
-    if (((u8 *)t->at)[o] & A_HI)
+    if (t->at[o] & A_HI)
         unhalf(t, vis, 1);
     u8 co = t->colour | t->cor;
-    if (vis && (((u8 *)t->ch)[o] != ch || ((u8 *)t->at)[o] != t->attr || ((u8 *)t->co)[o] != co || panicked))
+    if (vis && (t->ch[o] != ch || t->at[o] != t->attr || t->co[o] != co || panicked))
         draw(t, t->cy, t->cx);                          /* unchanged: not drawn again (as put1) */
-    ((u8 *)t->ch)[o] = ch;
-    ((u8 *)t->at)[o] = t->attr;
-    ((u8 *)t->co)[o] = co;
+    t->ch[o] = ch;
+    t->at[o] = t->attr;
+    t->co[o] = co;
     advance(t, vis, 1);
 }
 
 /* D28: the cell at grid offset o is the right half of a wide character (the plane exists) */
 static inline int tail_at(const struct term *t, u32 o)
 {
-    return (((const u8 *)t->at)[o] & A_HI) && ((const u8 *)t->ch)[o] == 0xFF && t->hi[o] == 0xFF;
+    return (t->at[o] & A_HI) && t->ch[o] == 0xFF && t->hi[o] == 0xFF;
 }
 
 /* D28: the high plane, on first use (never while a panic prints); 0: no memory (said once, after the write) */
@@ -892,7 +975,7 @@ static int hi_get(struct term *t)
 {
     if (t->hi)
         return 1;
-    if (!panicked && (t->hi = kmalloc(TROWS_MAX * COLS)))
+    if (!panicked && (t->hi = kmalloc(t->n)))
         return 1;
     nomem_say = 1;
     return 0;
@@ -931,15 +1014,15 @@ static __attribute__((noinline)) void putcp(struct term *t, int vis, u32 cp)
     if (tail_at(t, o) || tail_at(t, ow))
         unhalf(t, vis, w);                              /* a wide character it cuts loses both halves */
     u8 a = t->attr | A_HI, c = t->colour | t->cor;
-    ((u8 *)t->ch)[o] = (u8)v;
+    t->ch[o] = (u8)v;
     t->hi[o] = (u8)(v >> 8);
-    ((u8 *)t->at)[o] = a;
-    ((u8 *)t->co)[o] = c;
+    t->at[o] = a;
+    t->co[o] = c;
     if (w == 2) {
-        ((u8 *)t->ch)[o + 1] = 0xFF;
+        t->ch[o + 1] = 0xFF;
         t->hi[o + 1] = 0xFF;
-        ((u8 *)t->at)[o + 1] = a;
-        ((u8 *)t->co)[o + 1] = c;
+        t->at[o + 1] = a;
+        t->co[o + 1] = c;
     }
     if (vis) {
         draw(t, t->cy, t->cx);
@@ -1093,9 +1176,6 @@ control:
  * RAM floppy); this, every character's path, -O2: a printable ASCII byte outside a sequence (0x20-0x7F) is stored and
  * drawn here, everything else (a deferred wrap, half of a wide character, UTF-8, a sequence) one step away, so the
  * common path keeps its few registers (audit B3-18: about 4% fewer instructions per character) */
-_Static_assert(__builtin_offsetof(struct term, ch) == 0 &&
-               __builtin_offsetof(struct term, at) == sizeof ((struct term *)0)->ch &&
-               __builtin_offsetof(struct term, co) == 2 * sizeof ((struct term *)0)->ch, "put1: ch first, at and co after it");
 static __attribute__((optimize("O2"))) void put1(struct term *t, int vis, u8 ch)
 {
     if (__builtin_expect(t->esc || (s8)ch < 32 || t->wrap, 0)) {   /* (a deferred wrap, as terminals do: cell8) */
@@ -1109,18 +1189,18 @@ static __attribute__((optimize("O2"))) void put1(struct term *t, int vis, u8 ch)
             cell8(t, vis, ch);
         return;
     }
-    u8 *c = (u8 *)t + RX(t, t->cy) + (u32)t->cx;        /* the cell's byte (ch is first); its attributes and colour
-                                                         * follow, a grid apart */
-    if (c[sizeof t->ch] & A_HI) {                       /* D28: over half of a wide character: cell8 (unhalf) */
+    u32 o = RX(t, t->cy) + (u32)t->cx;
+    u8 *c = t->ch + o, *ca = t->at + o, *cc = t->co + o;     /* the cell's byte, attributes and colour */
+    if (*ca & A_HI) {                                   /* D28: over half of a wide character: cell8 (unhalf) */
         cell8(t, vis, ch);
         return;
     }
     u8 co = t->colour | t->cor, a = t->attr;
-    if (vis && (c[0] != ch || c[sizeof t->ch] != a || c[2 * sizeof t->ch] != co || panicked))
+    if (vis && (*c != ch || *ca != a || *cc != co || panicked))
         draw(t, t->cy, t->cx);                          /* a cell stored again as it is is not drawn again */
-    c[0] = ch;
-    c[sizeof t->ch] = a;
-    c[2 * sizeof t->ch] = co;
+    *c = ch;
+    *ca = a;
+    *cc = co;
     if (t->cx != WCOLS - 1)
         t->cx++;
     else
@@ -1143,18 +1223,20 @@ static u32 write_(int w, const char *s, u32 n, u32 max, int bounded)
         cursor(t, 0);
     while (i < n) {
         if (!t->esc && !t->wrap && (s8)s[i] >= 32) {    /* D28 21: a run of printable ASCII on one row, the put1 */
-            u8 *c = (u8 *)t + RX(t, t->cy);             /* path without its call and tests per byte */
+            int x = t->cx, x0 = WCOLS, x1 = 0;          /* path without its call and tests per byte: three pointers */
+            u8 *c = ROW(t, ch, t->cy) + x, *ca = ROW(t, at, t->cy) + x, *cc = ROW(t, co, t->cy) + x;   /* stepped */
             u8 co = t->colour | t->cor, a = t->attr;
-            int x = t->cx, x0 = WCOLS, x1 = 0;
-            for (u8 ch; i < n && x < WCOLS - 1 && (s8)(ch = (u8)s[i]) >= 32 && !(c[x + sizeof t->ch] & A_HI); x++, i++)
-                if (c[x] != ch || c[x + sizeof t->ch] != a || c[x + 2 * sizeof t->ch] != co || panicked) {
-                    c[x] = ch;
-                    c[x + sizeof t->ch] = a;
-                    c[x + 2 * sizeof t->ch] = co;
+            const char *q = s + i, *qe = s + n;
+            for (u8 ch; q < qe && x < WCOLS - 1 && (s8)(ch = (u8)*q) >= 32 && !(*ca & A_HI); x++, q++, c++, ca++, cc++)
+                if (*c != ch || *ca != a || *cc != co || panicked) {
+                    *c = ch;
+                    *ca = a;
+                    *cc = co;
                     if (x0 == WCOLS)
                         x0 = x;
                     x1 = x + 1;
                 }
+            i = (u32)(q - s);
             t->cx = x;
             if (vis && x1)
                 span(t->cy, x0, x1);
@@ -1309,12 +1391,12 @@ static long con_read(struct term *t, struct uconread *r, u32 cs)
     u8 *o = (u8 *)r->cells;
     for (u32 n = 0, y = 0, x = 0; n < k; n++, o += cs, x = x == COLS - 1 ? (y++, 0) : x + 1) {
         u32 i = RX(t, y) + x;
-        u8 a = ((u8 *)t->at)[i], *c = o;
+        u8 a = t->at[i], *c = o;
         if (cs == 4)
             *c++ = (a & A_HI) ? t->hi[i] : 0;
-        c[0] = ((u8 *)t->ch)[i];
+        c[0] = t->ch[i];
         c[1] = a & (A_INV | A_UND | A_BOLD);
-        c[2] = ((u8 *)t->co)[i];
+        c[2] = t->co[i];
     }
     r->rows = (u16)trows;
     r->cols = COLS;
