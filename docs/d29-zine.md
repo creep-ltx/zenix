@@ -360,7 +360,7 @@ revision 2's FFS image and device: AmigaOS's own filesystem is not running, so Z
   `SYS:`, `PROGDIR:` and the volume name are its root; `C:`, `S:`, `L:`, `LIBS:`, `DEVS:`, `FONTS:` its subdirectories
   where they exist; the current directory at the start is the program's. The owner's CPU library (10.1) is added as
   `LIBS:68060.library`.
-- **Limits:** as built since 16.12: at most 500 entries (more: only the program goes in, said), 48 MB, and half the fast
+- **Limits:** as built since 16.12: at most 2,000 entries (500 until 16.15; more: only the program goes in, said), 48 MB, and half the fast
   RAM the program leaves free; over that, archives and disk images and then the largest files are left out, each
   named (16.12).
 - **Writes** (owner answer 3, and 2026-11-04 "not all demos write to the same location"): as built (16.9), a file
@@ -545,7 +545,8 @@ ZINE's `Wait` and `WaitTOF` use the CPU's `stop` or the beam: nothing in ZINE ru
 
 ### 8.4 What ZINE does not do
 
-No task switching (one process), no input events, no timer requests, no screens, no windows, no disk devices. A
+No task switching (one process; `CreateNewProc` and `CreateProc` answer 0, as AmigaOS does when it cannot make one,
+16.15), no input events, no timer requests, no screens, no windows, no disk devices. A
 program that asks for these through a call ZINE does not have is stopped cleanly (9.1); one that finds them missing by
 an answer (0 from `OpenLibrary`, `IOERR_OPENFAIL`) takes its own error path and usually ends with a message, which
 `zine`
@@ -1783,6 +1784,65 @@ FPUs alike, the 68882 included, so it is FS-UAE's rounding, not the packages' (2
 Sizes (*measured*, the 68020-60 build): the blob image 97,328 -> 99,960 bytes (memory 109,316 -> 112,264: the
 installer, console.device, the AllocMem line); `/bin/zine` 40,152 -> 41,392 bytes (memory 46,932 -> 48,172); the two
 packages 61,340 + 41,016 bytes on the disk, in memory only on a 68040/060 during a session; the kernel unchanged.
+
+### 16.15 The 68060's black screens, a second process, CAAR, the FPU in AttnFlags (2026-11-11, branch zine5)
+
+**The 68060's black screens are not its data cache.** The round 4 rerun had 42 black screens on the 68060 machine, 6
+of them working on the 68030; the guess was the 040/060's copyback data cache holding the CPU's chip RAM writes
+(Copper lists, bitplanes) from the chips. Read from the code, ZINE already runs the program with the data cache off
+on a 68040/060 (`zine_enter` clears CACR's DE/EDC and pushes the caches, 10.1), and Zenix's transparent translation
+stays in place for the session (DESIGN D37: DTT0 makes the first 16 MB, chip RAM, the chips and the CIAs, inhibited
+and serialized; DTT1 copyback for fast RAM), so a program that switches the data cache on itself with MOVEC (as
+demos do) still writes chip RAM straight through. `zcache` checks that (below). FS-UAE does not model the 060's
+data cache for the chips at all (zcache's control: a write kept in the cache on purpose is still seen by the
+blitter), so no black screen in FS-UAE can come from it; on the Apollo 1260 the same set-up holds. What the six were
+(targeted reruns): Silkcut and Little Nell "worked" on the 68030 only because a 28 MB / 14 MB AllocMem was refused and
+they quit cleanly; on the 68060 they get the memory and are still loading at 50 s. superkewl and supercool precalc
+for 734 and 1,933 s emulated on the 68030 and are still in it at 50 s. A500 Homage and Talking Heads show their
+picture on the 68060 in every rerun (Talking Heads' comes after a precalc close to the 50 s limit): timing, not ZINE.
+The other 36: see zine-top100-findings.md "Round 5".
+
+**A second process** (dos `CreateNewProc` -498, `CreateProc` -138): Elude's demo engine (Dust, Soliloquy, Serenity,
+Shake Off The Dust, kakao) starts a sound process ("[Sound]: Create process:14bit"). ZINE runs one task with no task
+switching (8.4). Built: both calls answer as AmigaOS does when it cannot make a process (0, IoErr
+`ERROR_NO_FREE_STORE` 103), said once with the process's name ("ZINE: NAME asked dos for a second process "N":
+refused (ZINE runs one task), the program goes on without it"); the program takes its own error path instead of being
+stopped. **What a real second task would take** (not built; it changes 8.4, so it is the owner's decision): a task
+table of a few entries, each with its registers, USP, SR and (with an FPU) FSAVE/FMOVEM state, its own Process
+(signals, `pr_MsgPort`, a stack from `NP_StackSize`) and its own `TDNestCnt`/`IDNestCnt`; `ThisTask` switched with
+it; a switch when the running task blocks (`Wait`, `WaitPort`, `WaitIO`, `Delay`, a timer request) to the highest
+ready one; a `Signal` (from a task or an interrupt server) that readies a higher-priority task switches at the
+interrupt's exit (exec's preemption by priority; time slicing among equals optional); the child started from
+`NP_Entry` or `NP_Seglist`, removed when it returns; the session still ends when the main program does. About 2-3 KB
+of blob; nothing of Zenix runs meanwhile, only the program's own tasks. Most such processes are sound mixers woken by
+an audio or timer interrupt, so preemption by priority is the part that matters.
+
+**MOVEC CAAR on a 68040/060:** CAAR (the 020/030's cache address register) does not exist there: MOVEC to or from it
+is an illegal instruction (MC68060UM, MOVEC). Paradox's Cobalt writes it after its CACR write and crashed on the
+68060. The illegal-instruction vector (`zv_illegal`, `zb_illegal` in blob.c) now takes MOVEC to CAAR as a no-op and
+MOVEC from it as 0 on a 68040/060, from supervisor mode only, said once ("ZINE: a MOVEC to or from CAAR (68020/030
+only) taken as a no-op on this CPU"); anything else is the crash it was.
+
+**The FPU in AttnFlags:** with the CPU package and an FPU (16.14), ExecBase's AttnFlags now also say `AFF_68881`,
+`AFF_68882` and `AFF_FPU40` (as 68040/68060.library make them say). Elude's Lightshaft said "This program requires a
+math co-processor" on the 68060 machine, whose Kickstart saw the FPU switched off; and ZINE's math libraries now use
+the FPU there too.
+
+**The volume's entries:** at most 2,000 files and folders (was 500; 5.6); Lorem Ipsum's Dolor Sit Amet has 671 in
+21 MB, which the 68060 machine's memory takes. The other limits (48 MB, half the free fast RAM) are as before. An
+entry is 136 bytes of the volume block, counted only for the entries there are.
+
+*Verified* in FS-UAE (`tools/zine-emu-test.sh`): `zcache` (tools/tests/zine/zcache.S, on the 68040 and 68060
+machines): the program switches the data cache on with MOVEC, writes a chip RAM line with the CPU and the blitter
+copies it: the copy is right; the control (DTT0 made copyback for one write, inhibited again before the blit) says
+whether the machine models the data cache (FS-UAE: it does not); MOVEC CAAR a no-op reading 0, said; AttnFlags say
+the FPU; CacheControl leaves the data cache off. `zproc` (on the 68060 machine): CreateNewProc and CreateProc answer 0
+with IoErr 103, said once with the name, the child's entry never run. Not yet on a real 68040 or 68060.
+The targeted Top 100 reruns (zine-top100-findings.md "Round 5"): Soliloquy plays to its end and four more of Elude's
+demos run silently past where they stopped; Cobalt runs on the 68060; Lightshaft loads.
+
+Sizes (*measured*, the 68020-60 build): the blob's code 100,216 -> 100,928 bytes (memory 106,543 -> 107,261: the
+illegal-instruction no-op, the two dos calls); `/bin/zine` 48,169 -> 48,173 bytes in memory; the kernel unchanged.
 
 ## 17. Questions for the owner (what ZINE should be)
 

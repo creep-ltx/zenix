@@ -1879,6 +1879,41 @@ u32 c_Execute(u32 cmd, u32 in, u32 out)
     return ok;
 }
 
+/* dos CreateNewProc (-498) and CreateProc (-138) (d29 16.15): ZINE runs one task with no task switching (8.4), so a
+ * second process is refused with AmigaOS's own failure answer (0, IoErr ERROR_NO_FREE_STORE), said once with its name:
+ * the program takes its own error path (Elude's demos go on without their sound process) instead of being stopped.
+ * The second task itself would need ZINE to switch tasks (16.15 says what a minimal version would take). */
+static void proc_refused(u32 name)
+{
+    static int said;
+    if (!cur_name)
+        cur_name = Z.blk->name;
+    Z.ioerr = 103;                      /* ERROR_NO_FREE_STORE */
+    if (said++)
+        return;
+    say3("ZINE: ", cur_name, " asked dos for a second process");
+    if (name && c_TypeOfMem(name))
+        zb_say_text(" \"", name, "\"");
+    say3(": refused (ZINE runs one task), the program goes on without it\n", "", "");
+}
+
+u32 c_CreateNewProc(u32 *tags)
+{
+    u32 name = 0, *t = c_TypeOfMem((u32)tags) ? tags : 0, *ti;
+    for (u32 n = 0; n < 256 && (ti = (u32 *)c_NextTagItem(&t)); n++)
+        if (ti[0] == 0x80000000u + 1000 + 12)   /* NP_Name (dos/dostags.h) */
+            name = ti[1];
+    proc_refused(name);
+    return 0;
+}
+
+u32 c_CreateProc(u32 name, u32 pri, u32 seg, u32 stack)
+{
+    (void)pri, (void)seg, (void)stack;
+    proc_refused(name);
+    return 0;
+}
+
 u32 c_PutStr(const char *s)
 {
     if (Z.cur_out)                      /* a command's redirected output (16.11) */
@@ -2969,6 +3004,7 @@ F(ExamineFH); F(NameFromLock); F(SameLock);
 F(GetColorMap); F(FreeColorMap); F(GetRGB4); F(SetRGB4CM); F(SetRGB32CM); F(GetRGB32); F(InitVPort); F(InitView);
 F(SumKickData); F(Fault); F(PrintFault); F(WaitBOVP); F(WritePixel); F(ReadPixel);
 F(AllocDBufInfo); F(FreeDBufInfo); F(ChangeVPBitMap); F(FilePart); F(PathPart); F(AddPart);
+F(CreateNewProc); F(CreateProc);
 
 /* the offsets: the RKRM's Function Offset Reference (V37), the pools and ColdReboot from the NDK 3.2's exec_lib.fd */
 static const u16 exec_lvo[] = { 30, 108, 114, 120, 126, 132, 138, 144, 162, 168, 174, 198, 204, 210, 216, 234, 240,
@@ -3009,14 +3045,14 @@ static void (*const gfx_fn[])(void) = { zs_LoadRGB4, zs_LoadView, zs_WaitBlit, z
     zs_WaitBOVP, zs_WritePixel, zs_ReadPixel };
 static const u16 dos_lvo[] = { 42, 48, 54, 60, 132, 144, 198, 312, 342, 354, 360, 462, 948, 954, 30, 36, 66, 150,
     156, 222, 72, 216, 324, 330, 576, 534, 798, 858, 228, 234,
-    84, 90, 96, 102, 108, 114, 126, 210, 192, 372, 378, 384, 390, 402, 420, 870, 876, 882, 468, 474 };
+    84, 90, 96, 102, 108, 114, 126, 210, 192, 372, 378, 384, 390, 402, 420, 870, 876, 882, 468, 474, 498, 138 };
 static void (*const dos_fn[])(void) = { zs_Read, zs_Write, zs_Input, zs_Output, zs_IoErr, zx_Exit, zs_Delay,
     zs_FPutC, zs_FPuts, zs_VFPrintf, zs_Flush, zs_SetIoErr, zs_PutStr, zs_VPrintf, zs_Open, zs_Close, zs_Seek,
     zs_LoadSeg, zs_UnLoadSeg, zs_Execute, zs_DeleteFile, zs_IsInteractive, zs_FRead, zs_FWrite, zs_GetProgramName,
     zs_GetArgStr, zs_ReadArgs, zs_FreeArgs, zs_AllocDosObject, zs_FreeDosObject,
     zs_Lock, zs_UnLock, zs_DupLock, zs_Examine, zs_ExNext, zs_Info, zs_CurrentDir, zs_ParentDir, zs_DateStamp,
     zs_DupLockFromFH, zs_OpenFromLock, zs_ParentOfFH, zs_ExamineFH, zs_NameFromLock, zs_SameLock, zs_FilePart,
-    zs_PathPart, zs_AddPart, zs_Fault, zs_PrintFault };
+    zs_PathPart, zs_AddPart, zs_Fault, zs_PrintFault, zs_CreateNewProc, zs_CreateProc };
 static const u16 int_lvo[] = { 78, 210, 612, 198, 66, 252, 246, 606, 204, 72, 150, 270, 60, 300,
     510, 516, 768, 774, 780,
     474, 342, 336, 450, 90, 396, 408, 108, 588, 390, 384, 378, 162, 294 };

@@ -15,7 +15,7 @@
 #define ZV_VERSION  4u
 #define ZV_NAMEMAX  107                 /* bytes of a name (fib_FileName holds 108 with its end) */
 #define ZV_VOLMAX   30                  /* bytes of the volume's name */
-#define ZV_MAXFILES 500u                /* section 5.6's limits: more, and only the program goes in */
+#define ZV_MAXFILES 2000u               /* section 5.6's limits (16.15: was 500): more, and only the program goes in */
 #define ZV_MAXBYTES (48u << 20)         /* the files' bytes (d29 16.12; was 16 MB): the block stays one SYS_memalloc */
 #define ZV_NKEEP    8u                  /* regions of a program `zine` loaded itself (16.12) */
 

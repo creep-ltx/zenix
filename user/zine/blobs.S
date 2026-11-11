@@ -56,6 +56,19 @@ zv_linef:
     movem.l (%sp)+,%d0-%d7/%a0-%a6
     rte
 1:  jsr     zb_crash                /* never returns; its argument is still on the stack */
+/* the illegal-instruction vector (4): the 68020/030's MOVEC to or from CAAR on a 68040/060, which has no CAAR, is
+ * taken as a no-op (zb_illegal, blob.c, d29 16.15); anything else is a crash as above */
+    .globl  zv_illegal
+zv_illegal:
+    movem.l %d0-%d7/%a0-%a6,-(%sp)
+    move.l  %sp,-(%sp)
+    jsr     zb_illegal
+    tst.l   %d0
+    bne.s   1f
+    addq.l  #4,%sp
+    movem.l (%sp)+,%d0-%d7/%a0-%a6
+    rte
+1:  jsr     zb_crash                /* never returns; its argument is still on the stack */
     .globl  zb_getusp, zb_setusp
 zb_getusp:
     move.l  %usp,%a0
@@ -755,6 +768,8 @@ zs_AllocBitMap:
     CF  zs_FreeDBufInfo, c_FreeDBufInfo, 1, %a1
     CF  zs_ChangeVPBitMap, c_ChangeVPBitMap, 3, %a0, %a1, %a2
     CF  zs_FilePart, c_FilePart, 1, %d1
+    CF  zs_CreateNewProc, c_CreateNewProc, 1, %d1
+    CF  zs_CreateProc, c_CreateProc, 4, %d1, %d2, %d3, %d4
     CF  zs_PathPart, c_PathPart, 1, %d1
     CF  zs_AddPart, c_AddPart, 3, %d1, %d2, %d3
     CF  zs_OpenDiskFont, c_OpenDiskFont, 1, %a0

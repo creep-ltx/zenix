@@ -208,7 +208,7 @@ small:
 }
 
 /* ---- the way in (7.3) and the start (6), on the ZINE block's stack ---- */
-extern void zv_crash(void), zv_spurious(void), zv_irq(void), zv_priv(void), zv_linef(void);
+extern void zv_crash(void), zv_spurious(void), zv_irq(void), zv_priv(void), zv_linef(void), zv_illegal(void);
 
 static void cia_save_stop(void)
 {
@@ -329,6 +329,9 @@ static void sp_install(u32 *v)
     for (u32 i = 0; i < n; i++)
         if (!(h[12 + 2 * i] & 0x100) || fpu)
             v[h[12 + 2 * i] & 0xFF] = h[13 + 2 * i];
+    if (fpu)                            /* 16.15: AttnFlags say the FPU, as 68040/68060.library make them say
+                                         * (AFF_68881, AFF_68882, AFF_FPU40): Elude's demos look for it there */
+        Z.attn |= 0x0070;
     static const char m60[] = "ZINE: the 68060's missing instructions are emulated (Motorola's M68060 Software "
                               "Package)\n",
                       m60n[] = "ZINE: the 68060's missing integer instructions are emulated (Motorola's M68060 "
@@ -372,6 +375,7 @@ void zb_run(void)
     u32 *v = (u32 *)0;
     for (int i = 2; i < 256; i++)
         v[i] = (u32)zv_crash;
+    v[4] = (u32)zv_illegal;
     v[8] = (u32)zv_priv;
     v[11] = (u32)zv_linef;
     v[24] = (u32)zv_spurious;
@@ -580,6 +584,32 @@ done:
     if (!said) {
         said = 1;
         static const char m[] = "ZINE: an MMU instruction (PMOVE, PFLUSH, PTEST) taken as a no-op: the MMU is off\n";
+        zb_out(m, sizeof m - 1);
+    }
+    return 0;
+}
+
+/* The illegal-instruction vector (zv_illegal, blobs.S; rb as zb_linef's). A 68020/030 has CAAR, the cache address
+ * register its CACR's "clear entry" bits use; a 68040/060 has none and takes MOVEC to or from it as an illegal
+ * instruction (MC68060UM, MOVEC's control registers; Paradox's Cobalt writes it after a CACR write). With the 020/030
+ * cache entry bits meaning nothing there, a write is skipped and a read gives 0, said once. 0: done; 1: a crash. */
+u32 zb_illegal(u32 *rb);
+u32 zb_illegal(u32 *rb)
+{
+    u8 *fr = (u8 *)rb + 60;
+    u32 pc = *(u32 *)(fr + 2);
+    if ((*(u16 *)(fr + 6) >> 12) || (pc & 1) || pc < 0x1000 || !(Z.attn & 0x0088) || !(*(u16 *)fr & 0x2000))
+        return 1;                       /* a format 0 frame, from supervisor mode (MOVEC is privileged), 040/060 */
+    const u16 *ip = (const u16 *)pc;
+    if ((ip[0] & 0xFFFE) != 0x4E7A || (ip[1] & 0x0FFF) != 0x0802 || (ip[0] == 0x4E7A && ip[1] >> 12 == 15))
+        return 1;                       /* (a read into a7, the stack under the frame: not taken) */
+    if (ip[0] == 0x4E7A)                /* MOVEC CAAR,Rn: 0 */
+        rb[ip[1] >> 12] = 0;
+    *(u32 *)(fr + 2) = pc + 4;
+    static u8 said;
+    if (!said) {
+        said = 1;
+        static const char m[] = "ZINE: a MOVEC to or from CAAR (68020/030 only) taken as a no-op on this CPU\n";
         zb_out(m, sizeof m - 1);
     }
     return 0;

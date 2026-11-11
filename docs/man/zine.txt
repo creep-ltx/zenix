@@ -46,7 +46,10 @@ DESCRIPTION
     without an FPU (only the 68060's integer ones there); a program
     that needs an FPU then crashes, the crash line naming the
     instruction. CacheControl switches the instruction cache; the data
-    cache stays off.
+    cache stays off. A program that switches it on itself still writes
+    chip RAM straight through (Zenix keeps the first 16 MB uncached).
+    MOVEC to or from CAAR (a 68020/030 register) is a no-op there, and
+    AttnFlags say the FPU when the package has one.
 
     Overlaid programs (a root that loads its other parts from its own
     file while it runs, as many demos of the 1990s do) run: the whole
@@ -68,8 +71,11 @@ DESCRIPTION
     arguments, its own stack and the redirections (>NIL:, <file,
     >>file), run to its end and unloaded; its return code is IoErr().
     It runs on the same task: after "run" too, the program waits for
-    it (ZINE runs one task). A command run that way may run others, 8
-    inside one another at most. A command of AmigaOS's Shell or C:
+    it (ZINE runs one task: a second process asked for with
+    CreateNewProc or CreateProc is refused as AmigaOS refuses one it
+    cannot make (0), said, and the program goes on without it). A
+    command run that way may run others, 8 inside one another at most.
+    A command of AmigaOS's Shell or C:
     (CD, Echo, Stack, SetPatch, LoadWB...) is not run: Execute answers
     "done". A name that is no file answers "failed". The output names
     each command and what was done. An Assign command ("Assign LIBS:
@@ -87,11 +93,11 @@ DESCRIPTION
     gives out the four channels but plays nothing itself.
 
     The program sees its folder and its subfolders (8 levels deep, at
-    most 500 files and folders, 48 MB, and half the fast RAM the program
+    most 2000 files and folders, 48 MB, and half the fast RAM the program
     leaves free), copied into memory first. A bigger folder: its
     archives and disk images are left out first, then its largest
     files, each named (a program that loads one will not find it);
-    with more than 500 entries only the program goes in. Names
+    with more than 2000 entries only the program goes in. Names
     are found without case, as on AmigaOS (data/xyl.tp3 finds
     Data/XYL.TP3; the Latin-1 letters too). Two names in one folder that
     differ only in case (AmigaOS has no such pair) are both kept: a name

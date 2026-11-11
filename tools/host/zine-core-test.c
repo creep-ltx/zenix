@@ -541,9 +541,9 @@ static void test_vol(void)
     ((struct zv_ent *)(h + 1))[2].parent = 0;
     ((struct zv_ent *)(h + 1))[1].off = sz;
     CHECK(zv_check(b, sz) == -ZE_INVAL && zv_check(b, sz - 4) == -ZE_INVAL, "vol: data outside, a wrong length refused");
-    CHECK(zv_fits(500, 48u << 20, 64u << 20) && !zv_fits(501, 1, 64u << 20) && !zv_fits(1, (48u << 20) + 1, 64u << 20) &&
+    CHECK(zv_fits(2000, 48u << 20, 64u << 20) && !zv_fits(2001, 1, 64u << 20) && !zv_fits(1, (48u << 20) + 1, 64u << 20) &&
           !zv_fits(1, 3u << 20, (3u << 20) - 1) && zv_fits(1, 3u << 20, 3u << 20),
-          "vol: the limits (500 files, 48 MB, the budget given)");
+          "vol: the limits (2000 files, 48 MB, the budget given)");
     CHECK(zv_init(b, sz, 1, "a:b") == 0 && !strcmp(h->volname, "ZINE") && zv_add(b, 0, "x", 0, 0644, 0, 0, 0) == ZV_E_FULL,
           "vol: a volume name that is no AmigaDOS name, a full table");
 }

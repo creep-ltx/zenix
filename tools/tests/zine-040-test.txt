@@ -16,6 +16,8 @@ send zine /tests/zine/ztake; echo ztake-rc=$?\r
 wait ztake-rc= 60
 send zine /tests/zine/zcrash; echo zcrash-rc=$?\r
 wait zcrash-rc= 60
+send zine /tests/zine/zcache; echo zcache-rc=$?\r
+wait zcache-rc= 60
 send free\r
 wait (?m)^fast RAM free.*\n 20
 send zine /tests/zine/zcalls one two TO=dest NUM 42 QUIET; echo zcalls-rc=$?\r

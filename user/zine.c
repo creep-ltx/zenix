@@ -210,7 +210,7 @@ static struct {
     char path[400];                     /* the Zenix path being read */
     u32 top;                            /* bytes of the program's directory with its '/' (names shown from there) */
     u32 n, bytes;                       /* pass 1: entries (files and directories) and bytes found (saturated) */
-    int over;                           /* pass 1: more than 500 entries, stopped */
+    int over;                           /* pass 1: more than ZV_MAXFILES entries, stopped */
     u32 *sz, nsz;                       /* pass 1: every file's size, ZA_ARCH set for an archive or a disk image */
     u8 *vol;                            /* pass 2: the volume being filled */
     int noarch;                         /* pass 2: archives and disk images left out */
@@ -509,7 +509,7 @@ int main(int argc, char **argv)
                 "Zenix has free now\n", name, inf.bytes[1] >> 10, info.chip_free >> 10);
         return 1;
     }
-    /* the volume (5.6, 16.12): the program's directory with its subdirectories (16.10), at most 500 entries and
+    /* the volume (5.6, 16.12): the program's directory with its subdirectories (16.10), at most ZV_MAXFILES (2000) entries and
      * 48 MB, in half the fast RAM the program leaves free (its hunks, and its file in path A: a program reads its
      * data files into memory of its own, so as much again stays for that). Over that: archives and disk images left
      * out first, then the largest files until the rest fits; each left out file is named (the first 5). */
@@ -562,12 +562,12 @@ int main(int argc, char **argv)
                 W.thr == 0xFFFFFFFFu ? "its archives and disk images" : "its archives, disk images and largest files");
     }
     if (W.over) {
-        dprintf(2, "zine: only %s goes into ZINE's volume: its directory holds more than 500 files and directories: "
-                "a program that loads files may not find them; give it a directory of its own\n", name);
+        dprintf(2, "zine: only %s goes into ZINE's volume: its directory holds more than %u files and directories: "
+                "a program that loads files may not find them; give it a directory of its own\n", name, ZV_MAXFILES);
         nent = 0, vbytes = 0;
     }
     /* Zenix's Amiga fonts (16.13): /usr/share/fonts/amiga goes into the volume's FONTS (diskfont's OpenDiskFont looks
-     * there), when it fits in what the program's files leave of the budget and the 500 entries; else left out, said */
+     * there), when it fits in what the program's files leave of the budget and the ZV_MAXFILES entries; else left out, said */
     u32 fn = 0, fbytes = 0;
     static char wpath[sizeof W.path];
     {

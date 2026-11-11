@@ -425,3 +425,57 @@ The Fall and No Sleeping! on the 030: a line F crash and a black screen where th
 be checked, likely timing. Top blockers on the 68060: black screen at the limit 42 (6 of them work on the 030: look at
 the 060's copyback data cache and chip RAM), illegal instruction 9, dos CreateNewProc 5, early return codes 5, line A 2,
 exec -912 2. On the 030: black screen 30, memory 43, illegal instruction 9, MOVE16 7, data file not found 6.
+
+## Round 5 (2026-11-11, branch zine5, d29 16.15)
+
+Targeted reruns only (the same harness; the 68060 machine with its FPU and 64 MB unless said; traced runs with the
+trace blob). The full 500 rerun is still to do.
+
+**The 68060's 42 black screens** (run again with 120 s of PC time instead of 50): **14 now run or end cleanly**,
+none of them through a ZINE change: Nexus-7, A500 Homage and Talking Heads show their picture; Ikadalawampu,
+Luminagia, Noxie (Loonies), Second Rodeo (Fnuque), Discotto, Tribute to Acid (Nature), Higher State of Resolution,
+superkewl and three of Software Failure's intros (Supahfunkers, Umbilicus Mundi, Binary Roads) end after 2,300-4,600 s
+emulated. The guess that the 060's copyback data cache hid the CPU's chip RAM writes is wrong: ZINE runs programs with
+the data cache off, Zenix's DTT0 keeps the first 16 MB uncached even when a program switches it on, and FS-UAE does
+not model that cache against the chips at all (d29 16.15, the `zcache` test). The six that "worked on the 68030":
+Silkcut and Little Nell only ended cleanly there because a 28 MB / 14 MB AllocMem was refused (on the 68060 they get
+it and are still loading at 120 s); superkewl (ends now) and Supercool precalc for 734 and 1,933 s emulated; A500
+Homage and Talking Heads run (6 of 6 and 3 of 4 reruns at 50 s; Talking Heads' picture comes near the 50 s limit).
+
+**The 28 still black at 120 s**, compared with the 68030's results and shots: precalc (the program's own loops, no
+calls, as on the 68030): Software Failure's Electromathesis, Omnimetatheorem, Antelogium, Insomniac Contemplation,
+Ephemeral Permanence, Dual Panoply, Blue Artifact; Supercool; cathode and Trauma (Unique); Hex Junkie and Tunnel
+Vision (Fnuque); Point of No Return, Cruisin', Bantam, 4k-Wavy, gush. Loading or memory: Silkcut, Little Nell, lux
+aeterna, Twenty, Deep, Chips don't lie. Not settled (as in round 3): J (Ephidrena), Lola, total triple trouble, Fetish
+(CrM.library), The Fall (below).
+
+**A second process** (dos CreateNewProc, 5 on the 68060, all Elude's: a sound process): now refused with AmigaOS's
+answer (0, IoErr 103) and said. Soliloquy plays 2,235 s to a clean end; Dust, Serenity, kakao and Shake Off The Dust
+run with a picture to the 120 s limit (silent). Lightshaft, which said "This program requires a math co-processor" on
+the 68060, now loads (AttnFlags say the FPU); Machinist stops at an AllocMem of 11.7 MB (9 MB in one piece).
+
+**The data files not found on the 68030** (6): Elude's We come in peace, Lightshaft, Soliloquy and Machinist, and
+Ephidrena's Chips don't lie: their 12-15 MB `.dat` archives (and wavs) are left out of the volume on the 16 MB
+machine, so their files are missing: memory, not ZINE (on the 68060 the first four get their data). Dolor Sit Amet
+has 671 files and folders, over the volume's 500 entries, so only the program went in: the limit is now 2,000; on the
+68030 its 21 MB still do not fit, on the 68060 they do.
+
+**Illegal instruction, line A, exec -912** (traced on the 68060): Cobalt (Paradox) wrote MOVEC CAAR, which a
+68040/060 lacks: now a no-op, and it runs. deeppan opens gadtools.library (ZINE has none) and then calls through a base
+that is no library (exec's private -912 slot): needs gadtools. Gift needs ahi.device ("Couldn't open ahi.device") and
+crashes after. Not settled (each crashes in its own code, mostly after a long run; crash PCs reading `454D xxxx` are
+the tail of a Zenix memory header, "ZMEM", i.e. a jump into free memory): Psychedelic (after 342 s emulated),
+Virtual Dreams' 40k intro (CHK, illegal or line F in chip RAM, a different place each run), Leisner, Cubic
+Meditation (after "Calculating cubic capacity", 482 s), scifi (inside its own level 3 interrupt, at $82), SoftWired,
+1000%, Piramida (line A), My Kingdom (line A at $A), Cebit 90 (a jump to 0 after 890 s). The three that "work on the
+68020 and crash on the 68030" (Cebit 90, Psychedelic, the 40k intro) crash the same on a 68030 with only Zorro II RAM
+and with no FPU, so it is not 32-bit RAM or the FPU; traced, they crash after 300-900 s emulated, beyond where the
+68020's 50 s runs stopped. Superautodrome ran 292 s to its end on one 68030 run and crashed on another: flaky.
+
+**The three that did worse in round 4's rerun** (each rerun 3 times, this branch's code): Elysium (68020) crashes
+with line F at $130 every time; rounds 1 and 2 crashed at the same address (line A), only round 3's one run reached
+the limit: a crash that is usually there, not a regression. The Fall (68030) runs to the limit every time with a
+picture early and a black screen late; round 3's "clean end" was a return after 0 s: it runs further now, the black
+part not settled. No Sleeping! (68030) crashes every time, at a different place each run (line F, address error,
+illegal instruction); round 2 crashed too, round 3 once ran: an unstable crash in the intro's own code, not a
+regression.
