@@ -1,0 +1,14 @@
+Motorola's M68060 Software Package (060/) and M68040 Floating Point Software Package (040/), used by ZINE's CPU
+support packages (user/zine/zsp060.S, zsp040.S; docs/d29-zine.md 16.14).
+
+Both are Motorola's, under the licence in 060/README and 040/README (copyright Motorola Inc. 1993, 1994: use,
+modification and distribution allowed so long as the notice is kept unchanged and modified versions are identified as
+such). That licence asks nothing the GPL-2.0 does not allow; the Linux kernel (GPL-2.0) carries the same files.
+
+Where they come from: the Linux kernel 7.3 tree, arch/m68k/ifpsp060 and arch/m68k/fpsp040.
+- 060/: fpsp.sa and isp.sa (Motorola's released hex images, the form the package is supported in), their
+  documentation (fpsp.doc, isp.doc, CHANGES, README) and Motorola's source (src/fpsp.S, src/isp.S, src/README-SRC:
+  documentation only, it does not build with the GNU assembler). Not changed.
+- 040/: the package's source in the GNU assembler's syntax, as the Linux kernel converted it from Motorola's (that
+  conversion is a modified version in the licence's sense); the Linux kernel's skeleton.S (its call-outs into Linux)
+  is left out, ZINE's own call-outs (user/zine/zsp040.S) take its place. Not changed further.
