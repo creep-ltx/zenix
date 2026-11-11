@@ -406,3 +406,22 @@ Targeted reruns on it (60 s of PC time): of 8 productions that crashed on an FPU
 the 68030 (Starstruck, Ocean Machine, 021, 039 of the AGA demos; 4ks 007 and 010; 64k 025; 40k 053), none crashes:
 7 run or play to their end (Ocean Machine 2,148 s), Starstruck stops at an AllocMem of 48 MB (43 MB free in one
 piece); Renouncetro and Brutalism (Tornado, 68040+) run. Not yet on a real 68060.
+
+### Round 4's full rerun (2026-11-11, main 2026111101's code, all 500 on three machines, 50 s each)
+
+Counted with the harness's own rule (running with a picture at the limit, or ended cleanly); the 74 boot disks and
+non-programs are left out, so each machine is out of 426:
+
+| Machine | Before round 4 | After |
+|---|---|---|
+| 68EC020, 8 MB fast | 257 | 258 |
+| 68030 + 68882, 16 MB fast | 311 | 312 |
+| 68060 with its FPU, 64 MB fast (new) | - | 348 |
+
+Round 4's early-quit work mostly showed the old counts were already right for the 020/030 (the "quits" played to
+their end; the rule counts a run of 60 s or more as clean). The new 68060 machine runs 36 more than the 030, from the
+memory and from the CPU support packages. Three productions changed for the worse between runs (Elysium on the 020,
+The Fall and No Sleeping! on the 030: a line F crash and a black screen where the round before had them working): to
+be checked, likely timing. Top blockers on the 68060: black screen at the limit 42 (6 of them work on the 030: look at
+the 060's copyback data cache and chip RAM), illegal instruction 9, dos CreateNewProc 5, early return codes 5, line A 2,
+exec -912 2. On the 030: black screen 30, memory 43, illegal instruction 9, MOVE16 7, data file not found 6.
