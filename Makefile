@@ -1053,6 +1053,22 @@ $(BUILD)/zine.blob: $(BUILD)/zine-blob.elf tools/mkzexe.py tools/mkzblob.py tool
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@.zx
 	python3 tools/mkzblob.py $@.zx $@
+# the CPU support packages (d29 16.14): Motorola's 68060 and 68040 packages (user/zine/msp, their licence there) with
+# ZINE's call-outs, /lib/zine/sp060 and sp040, loaded by zine on a 68040/060 only
+ZSP040SRC := $(filter-out user/zine/msp/040/skeleton.S,$(wildcard user/zine/msp/040/*.S))
+ZSP040OBJS := $(BUILD)/zsp040.o $(ZSP040SRC:user/zine/msp/040/%.S=$(BUILD)/zsp040-%.o)
+$(BUILD)/zsp060.o: user/zine/zsp060.S user/zine/msp/060/fpsp.sa user/zine/msp/060/isp.sa | $(BUILD)
+	$(CC) -m68060 -x assembler-with-cpp -c -Iuser/zine $< -o $@
+$(BUILD)/zsp040.o: user/zine/zsp040.S user/zine/msp/040/fpsp.h | $(BUILD)
+	$(CC) -m68040 -x assembler-with-cpp -c -Iuser/zine $< -o $@
+$(BUILD)/zsp040-%.o: user/zine/msp/040/%.S user/zine/msp/040/fpsp.h | $(BUILD)
+	$(CC) -m68040 -x assembler-with-cpp -c -Iuser/zine/msp/040 $< -o $@
+$(BUILD)/sp060 $(BUILD)/sp040: $(BUILD)/sp%: $(BUILD)/zsp%.elf tools/mkzexe.py
+	tools/mkzexe.py $< $@
+$(BUILD)/zsp060.elf: $(BUILD)/zsp060.o link/user.ld
+	$(CC) -nostdlib $(ULDFLAGS) $< -o $@
+$(BUILD)/zsp040.elf: $(ZSP040OBJS) link/user.ld
+	$(CC) -nostdlib $(ULDFLAGS) $(ZSP040OBJS) -o $@
 # the trace build (tests only, /tests/zine/trace.blob): every library call named on the serial port
 ZTBLOBOBJS := $(BUILD)/zt-blobs.o $(BUILD)/zb-blob.o $(BUILD)/zb-blibs.o $(BUILD)/zb-blibload.o $(BUILD)/zb-bmore.o $(BUILD)/zb-bmath.o $(BUILD)/zb-bnext.o $(BUILD)/zb-bfont.o $(BUILD)/zb-amifont.o $(BUILD)/zb-bfpu.o $(BUILD)/zc-zpath.uo $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-zplan.uo
 $(BUILD)/zt-blobs.o: user/zine/blobs.S | $(BUILD)
@@ -1062,7 +1078,7 @@ $(BUILD)/zine-trace.elf: $(ZTBLOBOBJS) link/user.ld
 $(BUILD)/zine-trace.blob: $(BUILD)/zine-trace.elf tools/mkzexe.py tools/mkzblob.py
 	tools/mkzexe.py $< $@.zx
 	python3 tools/mkzblob.py $@.zx $@
-ZINETESTS := zexit zhello ztake zcrash zbadcall zalloc zscreen zmmu zfpu zovl zpkt zlibs zwrite zcase zexec zpart zcrunch zsuper zcalls znext
+ZINETESTS := zexit zhello ztake zcrash zbadcall zalloc zscreen zmmu zfpu zfpux zcon zovl zpkt zlibs zwrite zcase zexec zpart zcrunch zsuper zcalls znext
 # the null blob (step 2's tests): the pause and the resume with nothing in between (user/zine/nullblob.S)
 $(BUILD)/zb-nullblob.o: user/zine/nullblob.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
@@ -1098,7 +1114,7 @@ $(BUILD)/zinetests/zlibs: tools/tests/zine/zlibs.S tools/tests/zine/zt.i tools/m
 	$(CC) $(ASFLAGS) -Itools/tests/zine -Wa,-I$(BUILD)/zinetests $< -o $(BUILD)/zinetests/zlibs.o
 	python3 tools/mkhunktest.py $(BUILD)/zinetests/zlibs.o $@
 zine-tests: $(ZINETESTS:%=$(BUILD)/zinetests/%)
-$(BUILD)/zenix.hdf $(BUILD)/root-card.img: $(BUILD)/zine.blob $(BUILD)/zine-null.blob $(BUILD)/zine-trace.blob $(ZINETESTS:%=$(BUILD)/zinetests/%) $(BUILD)/zinetests/big/zbig
+$(BUILD)/zenix.hdf $(BUILD)/root-card.img: $(BUILD)/zine.blob $(BUILD)/sp060 $(BUILD)/sp040 $(BUILD)/zine-null.blob $(BUILD)/zine-trace.blob $(ZINETESTS:%=$(BUILD)/zinetests/%) $(BUILD)/zinetests/big/zbig
 
 # ---- programs with shared code (DESIGN D13, ZEX2: docs/d13-shared-code.md): one copy of the code for every process
 # running it. Every object is compiled with -msep-data through tools/purecc.sh (the 16-bit table offsets) - libz and
@@ -1157,7 +1173,7 @@ DEMOAPPS := sh login init mount zdesk term ahiru sumi ctop telnet rz sntp displa
 DEMOAPPS_HD := $(DEMOAPPS) wget ssh maki markdown zine drv-plipbox fdisk mkfs_ext2 fsck_ext2 mkfs_zenixfs fsck_zenixfs \
                dd sync zfsd fatd ffsd pfs3d
 DEMODEPS := $(BUILD)/demoboot.bin $(BUILD)/demoload.zx $(BUILD)/kernel.bin $(BUILD)/box.zx $(USERZX) $(SBINZX) $(NETDRVZX) \
-            $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(BUILD)/zine.blob $(shell find rootfs tools/demo -type f) \
+            $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(BUILD)/zine.blob $(BUILD)/sp060 $(BUILD)/sp040 $(shell find rootfs tools/demo -type f) \
             tools/mkroot.sh tools/mkdemo.sh tools/mkdemo.py tools/mkman.py
 $(BUILD)/zenix-demo.adf: $(DEMODEPS)
 	tools/mkdemo.sh $(BUILD) dd $@ "$(filter-out $(BOXAPPS),$(DEMOAPPS))" "$(BOXAPPS)"
@@ -1185,7 +1201,7 @@ $(BUILD)/cp437-8x8.psf: tools/font_8x8.c tools/mkpsf.py | $(BUILD)
 UFONT_SRC := tools/font_8x8.c tools/mkconfont.py $(wildcard tools/consolefont/*)
 $(BUILD)/zenix-8x8.zcf: $(UFONT_SRC) | $(BUILD)
 	python3 tools/mkconfont.py font $@
-$(BUILD)/pkg/list: $(BUILD)/bootmenu $(BUILD)/zenixboot $(BUILD)/cp437-8x8.psf $(BUILD)/zine.blob $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
+$(BUILD)/pkg/list: $(BUILD)/bootmenu $(BUILD)/zenixboot $(BUILD)/cp437-8x8.psf $(BUILD)/zine.blob $(BUILD)/sp060 $(BUILD)/sp040 $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
 	NETDRVS="$(NETDRVS)" python3 tools/mkzup.py packages $(BUILD) "$(UAPPS)"
 # the system bundle: the kernel and the base group only (DESIGN D22 3.1 and 4.4: everything else is installed live,
 # zup -f; copied to BOOT:Zenix/zenix-update.zup, docs/man/zenixboot.txt)

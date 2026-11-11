@@ -81,6 +81,12 @@ if [ -z "$NOTESTS" ] && [ -f "$B/libctest.pzx" ]; then cp "$B/libctest.pzx" "$T/
 # ZINE (DESIGN D29): its blob, the small AmigaOS /bin/zine loads (only on images with /bin/zine), and on test images
 # the null blob and the test programs (AmigaOS hunk executables written for the purpose) in /tests/zine
 if [ -f "$B/zine.blob" ] && [ -f "$T/bin/zine" ]; then mkdir -p "$T/lib/zine" && cp "$B/zine.blob" "$T/lib/zine/"; fi
+# and its CPU support packages (d29 16.14: Motorola's 68060 and 68040 packages, their notice with them); not on the
+# demo floppies, whose root is a RAM disk on every machine (102 KB more for the 68040/060 alone; zup adds them)
+if [ -z "$DEMO" ] && [ -f "$B/sp060" ] && [ -f "$B/sp040" ] && [ -f "$T/bin/zine" ]; then
+    cp "$B/sp060" "$B/sp040" "$T/lib/zine/"
+    [ -z "$NOMAN" ] && lic user/zine/msp/060/README m68060sp && lic user/zine/msp/040/README m68040fpsp
+fi
 if [ -z "$NOTESTS" ] && [ -f "$B/zine-null.blob" ] && [ -d "$B/zinetests" ]; then
     mkdir -p "$T/tests/zine" && cp "$B/zine-null.blob" "$T/tests/zine/null.blob" && { [ ! -f "$B/zine-trace.blob" ] || cp "$B/zine-trace.blob" "$T/tests/zine/trace.blob"; } && cp "$B"/zinetests/z[a-z]* "$T/tests/zine/"
     rm -f "$T"/tests/zine/*.o

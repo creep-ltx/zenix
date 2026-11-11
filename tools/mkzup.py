@@ -256,9 +256,10 @@ FAMILY_CONFIG = {"desktop": ["etc/dlogin", "etc/zdesk/keys", "etc/zdesk/menu", "
                              "etc/zdesk/bar", "etc/zdesk/themes/flat.theme", "etc/zdesk/themes/workbench.theme",
                              "etc/zdesk/themes/platinum.theme", "usr/share/fonts/amiga/README",
                              "usr/share/fonts/truetype/README"]}
-FAMILY_FILES = {"zine": [("zine.blob", "/lib/zine/zine.blob")],
+FAMILY_FILES = {"zine": [("zine.blob", "/lib/zine/zine.blob"), ("sp060", "/lib/zine/sp060"), ("sp040", "/lib/zine/sp040")],
                 "zinstall": [("bootmenu", "/lib/zinstall/bootmenu"), ("zenixboot", "/lib/zinstall/zenixboot")]}
-FAMILY_LICENSES = {"sumi": [("ports/sumi/upstream/LICENSE", "sumi"), ("ports/tui/upstream/LICENSE", "tui")],
+FAMILY_LICENSES = {"zine": [("user/zine/msp/060/README", "m68060sp"), ("user/zine/msp/040/README", "m68040fpsp")],
+                   "sumi": [("ports/sumi/upstream/LICENSE", "sumi"), ("ports/tui/upstream/LICENSE", "tui")],
                    "maki": [("ports/maki/upstream/LICENSE", "maki"), ("ports/tui/upstream/LICENSE", "maki-tui")],
                    "markdown": [("ports/markdown/upstream/LICENSE", "markdown"),
                                 ("ports/tui/upstream/LICENSE", "markdown-tui")],
