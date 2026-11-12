@@ -1,0 +1,66 @@
+PLAY(1)				Zenix manual
+
+NAME
+    play - play sound files on Paula
+
+SYNOPSIS
+    play [-v VOL] [-m] [-q] [-b MS] [FILE... | -]
+    play -r [-u] [-2] [-R RATE] [-v VOL] [-b MS] [FILE... | -]
+    play -S
+
+DESCRIPTION
+    Plays each FILE in turn through the sound server, sndd(8); with no
+    FILE, or "-", standard input. The kind is read from the file's
+    first bytes:
+      WAV     PCM, 8-bit or 16-bit, mono or stereo, any rate (also the
+              WAVE_FORMAT_EXTENSIBLE kind)
+      8SVX    the Amiga's IFF sound: plain or Fibonacci-delta packed,
+              mono or stereo; its volume is used; of a sound with
+              several octaves the first
+      AIFF    and AIFF-C (not compressed, or "sowt"), 8 or 16 bits
+    Paula plays 8-bit samples: 16-bit ones are rounded to 8 bits. A
+    rate above Paula's fastest (28,604 Hz on PAL) is divided by the
+    smallest whole number that brings it below, the samples it joins
+    averaged: 44,100 Hz plays at 22,050, 48,000 at 24,000. The rate
+    Paula really plays is the nearest its clock gives (the period).
+    A stereo sound plays on the channels 0 (left) and 1 (right), or 3
+    and 2 when another program has those; a mono sound on both
+    channels of a pair. Unless -q, a line says what was found and
+    what plays: "song.wav: WAV 16-bit stereo 44100 Hz -> 22030 Hz
+    (period 161)".
+    Ctrl-C ends it at once: the server stops the channels.
+
+OPTIONS
+    -v VOL    the volume, 0-64 (64)
+    -m        stereo mixed to mono: one pair of channels (both sides);
+              the other pair stays free for another program
+    -q        no line about the file
+    -b MS     the server's buffer: two halves of MS milliseconds each
+              (20-1000, default 60). More rides over the system being
+              busy (a floppy read), at the cost of chip RAM and delay
+    -r        raw bytes, 8-bit signed (no header): with -u unsigned,
+              -2 stereo (left, right), -R RATE samples a second (8000)
+    -S        print the sound server's state and end: the streams, the
+              underruns, DMACONR and each channel's period, volume,
+              block, how often it started a block, its stream
+
+EXIT STATUS
+    0 every file played; 1 a file could not be read or is not sound
+    (play goes on with the next); 2 no sound: no server, the channels
+    in use by other programs (two streams play at once at most), or
+    not enough chip RAM.
+
+NOTES
+    Not done: MP3, Ogg, FLAC and other packed formats; WAV's ADPCM and
+    float kinds; more than two channels; mixing with another program
+    on the same channels (the first program has them); 14-bit output.
+    A 44.1 kHz 16-bit stereo file is more than a 14 MHz 68020 reads in
+    time (in FS-UAE's stock A1200 about half speed: gaps); 22 kHz or
+    8-bit files play smoothly there, a faster CPU plays any.
+    An AIFF whose COMM chunk comes after its sound data cannot be read
+    from a pipe. Floppy activity can make a gap with the default
+    buffer (use -b). While sndd runs the terminal bell is silent; it
+    sounds again when sndd has ended (30 s after the last sound).
+
+SEE ALSO
+    modplay(1), sndd(8), beep(1), docs/d40-sound.md

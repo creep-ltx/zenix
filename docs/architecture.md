@@ -281,12 +281,19 @@ If the area overlaps the kernel or the RAM disk (little chip RAM), a 1 KB ring i
 survive a reset (the kernel says so). Whether chip RAM survives a warm reset on the PiStorm is not yet known; in
 FS-UAE (Kickstart 3.1, keyboard reset) it does (`tools/diag-test.sh`).
 
-### Sound (`kernel/audio.c`)
+### Sound (`kernel/audio.c`, `kernel/drv.c`; the sound server `user/sndd.c`, DESIGN D40)
 
 `beep(hz, ms)` plays a 32-byte square wave from chip RAM on Paula channels 0 and 1 (AUDxLC/LEN/PER/VOL, DMACON
-enable) and stops it from the 100 Hz tick. The terminal calls it for BEL (0x07). It is the only sound use so far:
-no sample playback, no mixing. The first beep logs whether channel 0 raised its end-of-sample flag (it can be
-checked without hearing it).
+enable) and stops it from the 100 Hz tick. The terminal calls it for BEL (0x07). The first beep logs whether channel 0
+raised its end-of-sample flag (it can be checked without hearing it).
+Everything else is the sound server's: `/sbin/sndd`, the D11 service of port `audio` (a reserved name), takes
+`SYS_drv`'s `DRV_CLAIM` of `DRV_PAULA` (0xDFF0A0; only the process of port `audio`, handled before the network gate).
+While the claim is held `beep` does nothing; `audio_hold` stops the four channels (volumes 0, then their DMA off,
+interrupts masked) when the claim is taken, before ZINE (`drv_zine`, which also kills sndd) and when it ends
+(`drv_exit`, before the holder's memory is freed; netd's end leaves it alone). The kernel has no audio interrupt code:
+sndd reads Paula's request bits in INTREQR at times it computes from the E-clock (`sys_hrtime`: Paula's clock / 5)
+and writes the channels' registers itself. Its protocol (`user/sndproto.h`), the double buffer, the frames of a
+module and the limits: docs/d40-sound.md.
 
 ### Mouse and joystick (`kernel/input.c`)
 

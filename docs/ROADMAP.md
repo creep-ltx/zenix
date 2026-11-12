@@ -153,8 +153,10 @@ zpkg-new kept out of a user's list (done 2026-11-05: --all shows them, man zpkg)
    boot, for the minimum's 4 MB of fast RAM) comes **next in block 5, after the desktop's real-hardware findings**,
    ahead of the file view, viewers, preferences and TrueType, in its section 10's order (the box, the stage 2 loader,
    `make demo`, the session, the keyboard, the network found by itself, `demo-test.sh`, the owner's A1200). Audit.
-6. **Sound and hardware:** a Paula server, `play`, a MOD player; optional memory protection on CPUs with an MMU; USB,
-   RTG, faster IDE, CD. Audit.
+6. **Sound and hardware:** a Paula server, `play`, a MOD player (done in FS-UAE 2026-11-12 on branch sound:
+   docs/d40-sound.md, `/sbin/sndd`, `play`, `modplay`; not heard, not yet on the A1200, where the halves' length is to
+   be measured against a floppy's track reads); optional memory protection on CPUs with an MMU; USB, RTG, faster IDE,
+   CD. Audit.
 7. **Zenix builds itself, and fun:** assembler, C compiler, `make`, debugger, Lua; games and demos on Zenix. A full
    audit of the whole system, then release 1.0 with the owner's yes.
 

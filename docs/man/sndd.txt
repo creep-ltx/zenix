@@ -1,0 +1,42 @@
+SNDD(8)				Zenix manual
+
+NAME
+    sndd - the sound server
+
+SYNOPSIS
+    /sbin/sndd   (not a command: started by the first call to port
+                 "audio", from /etc/svctab)
+
+DESCRIPTION
+    Owns Paula's four sound channels and plays what programs send it
+    on port "audio" (play(1), modplay(1), and any program with the
+    client library user/sndlib.c). It holds the kernel's claim of
+    Paula: while it runs, the terminal bell is silent, and when it
+    ends the kernel stops the channels before its memory is freed.
+    Two kinds of stream:
+      sound bytes   8-bit, mono or stereo, on a pair of channels (0
+                    left and 1 right, or 3 and 2): two at once
+      frames        a module's ticks on all four channels, from a bank
+                    of samples in chip RAM: one at a time
+    The channels are given to the first program that asks; another
+    gets "in use" until they are free. Sound waits in chip RAM in two
+    halves (60 ms each by default); sndd fills one while Paula plays
+    the other, woken by the system's 100 Hz tick at times worked out
+    from the E-clock, with no interrupts. A program that ends, or is
+    stopped with Ctrl-C, has its sound stopped at once.
+    sndd ends by itself after 30 s with nothing to play (the bell
+    sounds again), and before ZINE takes the machine; the next call
+    starts it again. Its priority is nice -10 (/etc/svctab).
+
+FILES
+    /etc/svctab   its line: audio -10 /sbin/sndd
+
+NOTES
+    Not done: mixing several sounds on one pair, priorities between
+    programs, the bell played through sndd, 14-bit sound. sndd does
+    not run while the kernel is busy for another program (a floppy
+    track read): a gap in the sound unless the halves are longer
+    (play -b). "play -S" shows its state.
+
+SEE ALSO
+    play(1), modplay(1), docs/d40-sound.md
