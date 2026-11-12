@@ -315,7 +315,7 @@ static int keep(int s)
         return 1;
     if (w->simple || !w->iw || !w->ih || w->kind == WK_DESKTOP)
         return 0;                       /* the desktop is redrawn by its program: a whole screen's copy costs too much */
-    u32 need = scr.depth == CHUNKY ? (u32)w->iw * w->ih : (u32)(w->iw + 15) / 16 * 2 * scr.depth * w->ih;
+    u32 need = CHUNKY_BM(&scr) ? (u32)w->iw * w->ih : (u32)(w->iw + 15) / 16 * 2 * scr.depth * w->ih;
     if (chip_used + need > chip_budget || bm_alloc(&w->back, w->iw, w->ih, scr.depth) < 0) {
         w->back.p = 0;
         w->simple = 1;                  /* simple refresh from now on: its program draws what is uncovered */

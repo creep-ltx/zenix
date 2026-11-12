@@ -96,6 +96,10 @@ The proposals, each with what it saves (none built here):
    floppy back and 5.3 KB less in every desktop booted from it. The disk image and the package keep the full one (or
    add `displayd-rtg`, chosen by displayd at its start when the record is there). Small, low risk; touches the
    Makefile (the main session's).
+   **Built 2026-11-12 (branch bootmem):** `displayd-nortg` (`-DNO_RTG`) on both demo floppies; measured 65,236 bytes
+   on the disk (-5,300), 96,076 in memory (-4,956); the DD floppy's stream -3,044 bytes, 57,856 -> 60,928 free; the
+   HD one's stream -4,100. Tests: demo-test, dpy-test and zdesk-test (stock speed; the full displayd is byte for byte
+   the same).
 4. **The CD's kernel bytes on the floppy (kernel.bin).** Moving the packet mover into diskd saves nothing on
    `kernel.bin` (diskd is embedded) and would need diskd to do PIO in user mode beside the kernel's ATA commands (the
    reset-warning flush, ZINE): not worth it. The only way to take the 2.1 KB off `kernel.bin` is a loadable kernel

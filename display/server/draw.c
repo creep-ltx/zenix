@@ -218,7 +218,7 @@ void bm_fill(struct bm *b, const struct rect *rr, int pen)
     if (b == &scr)
         dirty_add(&r);
     npix += (u32)(r.x1 - r.x0) * (u32)(r.y1 - r.y0);
-    if (b->depth == CHUNKY) {
+    if (CHUNKY_BM(b)) {
         fb_fill(&(struct fbmap){ b->p, b->stride }, FBR(r), pen);
         return;
     }
@@ -237,7 +237,7 @@ void bm_xor(struct bm *b, const struct rect *rr, int pen)
         return;
     if (b == &scr)
         dirty_add(&r);
-    if (b->depth == CHUNKY) {
+    if (CHUNKY_BM(b)) {
         fb_xor(&(struct fbmap){ b->p, b->stride }, FBR(r), pen);
         return;
     }
@@ -494,6 +494,7 @@ static int show_torn(int b0, u32 us, int y0, int y1)
     return bad || (early && later);
 }
 /* ---- D43: the screen on a graphics card (docs/d43-rtg.md 4): scr holds the pens, the card gets what changed ---- */
+#ifndef NO_RTG
 int rtg;
 struct fbcard card;
 static int ptr_x = -100, ptr_y;         /* the pointer's picture's top left on the card */
@@ -521,6 +522,7 @@ void fb_show(void)
         fb_put(&card, &(struct fbmap){ scr.p, scr.stride }, FBR(dirty[i]), ptr_x, ptr_y, ptr_a, ptr_b);
     ndirty = 0;
 }
+#endif
 
 /* the drawn screen from now on: a copy of the one on view (1 if so; 0 no chip RAM, or the blitter is not ours) */
 int shadow_begin(void)
@@ -635,8 +637,8 @@ void bm_copy(struct bm *s, int sx, int sy, struct bm *d, const struct rect *dr)
         ncopies++;
         dirty_add(&r);
     }
-    if (d->depth == CHUNKY) {           /* D43: from a chunky bitmap, or from a client's planar image */
-        if (s->depth == CHUNKY)
+    if (CHUNKY_BM(d)) {        /* D43: from a chunky bitmap, or from a client's planar image */
+        if (CHUNKY_BM(s))
             fb_copy(&(struct fbmap){ s->p, s->stride }, sx, sy, &(struct fbmap){ d->p, d->stride },
                     FBR(r));
         else
@@ -644,7 +646,7 @@ void bm_copy(struct bm *s, int sx, int sy, struct bm *d, const struct rect *dr)
                       FBR(r));
         return;
     }
-    if (s->depth == CHUNKY)
+    if (CHUNKY_BM(s))
         return;                         /* (never asked: nothing planar is made from a card's screen) */
     int depth = s->depth < d->depth ? s->depth : d->depth;
     int same = s == d, after = same && (r.y0 > sy || (r.y0 == sy && r.x0 > sx));
@@ -683,7 +685,7 @@ void bm_image(const struct bm *img, const u8 *mask, int sx, int sy, struct bm *d
         return;
     if (d == &scr)
         dirty_add(&r);
-    if (d->depth == CHUNKY) {
+    if (CHUNKY_BM(d)) {
         fb_planar(img->p, img->stride, img->bpr, img->depth, mask, sx, sy, &(struct fbmap){ d->p, d->stride },
                   FBR(r));
         return;
@@ -722,7 +724,7 @@ void bm_text(struct bm *b, int x, int y, const u8 *glyph, int fg, int bg, int at
         blit_idle();
     nglyphs++;
     npix += (u32)(c.x1 - c.x0) * (u32)(c.y1 - c.y0);
-    if (b->depth == CHUNKY) {
+    if (CHUNKY_BM(b)) {
         fb_glyph(&(struct fbmap){ b->p, b->stride }, x, y, glyph, fg, bg,
                  (attr & TA_BOLD ? FBA_BOLD : 0) | (attr & TA_UNDER ? FBA_UNDER : 0), FBR(c));
         return;
@@ -785,7 +787,7 @@ void bm_mask(struct bm *b, int bx0, int y0, int rows, const u8 *mask, int ms, in
     if (use_blit)
         blit_idle();
     npix += (u32)(c.x1 - c.x0) * (u32)(c.y1 - c.y0);
-    if (b->depth == CHUNKY) {
+    if (CHUNKY_BM(b)) {
         fb_mask(&(struct fbmap){ b->p, b->stride }, bx0, y0, mask, ms, FBR(c), fg, bg);
         return;
     }

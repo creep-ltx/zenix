@@ -90,7 +90,9 @@ DESCRIPTION
     fast RAM then, 2 MB at most. The chipset's screen shows one colour.
     On a PiStorm, whose one HDMI shows either picture, Amiga+F1..F10
     switches it between the desktop and the text consoles. The screen's
-    mode cannot be changed there (DPY_MODE answers DPYM_RTG).
+    mode cannot be changed there (DPY_MODE answers DPYM_RTG). The demo
+    floppies' displayd is built without this (their boot never hands
+    over a card): it always uses the chipset's screen.
 
     It ends when its last client has gone, and the console is text again.
 

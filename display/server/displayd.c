@@ -396,6 +396,7 @@ static int mode_alloc(struct bm *b, int want, int depth)
 
 /* ---- D43: a graphics card's screen (docs/d43-rtg.md 3-5): the one zenixboot RTG took over from AmigaOS ---- */
 static struct hwfb *test_card;          /* a test's pretend card's record: cleared when we end (the card is ours) */
+#ifndef NO_RTG
 static u32 hvs_reg, hvs_on, hvs_off;    /* the Pi's SCALER_DISPLIST1 and its two values (HWFB_HVS), 0: none */
 static void hvs_show(int on)            /* the HDMI shows the card's picture (1) or the chipset's (0) */
 {
@@ -453,6 +454,11 @@ static int card_take(void)
             f->flags & HWFB_TEST ? " (a test's pretend card)" : "");
     return 1;
 }
+#else
+static void hvs_show(int on) { (void)on; }
+static void fb_scale(int *x, int *y) { (void)x; (void)y; }
+static int card_take(void) { return 0; }   /* the demo floppy's displayd: the chipset's screen always */
+#endif
 
 static int screen_up(int con)
 {

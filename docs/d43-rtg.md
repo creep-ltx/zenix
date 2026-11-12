@@ -157,7 +157,9 @@ Sizes (measured, `make`, 2026-11-12): the kernel 0 bytes; `displayd` 65,184 -> 7
 fb.c 1,976 bytes of code at -Os, the chunky branches in draw.c about 1,100, the card's start, the pointer and the
 Pi's switch in displayd.c about 1,600, the relocations); every chipset desktop carries it. `zenixboot` 53,612 ->
 55,960 (+2,348). `dpytest` (a test program) 12,076 -> 13,616. The DD demo floppy: 64,000 -> 60,416 bytes free
-(-3,584, packed).
+(-3,584, packed). Since the block 6 audit (2.3) the demo floppies carry a displayd built without the card
+(`-DNO_RTG`, Makefile `displayd-nortg`): 65,236 bytes on the disk, 96,076 in memory (the full one 70,536 and
+101,032); the DD demo floppy 57,856 -> 60,928 bytes free (measured, `make demo`, 2026-11-12).
 
 ## 8. What does not change
 

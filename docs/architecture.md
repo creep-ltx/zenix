@@ -1585,7 +1585,9 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   `DPYM_RTG` 2 and changes nothing. With `HWFB_HVS` the server writes `dl_chip` into the HVS's register on `GEV_RELEASE`
   and at its end, `dl_rtg` on `GEV_ACQUIRE` (the Pi's HDMI follows the consoles). Verified in FS-UAE by
   `tools/rtg-test.sh` (a pretend card, `dpytest -fb`, its pixels read back) and on the PC by `tools/rtg-host-test.sh`;
-  never on a real card (docs/d43-rtg.md 11).
+  never on a real card (docs/d43-rtg.md 11). The demo floppies carry a second build of the same files,
+  `displayd-nortg` (`-DNO_RTG`: `rtg` the constant 0, no `fb.c`, every card branch gone; installed there as
+  `/sbin/displayd`): their bootblock never writes a card record (D43 section 3). Every other image has the full one.
 - **The window manager and the terminal** (DESIGN D38 steps 5-6): `zdesk` (`display/zdesk/`, docs/man/zdesk.txt)
   is an ordinary program, the display server's window manager (`DPY_WM_HELLO`): it gives the server its theme's
   frame style and palette, places and shows new windows, answers clicks on frames (drags run in the server: an
