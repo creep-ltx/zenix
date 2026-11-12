@@ -249,8 +249,9 @@ RAMDISK_K := 640
 RAMDISK_MOUNT_K := 689
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
-$(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/ksize-check.sh tools/ksize-budget
+$(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/check-init.py tools/ksize-check.sh tools/ksize-budget
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-init.py $<
 	tools/mkzexe.py --delta $< $@
 	@KSIZE_SKIP=$(if $(DIAG)$(GFXDEPTH),1) TOOLPREFIX=$(TOOLPREFIX) tools/ksize-check.sh $(BUILD) $@ $(KERNEL_MAX_MOUNT) || { rm -f $@; exit 1; }
 	@s=$$(wc -c < $@); echo "$@: $$s of $(KERNEL_MAX) bytes, $$(($(KERNEL_MAX) - s)) left for the kernel on the RAM floppy" \
@@ -278,8 +279,9 @@ $(BUILD)/zfs-embed.o: kernel/embed.S $(BUILD)/fsd.zx $(BUILD)/bootz.zx $(BUILD)/
 $(BUILD)/kernel-zfs.elf: $(KZOBJS) link/kernel.ld
 	$(CC) $(CFLAGS) -nostartfiles -T link/kernel.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections \
 	    $(KZOBJS) $(LIBGCC) -o $@
-$(BUILD)/kernel-zfs.bin: $(BUILD)/kernel-zfs.elf tools/mkzexe.py tools/check-68020-60.sh
+$(BUILD)/kernel-zfs.bin: $(BUILD)/kernel-zfs.elf tools/mkzexe.py tools/check-68020-60.sh tools/check-init.py
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-init.py $<
 	tools/mkzexe.py --delta $< $@
 $(BUILD)/zenix-zfs.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel-zfs.bin tools/mkadf.py
 	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel-zfs.bin $@
