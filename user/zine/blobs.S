@@ -96,28 +96,50 @@ zv_irq:
     move.l  %d0,-(%sp)
     jsr     zb_irq
     addq.l  #4,%sp
-    movem.l (%sp)+,%d0-%d1/%a0-%a1/%a5-%a6
+    tst.b   zt_need                 /* a task switch waiting (d29 16.16; never set with one task) */
+    bne.s   2f
+1:  movem.l (%sp)+,%d0-%d1/%a0-%a1/%a5-%a6
     rte
+2:  btst    #5,24(%sp)              /* only a task interrupted in user mode, */
+    bne.s   1b
+    move.w  30(%sp),%d0             /* in a format 0 frame, */
+    and.w   #0xF000,%d0
+    bne.s   1b
+    tst.b   TDNEST                  /* neither Forbid nor Disable, */
+    bpl.s   1b
+    tst.b   IDNEST
+    bpl.s   1b
+    move.l  26(%sp),%d0             /* and in its own code, not inside a ZINE call */
+    cmp.l   #_start,%d0
+    bcs.s   3f
+    cmp.l   #zb_text_end,%d0
+    bcs.s   1b
+3:  movem.l (%sp)+,%d0-%d1/%a0-%a1/%a5-%a6
+    bra.w   zt_swout
 
 /* the privilege violation (vector 8): ZINE's own privileged steps taken from user mode (Supervisor, SetSR, the cache
  * flush, the way out); any other is a crash */
     .globl  zv_priv
 zv_priv:
     cmp.l   #zs_sv,2(%sp)
-    beq.s   1f
+    beq.w   1f
     cmp.l   #zs_catch,2(%sp)
     beq.w   zb_goback
     cmp.l   #zs_setsr,2(%sp)
-    beq.s   3f
+    beq.w   3f
     cmp.l   #zs_flush,2(%sp)
-    beq.s   4f
+    beq.w   4f
     cmp.l   #zs_cc,2(%sp)
-    beq.s   5f
+    beq.w   5f
     cmp.l   #zs_super,2(%sp)
-    beq.s   6f
+    beq.w   6f
     cmp.l   #zs_user,2(%sp)
-    beq.s   7f
+    beq.w   7f
+    cmp.l   #zs_switch,2(%sp)
+    beq.w   8f
     bra.w   zv_crash
+8:  move.l  #zs_switch_ret,2(%sp)   /* a task switch (zt_yield): the task goes on there when it runs again */
+    bra.w   zt_swout
 1:  move.l  %a0,-(%sp)              /* Supervisor: the frame's PC becomes the caller's return address (popped from */
     move.l  %usp,%a0                /* the user stack), and the function runs in supervisor mode; its rte returns */
     move.l  (%a0)+,6(%sp)           /* to the caller with the caller's SR. Every user register stays as it was. */
@@ -170,13 +192,90 @@ zx_Enable:
     subq.b  #1,IDNEST
     bge.s   1f
     move.w  #0xC000,0xDFF09A
+    tst.b   zt_need                 /* a switch held while disabled (16.16) */
+    beq.s   1f
+    tst.b   TDNEST
+    bmi.s   zt_late
 1:  rts
 zx_Forbid:
     addq.b  #1,TDNEST
     rts
 zx_Permit:
     subq.b  #1,TDNEST
+    bge.s   1f
+    tst.b   zt_need                 /* a switch held while forbidden (16.16) */
+    beq.s   1f
+    tst.b   IDNEST
+    bmi.s   zt_late
+1:  rts
+/* zt_late: a switch that waited, now (every register kept): from Permit, Enable and the calls that may ready a task
+ * of higher priority (CFS below) */
+    .globl  zt_late
+zt_late:
+    tst.b   TDNEST
+    bpl.s   1f
+    tst.b   IDNEST
+    bpl.s   1f
+    movem.l %d0-%d1/%a0-%a1,-(%sp)
+    clr.l   -(%sp)
+    jsr     zt_yield
+    addq.l  #4,%sp
+    movem.l (%sp)+,%d0-%d1/%a0-%a1
+1:  rts
+
+/* ---- task switching (d29 16.16; btask.c has the lists and the choice) ----
+ * zt_yield(why): from a task in user mode its privileged instruction traps (zv_priv: zt_swout with the task going
+ * on at zs_switch_ret, answering 1); in supervisor mode it does nothing and answers 0. why is in d0 for zt_pick. */
+    .globl  zt_yield, zs_switch, zs_switch_ret, zt_swout, zt_idle, zt_ret
+zt_yield:
+    move.l  4(%sp),%d0
+zs_switch:
+    ori.w   #0,%sr
+    moveq   #0,%d0
     rts
+zs_switch_ret:
+    moveq   #1,%d0
+    rts
+/* the running task saved (the system stack holds its format 0 frame; every register is the task's) into its record
+ * (struct zt: d0-d7/a0-a6 0, USP 60, PC 64, SR 68, the FPU from 70), the next one chosen and run by rte */
+zt_swout:
+    move.w  #0x2700,%sr
+    move.l  %a0,-(%sp)
+    move.l  zt_cur,%a0
+    movem.l %d0-%d7,(%a0)
+    movem.l %a1-%a6,36(%a0)
+    move.l  (%sp)+,32(%a0)
+    move.l  %usp,%a1
+    move.l  %a1,60(%a0)
+    move.w  (%sp),68(%a0)
+    move.l  2(%sp),64(%a0)
+    tst.b   zt_fpu
+    beq.s   1f
+    jsr     zt_fpsave               /* bfpu.S */
+1:  move.l  zb_stack_top,%sp        /* the frame dropped: nothing else is on the system stack */
+    jsr     zt_pick                 /* btask.c: zt_cur the one to run */
+    move.l  zt_cur,%a0
+    tst.b   zt_fpu
+    beq.s   2f
+    jsr     zt_fprest
+2:  move.l  60(%a0),%a1
+    move.l  %a1,%usp
+    clr.w   -(%sp)                  /* format 0 */
+    move.l  64(%a0),-(%sp)
+    move.w  68(%a0),-(%sp)
+    movem.l (%a0),%d0-%d7
+    movem.l 36(%a0),%a1-%a6
+    move.l  32(%a0),%a0
+    rte
+/* nobody ready (zt_pick): the CPU stopped until an interrupt, then masked again */
+zt_idle:
+    stop    #0x2000
+    move.w  #0x2700,%sr
+    rts
+/* a task's entry returned (its return address): d0 its code (btask.c zt_exit, never returns) */
+zt_ret:
+    move.l  %d0,-(%sp)
+    jsr     zt_exit
 zx_GetCC:
     move.w  %ccr,-(%sp)
     moveq   #0,%d0
@@ -259,7 +358,12 @@ zx_rts:
     move.l  #1,zr_how               /* ZH_RETURN */
     bra.s   zs_catch
 zx_Exit:
-    tst.l   zb_depth                /* inside a command dos Execute runs (16.11): the command ends, its caller goes on */
+    tst.b   zt_on                   /* in a task that is not the first: that task ends (16.16) */
+    beq.s   2f
+    move.l  %d1,-(%sp)
+    jsr     zt_exit_child           /* back only in the first process */
+    addq.l  #4,%sp
+2:  tst.l   zb_depth                /* inside a command dos Execute runs (16.11): the command ends, its caller goes on */
     beq.s   1f
     move.l  %d1,%d0
     bra.w   zb_segret
@@ -495,6 +599,16 @@ zb_putch:
     .endif
     rts
 .endm
+/* CFS: as CF, then a task switch the call made due (it readied a task of higher priority) taken at once (16.16) */
+.macro CFS name, fn, n, r1=%d0, r2=%d0, r3=%d0, r4=%d0
+    CF  \name\()_c, \fn, \n, \r1, \r2, \r3, \r4
+    .globl  \name
+\name:
+    bsr.s   \name\()_c
+    tst.b   zt_need
+    bne.w   zt_late
+    rts
+.endm
     /* exec */
     CF  zs_Alert, c_Alert, 1, %d7
     CF  zs_SetIntVector, c_SetIntVector, 2, %d0, %a1
@@ -513,10 +627,12 @@ zb_putch:
     CF  zs_Enqueue, c_Enqueue, 2, %a0, %a1
     CF  zs_FindName, c_FindName, 2, %a0, %a1
     CF  zs_FindTask, c_FindTask, 1, %a1
-    CF  zs_SetTaskPri, c_SetTaskPri, 2, %a1, %d0
+    CFS zs_SetTaskPri, c_SetTaskPri, 2, %a1, %d0
     CF  zs_SetSignal, c_SetSignal, 2, %d0, %d1
     CF  zs_Wait, c_Wait, 1, %d0
-    CF  zs_Signal, c_Signal, 2, %a1, %d0
+    CFS zs_Signal, c_Signal, 2, %a1, %d0
+    CFS zs_AddTask, c_AddTask, 3, %a1, %a2, %a3
+    CF  zs_RemTask, c_RemTask, 1, %a1
     CF  zs_AllocSignal, c_AllocSignal, 1, %d0
     CF  zs_FreeSignal, c_FreeSignal, 1, %d0
     CF  zs_OldOpenLibrary, c_OldOpenLibrary, 1, %a1
@@ -578,10 +694,10 @@ zs_LoadSeg:
     CF  zs_AbleICR, c_AbleICR, 2, %a6, %d0
     CF  zs_SetICR, c_SetICR, 2, %a6, %d0
     CF  zs_DoIO, c_DoIO, 1, %a1
-    CF  zs_SendIO, c_SendIO, 1, %a1
+    CFS zs_SendIO, c_SendIO, 1, %a1
     CF  zs_CheckIO, c_CheckIO, 1, %a1
     CF  zs_WaitIO, c_WaitIO, 1, %a1
-    CF  zs_AbortIO, c_AbortIO, 1, %a1
+    CFS zs_AbortIO, c_AbortIO, 1, %a1
     CF  zs_TimerBeginIO, c_TimerBeginIO, 1, %a1
     CF  zs_TimerAbortIO, c_TimerAbortIO, 1, %a1
     CF  zs_AddTime, c_AddTime, 2, %a0, %a1
@@ -589,8 +705,8 @@ zs_LoadSeg:
     CF  zs_CmpTime, c_CmpTime, 2, %a0, %a1
     CF  zs_ReadEClock, c_ReadEClock, 1, %a0
     CF  zs_GetSysTime, c_GetSysTime, 1, %a0
-    CF  zs_PutMsg, c_PutMsg, 2, %a0, %a1
-    CF  zs_ReplyMsg, c_ReplyMsg, 1, %a1
+    CFS zs_PutMsg, c_PutMsg, 2, %a0, %a1
+    CFS zs_ReplyMsg, c_ReplyMsg, 1, %a1
     CF  zs_WaitPort, c_WaitPort, 1, %a0
     CF  zs_CreateMsgPort, c_CreateMsgPort, 0
     CF  zs_DeleteMsgPort, c_DeleteMsgPort, 1, %a0
@@ -647,7 +763,7 @@ zs_AllocBitMap:
     CF  zs_InitSemaphore, c_InitSemaphore, 1, %a0
     CF  zs_AttemptSemaphore, c_AttemptSemaphore, 1, %a0
     CF  zs_DeleteFile, c_DeleteFile, 1, %d1
-    CF  zs_AudioBeginIO, zb_audio_beginio, 1, %a1
+    CFS zs_AudioBeginIO, zb_audio_beginio, 1, %a1
     CF  zs_AudioAbortIO, zb_audio_abort, 1, %a1
     CF  zs_ConBeginIO, zb_con_beginio, 1, %a1
     CF  zs_ConAbortIO, zb_con_abort, 1, %a1
@@ -666,7 +782,16 @@ zs_AllocBitMap:
     rts
 .endm
     CFALL   zs_ObtainSemaphore, c_ObtainSemaphore, %a0
-    CFALL   zs_ReleaseSemaphore, c_ReleaseSemaphore, %a0
+    .globl  zs_ReleaseSemaphore     /* as CFALL, then a switch it made due (a waiter of higher priority) */
+zs_ReleaseSemaphore:
+    movem.l %d0-%d1/%a0-%a1,-(%sp)
+    move.l  %a0,-(%sp)
+    jsr     c_ReleaseSemaphore
+    addq.l  #4,%sp
+    movem.l (%sp)+,%d0-%d1/%a0-%a1
+    tst.b   zt_need
+    bne.w   zt_late
+    rts
 /* ---- docs/d29-zine.md 16.12: the calls the Top 100 asked for (bmore.c, bmath.c, blibs.c) ---- */
     /* exec */
     CF  zs_RawIOInit, c_RawIOInit, 0
@@ -768,8 +893,8 @@ zs_AllocBitMap:
     CF  zs_FreeDBufInfo, c_FreeDBufInfo, 1, %a1
     CF  zs_ChangeVPBitMap, c_ChangeVPBitMap, 3, %a0, %a1, %a2
     CF  zs_FilePart, c_FilePart, 1, %d1
-    CF  zs_CreateNewProc, c_CreateNewProc, 1, %d1
-    CF  zs_CreateProc, c_CreateProc, 4, %d1, %d2, %d3, %d4
+    CFS zs_CreateNewProc, c_CreateNewProc, 1, %d1
+    CFS zs_CreateProc, c_CreateProc, 4, %d1, %d2, %d3, %d4
     CF  zs_PathPart, c_PathPart, 1, %d1
     CF  zs_AddPart, c_AddPart, 3, %d1, %d2, %d3
     CF  zs_OpenDiskFont, c_OpenDiskFont, 1, %a0
@@ -1018,6 +1143,12 @@ zb_jumptable:
     movem.l (%sp)+,%d2-%d3/%a2-%a3
     rts
 
+/* the end of the blob's code: .rodata comes right after .text, and this file's is the first (d29 16.16: no task
+ * switch inside ZINE's own code) */
+    .section .rodata
+    .globl  zb_text_end
+zb_text_end:
+    .long   0
     .data
     .globl  zb_attn                 /* AttnFlags (a long, the low word used), set by zb_prepare */
 zb_attn:

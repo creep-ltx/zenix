@@ -85,5 +85,9 @@ send zine /tests/zine/zexit; echo zgroup2=$?; zine /tmp/zg/zxg; echo zgroup3=$?;
 wait zenix:/# 60
 send rm -r /tmp/zg\r
 wait zenix:/# 20
+send zine /tests/zine/ztask; echo ztask-rc=$?\r
+wait ztask-rc= 120
+send zine /tests/zine/zsound; echo zsound-rc=$?\r
+wait zsound-rc= 120
 send date; echo zine-null-done\r
 wait zine-null-done 20

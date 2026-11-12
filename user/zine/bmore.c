@@ -99,7 +99,13 @@ u32 c_FindPort(const char *name) { return name ? c_FindName((struct zlist *)(ZEX
 
 /* ---- dos ---- */
 #define DOSTRUE ((u32)-1)
-#define TASKP(o) (*(volatile u32 *)(Z.proc + (o)))
+/* the calling process (16.16: a process of the program's own has its own arguments; a plain task uses the first's) */
+static u32 cur_proc(void)
+{
+    u32 t = EB(ZO_ExecBase_ThisTask, u32);
+    return ((struct znode *)t)->type == NT_PROCESS ? t : Z.proc;
+}
+#define TASKP(o) (*(volatile u32 *)(cur_proc() + (o)))
 
 /* IsInteractive(d1) (-216): the console's own handles (Input(), Output(): what the user sees) are; files, NIL: and a
  * command's redirections are not */
@@ -337,6 +343,8 @@ u32 c_ReadArgs(const char *tmpl, u32 *array, u8 *rda)
             spos = slen;
     } else {
         src = (const u8 *)TASKP(ZO_Process_pr_Arguments);
+        if (!src)
+            src = (const u8 *)"";
         slen = len0((const char *)src);
     }
     /* the block: a header (whether the RDArgs is ours, the block's size), the strings (at most the line's bytes

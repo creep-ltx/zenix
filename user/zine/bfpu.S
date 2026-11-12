@@ -99,3 +99,44 @@ __wrap___fixsfsi:
     .data
 zm_fpu: .byte   0
     .even
+
+    .text
+/* a task's FPU state for the task switch (d29 16.16; blobs.S zt_swout): a0 the task's record (btask.c struct zt:
+ * 70 "kept", 72 FPCR/FPSR/FPIAR, 84 FP0-FP7, 180 the FSAVE frame). The registers only when the frame is not a null
+ * frame (the frame's version byte: at 0, on a 68060 its format byte at 2); on a 68060 whose FPU is still off in PCR
+ * (DFP) nothing is touched: no task has used it. d0 used. */
+    .globl  zt_fpsave, zt_fprest, zt_fpu
+zt_fpsave:
+    clr.w   70(%a0)
+    cmp.b   #2,zt_fpu
+    bne.s   1f
+    .long   0x4E7A0808              /* movec pcr,d0 */
+    btst    #1,%d0
+    beq.s   1f
+    clr.l   180(%a0)                /* a null frame */
+    clr.l   184(%a0)
+    clr.l   188(%a0)
+    rts
+1:  fsave   180(%a0)
+    cmp.b   #2,zt_fpu
+    bne.s   2f
+    tst.b   182(%a0)
+    bra.s   3f
+2:  tst.b   180(%a0)
+3:  beq.s   4f
+    fmovem.x %fp0-%fp7,84(%a0)
+    fmovem.l %fpcr/%fpsr/%fpiar,72(%a0)
+    move.w  #1,70(%a0)
+4:  rts
+zt_fprest:
+    cmp.b   #2,zt_fpu
+    bne.s   1f
+    .long   0x4E7A0808              /* movec pcr,d0 */
+    btst    #1,%d0
+    bne.s   3f
+1:  tst.w   70(%a0)
+    beq.s   2f
+    fmovem.l 72(%a0),%fpcr/%fpsr/%fpiar
+    fmovem.x 84(%a0),%fp0-%fp7
+2:  frestore 180(%a0)
+3:  rts

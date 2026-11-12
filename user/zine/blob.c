@@ -771,6 +771,7 @@ static void chain(struct ziv *iv, u32 pend)
             break;
 }
 
+static u32 l4;                          /* level 4 interrupts (the trace's line) */
 void zb_irq(u32 vec)
 {
     u32 lv = vec - 24;
@@ -799,8 +800,20 @@ void zb_irq(u32 vec)
             zb_serial_hex('P', &zb_irq_pc, 1);
             if (!(zb_irq_pc & 1) && c_TypeOfMem(zb_irq_pc) && c_TypeOfMem(zb_irq_pc + 15))
                 zb_serial_hex('Q', (const u32 *)zb_irq_pc, 4);
+            /* 16.16: the sound as Paula has it (DMACONR), audio.device's writes played and interrupts, the task
+             * switches */
+            u32 au[8] = { DMACONR, zb_aud_done, zb_aud_irqs, zt_switches, EB(ZO_ExecBase_ThisTask, u32),
+                          (u32)(u8)EB(ZO_ExecBase_TDNestCnt, s8) << 8 | (u8)EB(ZO_ExecBase_IDNestCnt, s8),
+                          l4, EB(ZO_ExecBase_TaskWait, u32) };
+            zb_serial_hex('A', au, 8);
         }
     }
+    if (lv == 3 && (pend & 0x0020) && zt_on)
+        zt_tick();                      /* more than one task: sleepers, timers, the quantum (16.16) */
+    if (lv == 4) {
+        l4++;
+        pend &= ~zb_audio_irq(pend);
+    }    /* audio.device's channels (16.16) */
     if (lv == 6 && (pend & 0x2000))
         zb_cia_irq(1, CIAB(CIA_ICR));
     for (u32 bit = 0; bit < 15; bit++) {

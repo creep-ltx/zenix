@@ -309,12 +309,15 @@ int zb_lib_flush(void)
 }
 
 /* ---- signal semaphores (exec/semaphores.h, NDK 3.2: ss_NestCount 14, ss_WaitQueue 16, ss_Owner 40,
- * ss_QueueCount 44). One task: nobody else can hold one, so Obtain never waits; the counts kept as exec keeps them
- * (QueueCount -1 when free) for programs that look. ---- */
+ * ss_QueueCount 44). The counts kept as exec keeps them (QueueCount -1 when free). With more than one task (16.16)
+ * Obtain waits while another task holds it: a SemaphoreRequest (a MinNode, sr_Waiter) on the wait queue and
+ * SIGF_SINGLE, as exec's; Release hands it to the first waiter. The shared forms are the exclusive ones. ---- */
 #define SS_Nest 14
 #define SS_Wait 16
 #define SS_Owner 40
 #define SS_Queue 44
+#define SIGF_SINGLE 0x10u
+#define THIS_TASK EB(ZO_ExecBase_ThisTask, u32)
 void c_InitSemaphore(u8 *ss)
 {
     struct zlist *l = (struct zlist *)(ss + SS_Wait);
@@ -327,19 +330,34 @@ void c_InitSemaphore(u8 *ss)
     *(s16 *)(ss + SS_Queue) = -1;
 }
 
+static int held_by_other(const u8 *ss)
+{
+    return zt_on && *(const s16 *)(ss + SS_Nest) > 0 && *(const u32 *)(ss + SS_Owner) != THIS_TASK;
+}
+
 void c_ObtainSemaphore(u8 *ss)
 {
     if (!ss)
         return;
-    (*(s16 *)(ss + SS_Nest))++;
     (*(s16 *)(ss + SS_Queue))++;
-    *(u32 *)(ss + SS_Owner) = Z.proc;
+    if (held_by_other(ss)) {
+        u32 req[3] = { 0, 0, THIS_TASK };      /* the MinNode, sr_Waiter */
+        c_SetSignal(0, SIGF_SINGLE);
+        c_AddTail((struct zlist *)(ss + SS_Wait), (struct znode *)req);
+        while (*(u32 *)(ss + SS_Owner) != THIS_TASK)
+            c_Wait(SIGF_SINGLE);
+        return;                         /* the releaser made it ours, NestCount 1 */
+    }
+    (*(s16 *)(ss + SS_Nest))++;
+    *(u32 *)(ss + SS_Owner) = THIS_TASK;
 }
 
 u32 c_AttemptSemaphore(u8 *ss)
 {
+    if (!ss || held_by_other(ss))
+        return 0;
     c_ObtainSemaphore(ss);
-    return ss ? 1 : 0;
+    return 1;
 }
 
 void c_ReleaseSemaphore(u8 *ss)
@@ -348,15 +366,23 @@ void c_ReleaseSemaphore(u8 *ss)
         return;
     (*(s16 *)(ss + SS_Nest))--;
     (*(s16 *)(ss + SS_Queue))--;
-    if (!*(s16 *)(ss + SS_Nest))
-        *(u32 *)(ss + SS_Owner) = 0;
+    if (*(s16 *)(ss + SS_Nest))
+        return;
+    u32 *req = (u32 *)c_RemHead((struct zlist *)(ss + SS_Wait));
+    *(u32 *)(ss + SS_Owner) = req ? req[2] : 0;
+    if (req) {
+        *(s16 *)(ss + SS_Nest) = 1;
+        c_Signal(req[2], SIGF_SINGLE);
+    }
 }
 
-/* ---- audio.device (devices/audio.h, NDK 3.2; the RKRM Devices manual): its channels allocated and freed, as
- * programs that play on Paula themselves ask for them first (SID and module players). Nothing is played through it:
- * CMD_WRITE is refused (IOERR_NOCMD) and named in the output; the program's own Paula writes and its level 4 handlers
- * (SetIntVector) play. IOAudio: io_Unit 24 (the channels, a mask), io_Command 28, io_Flags 30, io_Error 31,
- * ioa_AllocKey 32, ioa_Data 34 (the masks wanted), ioa_Length 38 (their count), ioa_Period 42, ioa_Volume 44. ---- */
+/* ---- audio.device (devices/audio.h, NDK 3.2; the RKRM Devices manual and the audio.device autodocs): its
+ * channels allocated and freed, and (16.16) CMD_WRITE played through Paula's DMA. IOAudio: io_Unit 24 (the channels,
+ * a mask), io_Command 28, io_Flags 30, io_Error 31, ioa_AllocKey 32, ioa_Data 34, ioa_Length 38, ioa_Period 42,
+ * ioa_Volume 44, ioa_Cycles 46, ioa_WriteMsg 48. A channel's writes queue on it (the request's own node); its audio
+ * interrupt says the buffer in its registers has started, so the next one is loaded behind it (no gap) and the one
+ * before is replied. A channel's interrupt is audio.device's only while it has writes there: a program's own level 4
+ * handlers (SetIntVector) are called for the other channels as before. ---- */
 #define CMD_RESET 1
 #define CMD_READ 2
 #define CMD_WRITE 3
@@ -372,18 +398,201 @@ void c_ReleaseSemaphore(u8 *ss)
 #define ADCMD_LOCK 13
 #define ADCMD_WAITCYCLE 14
 #define ADCMD_ALLOCATE 32
+#define ADIOF_PERVOL 0x10
+#define ADIOF_WRITEMESSAGE 0x80
+#define ADIOERR_NOALLOCATION (-10)
 #define ADIOERR_ALLOCFAILED (-11)
 #define IOERR_NOCMD (-3)
 #define IOERR_ABORTED (-2)
+#define FOREVER 0xFFFFFFFFu
 u32 zb_audio_base;
+u32 zb_aud_done, zb_aud_irqs;           /* writes played to their end, audio interrupts taken (the trace's line) */
 static u8 aud_used;                     /* the channels given */
 static u16 aud_key;
 static u8 *aud_lock;                    /* an ADCMD_LOCK in progress: done when its channels are freed */
-static u8 aud_said;
+static struct ach {
+    struct zlist q;                     /* the writes, in order: the first is playing or about to */
+    u8 *play;                           /* the write whose cycle is playing (started by an interrupt) */
+    u8 *regs;                           /* the write in the registers, to start at the next interrupt; 0: stop then */
+    u8 *waitcycle;                      /* an ADCMD_WAITCYCLE, replied when the playing cycle ends */
+    u32 left;                           /* cycles of play still to start (FOREVER: ioa_Cycles 0) */
+    u8 on, stopped;                     /* the channel's DMA runs; CMD_STOP holds it */
+} ach[4];
 
-void zb_audio_init(u32 base) { zb_audio_base = base; }
+void zb_audio_init(u32 base)
+{
+    zb_audio_base = base;
+    for (int c = 0; c < 4; c++) {
+        struct zlist *l = &ach[c].q;
+        l->head = (struct znode *)&l->tail;
+        l->tail = 0;
+        l->tailpred = (struct znode *)&l->head;
+    }
+}
 
-int zb_audio_pending(u8 *io) { return io && io == aud_lock; }
+int zb_audio_pending(u8 *io)
+{
+    if (!io)
+        return 0;
+    if (io == aud_lock)
+        return 1;
+    for (int c = 0; c < 4; c++) {
+        if (ach[c].waitcycle == io)
+            return 1;
+        for (struct znode *n = ach[c].q.head; n->succ; n = n->succ)
+            if ((u8 *)n == io)
+                return 1;
+    }
+    return 0;
+}
+
+int zb_audio_busy(void)
+{
+    for (int c = 0; c < 4; c++)
+        if (ach[c].q.head->succ || ach[c].waitcycle)
+            return 1;
+    return 0;
+}
+
+static int lowest(u32 m)
+{
+    for (int c = 0; c < 4; c++)
+        if (m & 1u << c)
+            return c;
+    return -1;
+}
+
+static void load(int c, u8 *io)         /* a write's buffer into channel c's registers */
+{
+    u32 len = *(u32 *)(io + 38);
+    len = len > 131072 ? 131072 : len < 2 ? 2 : len;
+    CUSTOML(0x0A0 + 0x10 * c) = *(u32 *)(io + 34);
+    CUSTOM(0x0A4 + 0x10 * c) = (u16)(len / 2);       /* words; 65,536 is written as 0 */
+    if (io[30] & ADIOF_PERVOL) {
+        CUSTOM(0x0A6 + 0x10 * c) = *(u16 *)(io + 42);
+        CUSTOM(0x0A8 + 0x10 * c) = *(u16 *)(io + 44);
+    }
+}
+
+static void off(int c)                  /* channel c silent: its DMA and interrupt off */
+{
+    CUSTOM(0x096) = (u16)(1u << c);
+    CUSTOM(0x09A) = (u16)(0x80u << c);
+    CUSTOM(0x09C) = (u16)(0x80u << c);
+    ach[c].on = 0;
+    ach[c].play = ach[c].regs = 0;
+}
+
+static void end_write(int c, u8 *io, s8 err)    /* a write off its queue, replied */
+{
+    c_Remove((struct znode *)io);
+    io[31] = (u8)err;
+    zb_io_done(io);
+    (void)c;
+}
+
+/* the channels in m with writes and not held: their first write loaded, then their DMA on in one write (14-bit
+ * pairs start together); the first interrupt of each says it started. Interrupts held off by the caller. */
+static void kick(u32 m)
+{
+    u16 dma = 0;
+    for (int c = 0; c < 4; c++) {
+        struct ach *a = &ach[c];
+        u8 *io = (u8 *)a->q.head;
+        if (!(m & 1u << c) || a->on || a->stopped || !((struct znode *)io)->succ)
+            continue;
+        load(c, io);
+        a->regs = io;
+        a->play = 0;
+        a->on = 1;
+        CUSTOM(0x09C) = (u16)(0x80u << c);
+        CUSTOM(0x09A) = (u16)(0x8000u | 0x80u << c);
+        dma |= (u16)(1u << c);
+    }
+    if (dma)
+        CUSTOM(0x096) = (u16)(0x8200u | dma);
+}
+
+/* what goes into channel c's registers behind the cycle that has just started */
+static void behind(int c)
+{
+    struct ach *a = &ach[c];
+    if (a->play && (a->left == FOREVER || a->left > 0)) {
+        a->regs = a->play;              /* the same buffer again: Paula repeats it by itself */
+        return;
+    }
+    struct znode *nx = a->play ? ((struct znode *)a->play)->succ : a->q.head;
+    if (nx && nx->succ) {
+        load(c, (u8 *)nx);
+        a->regs = (u8 *)nx;
+    } else
+        a->regs = 0;
+}
+
+/* from zb_irq, level 4: the bits of channels whose writes are audio.device's taken and answered */
+u32 zb_audio_irq(u32 pend)
+{
+    u32 mine = 0;
+    for (int c = 0; c < 4; c++) {
+        struct ach *a = &ach[c];
+        u16 bit = (u16)(0x80u << c);
+        if (!(pend & bit) || !a->on)
+            continue;
+        mine |= bit;
+        CUSTOM(0x09C) = bit;
+        CUSTOM(0x09C) = bit;
+        zb_aud_irqs++;
+        if (a->waitcycle) {
+            u8 *w = a->waitcycle;
+            a->waitcycle = 0;
+            zb_io_done(w);
+        }
+        u8 *r = a->regs;
+        if (r && r == a->play) {        /* the playing write's next cycle */
+            if (a->left != FOREVER)
+                a->left--;
+        } else {
+            if (a->play) {              /* the one before has played to its end */
+                zb_aud_done++;
+                end_write(c, a->play, 0);
+            }
+            a->play = r;
+            if (!r) {
+                off(c);
+                continue;
+            }
+            u16 cy = *(u16 *)(r + 46);
+            a->left = cy ? cy - 1u : FOREVER;
+            if (r[30] & ADIOF_WRITEMESSAGE) {       /* ioa_WriteMsg replied as the write starts */
+                u8 *wm = r + 48, *rp = *(u8 **)(wm + 14);
+                if (rp && c_TypeOfMem((u32)rp))
+                    zb_port_put(rp, (struct znode *)wm, 7);
+            }
+        }
+        behind(c);
+    }
+    return mine;
+}
+
+/* every write of the channels in m ended (aborted), their DMA off */
+static void flush(u32 m)
+{
+    u16 s = zt_dis();
+    for (int c = 0; c < 4; c++)
+        if (m & 1u << c) {
+            off(c);
+            struct znode *n;
+            while ((n = ach[c].q.head)->succ)
+                end_write(c, (u8 *)n, IOERR_ABORTED);
+            if (ach[c].waitcycle) {
+                u8 *w = ach[c].waitcycle;
+                ach[c].waitcycle = 0;
+                w[31] = (u8)IOERR_ABORTED;
+                zb_io_done(w);
+            }
+        }
+    zt_en(s);
+}
 
 /* ADCMD_ALLOCATE: the first mask in ioa_Data whose channels are all free (one program: none is stolen). 0 or the
  * error */
@@ -409,9 +618,12 @@ static s32 allocate(u8 *io)
 static void release(u8 *io)
 {
     u32 m = *(u32 *)(io + 24) & 15;
+    flush(m);                           /* the channels' writes end with them (their DMA off) */
     if (*(u16 *)(io + 32) == aud_key)
         aud_used &= (u8)~m;
-    CUSTOM(0x096) = (u16)m;             /* DMACON: those channels' DMA off */
+    for (int c = 0; c < 4; c++)
+        if (m & 1u << c)
+            ach[c].stopped = 0;
     *(u32 *)(io + 24) = 0;
     if (aud_lock && !(*(u32 *)(aud_lock + 24) & aud_used)) {
         u8 *l = aud_lock;
@@ -451,7 +663,26 @@ void zb_audio_beginio(u8 *io)
     u32 m = *(u32 *)(io + 24) & 15;
     io[8] = 5;                          /* NT_MESSAGE: in progress */
     io[31] = 0;
+    u16 s;
     switch (cmd) {
+    case CMD_WRITE: {
+        int c = lowest(m);
+        if (c < 0 || !(aud_used & 1u << c) || *(u16 *)(io + 32) != aud_key) {
+            io[31] = (u8)ADIOERR_NOALLOCATION;    /* not this request's channel (the autodoc's key check) */
+            break;
+        }
+        *(u32 *)(io + 24) = 1u << c;
+        io[30] &= (u8)~1;               /* asynchronous: replied when it has played */
+        s = zt_dis();
+        struct ach *a = &ach[c];
+        c_AddTail(&a->q, (struct znode *)io);
+        if (!a->on)
+            kick(1u << c);
+        else if (!a->regs)              /* the last cycle playing, nothing behind it: this one goes behind */
+            behind(c);
+        zt_en(s);
+        return;
+    }
     case ADCMD_ALLOCATE:
         io[31] = (u8)allocate(io);
         break;
@@ -469,38 +700,95 @@ void zb_audio_beginio(u8 *io)
                 CUSTOM(0x0A8 + 0x10 * c) = *(u16 *)(io + 44);
             }
         break;
-    case CMD_RESET:
     case CMD_FLUSH:
-    case CMD_STOP:
-        CUSTOM(0x096) = (u16)m;         /* those channels' DMA off */
+        flush(m);
+        break;
+    case CMD_RESET:
+        flush(m);
+        for (int c = 0; c < 4; c++)
+            if (m & 1u << c)
+                ach[c].stopped = 0;
+        break;
+    case CMD_STOP:                      /* held: the playing write starts again from its beginning at CMD_START */
+        s = zt_dis();
+        for (int c = 0; c < 4; c++)
+            if (m & 1u << c) {
+                off(c);
+                ach[c].stopped = 1;
+            }
+        zt_en(s);
         break;
     case CMD_START:
+        s = zt_dis();
+        for (int c = 0; c < 4; c++)
+            if (m & 1u << c)
+                ach[c].stopped = 0;
+        kick(m);
+        zt_en(s);
+        break;
+    case ADCMD_FINISH:                  /* the playing write ends after its current cycle */
+        s = zt_dis();
+        for (int c = 0; c < 4; c++)
+            if ((m & 1u << c) && ach[c].play) {
+                ach[c].left = 0;
+                behind(c);
+            }
+        zt_en(s);
+        break;
+    case ADCMD_WAITCYCLE: {
+        int c = lowest(m);
+        if (c >= 0 && ach[c].on && !ach[c].waitcycle) {
+            io[30] &= (u8)~1;
+            ach[c].waitcycle = io;
+            return;
+        }
+        break;
+    }
     case CMD_UPDATE:
     case CMD_CLEAR:
     case ADCMD_SETPREC:
-    case ADCMD_FINISH:
-    case ADCMD_WAITCYCLE:
         break;
-    case CMD_READ:
-        *(u32 *)(io + 34) = 0;          /* no CMD_WRITE is playing */
+    case CMD_READ: {                    /* the write playing on the channel, or 0 */
+        int c = lowest(m);
+        *(u32 *)(io + 34) = c >= 0 ? (u32)ach[c].play : 0;
         break;
-    default:                            /* CMD_WRITE: ZINE's audio.device plays nothing */
+    }
+    default:
         io[31] = (u8)IOERR_NOCMD;
-        if (!aud_said++)
-            say_num("ZINE: audio.device's command ", cmd, cmd == CMD_WRITE ? " (CMD_WRITE): ZINE's audio.device "
-                    "only gives channels, it plays nothing; answered with an error\n" : ": not known, answered with an "
-                    "error\n");
     }
     zb_io_done(io);
 }
 
 void zb_audio_abort(u8 *io)
 {
-    if (io && io == aud_lock) {
+    if (!io)
+        return;
+    if (io == aud_lock) {
         aud_lock = 0;
-        zb_io_done(io);
         io[31] = (u8)IOERR_ABORTED;
+        zb_io_done(io);
+        return;
     }
+    u16 s = zt_dis();
+    for (int c = 0; c < 4; c++) {
+        struct ach *a = &ach[c];
+        if (a->waitcycle == io) {
+            a->waitcycle = 0;
+            io[31] = (u8)IOERR_ABORTED;
+            zb_io_done(io);
+        }
+        for (struct znode *n = a->q.head; n->succ; n = n->succ)
+            if ((u8 *)n == io) {
+                int live = io == a->play || io == a->regs;
+                if (live)
+                    off(c);
+                end_write(c, io, IOERR_ABORTED);
+                if (live)
+                    kick(1u << c);
+                break;
+            }
+    }
+    zt_en(s);
 }
 
 /* ---- console.device (devices/console.h and conunit.h, NDK 3.2; the RKRM Devices manual, d29 16.14): a unit bound

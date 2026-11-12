@@ -191,6 +191,7 @@ u32 c_UnLoadSeg(u32 seg);
 u32 c_FindName(struct zlist *l, const char *name);
 void c_Enqueue(struct zlist *l, struct znode *n);
 void c_Remove(struct znode *n);
+u32 c_RemHead(struct zlist *l);
 void zb_io_done(u8 *io);
 extern u32 zb_audio_base;
 u32 zb_audio_open(u8 *io, u32 unit, u32 flags);
@@ -226,3 +227,23 @@ u32 c_Read(u32 fh, char *buf, s32 n);
 void c_AddTail(struct zlist *l, struct znode *n);
 void *zmemset(void *d, int c, u32 n);
 void *zmemcpy(void *d, const void *s, u32 n);
+/* btask.c (d29 16.16): more than one task. Until the program makes a second task (zt_on 0) every call works as for
+ * one; zt_need is a switch waiting for a moment it may happen (blobs.S tests it at an interrupt's return) */
+extern u8 zt_on, zt_need;
+u32 zb_frames(void);                    /* blibs.c: frames since the start (CIA-A's time-of-day counter) */
+int zb_timer_poll(void);                /* blibs.c: the timer requests that are due completed; how many */
+int zb_timer_busy(void);                /* blibs.c: 1 while a timer request waits */
+u16 zt_dis(void);                       /* interrupts held off (INTENA's master bit); the old state for zt_en */
+void zt_en(u16 s);
+void zt_check(void);                    /* at a moment a switch may happen: a waiting one done */
+int zt_sleep(u32 frames);               /* the task sleeps that many frames: 1, or 0 when it could not (one task) */
+void zt_tick(void);                     /* the vertical blank (zb_irq): sleepers and timers woken, the quantum */
+u32 zt_exit_child(u32 code);            /* dos Exit in a task that is not the first: it ends; else back */
+u32 c_Wait(u32 sigs);
+void c_Signal(u32 task, u32 sigs);
+u32 c_SetSignal(u32 sigs, u32 mask);
+void c_Cause(struct zint *iv);
+void zb_port_put(u8 *mp, struct znode *m, u8 type);   /* blibs.c: a message onto a port, its task told */
+int zb_audio_busy(void);                /* blibload.c: 1 while audio.device has writes queued or playing */
+u32 zb_audio_irq(u32 pend);             /* blibload.c: the audio interrupts that are audio.device's; their bits */
+extern u32 zb_aud_done, zb_aud_irqs, zt_switches;   /* counters for the trace build's line */

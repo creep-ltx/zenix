@@ -12,8 +12,10 @@ send zine /tests/zine/zcrash; echo zcrash-rc=$?\r
 wait zcrash-rc= 60
 send zine /tests/zine/zcache; echo zcache-rc=$?\r
 wait zcache-rc= 60
-send zine /tests/zine/zproc; echo zproc-rc=$?\r
-wait zproc-rc= 60
+send zine /tests/zine/ztask; echo ztask-rc=$?\r
+wait ztask-rc= 120
+send zine /tests/zine/zsound; echo zsound-rc=$?\r
+wait zsound-rc= 120
 send zine /tests/zine/zcalls one two TO=dest NUM 42 QUIET; echo zcalls-rc=$?\r
 wait zcalls-rc= 60
 send free\r

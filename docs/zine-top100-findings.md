@@ -479,3 +479,31 @@ picture early and a black screen late; round 3's "clean end" was a return after 
 part not settled. No Sleeping! (68030) crashes every time, at a different place each run (line F, address error,
 illegal instruction); round 2 crashed too, round 3 once ran: an unstable crash in the intro's own code, not a
 regression.
+
+## Round 6 (2026-11-12, branch zinetask, d29 16.16)
+
+Targeted reruns only (the same harness, `OUTBASE` a folder of its own; the 68060 machine with its FPU and 64 MB,
+the trace blob, 120 s of PC time). The full 500 rerun is still to do.
+
+**Elude's five now run their sound process.** ZINE switches the program's tasks (d29 16.16), so dos CreateNewProc
+gives the "14bit" sound process its own task; the engine loads its CyberSound `14bit.driver` (from the demo's
+folder), opens audio.device for the four channels and plays on Paula itself, with its own level 4 handlers
+(SetIntVector). How it was checked: the trace build writes, every 250 frames, DMACONR, audio.device's own counts,
+the task switches, ThisTask and the level 4 interrupts it dispatched (an `A` line); the demo's own lines say
+"[Sound]: Create process:14bit", "Created!", "Started!" and, at the music's end, "Flushing buffers... Done.
+Finished!". All five: the process made and started, task switches counted, the four audio channels' DMA (DMACONR
+`$000F`) seen on in the samples, the driver's AUD3 interrupt dispatched about 18 times a second. Serenity reaches
+its "THE END" screen; Soliloquy ends by itself after 3,351 s emulated; Dust's sound process plays its whole music
+and ends ("Finished!") after 845 s emulated.
+
+**But in FS-UAE the sound comes in bursts:** the channels' DMA is on in about 30 % of the samples (Dust; 4-5 % in
+Serenity, Shake Off The Dust and kakao). Read from Dust's code (its symbols: `snd_wav_read_msadpcm`, `SoundPlay`,
+`SoundReply`): the process decodes the MS-ADPCM `.wav` into 8 KB buffers (2,048 stereo frames at 27,429 Hz, 75 ms
+each) and gives each to the driver; the driver's interrupt calls `SoundReply`, which signals the process for the next.
+Measured in the trace: 2,987 buffers in 820 s emulated, 3.6 a second where the music needs 13.4. The process never
+waits (each Wait finds its signal already there) and has the CPU to itself (ThisTask is it in every sample; the first
+task, of lower priority, waits in TaskReady): the emulated 68060 decodes the music at about a quarter of real time,
+so the driver runs dry and stops between buffers. That is the emulated CPU's speed (FS-UAE's 68060 in the harness's
+cycle-exact set-up; `accuracy = 0` with `uae_cpu_speed = max` in a copy of the harness changed nothing measurable),
+not the task switching. A real 68060 at 50 MHz is several times faster; it has not been tried (the Apollo 1260 has
+not run ZINE's 68060 package yet either).

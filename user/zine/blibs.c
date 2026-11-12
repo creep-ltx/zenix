@@ -98,49 +98,8 @@ u32 c_FindName(struct zlist *l, const char *name)
     return 0;
 }
 
-/* ---- the task (one process) and its signals ---- */
-#define TASK(o, t) (*(volatile t *)(Z.proc + ZO_Task_##o))
-
-u32 c_FindTask(const char *name)
-{
-    return !name || streq(name, (const char *)TASK(tc_Node + ZO_Node_ln_Name, u32)) ? Z.proc : 0;
-}
-
-u32 c_SetTaskPri(u32 task, u32 pri)
-{
-    (void)task;
-    (void)pri;
-    return 0;
-}
-
-u32 c_SetSignal(u32 sigs, u32 mask)
-{
-    u32 old = TASK(tc_SigRecvd, u32);
-    TASK(tc_SigRecvd, u32) = (old & ~mask) | (sigs & mask);
-    return old;
-}
-
-void c_Signal(u32 task, u32 sigs)
-{
-    if (task == Z.proc)
-        TASK(tc_SigRecvd, u32) |= sigs;
-}
-
-/* Wait: one process, so only an interrupt server can send the signal; with interrupts disabled nothing can (5.2) */
-u32 c_Wait(u32 sigs)
-{
-    for (;;) {
-        u32 got = TASK(tc_SigRecvd, u32) & sigs;
-        if (got) {
-            TASK(tc_SigRecvd, u32) &= ~got;
-            return got;
-        }
-        if (timer_step())               /* a timer request comes due (waited for here): its signal, then again */
-            continue;
-        if (!sigs || EB(ZO_ExecBase_IDNestCnt, s8) >= 0)
-            zb_stop(ZH_STOP, ZS_WAIT);
-    }
-}
+/* ---- the running task's signals (FindTask, SetTaskPri, Signal, SetSignal, Wait: btask.c, d29 16.16) ---- */
+#define TASK(o, t) (*(volatile t *)(EB(ZO_ExecBase_ThisTask, u32) + ZO_Task_##o))
 
 u32 c_AllocSignal(u32 n)
 {
@@ -1879,40 +1838,8 @@ u32 c_Execute(u32 cmd, u32 in, u32 out)
     return ok;
 }
 
-/* dos CreateNewProc (-498) and CreateProc (-138) (d29 16.15): ZINE runs one task with no task switching (8.4), so a
- * second process is refused with AmigaOS's own failure answer (0, IoErr ERROR_NO_FREE_STORE), said once with its name:
- * the program takes its own error path (Elude's demos go on without their sound process) instead of being stopped.
- * The second task itself would need ZINE to switch tasks (16.15 says what a minimal version would take). */
-static void proc_refused(u32 name)
-{
-    static int said;
-    if (!cur_name)
-        cur_name = Z.blk->name;
-    Z.ioerr = 103;                      /* ERROR_NO_FREE_STORE */
-    if (said++)
-        return;
-    say3("ZINE: ", cur_name, " asked dos for a second process");
-    if (name && c_TypeOfMem(name))
-        zb_say_text(" \"", name, "\"");
-    say3(": refused (ZINE runs one task), the program goes on without it\n", "", "");
-}
-
-u32 c_CreateNewProc(u32 *tags)
-{
-    u32 name = 0, *t = c_TypeOfMem((u32)tags) ? tags : 0, *ti;
-    for (u32 n = 0; n < 256 && (ti = (u32 *)c_NextTagItem(&t)); n++)
-        if (ti[0] == 0x80000000u + 1000 + 12)   /* NP_Name (dos/dostags.h) */
-            name = ti[1];
-    proc_refused(name);
-    return 0;
-}
-
-u32 c_CreateProc(u32 name, u32 pri, u32 seg, u32 stack)
-{
-    (void)pri, (void)seg, (void)stack;
-    proc_refused(name);
-    return 0;
-}
+/* dos CreateNewProc and CreateProc: btask.c (d29 16.16) */
+u32 zb_ioerr_set(u32 e) { return Z.ioerr = e; }
 
 u32 c_PutStr(const char *s)
 {
@@ -1970,7 +1897,8 @@ u32 c_Flush(u32 fh) { (void)fh; return 1; }
 /* Delay: 50 ticks a second, counted in beam lines (313 a tick: 15,625 lines a second on PAL, 15,734 on NTSC) */
 void c_Delay(u32 ticks)
 {
-    zb_wait_lines(ticks * 313);
+    if (!zt_sleep(Z.pal ? ticks : ticks * 6 / 5))      /* more than one task: the caller sleeps (16.16) */
+        zb_wait_lines(ticks * 313);
 }
 
 /* ---- graphics (5.3, the first set) ---- */
@@ -1993,6 +1921,8 @@ u32 c_VBeamPos(void)
 /* the next vertical blank, by the beam (works with interrupts off): the line number goes down; 100 ms at most */
 void c_WaitTOF(void)
 {
+    if (zt_sleep(1))                    /* more than one task: the caller sleeps to the next frame (16.16) */
+        return;
     u32 last = c_VBeamPos(), seen = 0;
     for (u32 it = 0; it < 4000000u && seen < 1600; it++) {
         u32 l = c_VBeamPos();
@@ -2677,14 +2607,30 @@ static void initport(u8 *mp)
     *(u32 *)(mp + MP_SigTask) = *(u32 *)(ZEXEC + ZO_ExecBase_ThisTask);
 }
 
-u32 c_GetMsg(u8 *mp) { return mp ? c_RemHead((struct zlist *)(mp + MP_MsgList)) : 0; }
-static void port_put(u8 *mp, struct znode *m, u8 type)
+/* the message lists are changed with interrupts held off: the timer and audio.device reply from interrupts */
+u32 c_GetMsg(u8 *mp)
+{
+    if (!mp)
+        return 0;
+    u16 s = zt_dis();
+    u32 m = c_RemHead((struct zlist *)(mp + MP_MsgList));
+    zt_en(s);
+    return m;
+}
+/* mp_Flags (exec/ports.h): PA_SIGNAL 0 signals mp_SigTask, PA_SOFTINT 1 causes mp_SoftInt, PA_IGNORE 2 nothing */
+void zb_port_put(u8 *mp, struct znode *m, u8 type)
 {
     ((u8 *)m)[8] = type;                /* ln_Type */
+    u16 s = zt_dis();
     c_AddTail((struct zlist *)(mp + MP_MsgList), m);
-    if (*(u32 *)(mp + MP_SigTask) == Z.proc && !(mp[14] & 3) && mp[MP_SigBit] < 32)    /* PA_SIGNAL */
-        TASK(tc_SigRecvd, u32) |= 1u << mp[MP_SigBit];
+    zt_en(s);
+    u32 st = *(u32 *)(mp + MP_SigTask);
+    if ((mp[14] & 3) == 0 && st && mp[MP_SigBit] < 32)
+        c_Signal(st, 1u << mp[MP_SigBit]);
+    else if ((mp[14] & 3) == 1 && st)
+        c_Cause((struct zint *)st);
 }
+#define port_put zb_port_put
 
 /* ---- the handler port (docs/d29-zine.md 16.7): every file handle's fh_Type. ZINE has no handler process, but a
  * program may talk to "its file's handler" itself, as dos does: a StandardPacket (its message's ln_Name the
@@ -2759,12 +2705,30 @@ void c_PutMsg(u8 *mp, struct znode *m)
     else
         port_put(mp, m, 5);             /* NT_MESSAGE */
 }
-void c_ReplyMsg(u32 m) { (void)m; }
+/* ReplyMsg: onto its mn_ReplyPort as NT_REPLYMSG; without one NT_FREEMSG (exec/nodes.h) */
+void c_ReplyMsg(u8 *m)
+{
+    if (!m || !c_TypeOfMem((u32)m))
+        return;
+    u8 *rp = *(u8 **)(m + 14);
+    if (!rp || (u32)rp == Z.hport || ((u32)rp & 1) || !c_TypeOfMem((u32)rp)) {
+        m[8] = 6;
+        return;
+    }
+    port_put(rp, (struct znode *)m, 7);
+}
+/* WaitPort: the port's signal waited for while its list is empty; with one task, an empty port nothing can fill (no
+ * timer request or audio write under way) is a stop, as before */
 u32 c_WaitPort(u8 *mp)
 {
-    struct zlist *l = (struct zlist *)(mp + MP_MsgList);
-    if (!mp || !l->head->succ)
+    if (!mp)
         zb_stop(ZH_STOP, ZS_WAIT);
+    struct zlist *l = (struct zlist *)(mp + MP_MsgList);
+    while (!l->head->succ) {
+        if (!zt_on && !zb_timer_busy() && !zb_audio_busy())
+            zb_stop(ZH_STOP, ZS_WAIT);
+        c_Wait(mp[MP_SigBit] < 32 ? 1u << mp[MP_SigBit] : 0);
+    }
     return (u32)l->head;
 }
 
@@ -2910,7 +2874,6 @@ void c_FreeScreenBuffer(u8 *sc, u32 *sb)
         zx_FreeMem(sb[1], DBI_SIZE);
     zx_FreeMem((u32)sb, SB_SIZE);
 }
-static void port_put(u8 *mp, struct znode *m, u8 type);
 u32 c_ChangeScreenBuffer(u8 *sc, u32 *sb)
 {
     if (!sc || !sb || !sb[0])
@@ -3004,7 +2967,7 @@ F(ExamineFH); F(NameFromLock); F(SameLock);
 F(GetColorMap); F(FreeColorMap); F(GetRGB4); F(SetRGB4CM); F(SetRGB32CM); F(GetRGB32); F(InitVPort); F(InitView);
 F(SumKickData); F(Fault); F(PrintFault); F(WaitBOVP); F(WritePixel); F(ReadPixel);
 F(AllocDBufInfo); F(FreeDBufInfo); F(ChangeVPBitMap); F(FilePart); F(PathPart); F(AddPart);
-F(CreateNewProc); F(CreateProc);
+F(CreateNewProc); F(CreateProc); F(AddTask); F(RemTask);
 
 /* the offsets: the RKRM's Function Offset Reference (V37), the pools and ColdReboot from the NDK 3.2's exec_lib.fd */
 static const u16 exec_lvo[] = { 30, 108, 114, 120, 126, 132, 138, 144, 162, 168, 174, 198, 204, 210, 216, 234, 240,
@@ -3013,7 +2976,7 @@ static const u16 exec_lvo[] = { 30, 108, 114, 120, 126, 132, 138, 144, 162, 168,
     474, 480, 180,
     78, 84, 90, 96, 102, 396, 402, 426, 486, 558, 564, 570, 576, 678, 720,
     150, 156, 504, 510, 516, 654, 660, 354, 360, 390,
-    186, 192, 594, 612 };
+    186, 192, 594, 612, 282, 288 };
 static void (*const exec_fn[])(void) = { zx_Supervisor, zs_Alert, zs_rts, zx_Disable, zx_Enable, zx_Forbid,
     zx_Permit, zx_SetSR, zs_SetIntVector, zs_AddIntServer, zs_RemIntServer, zs_AllocMem, zs_AllocAbs, zs_FreeMem,
     zs_AvailMem, zs_Insert, zs_AddHead, zs_AddTail, zs_Remove, zs_RemHead, zs_RemTail, zs_Enqueue, zs_FindName,
@@ -3029,7 +2992,7 @@ static void (*const exec_fn[])(void) = { zx_Supervisor, zs_Alert, zs_rts, zx_Dis
     zs_ObtainSemaphore, zs_AttemptSemaphore,
     zx_SuperState, zx_UserState, zs_RawIOInit, zs_RawMayGetChar, zs_RawPutChar, zs_CreateIORequest,
     zs_DeleteIORequest, zs_AddPort, zs_RemPort, zs_FindPort,
-    zs_Allocate, zs_Deallocate, zs_FindSemaphore, zs_SumKickData };
+    zs_Allocate, zs_Deallocate, zs_FindSemaphore, zs_SumKickData, zs_AddTask, zs_RemTask };
 static const u16 gfx_lvo[] = { 192, 222, 228, 270, 288, 384, 456, 462, 390, 492, 498, 918, 924, 882, 852, 198,
     72, 78, 66, 474, 54, 60, 240, 342, 348, 354, 306, 234, 888, 960, 1050,
     792, 798, 300, 408, 414, 246, 336, 708, 588, 216, 210, 966, 972, 942,
@@ -3109,15 +3072,19 @@ static u8 *treq[NTREQ];
 static u32 tdue[NTREQ];
 static u32 tlast, thigh;                /* the counter's last value and the times it wrapped (24 bits) */
 
-static u32 ticks(void)                  /* frames since the program started, monotonic */
+static u32 ticks(void)                  /* frames since the program started, monotonic (interrupts read it too) */
 {
+    u16 s = zt_dis();
     u32 hi = CIAA(CIA_TODHI), mid = CIAA(CIA_TODMID), lo = CIAA(CIA_TODLO);
     u32 t = hi << 16 | mid << 8 | lo;
     if (t < tlast)
         thigh++;
     tlast = t;
-    return ((thigh << 24) | t) - Z.tod0;
+    t = ((thigh << 24) | t) - Z.tod0;
+    zt_en(s);
+    return t;
 }
+u32 zb_frames(void) { return ticks(); }
 
 static u32 hz(void) { return Z.pal ? 50 : 60; }
 u32 zb_ticks50(void) { u32 t = ticks(); return Z.pal ? t : t / 6 * 5 + t % 6 * 5 / 6; }    /* in 1/50 s */
@@ -3137,11 +3104,8 @@ void zb_io_done(u8 *io)
     if (io[30] & IOF_QUICK)
         return;
     u8 *rp = *(u8 **)(io + 14);
-    if (rp) {
-        c_AddTail((struct zlist *)(rp + 20), (struct znode *)io);
-        if (*(u32 *)(rp + 16) == Z.proc && !(rp[14] & 3))      /* PA_SIGNAL to this process */
-            TASK(tc_SigRecvd, u32) |= 1u << rp[15];
-    }
+    if (rp)
+        port_put(rp, (struct znode *)io, 7);
 }
 
 static int pending(u8 *io)
@@ -3150,6 +3114,32 @@ static int pending(u8 *io)
         if (treq[i] == io)
             return i;
     return -1;
+}
+
+/* the requests that are due completed (from a task, the vertical blank or the idle loop): how many */
+int zb_timer_poll(void)
+{
+    int n = 0;
+    u32 now = ticks();
+    for (int i = 0; i < NTREQ; i++) {
+        u16 s = zt_dis();
+        u8 *io = treq[i] && (s32)(now - tdue[i]) >= 0 ? treq[i] : 0;
+        if (io)
+            treq[i] = 0;
+        zt_en(s);
+        if (io) {
+            zb_io_done(io);
+            n++;
+        }
+    }
+    return n;
+}
+int zb_timer_busy(void)
+{
+    for (int i = 0; i < NTREQ; i++)
+        if (treq[i])
+            return 1;
+    return 0;
 }
 
 /* the earliest due request, waited for and completed: 1, or 0 when none is waiting */
@@ -3192,13 +3182,17 @@ void c_TimerBeginIO(u8 *io)
             if (unit == 2)
                 n = n > now ? n - now : 0;
         }
+        u32 due = ticks() + n;
+        io[30] &= (u8)~IOF_QUICK;
+        u16 s = zt_dis();
         for (int i = 0; i < NTREQ; i++)
             if (!treq[i]) {
+                tdue[i] = due;
                 treq[i] = io;
-                tdue[i] = ticks() + n;
-                io[30] &= (u8)~IOF_QUICK;
+                zt_en(s);
                 return;
             }
+        zt_en(s);
         io[31] = (u8)-1;                /* no room: IOERR_OPENFAIL as the nearest refusal */
         zb_io_done(io);
         return;
@@ -3216,9 +3210,12 @@ void c_TimerBeginIO(u8 *io)
 
 void c_TimerAbortIO(u8 *io)
 {
+    u16 s = zt_dis();
     int i = pending(io);
-    if (i >= 0) {
+    if (i >= 0)
         treq[i] = 0;
+    zt_en(s);
+    if (i >= 0) {
         zb_io_done(io);
         io[31] = (u8)-2;                /* IOERR_ABORTED */
     }
@@ -3227,21 +3224,31 @@ void c_TimerAbortIO(u8 *io)
 /* exec's I/O calls for every device ZINE has (timer.device only) */
 u32 c_CheckIO(u8 *io)
 {
+    zb_timer_poll();
     return io && pending(io) < 0 && !zb_audio_pending(io) && !zb_con_pending(io) ? (u32)io : 0;
 }
 s32 c_WaitIO(u8 *io)
 {
     if (!io)
         return 0;
+    u8 *wp = *(u8 **)(io + 14);
+    while (zt_on && wp && (pending(io) >= 0 || zb_audio_pending(io) || zb_con_pending(io)))
+        c_Wait(wp[15] < 32 ? 1u << wp[15] : 0);  /* more than one task: the reply port's signal (16.16) */
     while (pending(io) >= 0)
         timer_step();
+    while (zb_audio_pending(io))        /* an audio write: its interrupt ends it */
+        if (EB(ZO_ExecBase_IDNestCnt, s8) >= 0 || !(INTENAR & 0x4000))
+            zb_stop(ZH_STOP, ZS_WAIT);
     while (zb_con_pending(io)) {        /* a console read: only an interrupt server could end it (AbortIO) */
         if (!timer_step() && EB(ZO_ExecBase_IDNestCnt, s8) >= 0)
             zb_stop(ZH_STOP, ZS_WAIT);
     }
     u8 *rp = *(u8 **)(io + 14);
-    if (rp && !(io[30] & IOF_QUICK))
+    if (rp && !(io[30] & IOF_QUICK)) {
+        u16 s = zt_dis();
         c_Remove((struct znode *)io);   /* off the reply port */
+        zt_en(s);
+    }
     return (s8)io[31];
 }
 void c_SendIO(u8 *io)
@@ -3536,6 +3543,8 @@ void zb_libs_init(void)
     EB(ZO_ExecBase_IDNestCnt, s8) = -1;
     EB(ZO_ExecBase_TDNestCnt, s8) = -1;
     EB(ZO_ExecBase_AttnFlags, u16) = Z.attn;
+    EB(ZO_ExecBase_TaskSigAlloc, u32) = 0xFFFF;
+    EB(ZO_ExecBase_Quantum, u16) = 4;              /* exec's default: 4 frames (16.16) */
     EB(ZO_ExecBase_ResModules, u32) = ZNULLSPR + 16;    /* an empty, zero-ended array */
     static const u16 lists[] = { ZO_ExecBase_MemList, ZO_ExecBase_ResourceList, ZO_ExecBase_DeviceList,
                                  ZO_ExecBase_IntrList, ZO_ExecBase_LibList, ZO_ExecBase_PortList,

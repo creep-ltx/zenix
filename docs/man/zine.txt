@@ -71,10 +71,15 @@ DESCRIPTION
     arguments, its own stack and the redirections (>NIL:, <file,
     >>file), run to its end and unloaded; its return code is IoErr().
     It runs on the same task: after "run" too, the program waits for
-    it (ZINE runs one task: a second process asked for with
-    CreateNewProc or CreateProc is refused as AmigaOS refuses one it
-    cannot make (0), said, and the program goes on without it). A
-    command run that way may run others, 8 inside one another at most.
+    it. A command run that way may run others, 8 inside one another at
+    most.
+
+    A program may run more than one task: exec AddTask and dos
+    CreateNewProc or CreateProc start one, and ZINE switches them as
+    AmigaOS does (the highest priority first, equals in turn, a task
+    that waits gives the CPU to the next). Nothing of Zenix runs
+    meanwhile. The session ends when the program's first process ends,
+    whatever its other tasks are doing.
     A command of AmigaOS's Shell or C:
     (CD, Echo, Stack, SetPatch, LoadWB...) is not run: Execute answers
     "done". A name that is no file answers "failed". The output names
@@ -90,7 +95,8 @@ DESCRIPTION
     OpenLibrary of a library ZINE does not have loads it from LIBS:
     (at the start the program's LIBS directory, its own directory and
     RAM:), as demos that carry their own library do. audio.device
-    gives out the four channels but plays nothing itself.
+    gives out the four channels and plays what is written to it
+    (CMD_WRITE), as demos with a sound process of their own need.
 
     The program sees its folder and its subfolders (8 levels deep, at
     most 2000 files and folders, 48 MB, and half the fast RAM the program

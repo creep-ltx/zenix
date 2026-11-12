@@ -235,7 +235,8 @@ main:
     bne     fail
     tst.l   40(%a0)
     bne     fail
-    /* 11: audio.device: all four channels on open; a second request finds none; CMD_WRITE refused */
+    /* 11: audio.device: all four channels on open; a second request finds none; its CMD_WRITE is refused for the
+     * channels it does not hold (ADIOERR_NOALLOCATION; d29 16.16: a held channel plays) */
     moveq   #11,%d6
     move.b  #15,V_mask(%a4)
     lea     V_io(%a4),%a1
@@ -262,7 +263,7 @@ main:
     move.w  #3,28(%a1)          /* CMD_WRITE */
     move.l  #15,24(%a1)
     jsr     LVO_DoIO(%a6)
-    moveq   #-3,%d1             /* IOERR_NOCMD */
+    moveq   #-10,%d1            /* ADIOERR_NOALLOCATION */
     cmp.l   %d1,%d0
     bne     fail
     lea     m_aud(%pc),%a0
@@ -448,7 +449,7 @@ m_ram:   .asciz "zlibs: the library written to RAM: and read back\n"
 m_lib:   .asciz "zlibs: zt.library opened from RAM: (version 3.7, its Open, init and functions ran, InitStruct's bytes right)\n"
 m_del:   .asciz "zlibs: the file deleted from RAM:, gone; a second delete answered ERROR_OBJECT_NOT_FOUND\n"
 m_gone:  .asciz "zlibs: still loaded after the delete; RemLibrary expunged it, then it was gone\n"
-m_aud:   .asciz "zlibs: audio.device gave the four channels, refused a second request and CMD_WRITE\n"
+m_aud:   .asciz "zlibs: audio.device gave the four channels, refused a second request and its CMD_WRITE\n"
 m_paula: .asciz "zlibs: Paula's channel 0 interrupt through SetIntVector\n"
 m_cia:   .asciz "zlibs: CIA-B timer A through ciab.resource\n"
 m_mem:   .asciz "zlibs: memory as at the start\n"

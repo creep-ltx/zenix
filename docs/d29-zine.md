@@ -261,10 +261,10 @@ block (fast RAM).
 |---|---|---|
 | Memory | `AllocMem`, `FreeMem`, `AllocAbs`, `AvailMem` (with `MEMF_LARGEST`, `MEMF_TOTAL`), `TypeOfMem`, `AllocVec`, `FreeVec`, `AllocEntry`, `FreeEntry`, `CopyMem`, `CopyMemQuick`, `CreatePool`, `DeletePool`, `AllocPooled`, `FreePooled` | exec's own structures (`MemHeader`, `MemChunk`), first fit, `MEMF_CLEAR`, `MEMF_REVERSE`, `MEMF_CHIP`/`FAST`/`PUBLIC`/`ANY`; pools on top (gcc's libnix `malloc` uses them); a free of memory not in a `MemHeader` is a dead-end alert (9.1) |
 | Taking over | `Forbid`, `Permit`, `Disable`, `Enable`, `SetSR`, `GetCC`, `Supervisor`, `SuperState`, `UserState`, `StackSwap` | one task: `Forbid`/`Permit` count `TDNestCnt`; `Disable`/`Enable` count `IDNestCnt` and write `INTENA` `$4000`/`$C000`; `Supervisor` by the privilege-violation trick the autodoc describes (aos31-study/exec-kernel.md idea 2, the idea only), called in supervisor mode it builds the frame itself |
-| The task | `FindTask` (0 or its own name; else 0), `SetTaskPri` (answers the old one, no effect), `SetSignal`, `AllocSignal`, `FreeSignal`, `Signal`, `Wait` | one process; `Wait` stops the CPU (`stop #$2000`) until an interrupt server signals; a `Wait` that nothing can end (interrupts disabled, or no server, vector or ICR handler installed) is a clean stop: "NAME waits for a signal nothing can send" |
+| The task | `FindTask`, `SetTaskPri`, `SetSignal`, `AllocSignal`, `FreeSignal`, `Signal`, `Wait`, `AddTask`, `RemTask` (16.16) | with more than one task as 16.16 says; with one process: `Wait` stops the CPU (`stop #$2000`) until an interrupt server signals; a `Wait` that nothing can end (interrupts disabled, or no server, vector or ICR handler installed) is a clean stop: "NAME waits for a signal nothing can send" |
 | Interrupts | `SetIntVector`, `AddIntServer`, `RemIntServer` | 8.3 |
 | Libraries | `OpenLibrary`, `OldOpenLibrary`, `CloseLibrary`, `OpenResource`, `OpenDevice` (always fails: `IOERR_OPENFAIL`, 5.5), `CloseDevice`, `SetFunction` (flushes the caches), `MakeLibrary`, `MakeFunctions`, `InitResident`, `FindResident` (0), `SumLibrary` | an unknown library or resource answers 0, as AmigaOS does when it has none: the program's own error path runs |
-| Lists and messages | `Insert`, `AddHead`, `AddTail`, `Remove`, `RemHead`, `RemTail`, `Enqueue`, `FindName`, `AddPort`, `RemPort`, `FindPort` (0), `PutMsg`, `GetMsg`, `ReplyMsg`, `WaitPort`, `CreateMsgPort`, `DeleteMsgPort`, `CreateIORequest`, `DeleteIORequest`, `InitSemaphore`, `ObtainSemaphore`, `ReleaseSemaphore`, `AttemptSemaphore` | as the autodocs say, for one task |
+| Lists and messages | `Insert`, `AddHead`, `AddTail`, `Remove`, `RemHead`, `RemTail`, `Enqueue`, `FindName`, `AddPort`, `RemPort`, `FindPort` (0), `PutMsg`, `GetMsg`, `ReplyMsg`, `WaitPort`, `CreateMsgPort`, `DeleteMsgPort`, `CreateIORequest`, `DeleteIORequest`, `InitSemaphore`, `ObtainSemaphore`, `ReleaseSemaphore`, `AttemptSemaphore` | as the autodocs say (between tasks: 16.16) |
 | Caches | `CacheClearU`, `CacheClearE`, `CacheControl`, `CachePreDMA`, `CachePostDMA` | 10.1 |
 | The rest | `RawDoFmt`, `Alert` (9.1), `ColdReboot` (9.1), `Debug` (nothing) | |
 
@@ -545,12 +545,11 @@ ZINE's `Wait` and `WaitTOF` use the CPU's `stop` or the beam: nothing in ZINE ru
 
 ### 8.4 What ZINE does not do
 
-No task switching (one process; `CreateNewProc` and `CreateProc` answer 0, as AmigaOS does when it cannot make one,
-16.15), no input events, no timer requests, no screens, no windows, no disk devices. A
-program that asks for these through a call ZINE does not have is stopped cleanly (9.1); one that finds them missing by
-an answer (0 from `OpenLibrary`, `IOERR_OPENFAIL`) takes its own error path and usually ends with a message, which
-`zine`
-shows.
+No input events, no screens or windows of graphics' own (5.3), no disk devices. A program may run more than one task
+(16.16, owner 2026-11-11: "we want elude demos with sound"): its own tasks and processes are switched as exec switches
+them, nothing of Zenix runs meanwhile, and the session ends when the program's first process ends. A program that asks
+for these through a call ZINE does not have is stopped cleanly (9.1); one that finds them missing by an answer (0 from
+`OpenLibrary`, `IOERR_OPENFAIL`) takes its own error path and usually ends with a message, which `zine` shows.
 
 ## 9. The ways back
 
@@ -1338,8 +1337,8 @@ MakeFunctions and the semaphores, the RKRM Devices manual for audio.device, the 
 - **audio.device**: `OpenDevice` with an allocation (`ioa_Length`) gives the first wanted mask whose channels are free
   (io_Unit, an `ioa_AllocKey`), `ADCMD_ALLOCATE`, `ADCMD_FREE`, `ADCMD_LOCK` (in progress until the channels are
   freed), `ADCMD_PERVOL`, `CMD_STOP`/`CMD_RESET`/`CMD_FLUSH` (the channels' DMA off) and the others done at once;
-  `CloseDevice` frees the channels. **It plays nothing:** `CMD_WRITE` answers `IOERR_NOCMD` and the output says so
-  once. A player that asks for channels and then writes Paula's registers itself, with its own level 4 handlers
+  `CloseDevice` frees the channels. **It played nothing** (until 16.16, which plays `CMD_WRITE`): `CMD_WRITE` answered
+  `IOERR_NOCMD` and the output said so once. A player that asks for channels and then writes Paula's registers itself, with its own level 4 handlers
   (`SetIntVector`) or a CIA timer (`ciaa/ciab.resource`), plays.
 - Fixed on the way: a request completed with an error lost it (the reply cleared `io_Error`): the timer's "no room"
   and an unknown device's `SendIO` answered 0.
@@ -1802,7 +1801,7 @@ for 734 and 1,933 s emulated on the 68030 and are still in it at 50 s. A500 Homa
 picture on the 68060 in every rerun (Talking Heads' comes after a precalc close to the 50 s limit): timing, not ZINE.
 The other 36: see zine-top100-findings.md "Round 5".
 
-**A second process** (dos `CreateNewProc` -498, `CreateProc` -138): Elude's demo engine (Dust, Soliloquy, Serenity,
+**A second process** (dos `CreateNewProc` -498, `CreateProc` -138; superseded by 16.16, which runs it): Elude's demo engine (Dust, Soliloquy, Serenity,
 Shake Off The Dust, kakao) starts a sound process ("[Sound]: Create process:14bit"). ZINE runs one task with no task
 switching (8.4). Built: both calls answer as AmigaOS does when it cannot make a process (0, IoErr
 `ERROR_NO_FREE_STORE` 103), said once with the process's name ("ZINE: NAME asked dos for a second process "N":
@@ -1843,6 +1842,120 @@ demos run silently past where they stopped; Cobalt runs on the 68060; Lightshaft
 
 Sizes (*measured*, the 68020-60 build): the blob's code 100,216 -> 100,928 bytes (memory 106,543 -> 107,261: the
 illegal-instruction no-op, the two dos calls); `/bin/zine` 48,169 -> 48,173 bytes in memory; the kernel unchanged.
+
+### 16.16 More than one task (2026-11-11, branch zinetask; the owner: "we want elude demos with sound")
+
+The design, written before the code; it replaces 8.4's single-task rule and 16.15's refusal of a second process.
+Facts from the autodocs (RKRM Includes and Autodocs, exec and dos; the NDK 3.2's `dos/dostags.h`,
+`devices/audio.h` and `exec/tasks.h` for names and numbers).
+
+**The rule:** the program's tasks are switched as exec switches them. The highest-priority ready task runs; among
+equals, each runs for a quantum of 4 frames (ExecBase `Quantum`, as exec's default) and then the next of the same
+priority; a task that waits (`Wait`, `WaitPort`, `WaitIO`, `DoIO`, `Delay`, `WaitTOF`, a semaphore held by another)
+gives the CPU to the next ready one; a `Signal` (from a task or an interrupt) that readies a task of higher priority
+than the running one switches to it at once (from a task) or when the interrupt returns (from an interrupt). With no
+task ready the CPU stops (`stop #$2000`) until an interrupt. `Forbid` holds the running task (until `Permit` or until
+it waits: the autodoc's "breaks the forbidden state"), and so does `Disable` ("implies Forbid"); each task keeps its
+own `TDNestCnt`/`IDNestCnt` (`tc_TDNestCnt`, `tc_IDNestCnt`), and the interrupts are on while a task that waited with
+them disabled is away. Only a task interrupted **in user mode** is switched: code in supervisor mode (an interrupt,
+`Supervisor`, `SuperState`) is never preempted. Nothing of Zenix runs: the tasks are all the program's.
+
+**ZINE's own code is not preempted.** An interrupt that would switch tasks while the CPU is inside the blob (a library
+call in progress) leaves the switch pending: it happens at the next interrupt that finds the task in its own code, or
+when the call waits or yields. So the blob's functions need no locks against each other between tasks (exec's
+`Forbid` in its own functions has the same effect); only what interrupts also touch (the task lists, a port's message
+list, the signals) is changed with the interrupts held off (`INTENA`'s master bit, put back only if it was on). The
+blob's waiting loops (`WaitTOF`, `WaitBlit`, `Delay`) are switch points when tasks are waiting to run.
+
+**One task costs nothing new.** Until the program makes a second task, ZINE runs as before (the single-task paths of
+8.4's time); the interrupt's return tests one byte. The first `AddTask` or `CreateNewProc` turns task switching on for
+the rest of the session.
+
+**A task's state:** its registers (d0-d7/a0-a6, USP, SR, PC) and, with an FPU, its FPU state (`FSAVE`, and when that
+frame is not a null frame the eight FP registers and FPCR/FPSR/FPIAR; on a 68060 whose FPU is still switched off in
+PCR, nothing) are kept in a ZINE record of about 450 bytes from the program's memory (the first task's in the blob);
+`tc_SPReg` gets the stack pointer as exec's does. The lists are exec's own: the running task in `ThisTask`, the ready
+ones in ExecBase `TaskReady` by priority (Enqueue: first in, first out among equals), the waiting ones in `TaskWait`;
+`tc_State` `TS_RUN` 2, `TS_READY` 3, `TS_WAIT` 4, `TS_REMOVED` 6. A switch is the privilege-violation trick ZINE
+already uses (5.2): the task's `ori.w #0,sr` at one known address traps, the trap saves the task and runs the next
+with `rte`; an interrupt's return goes the same way when a switch is pending.
+
+**The calls:**
+- exec `AddTask(task a1, initialPC a2, finalPC a3)`: the caller's Task (its `tc_SPReg`, `tc_SPLower`/`Upper`,
+  name, priority); initial registers 0 but the PC; `finalPC` (0: ZINE's own end, as exec's "general finalizer") is
+  the return address on its stack; `tc_Flags` cleared, `tc_SigAlloc` = ExecBase `TaskSigAlloc`; answers the task.
+  `RemTask(task a1)` (0: the caller): the task leaves; its `tc_MemEntry` lists are freed (`CreateTask` puts the Task
+  and its stack there), and what ZINE allocated for it. `FindTask(name)` searches the running, ready and waiting
+  tasks. `SetTaskPri` sets the priority, answers the old one, and switches if another now comes first.
+- `Signal`, `Wait`, `SetSignal`, `AllocSignal`, `FreeSignal` on any task (the last three on the caller's).
+- Ports: `PutMsg` signals the port's `mp_SigTask` (`PA_SIGNAL`), calls `mp_SoftInt` (`PA_SOFTINT`, as `Cause`) or
+  nothing (`PA_IGNORE`); `ReplyMsg` puts the message on its `mn_ReplyPort` as `NT_REPLYMSG` (none: `NT_FREEMSG`);
+  `WaitPort` waits for the port's signal while its list is empty; `GetMsg`, `PutMsg`, `ReplyMsg` hold interrupts off
+  around the list (messages are also replied from interrupts: the timer, audio.device).
+- Semaphores: `ObtainSemaphore` (and the shared form, taken as the exclusive one) waits while another task holds it
+  (a `SemaphoreRequest` on `ss_WaitQueue`, `SIGF_SINGLE` bit 4, as exec's); `ReleaseSemaphore` hands it to the first
+  waiter; `AttemptSemaphore` answers 0 when another task holds it.
+- dos `CreateNewProc(tags d1)` with `NP_Seglist` or `NP_Entry` (one is needed: else 0), `NP_FreeSeglist`,
+  `NP_StackSize` (default 4,000 bytes, at least 1,024), `NP_Name` (copied; default "New Process"), `NP_Priority`
+  (default 0), `NP_Arguments` (`pr_Arguments`; d0/a0 at entry, as a Shell gives them), `NP_Input`/`NP_Output`
+  (default the session's console handles), `NP_CurrentDir` (default the creator's), `NP_WindowPtr`, `NP_ExitCode`
+  and `NP_ExitData` (called with d0 the return code and d1 the data when it ends); the others are accepted and
+  ignored (`NP_Cli`: no CLI structure, `Cli()` answers 0 in the child). The Process is the creator's twin in what ZINE
+  has: `pr_MsgPort` (signal 8), `pr_CIS`/`pr_COS`, `pr_StackSize`, `pr_StackBase`, `pr_SegList` 0; answers the
+  Process. `CreateProc(name d1, pri d2, seglist d3, stack d4)` the same from a segment list, answering the process's
+  `pr_MsgPort` (the autodoc's "process identifier"), 0 when it cannot.
+- **The end of a task:** a process or task whose entry returns, calls dos `Exit` or `RemTask(0)` ends (its exit code
+  hook first, its seglist unloaded with `NP_FreeSeglist`); the session goes on with the others. **The session ends
+  when the program's first process ends**, whatever its other tasks are doing (their memory goes with the program's).
+- `Delay` and graphics' `WaitTOF`, with other tasks: the task sleeps (in `TaskWait`, no signal used) until its frame
+  comes (CIA-A's frame counter, 5.4's clock); the vertical blank wakes it. `timer.device` requests are completed by the
+  vertical blank (and by the idle loop), so a task waiting for one does not hold the CPU; `WaitIO` and `DoIO` wait for
+  the request's reply-port signal.
+
+**audio.device plays (it only gave channels before, 16.8):** `CMD_WRITE` queues on its channel (the lowest one in
+`io_Unit`; a channel the request does not hold, by `ioa_AllocKey`, answers `ADIOERR_NOALLOCATION` as the autodoc
+says) and plays through Paula's DMA: `ioa_Data` (chip RAM), `ioa_Length` (2-131,072 bytes), `ioa_Cycles` (0:
+for ever), with `ADIOF_PERVOL` the period and volume, with `ADIOF_WRITEMESSAGE` `ioa_WriteMsg` replied when it starts.
+The channel's audio interrupt (level 4, `AUD0`-`AUD3`) moves it on: each interrupt means the buffer in the registers
+has started, so the next write's address and length are loaded behind it and Paula plays them without a gap; a write
+is replied (`zb_io_done`) when its last cycle has played; after the last queued write the channel's DMA goes off.
+`CMD_STOP` holds the channels (writes queue), `CMD_START` starts them together (one `DMACON` write, so 14-bit pairs
+stay in step), `CMD_FLUSH` and `CMD_RESET` end every write with `IOERR_ABORTED`, `AbortIO` one, `ADCMD_FINISH`
+ends the playing write after its current cycle, `ADCMD_WAITCYCLE` is replied when the playing write's cycle ends,
+`ADCMD_FREE` and closing the device end the channel's writes. A channel's interrupt is ZINE's only while
+audio.device has writes on it: a program's own level 4 handlers (`SetIntVector`, as module players have) are called
+as before for the other channels.
+
+**Not built** (each named if a program asks): task exceptions (`SetExcept`, `tc_ExceptCode`), traps (`AllocTrap`),
+`tc_Switch`/`tc_Launch` hooks, a CLI for a new process (`NP_Cli`), `RunCommand`, `SystemTagList`. **Limits:** the
+number of tasks is what memory allows; a task's stack has no guard (as on AmigaOS).
+
+**Size and speed** (the budget): about 3 KB of blob for the switching, the calls and audio.device's playing; a task
+switch is about 70 instructions plus the FPU's state. The single-task path: one `tst.b` at each interrupt's return.
+
+**Tests** (FS-UAE, `tools/zine-emu-test.sh`): `ztask` (two tasks ping-ponging signals and messages, priorities and
+preemption from an interrupt, Forbid holding the task, a semaphore waited for, a task's end, RemTask of another;
+on the 68020 and with the FPU state on the 68060), `zsound` (a process from `CreateNewProc` plays a sound through
+audio.device, double-buffered with two writes, while the first task draws; the channel's DMA seen on, the writes
+replied in order, the time they took close to the sound's length). The existing tests and the Top 100's single-task
+programs must run as before.
+
+**As built (2026-11-12):** `user/zine/btask.c` (the lists, the choice, the calls), `blobs.S` (the trap, the switch,
+the interrupt's return, Permit/Enable, the CFS stubs), `bfpu.S` (the FPU's state), `blibload.c` (semaphores between
+tasks, audio.device's playing), `blibs.c` (ports, ReplyMsg, WaitPort, WaitIO, Delay, WaitTOF, timer requests
+completed by the vertical blank). `zproc` (16.15's refusal) is gone with the refusal. The trace build's line every
+250 frames now also says DMACONR, audio.device's writes and interrupts, the task switches, ThisTask and the level 4
+interrupts (`A`), for checking a program's sound.
+
+*Verified* in FS-UAE (`tools/zine-emu-test.sh`): `ztask` and `zsound` on the 68020 machine and the 68060 machine
+(there with "FP0 kept for each task"); the rest of the test programs as before. The Top 100: Elude's five make and
+run their sound process and the four channels' DMA is seen on; in FS-UAE the emulated 68060 decodes their music at
+about a quarter of real time, so the sound comes in bursts (zine-top100-findings.md "Round 6"). Not yet on a real
+machine.
+
+Sizes (*measured*, the 68020-60 build): the blob's code 100,928 -> 106,988 bytes (memory 107,261 -> 113,899): the
+task switching and calls 3,434, audio.device's playing about 1,600, the rest in the stubs and the trace line; more
+than the 2-3 KB estimated above, mostly audio.device. `/bin/zine` and the kernel unchanged.
 
 ## 17. Questions for the owner (what ZINE should be)
 

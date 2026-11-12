@@ -92,10 +92,9 @@ PFS3 8 GB), to /dev/null and on the screen, in the text console and in zdesk's t
 
 **ZINE, open (2026-11-06):** the program's volume is named "ZINE", not after its folder as d29 5.6 says, so a demo that opens `<its disk's name>:data/...` fails. (2026-11-10, branch zine2: a volume name ZINE does not have is now taken as the program's folder when the path is there, d29 16.13; the volume itself is still named "ZINE".)
 
-**ZINE, open (2026-11-11, branch zine5, d29 16.15; approved by the owner 2026-11-11, docs/decisions.md: build it):** a program's second process (dos CreateNewProc, Elude's sound
-process) is refused with AmigaOS's answer, so those demos run silent; running it needs task switching in ZINE, which
-d29 8.4 rules out: the owner's decision (16.15 says what a minimal version takes). The Top 100's full rerun after
-round 5 is still to do.
+**ZINE, done (2026-11-11, branch zinetask, d29 16.16; approved by the owner 2026-11-11, docs/decisions.md):** a program's second process (dos CreateNewProc, Elude's sound
+process) runs: ZINE switches the program's tasks as exec does, and audio.device plays CMD_WRITE (zine-top100-findings.md
+"Round 6"). The Top 100's full rerun after rounds 5 and 6 is still to do.
 
 **Screen modes and preferences (owner 2026-11-06, docs/decisions.md):** the desktop's PAL hires / hires interlaced (NTSC detected), switched live; then preference programs with Test/Use/Save/Cancel for the screen mode, fonts, colours, for the desktop and the text console; the console's live mode/font switch. Fonts: `/usr/share/fonts/amiga/` for AmigaOS bitmap fonts copied as they are (a reader for .font files), `/usr/share/fonts/truetype/` later, `~/.fonts/` per user (docs/decisions.md). **The reader and the desktop's font are built (branch fonts, 2026-11-07, d38-desktop.md "Fonts"):** `font NAME SIZE` in `/etc/zdesk/screen`, read by displayd at its start, for titles, the bar, menus and labels (terminals keep the 8 x 8); **The preference programs are built (branch prefs, done 2026-11-07 in FS-UAE, d38-desktop.md "Preferences", d28-console-text.md 22):** `deskprefs` (the desktop's mode, font and colours, the font changed live by `DPY_FONT_SET`) and `conprefs` (the console's colours and Unicode font), Test/Use/Save/Cancel each checked by `tools/prefs-test.sh`; next: the console's interlaced mode (`CON_MODE`: 1.0-1.5 KB of kernel code against 700 bytes of room, D28 22: find the room first), `~/.fonts/`, the console's fixed-width fonts.
 
