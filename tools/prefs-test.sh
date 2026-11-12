@@ -182,7 +182,7 @@ send q
 sleep 2
 send echo state-6; cat /tmp/m1; conprefs -q; termtest screen /dev/tty1 lace-text 5 | grep -c '^row'\r
 sleep 4
-send printf '\033[2J\033[1;1H\342\226\210\033[64;1H\342\226\210\033[2;1H'; sleep 6\r
+send printf '\\033[2J\\033[1;1H\342\226\210\\033[64;1H\342\226\210\\033[2;1H'; sleep 6\r
 sleep 3
 shot lace
 sleep 5
@@ -230,7 +230,7 @@ if [ "$PART" = con ]; then
     grep -a -q '^conprefs: test: colours 8, font auto, mode hires$' "$L"; check "8 colours and Test: applied (said on its standard error)" $?
     [ "$(grep -a -A1 '^state-1' "$L" | tail -1)" = "conprefs: colours 16, font auto, mode hires" ]; check "Cancel: 16 colours again" $?
     [ "$(grep -a -A1 '^state-2' "$L" | tail -1)" = "conprefs: colours 8, font none, mode hires" ]; check "8 colours, no Unicode font, Use: both in effect (conprefs -q)" $?
-    grep -a -A4 '^state-2' "$L" | grep -q '^console-unchanged' && grep -a -A3 '^state-2' "$L" | grep -q '^font none'
+    grep -a -A5 '^state-2' "$L" | grep -q '^console-unchanged' && grep -a -A4 '^state-2' "$L" | grep -q '^font none'
     check "... /var/run/console holds them, /etc/console unchanged" $?
     # a block character (U+2588) at row 0, columns 0-3: without the font the box (its middle empty: the background)
     px nofont geom 3,3,000 11,3,000 3,1,BBB 3,6,BBB > "$OUT/p1"; rc=$?; check "... the block drawn as the box without the font ($(cat "$OUT/p1"))" $rc
