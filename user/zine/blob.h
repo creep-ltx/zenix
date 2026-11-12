@@ -207,14 +207,30 @@ void zb_con_close(u8 *io);
 void zb_con_beginio(u8 *io);
 void zb_con_abort(u8 *io);
 int zb_con_pending(u8 *io);
-u32 zb_con_rawkey(void);
 extern u32 zb_inp_base;                 /* input.device (blibload.c, 16.14) */
 void zb_inp_init(u32 base);
 u32 zb_inp_open(u8 *io);
-void zb_inp_beginio(u8 *io);
+void zb_inp_beginio(u8 *io);            /* binput.c (16.17) */
+/* binput.c (d29 16.17): the keys and the mouse for programs */
+extern u8 zi_live;                      /* someone listens: zb_irq gives the vertical blank to zi_frame */
+void zi_init(void);
+void zi_key(u8 sdr);                    /* the keyboard interrupt's byte */
+void zi_frame(void);
+void zi_win_open(u8 *w);
+void zi_win_close(u8 *w);
+void zi_activate(u8 *w);
+void zi_con_units(int d);
+void zb_con_input(const u8 *s, u32 n);  /* blibload.c: characters for console.device's reads */
+extern u32 zb_kbd_base, zb_gp_base;     /* keyboard.device, gameport.device */
+u32 zi_open(u8 *io, u32 base, u32 unit);
+void zi_close(u8 *io);
+void zi_beginio(u8 *io);
+void zi_abort(u8 *io);
+int zi_pending(u8 *io);
+void c_GetSysTime(u32 *tv);
 /* bmore.c, bmath.c (d29 16.12): the libraries beyond the four (utility and the math ones), the ROM font */
-#define ZB_NXLIB 8                      /* utility, mathffp, mathtrans, mathieeedoubbas/-doubtrans, -singbas/-singtrans,
-                                         * diskfont (16.13) */
+#define ZB_NXLIB 10                     /* utility, mathffp, mathtrans, mathieeedoubbas/-doubtrans, -singbas/-singtrans,
+                                         * diskfont (16.13), keymap, gadtools (16.17) */
 extern u32 zb_xlib[ZB_NXLIB];           /* their bases: zine_blk lib numbers 4 and on (kernel/zine.h) */
 void zb_more_init(u32 (*take)(u32));
 u32 zb_more_open(const char *name, u32 version);

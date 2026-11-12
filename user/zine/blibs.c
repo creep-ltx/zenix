@@ -253,6 +253,12 @@ static u32 slen(const char *s)
     return n;
 }
 
+static int is_zi(const u8 *io)          /* keyboard.device or gameport.device (binput.c) */
+{
+    u32 d = *(const u32 *)(io + ZO_IORequest_io_Device);
+    return d && (d == zb_kbd_base || d == zb_gp_base);
+}
+
 u32 c_OpenDevice(const char *name, u32 unit, u8 *io, u32 flags)
 {
     (void)unit, (void)flags;
@@ -270,7 +276,11 @@ u32 c_OpenDevice(const char *name, u32 unit, u8 *io, u32 flags)
     if (name && streq(name, "console.device"))
         return zb_con_open(io, unit, flags);    /* blibload.c: its text into the output, no keys (16.14) */
     if (name && streq(name, "input.device"))
-        return zb_inp_open(io);         /* blibload.c: handlers taken, no events (16.14) */
+        return zb_inp_open(io);         /* blibload.c, binput.c: the handlers get the events (16.17) */
+    if (name && streq(name, "keyboard.device"))
+        return zi_open(io, zb_kbd_base, unit);  /* binput.c (16.17) */
+    if (name && streq(name, "gameport.device"))
+        return zi_open(io, zb_gp_base, unit);
     if (name) {
         zb_out(msg, sizeof msg - 1);
         zb_out(name, slen(name));
@@ -289,6 +299,8 @@ void c_CloseDevice(u8 *io)
         zb_audio_close(io);
     else if (io && zb_con_base && *(u32 *)(io + ZO_IORequest_io_Device) == zb_con_base)
         zb_con_close(io);
+    else if (io && is_zi(io))
+        zi_close(io);
 }
 
 u32 c_SetFunction(u8 *lib, s32 off, u32 fn)
@@ -1935,11 +1947,18 @@ void c_WaitTOF(void)
 }
 
 static int view_show(const u8 *view);
+static void show_screen(u8 *sc);
+static int lord_show(const u8 *view);
+/* LoadView: a View of the program's own (16.13): its first ViewPort shown. Intuition's View (ViewAddress, 16.17):
+ * the front screen again, from its RasInfo as it is now (The Juggler flips its HAM screen's BitMap and the View's
+ * Copper lists and calls LoadView each frame), or a ViewPort of the program's own put there; else the blank display. */
 void c_LoadView(u32 view)
 {
     *(u32 *)(Z.lib[1] + ZO_GfxBase_ActiView) = view;
     if (view && view != IB_VIEWLORD(Z.lib[3]) && view_show((const u8 *)view))
-        return;                         /* a View of the program's own (16.13): its first ViewPort shown */
+        return;
+    if (view && view == IB_VIEWLORD(Z.lib[3]) && lord_show((const u8 *)view))
+        return;
     zb_blank_view();
 }
 
@@ -2074,8 +2093,9 @@ void c_SetRGB32(u32 vp, u32 n, u32 r, u32 g, u32 b) { (void)vp; rgb32(n, r, g, b
 #define RP_DrawMode 28
 #define CM_Count 2
 #define CM_ColorTable 4
-#define ZSCR_EXTRA 80                   /* after the Screen: a flag, the RasInfo (12), the ColorMap (52), the Copper
-                                         * list (+68), its plane pointers (+72), the program's own BitMap (+76) */
+#define ZSCR_EXTRA 84                   /* after the Screen: a flag, the RasInfo (12), the ColorMap (52), the Copper
+                                         * list (+68), its plane pointers (+72), the program's own BitMap (+76), the
+                                         * BitMap a Copper list chosen by LoadView shows (+80, 16.17) */
 
 /* the screen shown (5.5, the screens' first form): its BitMap's planes from the top, the standard display window
  * (320 or 640 wide, 256 or 200 lines), lowres, hires, HAM or EHB from its mode; colours stay what the program set */
@@ -2083,6 +2103,33 @@ void c_SetRGB32(u32 vp, u32 n, u32 r, u32 g, u32 b) { (void)vp; rgb32(n, r, g, b
 static u16 vc_con2 = 0x0024, vc_con3 = 0x0C00, vc_con4 = 0x0011;   /* BPLCON2-4 as VideoControl leaves them */
 static u8 vc_full;                      /* VTAG_FULLPALETTE */
 static u32 shown_depth;                 /* plane pointers in the shown screen's Copper list */
+/* the screens in depth order (16.17), as intuition keeps them: IntuitionBase FirstScreen, each Screen's NextScreen
+ * (0). Intuition's View's ViewPort stays 0 (with it set, Elude's demos ask GetDisplayInfoData). Ephidrena's J waits for its screen to be the FirstScreen; The
+ * Juggler shows its movie by LoadView of intuition's View once its text screen is closed. */
+#define FIRST (*(u32 *)(Z.lib[3] + ZO_IntuitionBase_FirstScreen))
+static void scr_unlink(u8 *sc)
+{
+    for (u32 *pp = &FIRST; *pp; pp = (u32 *)*pp)
+        if (*pp == (u32)sc) {
+            *pp = *(u32 *)sc;
+            break;
+        }
+    *(u32 *)sc = 0;
+}
+static void scr_place(u8 *sc, int front)
+{
+    scr_unlink(sc);
+    if (front) {
+        *(u32 *)sc = FIRST;
+        FIRST = (u32)sc;
+    } else {
+        u32 *pp = &FIRST;
+        while (*pp)
+            pp = (u32 *)*pp;
+        *pp = (u32)sc;
+    }
+}
+
 static void show_screen(u8 *sc)
 {
     u8 *bm = *(u8 **)(sc + SC_SIZEOF + 76) ? *(u8 **)(sc + SC_SIZEOF + 76) : sc + SC_BitMap;
@@ -2239,6 +2286,7 @@ u32 c_OpenScreenTagList(const u8 *ns, const u32 *tags)
     zb_rp_font(sc + SC_RastPort);
     sc[SC_SIZEOF] = custom ? 1 : 0;     /* CloseScreen frees only planes it allocated */
     *(u16 *)(sc + SC_ViewPort + VP_Modes) = (u16)modes;
+    scr_place(sc, !behind);
     if (!behind)
         show_screen(sc);
     return (u32)sc;
@@ -2261,33 +2309,112 @@ u32 c_CloseScreen(u8 *sc)
     extern u32 zb_tracing;
     if (zb_tracing && Z.shown == (u32)sc)
         zb_screen_report();
-    if (Z.shown == (u32)sc) {
+    scr_unlink(sc);
+    if (Z.shown == (u32)sc) {           /* the next screen shown, as intuition does (16.17), or the blank display */
         zb_blank_view();
         Z.shown = 0;
+        if (FIRST)
+            show_screen((u8 *)FIRST);
     }
+
     if (*(u32 *)(sc + SC_SIZEOF + 68))
         zx_FreeMem(*(u32 *)(sc + SC_SIZEOF + 68), 400);
     zx_FreeMem((u32)sc, SC_SIZEOF + ZSCR_EXTRA);
     return 1;
 }
 
-void c_ScreenToFront(u8 *sc) { if (sc) show_screen(sc); }
+void c_ScreenToFront(u8 *sc)
+{
+    if (!sc)
+        return;
+    scr_place(sc, 1);
+    show_screen(sc);
+}
+/* ScreenToBack(screen a0) (-246, 16.17): behind the others; the one in front shown */
+void c_ScreenToBack(u8 *sc)
+{
+    if (!sc)
+        return;
+    scr_place(sc, 0);
+    if (FIRST && FIRST != Z.shown)
+        show_screen((u8 *)FIRST);
+}
 
 /* ---- d29 16.13: the display calls the Top 100 asked for next. RethinkDisplay (-390), RemakeDisplay (-384),
  * MakeScreen(screen a0) (-378), graphics MrgCop(view a1) (-210) and MakeVPort(view a0, vp a1) (-216): the screen ZINE
  * shows is shown again from its BitMap, mode and RasInfo (as AmigaOS rebuilds its Copper lists); MoveScreen(screen
  * a0, dx d0, dy d1) (-162): ZINE's screens stay at the top; ScrollVPort(vp a0) (-588): the RasInfo's offsets and
  * BitMap taken at once (zb_screen_frame takes them every frame too). ---- */
+/* RethinkDisplay and RemakeDisplay (16.17): intuition's View gets Copper lists as AmigaOS's do, so a program can keep
+ * them: when the program has cleared the View's LOFCprList, a new record of ZINE's (a cprlist: cp_Next 0, start 4,
+ * MaxCount 8; then "ZCPR", the screen and the BitMap its RasInfo shows now) is put there, else the record there is
+ * renewed. LoadView of the View with such a record shows that BitMap (The Juggler's double buffer). */
+#define ZCPR 0x5A435052u
+static void cpr_record(void)
+{
+    u32 f = FIRST, v = IB_VIEWLORD(Z.lib[3]);
+    u32 *c = *(u32 **)(v + ZO_View_LOFCprList);
+    if (!f)
+        return;
+    if (!c) {
+        c = (u32 *)zx_AllocMem(24, MEMF_PUBLIC | MEMF_CLEAR);
+        if (!c)
+            return;
+        c[1] = ZBLANK;
+        c[3] = ZCPR;
+        *(u32 **)(v + ZO_View_LOFCprList) = c;
+    }
+    if (c_TypeOfMem((u32)c) && c[3] == ZCPR) {
+        const u8 *ri = *(const u8 *const *)((u8 *)f + SC_ViewPort + VP_RasInfo);
+        c[4] = f;
+        c[5] = ri && c_TypeOfMem((u32)ri) ? *(const u32 *)(ri + 4) : 0;
+    }
+}
+
+/* LoadView of intuition's View (16.17): the front screen, showing the BitMap of the Copper list record the View has
+ * (cpr_record), else its RasInfo's (taken at the next vertical blank); a ViewPort of the program's own put there
+ * shown as a View of its own; 1 when something is shown */
+static int lord_show(const u8 *view)
+{
+    u32 vp = *(const u32 *)view, f = FIRST;
+    const u32 *c = *(const u32 *const *)(view + ZO_View_LOFCprList);
+    if (f && (!vp || vp == f + SC_ViewPort)) {
+        u32 bm = c && c_TypeOfMem((u32)c) && c[3] == ZCPR && c[4] == f ? c[5] : 0;
+        *(u32 *)(f + SC_SIZEOF + 80) = bm;
+        if (Z.shown != f)
+            show_screen((u8 *)f);
+        return 1;
+    }
+    return vp && view_show(view);
+}
+
+/* graphics FreeCprList(cprlist a0) (-564): a record of ZINE's freed; any other (the View's first one) kept */
+void c_FreeCprList(u32 *c)
+{
+    if (c && !((u32)c & 1) && c_TypeOfMem((u32)c) && c[3] == ZCPR) {
+        u32 v = IB_VIEWLORD(Z.lib[3]);
+        if (*(u32 **)(v + ZO_View_LOFCprList) == c)
+            *(u32 **)(v + ZO_View_LOFCprList) = 0;
+        c[3] = 0;
+        zx_FreeMem((u32)c, 24);
+    }
+}
+
 u32 c_RethinkDisplay(void)
 {
-    if (Z.shown)
+    if (Z.shown) {
+        *(u32 *)((u8 *)Z.shown + SC_SIZEOF + 80) = 0;
         show_screen((u8 *)Z.shown);
+    }
+    cpr_record();
     return 0;
 }
 void c_MakeScreen(u8 *sc)
 {
-    if (sc && (u32)sc == Z.shown)
+    if (sc && (u32)sc == Z.shown) {
+        *(u32 *)(sc + SC_SIZEOF + 80) = 0;  /* its RasInfo's BitMap again (16.17) */
         show_screen(sc);
+    }
 }
 void c_MoveScreen(u8 *sc, s32 dx, s32 dy) { (void)sc, (void)dx, (void)dy; }
 
@@ -2566,11 +2693,13 @@ void zb_screen_frame(void)
     u16 *l = *(u16 **)(sc + SC_SIZEOF + 72);
     u8 *bm = *(u8 **)(sc + SC_SIZEOF + 76) ? *(u8 **)(sc + SC_SIZEOF + 76) : sc + SC_BitMap;
     /* the ViewPort's RasInfo (16.13: ScrollVPort, double buffers): its BitMap, if the program set another, and its
-     * offsets: RyOffset rows and RxOffset's words down the planes, the rest of RxOffset BPLCON1's delay */
+     * offsets: RyOffset rows and RxOffset's words down the planes, the rest of RxOffset BPLCON1's delay; a Copper
+     * list's BitMap LoadView chose comes first (16.17) */
     const u8 *ri = *(const u8 *const *)(sc + SC_ViewPort + VP_RasInfo);
     u32 off = 0, fine = 0;
     if (ri && c_TypeOfMem((u32)ri)) {
-        const u8 *rb = *(const u8 *const *)(ri + 4);
+        const u8 *rb = *(const u8 *const *)(sc + SC_SIZEOF + 80) ? *(const u8 *const *)(sc + SC_SIZEOF + 80) :
+                       *(const u8 *const *)(ri + 4);
         if (rb && c_TypeOfMem((u32)rb))
             bm = (u8 *)rb;
         s32 rx = *(const s16 *)(ri + 8), ry = *(const s16 *)(ri + 10);
@@ -2725,7 +2854,7 @@ u32 c_WaitPort(u8 *mp)
         zb_stop(ZH_STOP, ZS_WAIT);
     struct zlist *l = (struct zlist *)(mp + MP_MsgList);
     while (!l->head->succ) {
-        if (!zt_on && !zb_timer_busy() && !zb_audio_busy())
+        if (!zt_on && !zb_timer_busy() && !zb_audio_busy() && !zi_live)
             zb_stop(ZH_STOP, ZS_WAIT);
         c_Wait(mp[MP_SigBit] < 32 ? 1u << mp[MP_SigBit] : 0);
     }
@@ -2743,16 +2872,21 @@ u32 c_CreateMsgPort(void)
 void c_DeleteMsgPort(u8 *mp) { if (mp) zx_FreeMem((u32)mp, MP_SIZEOF); }
 
 /* ---- intuition's windows: a Window on the screen it names (or the first), its RastPort the screen's, an IDCMP
- * port that never gets a message (Window 136 bytes: Width 8, Height 10, Flags 24, IDCMPFlags 82, UserPort 86, WScreen
- * 46, RPort 50; NewWindow: Width 4, Height 6, IDCMPFlags 10, Screen 30; WA_ tags 0x80000063 + n) ---- */
+ * port with a signal of the task's own; the last one opened (or activated) gets the keys and the mouse (binput.c,
+ * 16.17). Window 136 bytes: LeftEdge 4, TopEdge 6, Width 8, Height 10, Flags 24, IDCMPFlags 82, UserPort 86,
+ * WScreen 46, RPort 50; NewWindow: LeftEdge 0, TopEdge 2, Width 4, Height 6, IDCMPFlags 10, Flags 14, Screen 30; WA_
+ * tags 0x80000063 + n (WA_Left 1, WA_Top 2, WA_Flags 8, WA_ReportMouse 0x23, WA_RMBTrap 0x27) ---- */
 #define WIN_SIZEOF 136
 u32 c_OpenWindowTagList(const u8 *nw, const u32 *tags)
 {
-    u32 w = 0, h = 0, scr = 0, idcmp = 0;
+    u32 w = 0, h = 0, scr = 0, idcmp = 0, fl = 0, x = 0, y = 0;
     if (nw) {
+        x = *(const u16 *)nw;
+        y = *(const u16 *)(nw + 2);
         w = *(const u16 *)(nw + 4);
         h = *(const u16 *)(nw + 6);
         idcmp = *(const u32 *)(nw + 10);
+        fl = *(const u32 *)(nw + 14);
         scr = *(const u32 *)(nw + 30);
     }
     for (const u32 *t = tags; t; t += 2) {
@@ -2773,6 +2907,11 @@ u32 c_OpenWindowTagList(const u8 *nw, const u32 *tags)
         if (tag == 0x80000067) h = d;
         if (tag == 0x8000006A) idcmp = d;
         if (tag == 0x80000070) scr = d;
+        if (tag == 0x80000064) x = d;
+        if (tag == 0x80000065) y = d;
+        if (tag == 0x8000006B) fl = d;
+        if (tag == 0x80000086) fl = d ? fl | 0x200 : fl & ~0x200u;          /* WFLG_REPORTMOUSE */
+        if (tag == 0x8000008A) fl = d ? fl | 0x10000 : fl & ~0x10000u;      /* WFLG_RMBTRAP */
     }
     u8 *win = (u8 *)zx_AllocMem(WIN_SIZEOF + MP_SIZEOF, 1 << 16);
     if (!win)
@@ -2784,16 +2923,31 @@ u32 c_OpenWindowTagList(const u8 *nw, const u32 *tags)
     }
     *(u16 *)(win + 8) = (u16)(w ? w : 320);
     *(u16 *)(win + 10) = (u16)(h ? h : 200);
+    *(u16 *)(win + 4) = (u16)x;
+    *(u16 *)(win + 6) = (u16)y;
+    *(u32 *)(win + 24) = fl & ~0x2000u; /* WFLG_WINDOWACTIVE: binput.c's to set */
     *(u32 *)(win + 46) = scr;
     *(u32 *)(win + 82) = idcmp;
     u8 *mp = win + WIN_SIZEOF;
     initport(mp);
+    u32 sig = c_AllocSignal((u32)-1);   /* the port's own signal (a window's messages wake only its waiter) */
+    mp[MP_SigBit] = (u8)(sig < 32 ? sig : 16);
     *(u32 *)(win + 86) = (u32)mp;
+    zi_win_open(win);
     return (u32)win;
 }
 
 u32 c_OpenWindow(const u8 *nw) { return c_OpenWindowTagList(nw, 0); }
-void c_CloseWindow(u8 *win) { if (win) zx_FreeMem((u32)win, WIN_SIZEOF + MP_SIZEOF); }
+void c_CloseWindow(u8 *win)
+{
+    if (!win)
+        return;
+    zi_win_close(win);
+    u8 *mp = win + WIN_SIZEOF;
+    if (mp[MP_SigBit] != 16)
+        c_FreeSignal(mp[MP_SigBit]);
+    zx_FreeMem((u32)win, WIN_SIZEOF + MP_SIZEOF);
+}
 u32 c_ModifyIDCMP(u8 *win, u32 f) { if (win) *(u32 *)(win + 82) = f; return 1; }
 void c_SetPointer(u32 win) { (void)win; }
 /* ---- intuition: the public screen and screen buffers (16.12) ----
@@ -2814,8 +2968,11 @@ u32 c_LockPubScreen(const char *name)
         u32 tags[] = { 0x80000023, 640, 0x80000024, Z.pal ? 256u : 200u, 0x80000025, 2, 0x80000032,
                        (Z.pal ? 0x00021000u : 0x00011000u) | 0x8000, 0x80000037, 1, 0 };
         pubscr = (u8 *)c_OpenScreenTagList(0, tags);
-        if (pubscr)
+        if (pubscr) {
             *(u16 *)(pubscr + SC_ViewPort + VP_Modes) = 0x8000;    /* HIRES */
+            scr_unlink(pubscr);         /* never shown: not one of the screens in depth order (16.17; with it there
+                                         * Elude's demos went on to GetDisplayInfoData) */
+        }
     }
     return (u32)pubscr;
 }
@@ -2941,14 +3098,14 @@ F(Open); F(Close); F(Seek); F(LoadSeg); F(UnLoadSeg);
 F(DoIO); F(SendIO); F(CheckIO); F(WaitIO); F(AbortIO);
 F(TimerBeginIO); F(TimerAbortIO); F(AddTime); F(SubTime); F(CmpTime); F(ReadEClock); F(GetSysTime);
 F(GetMsg); F(PutMsg); F(ReplyMsg); F(WaitPort); F(CreateMsgPort); F(DeleteMsgPort);
-F(OpenWindowTagList); F(OpenWindow); F(CloseWindow); F(ModifyIDCMP); F(SetPointer); F(ViewPortAddress);
+F(ScreenToBack); F(FreeCprList); F(FindDisplayInfo); F(NextDisplayInfo); F(GetDisplayInfoData); F(OpenWindowTagList); F(OpenWindow); F(CloseWindow); F(ModifyIDCMP); F(SetPointer); F(ViewPortAddress);
 F(LoadRGB32); F(SetRGB32); F(OpenScreenTagList); F(OpenScreen); F(CloseScreen); F(ScreenToFront);
 F(LoadView); F(WaitTOF); F(WaitBlit); F(OwnBlitter); F(DisownBlitter); F(VBeamPos); F(SetRGB4); F(LoadRGB4);
 F(Output); F(Input); F(Write); F(Read); F(PutStr); F(VPrintf); F(VFPrintf); F(FPuts); F(FPutC); F(Flush); F(IoErr);
 F(SetIoErr); F(Delay); F(Execute); F(CloseWorkBench); F(OpenWorkBench); F(rts);
 F(InitStruct); F(MakeLibrary); F(MakeFunctions); F(FindResident); F(InitResident); F(AddLibrary); F(RemLibrary);
 F(SumLibrary); F(AddResource); F(InitSemaphore); F(ObtainSemaphore); F(ReleaseSemaphore); F(AttemptSemaphore);
-F(DeleteFile); F(AudioBeginIO); F(AudioAbortIO); F(ConBeginIO); F(ConAbortIO); F(ConRawKey); F(ViewAddress); F(InpBeginIO);
+F(DeleteFile); F(AudioBeginIO); F(AudioAbortIO); F(ConBeginIO); F(ConAbortIO); F(ViewAddress); F(InpBeginIO); F(ZiBeginIO); F(ZiAbortIO); F(RawKeyConvert); F(PeekQualifier); F(RetA0);
 X(Supervisor); X(Disable); X(Enable); X(Forbid); X(Permit); X(SetSR); X(GetCC); X(CacheClearU); X(ColdReboot); X(Exit);
 X(SuperState); X(UserState);
 F(RawIOInit); F(RawMayGetChar); F(RawPutChar); F(CreateIORequest); F(DeleteIORequest); F(AddPort); F(RemPort);
@@ -2996,7 +3153,7 @@ static void (*const exec_fn[])(void) = { zx_Supervisor, zs_Alert, zs_rts, zx_Dis
 static const u16 gfx_lvo[] = { 192, 222, 228, 270, 288, 384, 456, 462, 390, 492, 498, 918, 924, 882, 852, 198,
     72, 78, 66, 474, 54, 60, 240, 342, 348, 354, 306, 234, 888, 960, 1050,
     792, 798, 300, 408, 414, 246, 336, 708, 588, 216, 210, 966, 972, 942,
-    570, 576, 582, 630, 996, 900, 204, 360, 402, 324, 318 };
+    570, 576, 582, 630, 996, 900, 204, 360, 402, 324, 318, 564, 726, 732, 756 };
 static void (*const gfx_fn[])(void) = { zs_LoadRGB4, zs_LoadView, zs_WaitBlit, zs_WaitTOF, zs_SetRGB4, zs_VBeamPos,
     zs_OwnBlitter, zs_DisownBlitter, zs_InitBitMap, zs_AllocRaster, zs_FreeRaster, zs_AllocBitMap, zs_FreeBitMap,
     zs_LoadRGB32, zs_SetRGB32, zs_InitRastPort,
@@ -3005,7 +3162,8 @@ static void (*const gfx_fn[])(void) = { zs_LoadRGB4, zs_LoadView, zs_WaitBlit, z
     zs_GetVPModeID, zs_ModeNotAvailable, zs_BltClear, zs_GetSprite, zs_FreeSprite, zs_Draw, zs_PolyDraw,
     zs_VideoControl, zs_ScrollVPort, zs_MakeVPort, zs_MrgCop, zs_AllocDBufInfo, zs_FreeDBufInfo, zs_ChangeVPBitMap,
     zs_GetColorMap, zs_FreeColorMap, zs_GetRGB4, zs_SetRGB4CM, zs_SetRGB32CM, zs_GetRGB32, zs_InitVPort, zs_InitView,
-    zs_WaitBOVP, zs_WritePixel, zs_ReadPixel };
+    zs_WaitBOVP, zs_WritePixel, zs_ReadPixel, zs_FreeCprList, zs_FindDisplayInfo, zs_NextDisplayInfo,
+    zs_GetDisplayInfoData };
 static const u16 dos_lvo[] = { 42, 48, 54, 60, 132, 144, 198, 312, 342, 354, 360, 462, 948, 954, 30, 36, 66, 150,
     156, 222, 72, 216, 324, 330, 576, 534, 798, 858, 228, 234,
     84, 90, 96, 102, 108, 114, 126, 210, 192, 372, 378, 384, 390, 402, 420, 870, 876, 882, 468, 474, 498, 138 };
@@ -3020,7 +3178,7 @@ static const u16 int_lvo[] = { 78, 210, 612, 198, 66, 252, 246, 606, 204, 72, 15
     510, 516, 768, 774, 780,
     474, 342, 336, 450, 90, 396, 408, 108, 588, 390, 384, 378, 162, 294 };
 static void (*const int_fn[])(void) = { zs_CloseWorkBench, zs_OpenWorkBench, zs_OpenScreenTagList, zs_OpenScreen,
-    zs_CloseScreen, zs_ScreenToFront, zs_SetPointer, zs_OpenWindowTagList, zs_OpenWindow, zs_CloseWindow,
+    zs_CloseScreen, zs_ScreenToFront, zs_ScreenToBack, zs_OpenWindowTagList, zs_OpenWindow, zs_CloseWindow,
     zs_ModifyIDCMP, zs_SetPointer, zs_SetPointer, zs_ViewPortAddress,
     zs_LockPubScreen, zs_UnlockPubScreen, zs_AllocScreenBuffer, zs_FreeScreenBuffer, zs_ChangeScreenBuffer,
     zs_QueryOverscan, zs_WBenchTo, zs_WBenchTo, zs_ActivateWindow, zs_DisplayAlert, zs_AllocRemember,
@@ -3225,22 +3383,22 @@ void c_TimerAbortIO(u8 *io)
 u32 c_CheckIO(u8 *io)
 {
     zb_timer_poll();
-    return io && pending(io) < 0 && !zb_audio_pending(io) && !zb_con_pending(io) ? (u32)io : 0;
+    return io && pending(io) < 0 && !zb_audio_pending(io) && !zb_con_pending(io) && !zi_pending(io) ? (u32)io : 0;
 }
 s32 c_WaitIO(u8 *io)
 {
     if (!io)
         return 0;
     u8 *wp = *(u8 **)(io + 14);
-    while (zt_on && wp && (pending(io) >= 0 || zb_audio_pending(io) || zb_con_pending(io)))
+    while (zt_on && wp && (pending(io) >= 0 || zb_audio_pending(io) || zb_con_pending(io) || zi_pending(io)))
         c_Wait(wp[15] < 32 ? 1u << wp[15] : 0);  /* more than one task: the reply port's signal (16.16) */
     while (pending(io) >= 0)
         timer_step();
     while (zb_audio_pending(io))        /* an audio write: its interrupt ends it */
         if (EB(ZO_ExecBase_IDNestCnt, s8) >= 0 || !(INTENAR & 0x4000))
             zb_stop(ZH_STOP, ZS_WAIT);
-    while (zb_con_pending(io)) {        /* a console read: only an interrupt server could end it (AbortIO) */
-        if (!timer_step() && EB(ZO_ExecBase_IDNestCnt, s8) >= 0)
+    while (zb_con_pending(io) || zi_pending(io)) {  /* a read of keys or a port: the vertical blank ends it */
+        if (!timer_step() && (EB(ZO_ExecBase_IDNestCnt, s8) >= 0 || !(INTENAR & 0x4000) || !(INTENAR & 0x0020)))
             zb_stop(ZH_STOP, ZS_WAIT);
     }
     u8 *rp = *(u8 **)(io + 14);
@@ -3262,6 +3420,8 @@ void c_SendIO(u8 *io)
         zb_con_beginio(io);
     else if (*(u32 *)(io + 20) == zb_inp_base && zb_inp_base)
         zb_inp_beginio(io);
+    else if (is_zi(io))
+        zi_beginio(io);
     else {
         io[31] = (u8)-1;
         zb_io_done(io);
@@ -3278,6 +3438,8 @@ s32 c_DoIO(u8 *io)
         zb_con_beginio(io);
     else if (*(u32 *)(io + 20) == zb_inp_base && zb_inp_base)
         zb_inp_beginio(io);
+    else if (is_zi(io))
+        zi_beginio(io);
     else
         io[31] = (u8)-1;
     return c_WaitIO(io);
@@ -3290,6 +3452,8 @@ void c_AbortIO(u8 *io)
         zb_audio_abort(io);
     else if (io && *(u32 *)(io + 20) == zb_con_base && zb_con_base)
         zb_con_abort(io);
+    else if (io && is_zi(io))
+        zi_abort(io);
 }
 
 void c_AddTime(u32 *d, const u32 *s2)
@@ -3472,8 +3636,8 @@ void zb_libs_init(void)
     {   /* console.device (blibload.c, 16.14): Open, Close, Expunge, the reserved one, BeginIO, AbortIO, then
          * console_lib.fd's CDInputHandler (-42) and RawKeyConvert (-48) */
         static const u16 clvo[] = { 6, 12, 18, 24, 30, 36, 42, 48 };
-        static void (*const cfn[])(void) = { zs_rts, zs_rts, zs_rts, zs_rts, zs_ConBeginIO, zs_ConAbortIO, zs_ConRawKey,
-                                             zs_ConRawKey };
+        static void (*const cfn[])(void) = { zs_rts, zs_rts, zs_rts, zs_rts, zs_ConBeginIO, zs_ConAbortIO, zs_RetA0,
+                                             zs_RawKeyConvert };
         static const char cname[] = "console.device";
         u32 base = take(8 * 6 + 34) + 8 * 6;
         zb_jumptable(base, 8, clvo, cfn, 8);
@@ -3489,7 +3653,7 @@ void zb_libs_init(void)
     {   /* input.device (blibload.c, 16.14): Open, Close, Expunge, the reserved one, BeginIO, AbortIO (nothing is ever
          * in progress), then input_lib.fd's PeekQualifier (-42: no qualifier keys held) */
         static const u16 ilvo[] = { 6, 12, 18, 24, 30, 36, 42 };
-        static void (*const ifn[])(void) = { zs_rts, zs_rts, zs_rts, zs_rts, zs_InpBeginIO, zs_rts, zs_ConRawKey };
+        static void (*const ifn[])(void) = { zs_rts, zs_rts, zs_rts, zs_rts, zs_InpBeginIO, zs_rts, zs_PeekQualifier };
         static const char iname[] = "input.device";
         u32 base = take(7 * 6 + 34) + 7 * 6;
         zb_jumptable(base, 7, ilvo, ifn, 7);
@@ -3502,6 +3666,23 @@ void zb_libs_init(void)
         l->idstring = (char *)idstr;
         zb_inp_init(base);
     }
+    for (int i = 0; i < 2; i++) {       /* keyboard.device and gameport.device (binput.c, 16.17): Open, Close, Expunge,
+                                         * the reserved one, BeginIO, AbortIO */
+        static const u16 klvo[] = { 6, 12, 18, 24, 30, 36 };
+        static void (*const kfn[])(void) = { zs_rts, zs_rts, zs_rts, zs_rts, zs_ZiBeginIO, zs_ZiAbortIO };
+        static const char *const kname[2] = { "keyboard.device", "gameport.device" };
+        u32 base = take(6 * 6 + 34) + 6 * 6;
+        zb_jumptable(base, 6, klvo, kfn, 6);
+        struct zlib *l = (struct zlib *)base;
+        l->node.type = 3;               /* NT_DEVICE */
+        l->node.name = (char *)kname[i];
+        l->negsize = 36;
+        l->possize = 34;
+        l->version = 40;
+        l->idstring = (char *)idstr;
+        *(i ? &zb_gp_base : &zb_kbd_base) = base;
+    }
+    zi_init();
     extern u32 zb_tracing;
     if (zb_tracing) {                   /* the trace build: the bases, so the trace's slots can be named */
         static const char hx[] = "0123456789abcdef";

@@ -77,8 +77,10 @@
     jsr     LVO_OpenDevice(%a6)
     tst.l   %d0
     bne.s   91f
-    move.w  #9,28(%a3)              /* IND_ADDHANDLER */
-    lea     handler(%pc),%a0
+    move.w  #9,28(%a3)              /* IND_ADDHANDLER: io_Data the handler's Interrupt */
+    lea     hint(%pc),%a0
+    lea     handler(%pc),%a1
+    move.l  %a1,18(%a0)             /* is_Code */
     move.l  %a0,40(%a3)
     move.l  %a3,%a1
     jsr     LVO_DoIO(%a6)
@@ -165,5 +167,8 @@ n_inp:   .asciz "zcon: wrong: input.device\n"
 n_view:  .asciz "zcon: wrong: ViewAddress\n"
 n_alloc: .asciz "zcon: wrong: AllocMem of 1 GB given\n"
     .balign 4
+hint:    .long 0, 0                 /* ln_Succ, ln_Pred */
+         .byte 2, 0                 /* NT_INTERRUPT, priority 0 */
+         .long 0, 0, 0              /* ln_Name, is_Data, is_Code */
 io:      .space 64
 buf:     .space 8

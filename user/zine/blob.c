@@ -754,13 +754,15 @@ extern void zx_chain(void);
 static const u16 lvlmask[8] = { 0, 0x0007, 0x0008, 0x0070, 0x0780, 0x1800, 0x2000, 0 };
 
 /* the keyboard, while no program owns it: its byte taken and the handshake given (KDAT low for three beam lines:
- * at least 96 us even in a 31 kHz mode, above the HRM's 85 us), so it does not resynchronise; the byte is dropped */
+ * at least 96 us even in a 31 kHz mode, above the HRM's 85 us), so it does not resynchronise; the byte goes to the
+ * program's input (binput.c, 16.17) when something listens, else it is dropped */
 static void kbd(void)
 {
-    (void)CIAA(CIA_SDR);
+    u8 b = CIAA(CIA_SDR);
     CIAA(CIA_CRA) |= 0x40;
     zb_wait_lines(3);
     CIAA(CIA_CRA) &= (u8)~0x40;
+    zi_key(b);
 }
 
 static void chain(struct ziv *iv, u32 pend)
@@ -808,6 +810,8 @@ void zb_irq(u32 vec)
             zb_serial_hex('A', au, 8);
         }
     }
+    if (lv == 3 && (pend & 0x0020) && zi_live)
+        zi_frame();                     /* the keys and the mouse to whoever listens (16.17) */
     if (lv == 3 && (pend & 0x0020) && zt_on)
         zt_tick();                      /* more than one task: sleepers, timers, the quantum (16.16) */
     if (lv == 4) {

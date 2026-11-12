@@ -239,7 +239,7 @@ also when it is killed, and the serial tap removes its port's link. A job starts
 
 What the tests need: FS-UAE, and the Kickstart ROM files in the directory named by `ZENIX_KICKSTART_DIR` (default
 FS-UAE's own Kickstarts folder, `Documents/FS-UAE/Kickstarts` in your home directory); the configs in `fsuae/` name no path of their own (`tools/fsuae_conf.py`
-fills it in, with the build directory and the serial port). kbd-test, cu-test, diag-test, colour-test, random-test and the screenshots
+fills it in, with the build directory and the serial port). kbd-test, zine-input-test, cu-test, diag-test, colour-test, random-test and the screenshots
 (`tools/shot.py`) also need the headless cage rig: `ZENIX_CAGE_RIG` names its directory. A single test
 beside others: `ZENIX_SERIAL=/tmp/NAME ZENIX_BUILD=/tmp/NAME-build ZENIX_OUT=/tmp/NAME-out tools/users-test.sh` (its own
 serial port, a copy of `build/` and an output folder; without `ZENIX_BUILD` it uses `build/` of the tree, which only

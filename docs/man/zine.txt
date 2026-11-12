@@ -136,9 +136,14 @@ DESCRIPTION
     "Assign Love: <its folder>" would; zine says so once.
     On a machine with an FPU the math libraries compute on it.
     console.device opened on a window takes the program's text into its
-    output (control sequences left out); it gives no keys, so a read
-    waits; input.device takes a program's input handler and never
-    calls it. The first large AllocMem that fails is said, with the
+    output (control sequences left out). The keyboard and the mouse
+    reach a program that asks the OS for them: its window's IDCMP
+    (VANILLAKEY, RAWKEY, MOUSEBUTTONS, MOUSEMOVE, INTUITICKS), console
+    reads (the USA keymap), input.device handlers, keyboard.device and
+    gameport.device; a program that reads the hardware itself is left
+    alone. gadtools.library makes gadgets and menus (none are drawn);
+    keymap.library maps keys. The first large AllocMem that fails is
+    said, with the
     largest free block (a program that quits at once for want of
     memory shows why).
 

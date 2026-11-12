@@ -545,7 +545,8 @@ ZINE's `Wait` and `WaitTOF` use the CPU's `stop` or the beam: nothing in ZINE ru
 
 ### 8.4 What ZINE does not do
 
-No input events, no screens or windows of graphics' own (5.3), no disk devices. A program may run more than one task
+No screens or windows of graphics' own (5.3), no disk devices. Input events (the keys and the mouse) come since 16.17,
+only to programs that ask for them through the OS. A program may run more than one task
 (16.16, owner 2026-11-11: "we want elude demos with sound"): its own tasks and processes are switched as exec switches
 them, nothing of Zenix runs meanwhile, and the session ends when the program's first process ends. A program that asks
 for these through a call ZINE does not have is stopped cleanly (9.1); one that finds them missing by an answer (0 from
@@ -1956,6 +1957,105 @@ machine.
 Sizes (*measured*, the 68020-60 build): the blob's code 100,928 -> 106,988 bytes (memory 107,261 -> 113,899): the
 task switching and calls 3,434, audio.device's playing about 1,600, the rest in the stubs and the trace line; more
 than the 2-3 KB estimated above, mostly audio.device. `/bin/zine` and the kernel unchanged.
+
+### 16.17 Input for programs, gadtools, the unsettled ones (2026-11-12, branch zine7)
+
+**The rule:** the session owns the machine (8.1), so ZINE gives a program the keyboard and the mouse as AmigaOS does,
+through the OS's own paths, and only when the program asks for them that way. A program that takes the hardware itself
+(its own level 2 or level 3 vector, a `ciaa.resource` handler for the serial port's interrupt, the interrupts switched
+off, the CIA or `JOYxDAT` read directly) never meets this code and works as before.
+
+**The path** (`user/zine/binput.c`; the RKRM Devices manual's input, console, keyboard and gameport chapters, the RKRM
+Libraries' IDCMP and keymap chapters, the HRM's keyboard and controller port sections; the NDK 3.2's
+`devices/inputevent.h`, `input.h`, `keyboard.h`, `gameport.h`, `intuition/intuition.h` for numbers):
+- **The keyboard:** CIA-A's serial port interrupt (level 2) already took the byte and gave the handshake (8.3); the code
+  (the byte inverted and rotated right) goes into a ring of 32, nothing else happens in the interrupt. The keyboard's
+  own codes (`$78` the reset warning, `$F9`-`$FE`) are not keys.
+- **The vertical blank** (level 3) makes the InputEvents: `IECLASS_RAWKEY` for each key (the qualifiers held,
+  `IEQUALIFIER_NUMERICPAD` for the pad, the previous two key-downs in `ie_position` for dead keys), `IECLASS_RAWMOUSE`
+  for port 0's movement (`JOY0DAT`'s counters, `IEQUALIFIER_RELATIVEMOUSE`) and buttons (CIA-A PRA bit 6, `POTINP` bit
+  10; `IECODE_LBUTTON`/`RBUTTON`, up with `IECODE_UP_PREFIX`), and with a handler installed an `IECLASS_TIMER` about
+  ten times a second. The chain goes through the program's input handlers of priority above 50 (highest first; a0 the
+  events, a1 `is_Data`, d0 the chain passed on), then intuition's part, then the handlers of 50 and below. This runs in
+  the interrupt, where AmigaOS runs it in input.device's task at priority 20: the handler sees the same events.
+- **Intuition's part:** the active window is the last one opened or the one `ActivateWindow` names
+  (`WFLG_WINDOWACTIVE`, IntuitionBase `ActiveWindow`). It gets `IDCMP_VANILLAKEY` for a key-down that is one character
+  on the keymap, else `IDCMP_RAWKEY` (key-ups and the qualifier keys too); `IDCMP_MOUSEBUTTONS` (`SELECTDOWN`/`UP`;
+  `MENUDOWN`/`UP` with `WFLG_RMBTRAP`, else a right-button release is an `IDCMP_MENUPICK` with `MENUNULL`: ZINE draws
+  no menus); `IDCMP_MOUSEMOVE` with `WFLG_REPORTMOUSE` (`IDCMP_DELTAMOVE` honoured); `IDCMP_INTUITICKS` ten times a
+  second; at most one MOUSEMOVE and one INTUITICKS not yet replied, as intuition. The window's `MouseX`/`MouseY`
+  (and `GZZMouseX/Y`), its screen's and IntuitionBase's follow the pointer, kept inside the screen. The IntuiMessages
+  (`im_IAddress` pointing at the previous keys, as MapRawKey wants them; the time in `Seconds`/`Micros`) come from a
+  pool of 32 made with the first window; a message the program replies is free again, one the pool lacks is dropped.
+  A window's port now has a signal of its own (`AllocSignal(-1)`), freed with the window.
+- **console.device:** a `CMD_READ` is done at once when typed characters wait in the unit's buffer (64), else when the
+  next come: at least one, at most `io_Length`. The characters are the USA keymap's (the ROM's default; Shift, Caps
+  Lock, Ctrl), the cursor keys `CSI A`-`D` (shifted `CSI T`, `S`, `CSI " A"`, `" @"`), F1-F10 `CSI 0~`-`9~` (shifted
+  `10~`-`19~`), Help `CSI ?~`. `RawKeyConvert` (-48) and keymap.library's `MapRawKey` give the same for one event;
+  `MapANSI` the other way; `CDInputHandler` passes the events on.
+- **input.device:** `IND_ADDHANDLER`/`REMHANDLER` change the handler list (an Interrupt whose `is_Code` is not in
+  the program's memory is refused with `IOERR_BADLENGTH` rather than called), `IND_WRITEEVENT` sends the program's event
+  through it (and intuition's part) at once; `PeekQualifier` (-42) answers the qualifiers held.
+- **keyboard.device** (new): `KBD_READEVENT` gives the queued key events (16 kept while it is open; done when one
+  comes), `KBD_READMATRIX` the 16 bytes of keys held, the reset handler commands are taken. **gameport.device** (new),
+  units 0 and 1: `GPD_SETCTYPE`/`ASKCTYPE` (mouse, relative or absolute joystick), `GPD_SETTRIGGER`/`ASKTRIGGER`,
+  `GPD_READEVENT` done when the trigger is met (a button down or up as `gpt_Keys` asks, a movement of `gpt_XDelta`/
+  `gpt_YDelta`, a direction change of an absolute joystick, or `gpt_Timeout` frames).
+- **The cost when nobody listens:** none of it runs until a program installs a handler, opens a window, a console unit,
+  keyboard.device or gameport.device (`zi_live`); the keyboard's byte is dropped as before and the vertical blank tests
+  one byte. A single-task `WaitPort` on an empty port no longer stops the program while the input can still fill it.
+
+**gadtools.library** (`user/zine/bgad.c`, library number 13): enough for a program that builds its gadgets and menus
+with it and reads its window through it (Efreet's deeppan opened it, did not check the answer and called
+`GT_GetIMsg` through base 0). `CreateContext`, `CreateGadgetA` (a Gadget from the NewGadget, linked behind the
+previous; 0 when the previous is 0, the autodoc's chaining), `FreeGadgets`, `CreateMenusA` (Menu and MenuItem lists
+from the NewMenu array, with `GTMENU_USERDATA` behind each, sub-items, `NM_IGNORE`, disabled and check flags, the
+command key), `FreeMenus`, `GetVisualInfoA`/`FreeVisualInfo`, `GT_GetIMsg`/`GT_ReplyIMsg` (exec's GetMsg and ReplyMsg),
+`GT_FilterIMsg`/`GT_PostFilterIMsg` (the message itself), `LayoutMenusA`/`LayoutMenuItemsA` (TRUE); the drawing and
+refresh calls, `GT_SetGadgetAttrsA`, `DrawBevelBoxA`, `SetDesignFontA` and `ScaleGadgetRectA` do nothing,
+`GT_GetGadgetAttrsA` answers 0. ZINE draws no gadgets and no menus. **keymap.library** (number 12): `MapRawKey`,
+`MapANSI`, `AskKeyMapDefault` (a KeyMap with empty tables), `SetKeyMapDefault` taken.
+
+**The screens in depth order** (found with the demos below): IntuitionBase `FirstScreen` and each Screen's
+`NextScreen` are kept as intuition keeps them (a new screen in front, `SA_Behind` at the back; `ScreenToFront`,
+`ScreenToBack` (-246, new) and `CloseScreen` move them); `LockPubScreen`'s stand-in (16.12) is not among them, and
+intuition's View's `ViewPort` stays 0. With a front screen there, Elude's 14bit sound driver asks the display
+database for its mode's monitor (before, it found no screen and skipped it), so graphics' **display database** came
+too: `FindDisplayInfo` (-726, a handle for a native PAL or NTSC mode, 0 for another), `NextDisplayInfo` (-732, the
+native modes in turn) and `GetDisplayInfoData` (-756): `DTAG_DISP` (properties, ticks per pixel, the colours'
+bits), `DTAG_DIMS` (depth, sizes, the nominal rectangle), `DTAG_MNTR` (a frame's rows and colour clocks: 312 x
+227 PAL, 262 x 227 NTSC), `DTAG_NAME` ("PAL:LowRes" ...), as many bytes as asked, 0 for another tag.
+Closing the shown screen shows the next one (before: the blank display). `RethinkDisplay`/`RemakeDisplay` give
+intuition's View Copper lists as AmigaOS does: when the program has cleared `View.LOFCprList`, a new record of
+ZINE's (a `cprlist` header, then "ZCPR", the screen and the BitMap its RasInfo shows now) is put there, else the one
+there is renewed; `LoadView` of intuition's View shows the front screen with the record's BitMap (taken at the next
+vertical blank, so no tear), and `FreeCprList` (-564, new) frees a record. The Juggler double-buffers that way: it
+keeps two such lists made with its two BitMaps, and each frame sets `RasInfo->BitMap` (where its RastPort draws)
+and the View's `LOFCprList` (what is shown: the other one) and calls `LoadView(ViewAddress())`.
+
+**The demos** (zine-top100-findings.md "Round 7"): The Juggler shows its text, starts its HAM movie at a key and
+ends at Esc (return code 0); Ephidrena's J waited for `IntuitionBase->FirstScreen` to be its screen before its
+vertical-blank code signals the main task, and now ends by itself (253 s); deeppan opens its window through gadtools
+and runs (before: a crash through base 0). Not ZINE's: Fetish loops opening `CrM.library` (Crunch-Mania's, not in
+its folder); Gift needs AHI (`ahi.device` with a mode requester and a mixing player: an AHI is a project of its own,
+so ZINE keeps answering `IOERR_OPENFAIL`, and Gift's own cleanup then calls through a base of 0); Lola, total
+triple trouble and The Fall take the machine (Lola waits in `STOP` for its own interrupt's flag; the other two make
+no call and run their own interrupts); My Kingdom part 1 runs its exit code twice and calls LoadView through the
+GfxBase it cleared the first time.
+
+*Verified* in FS-UAE: `tools/zine-input-test.sh` (the test program `zinput`, keys typed on the emulated keyboard in
+the cage rig: a, b, c, F1, a joystick's fire in port 0, q): console reads, VANILLAKEY and RAWKEY through
+`GT_GetIMsg`, MOUSEBUTTONS, the input handler, keyboard.device, MapRawKey, the gadtools calls, `FirstScreen`,
+`GetDisplayInfoData`'s monitor rows; the
+rest of the test programs as before (`tools/zine-emu-test.sh`). Not yet on a real machine.
+
+Sizes (*measured*, the 68020-60 build): the blob's code 107,012 -> 117,252 bytes (memory 113,923 -> 125,373): the
+input path about 5.9 KB (binput.c, and 1 KB of buffers: the key ring, a frame's events, keyboard.device's queue),
+gadtools and keymap 1 KB, the display database about 1.2 KB, the screens' order, the Copper list records,
+FreeCprList and ScreenToBack the rest. The
+IntuiMessage pool (32 x 60 bytes) comes from the program's memory with its first window. `/bin/zine` 48,173 ->
+48,213 bytes in memory (two library names); the kernel unchanged; the HD demo floppy 296,960 -> 289,280 bytes free
+(its RAM disk 12 KB larger unpacked).
 
 ## 17. Questions for the owner (what ZINE should be)
 
