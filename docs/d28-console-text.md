@@ -1201,7 +1201,9 @@ docs/d38-desktop.md "Screen modes" ("The text console the same way"), read from 
   29,372 -> 27,472 bytes, so kernel.bin went 182,820 -> 182,896 with `CON_MODE`, and the mount tests' floppy has
   1,424 bytes free (800 kept); its RAM disk has at least 46 free blocks, 20 more than before (the smaller programs), room for
   a later 1-KB step down of `RAMDISK_MOUNT_K` if the kernel needs it. Speed: write_'s run of printable bytes steps
-  three pointers through the grids (before: one pointer and offsets a grid apart); not measured on a real 68020.
+  three pointers through the grids (before: one pointer and offsets a grid apart). conspeed-test in FS-UAE (stock
+  A1200, an emulator figure, not hardware): `seq 1 2000` 2.74 -> 2.83 s, the colour run 6.03 -> 6.19 s (about 3% slower
+  at 32 rows: three base registers on the hot path); not measured on a real 68020, a later look at winning it back.
 
 **Tests (FS-UAE):** `tools/prefs-test.sh con` on the stock A1200 with 4 MB fast, typed on the serial line: 8 colours
 and Test (in effect), Cancel (16 again); 8 colours and no font, Use (in effect, the block character drawn as the box in
