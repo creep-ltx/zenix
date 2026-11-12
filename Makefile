@@ -48,7 +48,8 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet \
-          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs
+          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs \
+          play modplay
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -80,7 +81,7 @@ USERZX := $(UAPPS:%=$(BUILD)/%.zx)
 # the base package: the ZenixFS server, which mount registers as a file service (D11 6.4), and the network server.
 # Not commands: no page; wasabid (D24), the remote control daemon root starts, has docs/man/wasabid.txt; nfscd (D23),
 # the server of an NFS mount, is described in docs/man/mount.txt, as are fatd (D30), the server of a FAT mount, ffsd (D31), of an OFS or FFS mount, and pfs3d (D32), of a PFS3 mount.
-SBINAPPS := zfsd netd wasabid nfscd fatd ffsd pfs3d displayd dlogin
+SBINAPPS := zfsd netd wasabid nfscd fatd ffsd pfs3d displayd dlogin sndd
 SBINZX := $(SBINAPPS:%=$(BUILD)/%.zx)
 # the network's drivers (DESIGN D19 steps 7-8): user processes netd starts as /sbin/net/NAME IFACE [ARGS], from
 # net/drv/NAME.c, built as drv-NAME. NETDRVS are shipped (/sbin/net on every full root image and in the base package);
@@ -590,6 +591,16 @@ $(BUILD)/arc-core.uo: ports/ahiru/upstream/core/arc.c $(ARC_HDRS) | $(BUILD)
 $(BUILD)/unlha.uelf: $(BUILD)/unlha.uo $(BUILD)/arcread.uo $(BUILD)/arclha.uo $(BUILD)/arclzx.uo $(BUILD)/arc-core.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/unlha.uo $(BUILD)/arcread.uo $(BUILD)/arclha.uo $(BUILD)/arclzx.uo \
 	    $(BUILD)/arc-core.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+# sound (DESIGN D40, docs/d40-sound.md): the server /sbin/sndd (port "audio"), play with its file reader, modplay with
+# its replayer; the client library in both. Cold code at -Os; the reader's and the replayer's loops at -O2
+$(BUILD)/sndd.uo $(BUILD)/play.uo $(BUILD)/modplay.uo $(BUILD)/sndlib.uo: $(BUILD)/%.uo: user/%.c user/sndproto.h user/sndlib.h user/snddec.h user/modrep.h kernel/netproto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/snddec.uo $(BUILD)/modrep.uo: $(BUILD)/%.uo: user/%.c user/snddec.h user/modrep.h | $(BUILD)
+	$(CC) $(UCFLAGS) -c $< -o $@
+$(BUILD)/play.uelf: $(BUILD)/play.uo $(BUILD)/snddec.uo $(BUILD)/sndlib.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/play.uo $(BUILD)/snddec.uo $(BUILD)/sndlib.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(BUILD)/modplay.uelf: $(BUILD)/modplay.uo $(BUILD)/modrep.uo $(BUILD)/sndlib.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/modplay.uo $(BUILD)/modrep.uo $(BUILD)/sndlib.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 # the crypto library (DESIGN D21 3.5, docs/d21-crypto-ssh-https.md): BearSSL and Monocypher (only the files used,
 # crypto/*/README) and Zenix's crypto/zc/, as one archive linked with --gc-sections into the programs that use it
 # (cryptotest, ssh, ssh-keygen). Cold code at -Os; the files a handshake waits on at -O2 (D21 3.6 step 1: the curve25519
