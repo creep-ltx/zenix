@@ -80,8 +80,8 @@ USERZX := $(UAPPS:%=$(BUILD)/%.zx)
 # servers that live on the disk as files (DESIGN D19 step 1), installed as /sbin/NAME on every full root image and in
 # the base package: the ZenixFS server, which mount registers as a file service (D11 6.4), and the network server.
 # Not commands: no page; wasabid (D24), the remote control daemon root starts, has docs/man/wasabid.txt; nfscd (D23),
-# the server of an NFS mount, is described in docs/man/mount.txt, as are fatd (D30), the server of a FAT mount, ffsd (D31), of an OFS or FFS mount, and pfs3d (D32), of a PFS3 mount, and iso9660d (D44), of an ISO 9660 mount (a CD).
-SBINAPPS := zfsd netd wasabid nfscd fatd ffsd pfs3d iso9660d displayd dlogin sndd usbd
+# the server of an NFS mount, is described in docs/man/mount.txt, as are fatd (D30), the server of a FAT mount, ffsd (D31), of an OFS or FFS mount, and pfs3d (D32), of a PFS3 mount, and iso9660d (D44), of an ISO 9660 mount (a CD), and exfatd (D47), of an exFAT mount.
+SBINAPPS := zfsd netd wasabid nfscd fatd ffsd pfs3d iso9660d exfatd displayd dlogin sndd usbd
 SBINZX := $(SBINAPPS:%=$(BUILD)/%.zx)
 # the network's drivers (DESIGN D19 steps 7-8): user processes netd starts as /sbin/net/NAME IFACE [ARGS], from
 # net/drv/NAME.c, built as drv-NAME. NETDRVS are shipped (/sbin/net on every full root image and in the base package);
@@ -521,7 +521,7 @@ $(BUILD)/nfscd.uelf: $(BUILD)/nfscd.uo $(NFSOBJS) $(BUILD)/crt0.o $(BUILD)/libz.
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/nfscd.uo $(NFSOBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
 STACK_nfscd := 8192
 # fatd (DESIGN D30, docs/d30-fat.md): the server of a FAT mount, /sbin/fatd, one file. Cold code: -Os
-$(BUILD)/fatd.uo: user/fatd.c user/volid.h user/diskcall.h kernel/fsperm.h kernel/fsproto.h kernel/diskproto.h user/libz.h user/usys.h | $(BUILD)
+$(BUILD)/fatd.uo: user/fatd.c user/utf16name.h user/volid.h user/diskcall.h kernel/fsperm.h kernel/fsproto.h kernel/diskproto.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
 STACK_fatd := 8192
 # ffsd (DESIGN D31, docs/d31-ffs.md): the server of an OFS or FFS mount, /sbin/ffsd, one file. Cold code: -Os
@@ -536,6 +536,10 @@ STACK_pfs3d := 8192
 $(BUILD)/iso9660d.uo: user/iso9660d.c user/volid.h user/diskcall.h kernel/fsperm.h kernel/fsproto.h kernel/diskproto.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
 STACK_iso9660d := 8192
+# exfatd (DESIGN D47, docs/d47-exfat.md): the server of an exFAT mount (a USB stick), read-only, /sbin/exfatd. Cold code: -Os
+$(BUILD)/exfatd.uo: user/exfatd.c user/utf16name.h user/volid.h user/diskcall.h kernel/fsperm.h kernel/fsproto.h kernel/diskproto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+STACK_exfatd := 8192
 # ---- Zenix Desktop (DESIGN D38, docs/d38-desktop.md): the display server /sbin/displayd (display/server/: the
 # protocol, the input and the font reader cold, -Os; the drawing and the fonts -O2: the golden path, input to screen), the client
 # library display/lib/libdisplay.c linked into each client (static, D38 5), the test client dpytest ----
