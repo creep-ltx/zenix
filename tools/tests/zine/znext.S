@@ -14,6 +14,8 @@
 #define LVO_FindSemaphore -594
 #define LVO_Lock -84
 #define LVO_CompareDates -738
+#define LVO_SetDrMd -354
+#define LVO_RectFill -306
 #define LVO_CopyMem -624
 #define LVO_GetDeviceProc -642
 #define LVO_FreeDeviceProc -648
@@ -1025,6 +1027,54 @@ main:
     bne     fail
     subq.l  #1,%d4
     bpl.s   50b
+    lea     V_bm(%a4),%a0       /* RectFill (16.18: a byte at a time): 64 x 4, one plane */
+    moveq   #1,%d0
+    moveq   #64,%d1
+    moveq   #4,%d2
+    CALL    V_gfx, LVO_InitBitMap
+    moveq   #64,%d0
+    moveq   #4,%d1
+    jsr     LVO_AllocRaster(%a6)
+    move.l  %d0,V_bm+bm_Planes(%a4)
+    beq     fail
+    lea     V_rp(%a4),%a1
+    jsr     LVO_InitRastPort(%a6)
+    lea     V_bm(%a4),%a0
+    move.l  %a0,V_rp+4(%a4)
+    lea     V_rp(%a4),%a1
+    moveq   #1,%d0
+    jsr     LVO_SetAPen(%a6)
+    lea     V_rp(%a4),%a1
+    moveq   #3,%d0
+    moveq   #1,%d1
+    moveq   #40,%d2
+    moveq   #2,%d3
+    jsr     LVO_RectFill(%a6)
+    lea     V_rp(%a4),%a1
+    moveq   #2,%d0              /* COMPLEMENT */
+    jsr     LVO_SetDrMd(%a6)
+    lea     V_rp(%a4),%a1
+    moveq   #4,%d0
+    moveq   #1,%d1
+    moveq   #7,%d2
+    moveq   #1,%d3
+    jsr     LVO_RectFill(%a6)
+    move.l  V_bm+bm_Planes(%a4),%a0
+    tst.l   (%a0)               /* row 0 untouched */
+    bne     fail
+    cmp.l   #0x10FFFFFF,8(%a0)  /* row 1: 3-40 set, then 4-7 complemented */
+    bne     fail
+    cmp.l   #0xFF800000,12(%a0)
+    bne     fail
+    cmp.l   #0x1FFFFFFF,16(%a0) /* row 2: 3-40 */
+    bne     fail
+    cmp.l   #0xFF800000,20(%a0)
+    bne     fail
+    tst.l   24(%a0)             /* row 3 untouched */
+    bne     fail
+    moveq   #64,%d0
+    moveq   #4,%d1
+    jsr     LVO_FreeRaster(%a6)
     SAY     m_dosl
     SAY     m_font
     moveq   #0,%d0
@@ -1073,7 +1123,7 @@ p_none:   .asciz "nosuch.file"
 p_disk:   .asciz "ZDisk:Data/Sub/f.txt"
 p_t:      .asciz "T:znext"
 p_ramdisk: .asciz "ram disk"
-m_dosl:   .asciz "znext: the DOS list, GetDeviceProc, CompareDates and CopyMem answered\n"
+m_dosl:   .asciz "znext: the DOS list, GetDeviceProc, CompareDates, CopyMem and RectFill answered\n"
     .balign 4
 cm_src:   .ascii "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJ"
           .byte 0x5A

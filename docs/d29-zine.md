@@ -2104,6 +2104,9 @@ by 13 KB after round 7's blob grew.
 destination were not both long-aligned; it now aligns the destination and copies longs four at a time (a 68020 and
 later read a long at any address). Demos that read their data in odd-sized pieces spent minutes of the 68060's
 emulated time there (The Martini Effect: a `Read`, then a thousand `CopyMem` calls of a few bytes each).
+`RectFill` set or complemented a pixel at a time, plane by plane; it now works a
+byte at a time, the edges masked. Efreet's deeppan clears its window with RectFill every frame: its frames stayed
+off the screen for minutes of emulated time.
 
 **The trace build** writes each AllocMem's size, attributes and answer (`M`), and on a crash in supervisor mode the
 supervisor stack above the frame (`S`) with the code before the first stacked address that looks like a return.
@@ -2111,14 +2114,15 @@ supervisor stack above the frame (`S`) with the code before the first stacked ad
 *Verified* in FS-UAE: `tools/zine-input-test.sh` on the 68020 and the 68060 machine (zinput opens lowlevel.library:
 SystemControlA, ReadJoyPort's two types, GetKey in its keyboard interrupt, the keyboard, vertical-blank and 20 ms
 timer interrupts counted, ElapsedTime; the test's 68060 run had never found its disk images before, fixed),
-`tools/zine-emu-test.sh` (znext: the DOS list, GetDeviceProc, CompareDates, CopyMem at odd addresses; znext had 2,709
+`tools/zine-emu-test.sh` (znext: the DOS list, GetDeviceProc, CompareDates, CopyMem at odd addresses, RectFill set
+and complemented across bytes; znext had 2,709
 KB of fast RAM before and 2,890 KB with the block's spare end), `tools/host/zine-test.sh` (zp_give: in address order,
 refused in a free block, over a chunk, in chip RAM, across two blocks, over a header, with a full array). Not yet on
 a real machine.
 
-Sizes (*measured*, the 68020-60 build): the blob's code 117,252 -> 121,190 bytes (memory 125,373 -> 129,365):
-lowlevel.library about 2.3 KB, the DOS list, GetDeviceProc and CompareDates about 1 KB, the rest the copy, zp_give and
-the trace lines. `/bin/zine` 45,904 -> 45,926 bytes in memory (a library name); the kernel unchanged.
+Sizes (*measured*, the 68020-60 build): the blob's code 117,252 -> 121,306 bytes (memory 125,373 -> 129,481):
+lowlevel.library about 2.3 KB, the DOS list, GetDeviceProc and CompareDates about 1 KB, the rest the copy, RectFill,
+zp_give and the trace lines. `/bin/zine` 45,904 -> 45,926 bytes in memory (a library name); the kernel unchanged.
 
 ## 17. Questions for the owner (what ZINE should be)
 

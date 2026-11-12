@@ -764,21 +764,43 @@ u32 c_Text(u8 *rp, const u8 *s, u32 n)
 
 /* RectFill(rp a1, xmin d0, ymin d1, xmax d2, ymax d3) (-306) and SetRast(rp a1, pen d0) (-234): FgPen's colour (SetRast
  * the pen given) into the BitMap's planes the Mask allows, clipped; COMPLEMENT flips them */
+/* a rectangle in the pen, or complemented (16.18: a byte at a time, the edges masked, the middle of a row whole; it
+ * was a pixel at a time, which kept deeppan's frames from the screen for minutes) */
 static void fill(u8 *rp, s32 x0, s32 y0, s32 x1, s32 y1, u8 pen, u8 mode)
 {
     u8 *bm = rp ? *(u8 **)(rp + RP_BitMap) : 0;
     if (!bm)
         return;
-    s32 w = *(u16 *)(bm + ZO_BitMap_BytesPerRow) * 8, h = *(u16 *)(bm + ZO_BitMap_Rows);
+    u32 bpr = *(u16 *)(bm + ZO_BitMap_BytesPerRow);
+    s32 w = (s32)bpr * 8, h = *(u16 *)(bm + ZO_BitMap_Rows);
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
     if (x1 >= w) x1 = w - 1;
     if (y1 >= h) y1 = h - 1;
-    for (s32 y = y0; y <= y1; y++)
-        for (s32 x = x0; x <= x1; x += 8) {
-            s32 n = x1 - x + 1 < 8 ? x1 - x + 1 : 8;
-            put8(bm, x, y, 0xFF, (u32)n, pen, pen, mode & COMPLEMENT, rp[RP_Mask]);
+    if (x0 > x1 || y0 > y1)
+        return;
+    u32 b0 = (u32)x0 >> 3, b1 = (u32)x1 >> 3;
+    u8 lm = (u8)(0xFF >> (x0 & 7)), rm = (u8)(0xFF << (7 - (x1 & 7)));
+    if (b0 == b1)
+        lm &= rm;
+    for (u32 pl = 0; pl < bm[ZO_BitMap_Depth] && pl < 8; pl++) {
+        u8 *p = *(u8 **)(bm + ZO_BitMap_Planes + 4 * pl);
+        if (!p || p == (u8 *)-1 || !(rp[RP_Mask] & (1u << pl)))
+            continue;
+        int cpl = mode & COMPLEMENT, set = (pen >> pl) & 1;
+        for (s32 y = y0; y <= y1; y++) {
+            u8 *r = p + (u32)y * bpr;
+            for (u32 b = b0; b <= b1; b++) {
+                u8 m = b == b0 ? lm : b == b1 ? rm : 0xFF;
+                if (cpl)
+                    r[b] ^= m;
+                else if (set)
+                    r[b] |= m;
+                else
+                    r[b] &= (u8)~m;
+            }
         }
+    }
 }
 void c_RectFill(u8 *rp, s32 x0, s32 y0, s32 x1, s32 y1)
 {
