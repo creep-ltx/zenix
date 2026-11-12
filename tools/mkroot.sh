@@ -45,7 +45,7 @@ fi
 mkdir -p "$T/bin" "$T/tmp"
 for p in $PROGS; do
     name=$(echo "$p" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')    # mkfs_ext2 -> mkfs.ext2
-    dir=bin; case $p in zup|zfsd|netd|wasabid|nfscd|fatd|ffsd|pfs3d|iso9660d|displayd|dlogin|sndd) dir=sbin; mkdir -p "$T/sbin";; esac  # the updater (D15), the servers (D19)
+    dir=bin; case $p in zup|zfsd|netd|wasabid|nfscd|fatd|ffsd|pfs3d|iso9660d|displayd|dlogin|sndd|usbd) dir=sbin; mkdir -p "$T/sbin";; esac  # the updater (D15), the servers (D19)
     case $p in drv-*) dir=sbin/net; name=${p#drv-}; mkdir -p "$T/sbin/net";; esac   # the network's drivers (D19 step 7)
     case $p in displayd-nortg) dir=sbin; name=displayd; mkdir -p "$T/sbin";; esac   # the demo floppies' displayd without RTG (Makefile)
     cp "$B/$p.zx" "$T/$dir/$name"

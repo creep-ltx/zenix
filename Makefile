@@ -49,7 +49,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet \
           rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs \
-          play modplay
+          play modplay lsusb
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -81,7 +81,7 @@ USERZX := $(UAPPS:%=$(BUILD)/%.zx)
 # the base package: the ZenixFS server, which mount registers as a file service (D11 6.4), and the network server.
 # Not commands: no page; wasabid (D24), the remote control daemon root starts, has docs/man/wasabid.txt; nfscd (D23),
 # the server of an NFS mount, is described in docs/man/mount.txt, as are fatd (D30), the server of a FAT mount, ffsd (D31), of an OFS or FFS mount, and pfs3d (D32), of a PFS3 mount, and iso9660d (D44), of an ISO 9660 mount (a CD).
-SBINAPPS := zfsd netd wasabid nfscd fatd ffsd pfs3d iso9660d displayd dlogin sndd
+SBINAPPS := zfsd netd wasabid nfscd fatd ffsd pfs3d iso9660d displayd dlogin sndd usbd
 SBINZX := $(SBINAPPS:%=$(BUILD)/%.zx)
 # the network's drivers (DESIGN D19 steps 7-8): user processes netd starts as /sbin/net/NAME IFACE [ARGS], from
 # net/drv/NAME.c, built as drv-NAME. NETDRVS are shipped (/sbin/net on every full root image and in the base package);
@@ -109,7 +109,7 @@ $(BUILD)/bootblock.bin: $(BUILD)/bootblock.elf
 
 # stage0: reads the Pi's hardware addresses from Emu68's device tree while AmigaOS is alive. Position
 # independent (-mpcrel), no data, no relocations; embedded in the kernel image (start.S) and called by the bootblock.
-$(BUILD)/stage0.o: boot/stage0.c boot/genet-stop.h net/drv/genet.h kernel/hwinfo.h boot/dtapi_amiga.h | $(BUILD)
+$(BUILD)/stage0.o: boot/stage0.c boot/genet-stop.h boot/xhci-stop.h net/drv/genet.h kernel/hwinfo.h boot/dtapi_amiga.h | $(BUILD)
 	$(CC) -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib -Os -Wall -Wextra -mpcrel \
 	    -fno-asynchronous-unwind-tables -c $< -o $@
 	@test -z "$$($(TOOLPREFIX)readelf -r $@ | grep -E "R_68K_(32|16|8|GOT|PLT)")" || { echo "stage0 must have no absolute relocations"; exit 1; }
@@ -246,8 +246,9 @@ RAMDISK_K := 640
 # and LEAN=1 (tools/mkroot.sh: no /etc/zdesk, a one-block /lost+found) gave 25 back (26 free). 692 since DESIGN D41
 # (2026-11-12, memory protection: about 7 KB of kernel, kernel/mmu.c and its hooks). 689 since DESIGN D44 (2026-11-12,
 # the CD drive: about 2.4 KB of kernel, ATAPI in kernel/ide.c and cd0 in the built-in diskd). 688 since DESIGN D45
-# revision 3 (2026-11-12, memory protection's code in a span of its own: 200 bytes of kernel.bin).
-RAMDISK_MOUNT_K := 688
+# revision 3 (2026-11-12, memory protection's code in a span of its own: 200 bytes of kernel.bin). 685 since DESIGN D46
+# (2026-11-12, USB sticks: 3.4 KB of kernel.bin: the built-in diskd's usb0 2.3 KB, stage0's boot-only lookup 0.7 KB).
+RAMDISK_MOUNT_K := 685
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/check-init.py tools/ksize-check.sh tools/ksize-budget
@@ -747,6 +748,12 @@ STACK_drv-a2065 := 8192
 STACK_drv-genet := 8192
 STACK_drv-ne2000 := 8192
 STACK_drv-plipbox := 8192
+# USB (DESIGN D46, docs/d46-usb.md): the server /sbin/usbd (port "usb"; the xHCI back end and the USB core are
+# included by usb/usbd.c, and by the host test tools/usb-host-test.c against the model), and lsusb
+$(BUILD)/usbd.uo: usb/usbd.c usb/xhci-core.c usb/core.c usb/xhci.h usb/usb.h usb/usbproto.h kernel/netproto.h kernel/hwinfo.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/lsusb.uo: usb/usbproto.h
+STACK_usbd := 8192
 # genet's chip and PHY code is genet-core.c, included by genet.c (and by the host test against the model)
 $(BUILD)/drv-genet.uo: net/drv/genet-core.c net/drv/genet.h
 $(BUILD)/drv-ne2000.uo: net/drv/ne2000-core.c net/drv/ne2000.h

@@ -1,0 +1,58 @@
+USBD(8)				Zenix manual
+
+NAME
+    usbd - the USB server
+
+SYNOPSIS
+    /sbin/usbd [cache=kernel|cache=user]
+                 (not a command: started by a call to port "usb",
+                 from /etc/svctab; kept running by "lsusb --hold")
+
+DESCRIPTION
+    Drives the USB 2.0 port of a Raspberry Pi 4 or CM4 under Emu68
+    (a PiStorm): the BCM2711's xHCI controller, which the firmware
+    enables with otg_mode=1 in config.txt. It finds the controller in
+    the boot's hardware table, claims it from the kernel (no other
+    program may), resets it, and then looks at it ten times a second
+    (no interrupts).
+    A USB stick plugged into the port (mass storage, bulk-only, with
+    512-byte sectors) is served to the disk server: diskd lists it as
+    usb0 and its partitions as usb0p1, usb0p2, ... (an MBR, an RDB),
+    read-only, and mount(8) mounts them as any disk's (FAT, ext2,
+    ZenixFS, FFS, PFS3). A stick that is pulled out under a mount
+    makes the mount answer "stale"; unmount it.
+    One stick at a time, plugged straight in (no hubs). A device that
+    is not a stick is listed by lsusb(1) and left alone; one whose
+    answers make no sense (or that is never ready, has no medium,
+    4096-byte sectors, or is a CD drive) is named in the log and left
+    alone until it is pulled out.
+    cache=...   the cache calls around the controller's memory:
+                cache=kernel always the kernel's; cache=user Emu68's
+                range opcodes from usbd. By default usbd tries the
+                opcodes in a child process first and uses them if
+                they work. Either way a No-Op command with a stale
+                cache line is its self-test: if the controller does
+                not answer it, usbd stops.
+    Its messages go to the kernel log (dmesg): the controller's
+    values, the cache calls chosen, each device that comes and goes,
+    a stick's name and size. On a machine without the controller it
+    says so once and stops until the next boot (status 0).
+
+FILES
+    /etc/svctab   its line: usb -5 /sbin/usbd
+    /etc/daemons  the line "usb 0 /bin/lsusb --hold" keeps it running
+                  (shipped with a # before it)
+
+NOTES
+    Not done yet: writing to a stick, exFAT (the next item), hubs,
+    keyboards and mice, USB 3, more than one stick, card readers'
+    other slots. A request reads at most 64 KB; a stick that does not
+    answer a read in 5 s is dropped. The kernel stops the controller
+    when usbd ends, and before a ZINE program runs (a mount of the
+    stick is stale afterwards); five ends within 60 s (five ZINE
+    programs, say) make the service manager give it up until the next
+    boot. Not yet run on a real PiStorm: docs/d46-usb.md section 6.2
+    is its first run.
+
+SEE ALSO
+    lsusb(1), diskd(8), mount(8), init(8), docs/d46-usb.md

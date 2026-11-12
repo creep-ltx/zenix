@@ -27,6 +27,12 @@
 #define GSTOP_SLOW      0x10            /* the DMA did not say "stopped" within 100 ms */
 #define GSTOP_NOTV5     0x20            /* the address held no GENET v5: nothing written */
 
+/* hwinfo.xhci_stop (boot/xhci-stop.h, DESIGN D46 3.6: the warm start from AmigaOS) */
+#define XSTOP_DONE      0x01            /* an xHCI was looked at: halted (or it already was) */
+#define XSTOP_RAN       0x02            /* it was running (AmigaOS's USB stack left it on) */
+#define XSTOP_SLOW      0x04            /* it did not say "halted" within 100 ms */
+#define XSTOP_NOTXHCI   0x08            /* the address held no xHCI (its capability length or version made no sense) */
+
 #define HW_MAXBOARDS 16
 
 /* one configured Zorro expansion board, copied from expansion.library's ConfigDev list */
@@ -64,7 +70,11 @@ struct hwinfo {
                                  * none: credited fully by the entropy pool (DESIGN D19 9.3) */
     unsigned int genet_stop;    /* what stage0 did to a GENET a previous owner may have left running: GSTOP_* bits, 0 if
                                  * there was none (or a dry run); the driver and the boot log say it */
-    unsigned int reserved[3];
+    /* (DESIGN D46, 2026-11-12) the BCM2711's xHCI USB 2.0 controller (/scb/xhci@7e9c0000, found through /__symbols__'s
+     * "xhci"): 0 when the device tree has none or its node is disabled (no otg_mode=1 in config.txt) */
+    unsigned int xhci;          /* its registers as the 68k sees them */
+    unsigned int xhci_size;     /* its "reg" length (1 MB on the CM4): the claim's window */
+    unsigned int xhci_stop;     /* what stage0 did to an xHCI a previous owner left running: XSTOP_* bits, 0 if none */
     struct hwboard board[HW_MAXBOARDS];
     /* (DESIGN D43, 2026-11-12) an RTG screen zenixboot RTG took over from AmigaOS's Picasso96 (docs/d43-rtg.md 3):
      * written by zenixboot after stage0, never by the kernel; read by the display server */

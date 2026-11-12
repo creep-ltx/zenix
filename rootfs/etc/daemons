@@ -4,3 +4,5 @@
 # 60 s: given up). Output goes to the kernel log (dmesg). At most 4 lines; 6 words in 79 characters.
 # The remote control (wasabid(8)): write /etc/wasabid.conf first, then remove the # below.
 #wasabid   0     /sbin/wasabid --init
+# The USB server kept running (usbd(8)), for USB keyboards and mice on a PiStorm with a CM4: remove the # below.
+#usb       0     /bin/lsusb --hold

@@ -11,8 +11,8 @@
 #     any count: the bytes of the image), a disc changed under a mount answers -ESTALE until it is mounted again, a
 #     drive becoming ready waited for, no disc, a restart keeps the CD's claim, no drive: no cd0.
 cd "$(dirname "$0")/.." || exit 1
-T=$(mktemp -d /tmp/zdisk.XXXXXX)
-trap 'rm -rf $T' EXIT
+T=$(mktemp -d "${TMPDIR:-/tmp}/zdisk.XXXXXX")
+[ -n "$KEEP" ] || trap 'rm -rf $T' EXIT
 CF="-m32 -DZHOST -std=gnu11 -O1 -g -Wall -Wno-format-truncation -fsanitize=address,undefined"
 gcc $CF -o $T/fdisk user/fdisk.c tools/host/hostdisk.c || { echo "FAIL build fdisk"; exit 1; }
 gcc $CF -o $T/diskd tools/host/diskd-host.c tools/host/hostdisk.c -Ituser || { echo "FAIL build diskd"; exit 1; }
@@ -196,6 +196,90 @@ after restart 3 "^open cd0 raw 7 -> -16" && after restart 3 "^open cd0 mount 6 -
     && check "cd0: a restarted diskd keeps the CD's claim, and the mount reads on" ok || { check "cd0: restart" bad; cat $T/cd.out; }
 printf 'list\n' | HOSTDISK=$T/d.hdf $T/diskd > $T/nocd.out 2>&1
 grep -q "cd0" $T/nocd.out && check "no CD drive: no cd0" bad || check "no CD drive: no cd0" ok
+
+# ---- D46: a USB stick through the USB server (a stub of usbd behind the posts): usb0 and its partitions, read-only ----
+python3 - "$T/stick.img" <<'EOP'
+import struct, sys
+n = 20000                                   # 10 MB: an MBR, a FAT32 partition (0x0C) and a Linux one (0x83)
+img = bytearray(n * 512)
+for i in range(n): img[i * 512:i * 512 + 4] = struct.pack('<I', i)       # every sector says its number
+def ent(boot, typ, start, size): return bytes([boot, 0, 0, 0, typ, 0, 0, 0]) + struct.pack('<II', start, size)
+mbr = bytearray(img[0:512]); mbr[446:446 + 32] = ent(0x80, 0x0C, 2048, 8192) + ent(0, 0x83, 10240, 9760)
+mbr[510] = 0x55; mbr[511] = 0xAA; img[0:512] = mbr
+open(sys.argv[1], 'wb').write(img)
+EOP
+H=$(printf 'usb hello\nusb add\nlist\n' | HOSTUSB=$T/stick.img HOSTDISK=$T/d.hdf $T/diskd 2>&1 | sed -n 's/^list -> usb0p1 h\([0-9]*\) .*/\1/p')
+cat > $T/usb.txt <<EOF2
+list
+usb hello-other
+usb hello
+usb add
+list
+open usb0p1 mount 30
+readx $H 0 128 $T/u1
+readx $H 8100 92 $T/u2
+readx $H 8150 50 $T/u3
+readx $H 0 129 $T/u4
+write $H 0 30
+usb fail 1
+read $H 5 30
+open fd0 plain 1
+rescan
+list
+usb dead
+read $H 5 30
+usb alive
+unmount $H 30
+usb add
+open usb0p1 mount 31
+usb del
+read $H 5 31
+list
+unmount $H 31
+list
+usb add
+open usb0p1 mount 30
+restart
+usb beat
+open usb0p1 mount 30
+read $H 5 30
+list
+usb late 10
+read $H 6 30
+usb late 100000
+read $H 7 30
+usb late 0
+usb add
+usb flood 12
+list
+EOF2
+HOSTUSB=$T/stick.img HOSTDISK=$T/d.hdf $T/diskd < $T/usb.txt > $T/usb.out 2>&1
+uwant() { grep -q -- "$2" $T/usb.out && check "usb0: $1" ok || { check "usb0: $1" bad; cat $T/usb.out; }; }
+upart() { dd if=$T/stick.img bs=512 skip=$1 count=$2 status=none | cmp -s - $3; }
+[ "$(sed -n '1,/^usb hello /p' $T/usb.out | grep -c 'list -> usb0')" = 0 ] && check "usb0: nothing before the USB server's hello" ok || check "usb0: before hello" bad
+uwant "a hello from a process that does not own port usb refused" "usb hello-other -> -1"
+uwant "the server's hello answered" "^usb hello -> 0"
+uwant "the stick listed with its label, read-only (caps 8)" "list -> usb0 h[0-9]* start 0 sectors 20000 type 00000000 mounted 0 caps 8"
+uwant "its FAT32 partition (MBR type 0x0C)" "list -> usb0p1 h$H start 2048 sectors 8192 type 4d42520c"
+uwant "its Linux partition (ext2)" "list -> usb0p2 h[0-9]* start 10240 sectors 9760 type 4c4e5800"
+upart 2048 128 $T/u1 && check "usb0p1: 128 sectors at once are the stick's" ok || check "usb0p1: 128 sectors" bad
+upart 10148 92 $T/u2 && check "usb0p1: its last 92 sectors" ok || check "usb0p1: the last sectors" bad
+uwant "past the partition's end refused" "readx $H 8150 50 .* -> -22"
+uwant "more than the server's 128 sectors at once refused" "readx $H 0 129 .* -> -22"
+uwant "a write refused: read-only" "write $H 0 30 -> -30"
+uwant "the server's error comes back (-EIO)" "read $H 5 30 -> -5"
+[ "$(sed -n '/^rescan/,/^usb dead/p' $T/usb.out | grep -c 'list -> usb0')" = 3 ] && check "usb0: a rescan for df0 or the table keeps the stick's devices" ok || { check "usb0: rescan keeps them" bad; cat $T/usb.out; }
+grep -A2 '^usb dead' $T/usb.out | grep -q -- '-> -5' && check "usb0: a server that stops answering: -EIO after the wait, nothing hangs" ok || check "usb0: dead server" bad
+grep -A1 '^usb del' $T/usb.out | grep -q -- "read $H 5 31 -> -116" && check "usb0: the stick pulled under a mount: -ESTALE" ok || check "usb0: pulled under a mount" bad
+[ "$(sed -n "/^unmount $H 31/,/^usb add/p" $T/usb.out | grep -c 'list -> usb0')" = 0 ] && check "usb0: unmounted, gone from the list" ok || check "usb0: gone after unmount" bad
+grep -A4 '^restart' $T/usb.out | grep -q "open usb0p1 mount 30 -> $H" && grep -A5 '^restart' $T/usb.out | grep -q "read $H 5 30 -> 0" \
+    && check "usb0: a restarted diskd keeps the mount's slot; the server's heartbeat finds no window, says hello and brings the stick back to it" ok || { check "usb0: restart" bad; cat $T/usb.out; }
+uwant "an answer that comes while diskd waits: read" "read $H 6 30 -> 0"
+grep -A2 "^usb late 100000" $T/usb.out | grep -q "read $H 7 30 -> -5" && check "usb0: an answer that never comes: -EIO after the 5 s wait, the stick dropped" ok || check "usb0: no answer" bad
+grep -q "records from the USB server were lost" $T/usb.out && [ "$(sed -n '/^usb flood/,$p' $T/usb.out | grep -c 'list -> usb0 ')" = 1 ] \
+    && check "usb0: more news than the window holds: said, the newest taken (the stick there)" ok || { check "usb0: flood" bad; cat $T/usb.out; }
+printf 'list\nusb add\nlist\n' | HOSTUSB=$T/stick.img HOSTDISK=$T/d.hdf $T/diskd > $T/nousb.out 2>&1
+grep -q "usb0" $T/nousb.out && check "usb0: no hello, no stick (news before a hello ignored)" bad || check "usb0: no hello, no stick (news before a hello ignored)" ok
 
 echo "disk-host-test: $pass passed, $fail failed"
 [ $fail = 0 ]
