@@ -1090,6 +1090,9 @@ struct upeermem { u32 addr, len; };
                               * window at off, then the port's owner woken (POLLRDBAND); len 0 only wakes */
 struct upostbuf { u32 addr, size; s32 from; };
 struct upost { u32 off, src, len; };
+#define SYS_atapi       98   /* struct uatapi * (diskproto.h): a packet to the ATAPI CD drive (disk server only; DESIGN D44) */
+struct uatapi;
+int ide_atapi(struct uatapi *q);
 long ipc_peer(u32 msg, u32 op, u32 arg);
 long ipc_post(u32 op, u32 port, u32 arg);
 long zine_sys(u32 op, u32 a, u32 b);

@@ -762,7 +762,7 @@ pattern (section 6).
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 94 system calls (the numbers and
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 95 system calls (the numbers and
 a line on each are in `kernel/kernel.h`; numbers 1-97, of which 39, 40 and 68 are unused; the next free number is
 claimed in CLAUDE.md first): the network (`sock`, `netsrv`, `drv`: section 11, "Sockets" and "The network's drivers"), files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount

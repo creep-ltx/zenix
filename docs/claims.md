@@ -29,7 +29,8 @@ Claim a number here **before** using it (system calls, message types, port names
 | 89 `console`'s op 10 `CON_MOUSE` (DESIGN D38: the grab's descriptor; a2 THRESHOLD 0..127 \| MULTIPLIER 1..8 << 8, the mouse's acceleration a frame; -EINVAL otherwise) | branch desk, 2026-11-04 |
 | 89 `console`'s op 11 `CON_MODE` (DESIGN D28 22: the console's mode, every console's, no descriptor; a2 `CONM_HIRES` 0, `CONM_LACE` 1, `CONM_ASK` 0xFF asks; root to set) | branch pubprep, 2026-11-12 |
 | 92 `drv`'s `DRV_CLAIM` base `DRV_PAULA` 0xDFF0A0 (Paula's four channels: the process of port `audio` only, before the network gate; DESIGN D40) | branch sound, 2026-11-12 |
-| **next free: 98** | |
+| 98 `atapi` (DESIGN D44: a packet command to the IDE port's ATAPI CD drive, `struct uatapi` in `kernel/diskproto.h`, first size 28; the disk server only) | branch cd, 2026-11-12 |
+| **next free: 99** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
 Message types claimed so far: `NET_*` 1-19 on port `net` (`kernel/netproto.h`, DESIGN D19 step 3: the `SOCK_*` op
 numbers 1-18 and `NET_CLOSE` 19; 1-63 are the kernel's to the server), `NETDRV_*` from 64 (the drivers' blocks, step 7:
@@ -37,7 +38,8 @@ numbers 1-18 and `NET_CLOSE` 19; 1-63 are the kernel's to the server), `NETDRV_*
 `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `FS_*` 25 `FS_MARK` (D15 step 2, 2026-10-26:
 zup's "needs a check" mark), `FS_*` 26 `FS_HEALTH` (D34, branch zroot, 2026-11-01: boot asks whether a ZenixFS root could only be mounted read-only), `FS_SYNC`'s a0 1 "bounded" (D23 step 1, branch nfs12, 2026-10-28; recorded by audit
 2026-10-29 B2-7), `DISK_*` 1-8, `DISK_*` 9 `DISK_INFOSZ` and
-10 `DISK_LISTSZ` (D15 step 0, fix3, 2026-10-26: `DISK_INFO`/`DISK_LIST` with the caller's buffer size).
+10 `DISK_LISTSZ` (D15 step 0, fix3, 2026-10-26: `DISK_INFO`/`DISK_LIST` with the caller's buffer size); `struct diskinfo`'s
+caps bit `DISKCAP_RO` 8 (D44, branch cd, 2026-11-12: a read-only medium, the CD drive `cd0`).
 `struct umsg`'s `kflags` bits: 1 `UMSG_KERNEL`, 2 `UMSG_NETREPLY` (internal), 4 `UMSG_CANCEL` (D23 step 1, branch nfs12, 2026-10-28: only the kernel sets it, for a killed client), 8
 `UMSG_LINKS` (D26, branch d26, 2026-10-28: only the kernel sets it, through `ipc_kcall`'s kflags argument; `call()`
 ORs D23's `UMSG_CANCEL` in itself), 16 `UMSG_GROUPS` (branch groups, 2026-10-31: the supplementary groups follow the

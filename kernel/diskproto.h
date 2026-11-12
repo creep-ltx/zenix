@@ -33,3 +33,18 @@ struct diskinfo {
 #define DISKCAP_FLUSH  1       /* DISK_FLUSH really reaches the medium */
 #define DISKCAP_FLASH  2       /* flash (CF/SD): no seek cost, align writes to erase; unset: rotating or unknown */
 #define DISKCAP_RAM    4       /* memory: writes are durable only until reset */
+#define DISKCAP_RO     8       /* DESIGN D44: a read-only medium (a CD): DISK_WRITE answers -EROFS */
+
+/* DESIGN D44 (docs/d44-cd.md; frozen, grows only at the end): SYS_atapi's request, a packet command to the IDE port's
+ * ATAPI CD drive, for the disk server only. Data comes from the drive (no command here sends data to it): of the bytes
+ * it sends, the first SKIP are dropped and the next LEN go to BUF (LEN and SKIP even; BUF anywhere), the rest dropped.
+ * Answers the bytes the drive sent, or -ENODEV (no CD drive), -EINVAL (odd), -EPERM, -EFAULT (the struct), -EIO (ERR
+ * set at the end, the ATA error register in ERR - the sense key in its bits 7-4 -, or no answer in time or nonsense:
+ * ERR 0, said on the log, and the drive given DEVICE RESET) */
+struct uatapi {
+    unsigned char cdb[12];     /* the packet (12 bytes: the drive's IDENTIFY PACKET DEVICE says so, checked at boot) */
+    void *buf;
+    unsigned len, skip;
+    unsigned err;              /* back: the error register after a failed command, 0 otherwise */
+};
+#define UATAPI_FIRST   28      /* its first size */

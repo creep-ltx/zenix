@@ -350,6 +350,8 @@ static inline int sys_peer(void *msg, int op, void *arg) { return sys3(96, (u32)
 struct upostbuf { u32 addr, size; int from; };
 struct upost { u32 off, src, len; };
 static inline int sys_post(int op, int port, void *arg) { return sys3(97, (u32)op, (u32)port, (u32)arg); }
+/* DESIGN D44: a packet to the ATAPI CD drive, struct uatapi (kernel/diskproto.h); the disk server only */
+static inline int sys_atapi(void *q) { return sys3(98, (u32)q, 0, 0); }
 #ifndef ZENIX_LIBC                       /* the C library: its own headers have them (libc/zenix/include) */
 #define SIGHUP   1
 #define SIGINT   2
