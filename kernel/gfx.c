@@ -130,7 +130,7 @@ const u16 gfx_palette2[4] = { 0x000, 0xC22, 0x2BB, 0xBBB };
  * Kickstart ROM. Accelerators and Emu68 put fast RAM - and with it GfxBase and the font lists - far above 16 MB
  * (Emu68: 0x08000000..., 0x41000000...), so a fixed "below 128 MB" window lost the font on a PiStorm (first boot
  * on the owner's A1200, 2026-10-23: "display: not available (no ROM font)"). */
-static int plausible(u32 a)
+KINIT static int plausible(u32 a)
 {
     const struct bootinfo *bi = (const struct bootinfo *)0x1000;
     if (a >= 0xF00000u && a < 0x1000000u)           /* Kickstart ROM */
@@ -147,7 +147,7 @@ static int plausible(u32 a)
     return 0;
 }
 
-static int font_extract(u32 tf)
+KINIT static int font_extract(u32 tf)
 {
     if (!plausible(tf) || (tf & 1))
         return -1;
@@ -181,7 +181,7 @@ static int font_extract(u32 tf)
 }
 
 /* call before mem_init: the font structures live in memory the OS left behind */
-int gfx_font_init(u32 gfxbase)
+KINIT int gfx_font_init(u32 gfxbase)
 {
     if (!plausible(gfxbase))
         return -1;
@@ -833,7 +833,7 @@ static void say_depth(void)
             aga && gfx_depth > 1 ? " at 64-bit fetch (FMODE 3)" : "", lace ? ", interlaced" : "");
 }
 
-int gfx_init(void)
+KINIT int gfx_init(void)
 {
     int fl = frame_lines();
     if (fl && fl < 280) {               /* NTSC: 200 lines */

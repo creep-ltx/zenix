@@ -213,7 +213,7 @@ static int probe_target(u8 target)
     return 0;
 }
 
-int a3000_init(void)
+KINIT int a3000_init(void)
 {
     up = 0;
 #ifndef A3000_HOST_TEST

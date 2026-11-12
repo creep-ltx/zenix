@@ -460,13 +460,13 @@ void mmu_before_reset(void)
 }
 
 /* ---- the boot (D41 section 12) ---- */
-static int off_why(const char *why)
+KINIT static int off_why(const char *why)
 {
     kprintf("mmu: memory protection off: %s\n", why);
     return 0;
 }
 
-static u32 *table(u32 *slot, u8 **next, u32 size)   /* the table *slot names, made from *next if there is none */
+KINIT static u32 *table(u32 *slot, u8 **next, u32 size)   /* the table *slot names, made from *next if there is none */
 {
     if (!(*slot & 2)) {
         u32 *t = (u32 *)*next;
@@ -476,7 +476,7 @@ static u32 *table(u32 *slot, u8 **next, u32 size)   /* the table *slot names, ma
     return (u32 *)(*slot & ~(size - 1));
 }
 
-void mmu_setup(const struct bootinfo *bi)
+KINIT void mmu_setup(const struct bootinfo *bi)
 {
     const struct hwinfo *hw = (const struct hwinfo *)HWINFO_ADDR;
     u32 k = bi->kopts;

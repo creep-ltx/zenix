@@ -18,14 +18,14 @@
 #define RTC_INTENAR (*(volatile u16 *)0xDC001C)       /* where a mirror of the custom chips would show INTENAR */
 
 static u8 nib(u8 n) { return RTC(n) & 0x0F; }
-static u8 two(u8 lo) { return nib(lo) + 10 * nib(lo + 1); }
+KINIT static u8 two(u8 lo) { return nib(lo) + 10 * nib(lo + 1); }
 
-static void wait_lines(u16 n)           /* a scan line is about 64 us */
+KINIT static void wait_lines(u16 n)           /* a scan line is about 64 us */
 {
     while (n--) { u8 c = VHPOSR; while (VHPOSR == c) ; }
 }
 
-static int date_ok(u8 d, u8 wd)         /* do the registers from d on hold a sane date? (day d, month d + 2) */
+KINIT static int date_ok(u8 d, u8 wd)         /* do the registers from d on hold a sane date? (day d, month d + 2) */
 {
     u8 day = two(d), mon = two(d + 2);
     return day >= 1 && day <= 31 && mon >= 1 && mon <= 12 && nib(d + 4) <= 9 && nib(wd) <= 6;
@@ -59,7 +59,7 @@ static int custom_mirror(void)
 u8 rtc_ok;                              /* rtc_read found a ticking clock (D29: the session's seconds) */
 
 /* Seconds since 1970, or 0 when there is no usable clock. */
-u32 rtc_read(void)
+KINIT u32 rtc_read(void)
 {
     u8 i, s, mode = 0, msm_type;
     if (custom_mirror()) {

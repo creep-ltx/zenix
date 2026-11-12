@@ -47,7 +47,7 @@ static u32 *mbox_msg = mbox_static;
 static void cache_clean(void *p)  { register void *a __asm__("a0") = p; __asm__ volatile(".word 0xF468" :: "a"(a) : "memory"); }
 static void cache_inval(void *p)  { register void *a __asm__("a0") = p; __asm__ volatile(".word 0xF448" :: "a"(a) : "memory"); }
 
-static int mbox_call(u32 tag, u32 a, u32 b, u32 nwords, u32 *r0, u32 *r1)
+KINIT static int mbox_call(u32 tag, u32 a, u32 b, u32 nwords, u32 *r0, u32 *r1)
 {
     volatile u32 *m = mbox_msg;
     m[0] = __builtin_bswap32(8 * 4);            /* total size */
@@ -82,7 +82,7 @@ static int mbox_call(u32 tag, u32 a, u32 b, u32 nwords, u32 *r0, u32 *r1)
 }
 #endif
 
-static void delay_us(u32 us)
+KINIT static void delay_us(u32 us)
 {
     u32 t0 = now_us();
     while (now_us() - t0 < us)
@@ -185,7 +185,7 @@ static int cmd(u32 index, u32 arg, u32 flags, u32 tm, u32 timeout_us)
     return 0;
 }
 
-static int acmd(u32 index, u32 arg, u32 flags, u32 tm)
+KINIT static int acmd(u32 index, u32 arg, u32 flags, u32 tm)
 {
     if (cmd(55, card_rca << 16, CMD_R1, 0, 500000))
         return -1;
@@ -193,7 +193,7 @@ static int acmd(u32 index, u32 arg, u32 flags, u32 tm)
 }
 
 /* SD clock = base / (2 * div); div = 0 means base. 10-bit divided clock mode. */
-static int set_clock(u32 base, u32 target)
+KINIT static int set_clock(u32 base, u32 target)
 {
     u32 div = 0;
     if (target < base)
@@ -235,7 +235,7 @@ static void sector0_kind(const u8 *sec, char *out)
     *out++ = ')'; *out = 0;
 }
 
-int emmc_init(void)
+KINIT int emmc_init(void)
 {
 #ifdef EMMC_HOST_TEST
     const struct hwinfo *hw = fake_hw();

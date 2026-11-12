@@ -331,6 +331,7 @@ u32 hr_time(void)
 /* the loop every idle moment returns to (the scheduler's): -O2, apart from kmain's -Os boot code */
 static __attribute__((noreturn, noinline)) void idle_loop(void)
 {
+    mem_boot_release();         /* D45: kmain is done (it called us and is never returned to): its span to the pool */
     for (;;) {
         proc_reap_orphans();
         kwork();                /* queued input first: it may wake a reader */
@@ -346,7 +347,7 @@ static __attribute__((noreturn, noinline)) void idle_loop(void)
 
 #pragma GCC push_options
 #pragma GCC optimize("Os")              /* the boot (vectors_init to kmain): run once, size first (audit block 2) */
-static void vectors_init(void)
+KINIT static void vectors_init(void)
 {
     for (int i = 0; i < 256; i++)
         vector_table[i] = (u32)exc_common;
@@ -361,7 +362,7 @@ static void vectors_init(void)
 
 /* CIA-B timers A and B chained as the free-running E-clock counter behind hr_time(): started early in kmain, because
  * gfx_init times its frame measurement with it */
-static void eclock_init(void)
+KINIT static void eclock_init(void)
 {
     eclock_hz = (VPOSR & 0x1000) ? ECLOCK_NTSC : ECLOCK_PAL;
     CIAB(CIA_CRA) = 0x00;
@@ -377,7 +378,7 @@ static void eclock_init(void)
 }
 
 /* the 100 Hz tick: CIA-A timer A. Its period is latch + 1 E-clock counts: the latch nearest to eclock_hz / 100 */
-static void timer_init(void)
+KINIT static void timer_init(void)
 {
     u32 latch = (eclock_hz + 50) / 100 - 1;     /* 7093 PAL (99.997 Hz), 7158 NTSC (100.001 Hz) */
     kprintf("clock: E-clock %u Hz (%s), tick latch %u\n", eclock_hz, eclock_hz == ECLOCK_NTSC ? "NTSC" : "PAL", latch);
@@ -394,7 +395,7 @@ static void timer_init(void)
     kbd_init();                         /* one handshake: the keyboard may still wait for one (K2) */
 }
 
-static void mem_selftest(void)
+KINIT static void mem_selftest(void)
 {
     u32 c0, f0, c1, f1;
     mem_stats(&c0, &f0);
@@ -415,7 +416,7 @@ static void mem_selftest(void)
     kprintf("mem: self-test ok (alloc, free, merge, owner free)\n");
 }
 
-static const char *cpu_name(u16 attn)
+KINIT static const char *cpu_name(u16 attn)
 {
     if (attn & 0x80)  return "68060";
     if (attn & 0x08)  return "68040";
@@ -424,7 +425,7 @@ static const char *cpu_name(u16 attn)
     return "68000/68010";
 }
 
-void kmain(struct bootinfo *bi)
+KINIT void kmain(struct bootinfo *bi)
 {
 #ifdef DIAG_TICKS0
     ticks = DIAG_TICKS0;                /* test builds (tools/time-test.sh): the tick count starts near its wrap */

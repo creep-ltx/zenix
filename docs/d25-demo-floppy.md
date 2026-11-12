@@ -128,7 +128,7 @@ picolibc and the text-UI library each.
   - `/bin`: `sh`, `login`, `init`, `mount`, `zdesk`, `term`, `ahiru`, `sumi`, `ctop`, `telnet`, `rz` (`sz`), `sntp`,
     and the box with the 65 names of 2.2 as hard links (`ls`, `cat`, ..., `ping`, `host`, `ifconfig` with `ifup` and
     `ifdown`, `netstat`, `route`, `less` with `more`, `gzip` with `gunzip` and `zcat`, `reboot` with `halt`).
-  - `/sbin`: `displayd`, `dlogin`, `netd`; `/sbin/net`: `a2065`, `genet`, `ne2000`. (Not `plipbox`: a box on the
+  - `/sbin`: `displayd` (built without the graphics card's code, D43: the floppy never hands one over), `dlogin`, `netd`; `/sbin/net`: `a2065`, `genet`, `ne2000`. (Not `plipbox`: a box on the
     parallel port cannot be found without asking, and nobody would be asked.)
   - `/etc`: today's `rootfs/etc` with the demo's changes (7), `/etc/zdesk` (the themes, bar, menu, icons, keys).
   - `/usr/man`: the pages of everything on the disk and `demo` (what this disk is, where the source is);

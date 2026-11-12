@@ -6,7 +6,7 @@
  * SD card of a Raspberry Pi 4 / CM4 under Emu68 (emmc.c), else the Amiga 3000's SCSI disk (a3000.c). */
 static enum { B_IDE, B_EMMC, B_A3000 } which;
 
-int blk_init(void)
+KINIT int blk_init(void)
 {
     if (ide_init() == 0) {
         which = B_IDE;

@@ -48,7 +48,8 @@ struct zine_args {
     u32 vol, vol_size, blk, blk_size;
     const struct zine_range *ranges;    /* Zenix's pools (walked by the blob with interrupts masked) */
     u32 nranges;
-    u32 kernel_pa, kernel_mem;          /* the kernel image and its BSS */
+    u32 kernel_pa, kernel_mem;          /* the kernel image and its BSS (D45: its spans inside it are pool ranges after
+                                         * the boot: a checksum of the kernel must leave them out) */
     u32 klog_pa, klog_size;             /* the log area at the top of chip RAM (0: none) */
     u32 ram_pa, ram_size;               /* a RAM disk outside the pools (0: none) */
     /* Zenix's records of the registers the way back sets (write-only ones cannot be read back) */

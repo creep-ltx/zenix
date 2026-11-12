@@ -2,7 +2,10 @@
 /* Host test of the kernel's allocator (kernel/mem.c), built 32-bit with its pools at their real addresses (mmap): a
  * fast range that crosses 1 GB gives MEM_LOW1G blocks from its low part (audit A15: it was skipped whole), never one
  * that ends above 1 GB; a range wholly below 1 GB (the A1200's fast RAM) behaves as before; ordinary blocks still come
- * from anywhere, big ones from the high end. Build and run: tools/mem-test.sh */
+ * from anywhere, big ones from the high end. DESIGN D45: the boot's spans inside the "kernel" (their bounds set by the
+ * link, tools/mem-test.sh) reserved as ranges of one used block, given back by mem_boot_release (filled with ILLEGAL,
+ * the free count up by exactly the span), the CD's kept while a drive is there, nothing reserved or freed when the range
+ * table is full. Build and run: tools/mem-test.sh */
 #include <stdio.h>
 #include <stdarg.h>
 #include <sys/mman.h>
@@ -12,6 +15,13 @@ void exit(int) __attribute__((noreturn));
 void kprintf(const char *fmt, ...) { va_list ap; va_start(ap, fmt); vprintf(fmt, ap); va_end(ap); }
 void panic(const char *why) { printf("panic: %s\n", why); exit(2); }
 u32 klog_area_base(void) { return 0; }
+u8 mmu_on;                                      /* D41 off: its hooks are never called */
+void mmu_upd_gone(void) {}
+void mmu_block(u32 d, u32 l, u32 o) { (void)d; (void)l; (void)o; }
+void mmu_freed(u32 d, u32 l) { (void)d; (void)l; }
+static int cd_there, flushes;
+int ide_cd_present(void) { return cd_there; }
+void cache_flush_code(void) { flushes++; }
 
 static int bad;
 #define EXPECT_TRUE(c, msg) do { if (!(c)) { printf("FAIL: %s\n", msg); bad++; } else printf("ok:   %s\n", msg); } while (0)
@@ -61,6 +71,56 @@ int main(void)
     u8 *g = mem_alloc(64 * 1024, MEM_FASTONLY, 0);
     EXPECT_TRUE(g && (u32)g + 64 * 1024 == 0x30100000, "... an ordinary big one from the high end");
     munmap((void *)0x30000000, 0x100000);
+
+    /* 4. DESIGN D45: a fast region 0x20000000-0x20100000 with the "kernel" at 0x20010000 (128 KB); its spans as
+     * tools/mem-test.sh links them: the boot's 0x20010100-0x20018100 (32 KB), the CD's 0x20018100-0x20018400 */
+    {
+        u32 R = 0x20000000u, K = 0x20010000u, B0 = 0x20010100u, B1 = 0x20018100u, C1 = 0x20018400u;
+        void *m = mmap((void *)R, 0x100000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+        if (m != (void *)R) { printf("FAIL: cannot map the D45 region\n"); return 1; }
+        struct bootinfo bi;
+        memset(&bi, 0, sizeof bi);
+        bi.nregions = 1;
+        bi.r[0].attrs = MEMF_FAST; bi.r[0].lower = R; bi.r[0].upper = R + 0x100000;
+        nranges = 0; freeb[0] = freeb[1] = 0;
+        mem_init(&bi, K, 0x20000);
+        u32 cf, f0, f1, f2, ct, ft;
+        mem_stats(&cf, &f0);
+        mem_totals(&ct, &ft);
+        EXPECT_TRUE(nranges == 4 && span_blk[0] == (struct mblk *)B0 && span_blk[1] == (struct mblk *)B1,
+                    "D45: the two spans reserved as ranges of their own, after the real memory's");
+        EXPECT_TRUE(f0 == 0x100000 - 0x20000, "... in use: the free count is the region less the kernel");
+        EXPECT_TRUE(ft == f0 + (B1 - B0) + (C1 - B1), "... counted in the pool's total");
+        cd_there = 1;
+        mem_boot_release();
+        mem_stats(&cf, &f1);
+        EXPECT_TRUE(f1 == f0 + (B1 - B0) && flushes == 1, "the boot span given back: free up by exactly its size, the caches flushed");
+        EXPECT_TRUE(((u32 *)B0)[4] == 0x4AFC4AFCu && ((u32 *)B1)[-1] == 0x4AFC4AFCu, "... filled with ILLEGAL first");
+        EXPECT_TRUE(span_blk[1] && USED(span_blk[1]), "the CD span kept: a drive answered");
+        int in = 0;
+        for (int i = 0; i < 300 && !in; i++) {
+            u8 *p = mem_alloc(8192, MEM_FASTONLY, 1);
+            in = p && (u32)p >= B0 && (u32)p < B1;
+        }
+        EXPECT_TRUE(in, "... and the boot span's memory is handed out once the rest is taken");
+        mem_free_owner(1);
+        mem_boot_release();
+        mem_stats(&cf, &f2);
+        EXPECT_TRUE(f2 == f1 && flushes == 1, "a second release does nothing");
+        /* the range table full: the spans stay the kernel's, the release frees nothing */
+        nranges = 0; freeb[0] = freeb[1] = 0;
+        memset(ranges, 0, sizeof ranges);
+        nranges = 14;                                   /* 14 empty slots taken: the region's two ranges fill it */
+        span_blk[0] = span_blk[1] = 0;
+        mem_init(&bi, K, 0x20000);
+        mem_stats(&cf, &f0);
+        cd_there = 0;
+        mem_boot_release();
+        mem_stats(&cf, &f1);
+        EXPECT_TRUE(nranges == 16 && !span_blk[0] && !span_blk[1] && f1 == f0 && flushes == 1,
+                    "the range table full: the spans stay the kernel's, nothing freed, no panic");
+        munmap((void *)R, 0x100000);
+    }
 
     printf(bad ? "FAILED\n" : "all ok\n");
     return bad != 0;

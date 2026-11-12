@@ -24,7 +24,7 @@
 static u8 txring[4096];
 static volatile u16 txhead, txtail;
 
-void serial_init(void)
+KINIT void serial_init(void)
 {
     SERPER = 30;                /* 115200 baud, PAL, 8N1 */
 }
@@ -426,7 +426,7 @@ static u32 hdr_sum(const struct klog_hdr *a)
 /* A slot counts by its header alone (magic, size, header sum): the slot choice, the boot number and the reason come
  * from it. The text sum decides only whether the text is shown: an old boot menu wrote 8 bytes into slot 0's text (an
  * AllocAbs() remainder's header), and a slot rejected for that made the kernel show an older boot as the previous one */
-static int slot_valid(const struct klog_hdr *a)
+KINIT static int slot_valid(const struct klog_hdr *a)
 {
     if (a->magic != KLOG_MAGIC)
         return 0;
@@ -436,7 +436,7 @@ static int slot_valid(const struct klog_hdr *a)
     return 0;
 }
 
-static int text_valid(const struct klog_hdr *a)
+KINIT static int text_valid(const struct klog_hdr *a)
 {
     u32 sum = 0;
     const char *t = KTEXT(a);
@@ -448,7 +448,7 @@ static int text_valid(const struct klog_hdr *a)
 u32 klog_area_base(void) { return klog_area_pa; }
 
 /* very first thing in kmain, before anything prints: find the previous boot's log, start this one in the other slot */
-void klog_init(const struct bootinfo *bi)
+KINIT void klog_init(const struct bootinfo *bi)
 {
     u32 top = 0;
     for (int i = 0; i < bi->nregions && i < 8; i++)
@@ -585,7 +585,7 @@ u32 klog_read(u32 off, char *buf, u32 n)
 }
 
 /* the display is up: show what was logged so far, and keep showing new messages */
-void klog_to_screen(void)
+KINIT void klog_to_screen(void)
 {
     char c;
     u32 total = kl->total;
@@ -605,7 +605,7 @@ void klog_mirror_on(void) { klog_mirror = 1; }
 
 /* Says what klog_init found, and shows the previous boot's last lines (on the screen too while the boot log is
  * mirrored there), framed and marked so they cannot be taken for this boot's messages. */
-void klog_show_prev(void)
+KINIT void klog_show_prev(void)
 {
     if (prev_state == 3) {
         kprintf("klog: chip RAM top is in use (kernel or RAM disk): this log will not survive a reset\n");

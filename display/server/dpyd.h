@@ -27,13 +27,24 @@ struct region { u16 n; u8 over; struct rect r[RMAX]; };    /* over: pieces were 
 extern struct bm scr;           /* the screen (on a card, D43: the pens' bitmap in fast RAM, shown by fb_show) */
 #define CHUNKY 8                /* a bitmap's depth that means a byte a pixel, the pen (D43: a card's screen, its kept
                                  * copies); planar bitmaps have 1-4 planes */
+#ifdef NO_RTG                   /* the demo floppy's displayd (`make demo`): its bootblock writes no card record (D43
+                                 * 3), so fb.c and every card branch are left out: rtg is the constant 0 */
+#define rtg 0
+#define CHUNKY_BM(b) 0
+static inline void fb_show(void) {}
+static inline void fb_all(void) {}
+static inline void fb_pointer(int x, int y) { (void)x; (void)y; }
+static inline void fb_pointer_image(const u16 *a, const u16 *b) { (void)a; (void)b; }
+#else
 extern int rtg;                 /* the screen is a graphics card's (DESIGN D43, docs/d43-rtg.md) */
-struct fbcard;
-extern struct fbcard card;      /* that card (fb.h) */
+#define CHUNKY_BM(b) ((b)->depth == CHUNKY)     /* a byte a pixel: only on a card (its screen, its kept copies) */
 void fb_show(void);             /* what was drawn on the screen since the last show onto the card, and the pointer */
 void fb_all(void);              /* the whole screen to be shown again (the pens changed) */
 void fb_pointer(int x, int y);  /* the pointer's place on the card (its picture's top left) */
 void fb_pointer_image(const u16 *a, const u16 *b);     /* its picture: 16 rows of two planes (kept, not copied) */
+#endif
+struct fbcard;
+extern struct fbcard card;      /* that card (fb.h) */
 extern int use_blit;            /* the blitter is ours (the console is shown): else the CPU draws */
 extern int aga;
 extern int lace;               /* the screen is interlaced (D38 "Screen modes"): line y on frame line y / 2 */
