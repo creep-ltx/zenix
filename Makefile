@@ -1031,7 +1031,7 @@ $(BUILD)/zine.uo: user/zine.c $(ZINEH) user/pw.h user/libz.h user/usys.h | $(BUI
 ZINECMD := $(BUILD)/zine.uo $(BUILD)/pw.uo $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-lvo.uo $(BUILD)/zc-lvo40.uo
 $(BUILD)/zine.uelf: $(ZINECMD) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(ZINECMD) $(BUILD)/libz.uo $(LIBGCC) -o $@
-ZBLOBOBJS := $(BUILD)/zb-blobs.o $(BUILD)/zb-blob.o $(BUILD)/zb-blibs.o $(BUILD)/zb-blibload.o $(BUILD)/zb-bmore.o $(BUILD)/zb-bmath.o $(BUILD)/zb-bnext.o $(BUILD)/zb-bfont.o $(BUILD)/zb-amifont.o $(BUILD)/zb-bfpu.o $(BUILD)/zb-btask.o $(BUILD)/zc-zpath.uo $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-zplan.uo
+ZBLOBOBJS := $(BUILD)/zb-blobs.o $(BUILD)/zb-blob.o $(BUILD)/zb-binput.o $(BUILD)/zb-bgad.o $(BUILD)/zb-blibs.o $(BUILD)/zb-blibload.o $(BUILD)/zb-bmore.o $(BUILD)/zb-bmath.o $(BUILD)/zb-bnext.o $(BUILD)/zb-bfont.o $(BUILD)/zb-amifont.o $(BUILD)/zb-bfpu.o $(BUILD)/zb-btask.o $(BUILD)/zc-zpath.uo $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-zplan.uo
 $(BUILD)/zb-blobs.o: user/zine/blobs.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 # the blob writes low memory (the vectors at 0, ExecBase at 0x800): addresses near 0 are not null pointers to it
@@ -1070,7 +1070,7 @@ $(BUILD)/zsp060.elf: $(BUILD)/zsp060.o link/user.ld
 $(BUILD)/zsp040.elf: $(ZSP040OBJS) link/user.ld
 	$(CC) -nostdlib $(ULDFLAGS) $(ZSP040OBJS) -o $@
 # the trace build (tests only, /tests/zine/trace.blob): every library call named on the serial port
-ZTBLOBOBJS := $(BUILD)/zt-blobs.o $(BUILD)/zb-blob.o $(BUILD)/zb-blibs.o $(BUILD)/zb-blibload.o $(BUILD)/zb-bmore.o $(BUILD)/zb-bmath.o $(BUILD)/zb-bnext.o $(BUILD)/zb-bfont.o $(BUILD)/zb-amifont.o $(BUILD)/zb-bfpu.o $(BUILD)/zb-btask.o $(BUILD)/zc-zpath.uo $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-zplan.uo
+ZTBLOBOBJS := $(BUILD)/zt-blobs.o $(BUILD)/zb-blob.o $(BUILD)/zb-binput.o $(BUILD)/zb-bgad.o $(BUILD)/zb-blibs.o $(BUILD)/zb-blibload.o $(BUILD)/zb-bmore.o $(BUILD)/zb-bmath.o $(BUILD)/zb-bnext.o $(BUILD)/zb-bfont.o $(BUILD)/zb-amifont.o $(BUILD)/zb-bfpu.o $(BUILD)/zb-btask.o $(BUILD)/zc-zpath.uo $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-zplan.uo
 $(BUILD)/zt-blobs.o: user/zine/blobs.S | $(BUILD)
 	$(CC) $(ASFLAGS) -DZINE_TRACE $< -o $@
 $(BUILD)/zine-trace.elf: $(ZTBLOBOBJS) link/user.ld
@@ -1078,7 +1078,7 @@ $(BUILD)/zine-trace.elf: $(ZTBLOBOBJS) link/user.ld
 $(BUILD)/zine-trace.blob: $(BUILD)/zine-trace.elf tools/mkzexe.py tools/mkzblob.py
 	tools/mkzexe.py $< $@.zx
 	python3 tools/mkzblob.py $@.zx $@
-ZINETESTS := zexit zhello ztake zcrash zbadcall zalloc zscreen zmmu zfpu zfpux zcon zcache zovl zpkt zlibs zwrite zcase zexec zpart zcrunch zsuper zcalls znext ztask zsound
+ZINETESTS := zexit zhello ztake zcrash zbadcall zalloc zscreen zmmu zfpu zfpux zcon zcache zovl zpkt zlibs zwrite zcase zexec zpart zcrunch zsuper zcalls znext ztask zsound zinput
 # the null blob (step 2's tests): the pause and the resume with nothing in between (user/zine/nullblob.S)
 $(BUILD)/zb-nullblob.o: user/zine/nullblob.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
