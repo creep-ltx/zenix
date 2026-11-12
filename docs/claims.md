@@ -30,6 +30,7 @@ Claim a number here **before** using it (system calls, message types, port names
 | 89 `console`'s op 11 `CON_MODE` (DESIGN D28 22: the console's mode, every console's, no descriptor; a2 `CONM_HIRES` 0, `CONM_LACE` 1, `CONM_ASK` 0xFF asks; root to set) | branch pubprep, 2026-11-12 |
 | 92 `drv`'s `DRV_CLAIM` base `DRV_PAULA` 0xDFF0A0 (Paula's four channels: the process of port `audio` only, before the network gate; DESIGN D40) | branch sound, 2026-11-12 |
 | 98 `atapi` (DESIGN D44: a packet command to the IDE port's ATAPI CD drive, `struct uatapi` in `kernel/diskproto.h`, first size 28; the disk server only) | branch cd, 2026-11-12 |
+| 92 `drv` for the service of port `usb` (DESIGN D46: `DRV_HWINFO`, the `DRV_CLAIM` of the hardware table's `xhci` and that claim's ops only, before the network gate); the quiesce step `DRVS_WAIT` 3 (until `(*addr & mask) == value`, at most 20 ms; not on `DRV_PARPORT`); the hardware table's `xhci`, `xhci_size`, `xhci_stop` where `reserved[3]` was, `XSTOP_DONE` 1, `XSTOP_RAN` 2, `XSTOP_SLOW` 4, `XSTOP_NOTXHCI` 8 | branch usb, 2026-11-12 |
 | **next free: 99** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
 Message types claimed so far: `NET_*` 1-19 on port `net` (`kernel/netproto.h`, DESIGN D19 step 3: the `SOCK_*` op
@@ -39,7 +40,7 @@ numbers 1-18 and `NET_CLOSE` 19; 1-63 are the kernel's to the server), `NETDRV_*
 zup's "needs a check" mark), `FS_*` 26 `FS_HEALTH` (D34, branch zroot, 2026-11-01: boot asks whether a ZenixFS root could only be mounted read-only), `FS_SYNC`'s a0 1 "bounded" (D23 step 1, branch nfs12, 2026-10-28; recorded by audit
 2026-10-29 B2-7), `DISK_*` 1-8, `DISK_*` 9 `DISK_INFOSZ` and
 10 `DISK_LISTSZ` (D15 step 0, fix3, 2026-10-26: `DISK_INFO`/`DISK_LIST` with the caller's buffer size); `struct diskinfo`'s
-caps bit `DISKCAP_RO` 8 (D44, branch cd, 2026-11-12: a read-only medium, the CD drive `cd0`).
+caps bit `DISKCAP_RO` 8 (D44, branch cd, 2026-11-12: a read-only medium, the CD drive `cd0`); `DISK_USBHELLO` 11 (D46, branch usb, 2026-11-12: the USB server's hello, root and the owner of port `usb` only) and the posted records `struct urec` (32 bytes, `UREC_N` 8 a window) with kinds `UR_READ` 1, `UR_DONE` 16, `UR_ADD` 17, `UR_DEL` 18.
 `struct umsg`'s `kflags` bits: 1 `UMSG_KERNEL`, 2 `UMSG_NETREPLY` (internal), 4 `UMSG_CANCEL` (D23 step 1, branch nfs12, 2026-10-28: only the kernel sets it, for a killed client), 8
 `UMSG_LINKS` (D26, branch d26, 2026-10-28: only the kernel sets it, through `ipc_kcall`'s kflags argument; `call()`
 ORs D23's `UMSG_CANCEL` in itself), 16 `UMSG_GROUPS` (branch groups, 2026-10-31: the supplementary groups follow the
@@ -69,6 +70,9 @@ registered as services (D11):
 `audio` (D40, branch sound 2026-11-12: the sound server `/sbin/sndd`, reserved for root like `net`; its protocol
 `user/sndproto.h`: requests `SND_OPEN` 1 .. `SND_PAUSE` 9 and the tests' `SND_STATE` 10, `SNDF_STEREO` 1, `SNDF_FRAMES`
 2, `SNDI_NTSC` 1, `SNDC_TRIG` 1, `SNDC_PER` 2, `SNDC_VOL` 4, `SNDC_LOOP` 8, `SNDC_STOP` 16, `SND_SILENT` 0xFFFFFFFF);
+`usb` (D46, branch usb 2026-11-12: the USB server `/sbin/usbd`, a service, so only its process takes the port; its
+protocol `usb/usbproto.h`: requests `USB_LIST` 1, `USB_DESC` 2, `USB_HOLD` 3, `USB_STAT` 4; `struct usbdevinfo` first
+size 68, `struct usbstat` 32);
 `disk`, `fs`, `fs.*`; `ping` (the test service, served by `msgpingd` since D19 step 0); `net` (D19, the network server:
 reserved for root like `fs` and `disk`; `socktestd` serves it in the tests until netd).
 

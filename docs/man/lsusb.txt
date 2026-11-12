@@ -1,0 +1,35 @@
+LSUSB(1)			Zenix manual
+
+NAME
+    lsusb - list the USB devices
+
+SYNOPSIS
+    lsusb [-v]
+    lsusb --hold
+
+DESCRIPTION
+    Lists the devices the USB server, usbd(8), sees: its number,
+    vendor and product, whether usbd serves it (a USB stick) or not
+    (no driver), its speed and its port, and for a stick its name and
+    size as the disk server shows it:
+      Device 1: ID 1b1c:1a0e USB stick, high speed, root port 1:
+      "Corsair Voyager GTX", 122104 MB, usb0
+    (one line). The first call starts usbd.
+    -v          also the device descriptor's class and the
+                configuration's interfaces and endpoints
+    --hold      (root) keep usbd running: wait until it ends, then
+                start it again a second later, for ever; ends at once
+                (status 0) on a machine without a USB controller. The
+                line for it in /etc/daemons ships with a # before it.
+
+EXIT STATUS
+    0 the list (or "no USB devices"); 1 no USB controller on this
+    machine, or no USB server; 2 a wrong argument.
+
+NOTES
+    The only USB on Zenix today is a Pi 4's or CM4's own port under
+    Emu68 (a PiStorm): on every other machine lsusb says "no USB
+    controller on this machine".
+
+SEE ALSO
+    usbd(8), docs/d46-usb.md

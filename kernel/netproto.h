@@ -226,6 +226,7 @@ struct udrvstep {
 };
 #define DRVS_WRITE 1            /* *addr = value */
 #define DRVS_RMW   2            /* *addr = (*addr & ~mask) | value */
+#define DRVS_WAIT  3            /* DESIGN D46: wait until (*addr & mask) == value, at most 20 ms (not on DRV_PARPORT) */
 struct udrvquiesce { u32 n; struct udrvstep step[DRV_QSTEPS]; };
 
 /* DRV_ATTACH's block (frozen, first size UDRVATTACH_FIRST; the caller's size in size and b). The driver says who it

@@ -243,6 +243,14 @@ test against the chip model); what it found goes into `genet_stop` (the next res
 `kmain` logs `pi: genet: ...` when the DMA was running. A caller that may still go back to AmigaOS (`zenixboot
 CHECK`) puts `HWINFO_DRYRUN` in the magic word first, and stage0 then writes no hardware (DESIGN D19 14, step 9).
 
+**The xHCI USB controller** (DESIGN D46): the node `/__symbols__`' `xhci` names (`/scb/xhci@7e9c0000` on a CM4; no
+alias names it), unless its status is "disabled" (the firmware enables it for `otg_mode=1` in config.txt): `xhci`
+(its 68k address, 0xF89C0000 on Emu68 1.1), `xhci_size` (its `reg` length, 1 MB) and `xhci_stop`, in the three words
+that were `reserved[3]` (the table's size and first size unchanged). stage0 halts one AmigaOS's USB stack left
+running, as the GENET's, as its last hardware step: Run/Stop and the interrupt enable cleared, at most 100 ms for
+HCHalted (`boot/xhci-stop.h`, `XSTOP_*` bits: it ran, it did not halt in time, the address held no xHCI); no reset
+(the USB server resets it).
+
 After `board[]` (offset 408, `HWFB_OFF`) comes **`struct hwfb`** (DESIGN D43): an RTG screen `zenixboot RTG` took over
 from AmigaOS's Picasso96 (the front screen's memory, size, bytes a row, `RGBFormat`, bytes a pixel), and on a Pi the
 HVS's display-list register (`SCALER_DISPLIST1`, the peripheral base + 0x400024) with its value showing the card's
@@ -335,10 +343,29 @@ Everything else is the sound server's: `/sbin/sndd`, the D11 service of port `au
 `SYS_drv`'s `DRV_CLAIM` of `DRV_PAULA` (0xDFF0A0; only the process of port `audio`, handled before the network gate).
 While the claim is held `beep` does nothing; `audio_hold` stops the four channels (volumes 0, then their DMA off,
 interrupts masked) when the claim is taken, before ZINE (`drv_zine`, which also kills sndd) and when it ends
-(`drv_exit`, before the holder's memory is freed; netd's end leaves it alone). The kernel has no audio interrupt code:
+(`drv_exit`, before the holder's memory is freed; netd's end releases only its own children's claims). The kernel has no audio interrupt code:
 sndd reads Paula's request bits in INTREQR at times it computes from the E-clock (`sys_hrtime`: Paula's clock / 5)
 and writes the channels' registers itself. Its protocol (`user/sndproto.h`), the double buffer, the frames of a
 module and the limits: docs/d40-sound.md.
+
+### USB (`kernel/drv.c`; the USB server `usb/usbd.c`; diskd's `usb0`; DESIGN D46)
+
+Only a Pi 4 or CM4 under Emu68 has USB here: the BCM2711's xHCI on the one USB 2.0 port, which stage0 records in the
+hardware table (above). Everything is the USB server's: `/sbin/usbd`, the D11 service of port `usb` (`/etc/svctab`;
+kept running by `lsusb --hold`, a commented line of `/etc/daemons`). `SYS_drv` gives the service of port `usb`
+(`svc_pid("usb")`, checked before the network gate) only `DRV_HWINFO`, the `DRV_CLAIM` of the table's `xhci` (its
+window `xhci_size` long; nobody else may claim it) and that claim's `DRV_DMAMEM`, `DRV_QUIESCE` and `DRV_CACHE`;
+anything else is -EPERM. Its quiesce program clears USBCMD, waits for HCHalted (`DRVS_WAIT`) and clears IMAN. usbd
+polls the controller (no interrupt): `usb/xhci-core.c` (the controller: rings, commands, events, slots, control and
+bulk transfers, the root port; its register and DMA memory access, clock, cache calls and log from the includer) and
+`usb/core.c` (the root ports, enumeration, bulk-only transport and SCSI for one USB stick), both also compiled on the
+PC against `tools/xhci-model.h`. The stick reaches the filesystems through diskd as `usb0` and its partitions,
+read-only: usbd calls `DISK_USBHELLO` once (and again when its once-a-second empty post finds no window: a diskd that
+started again), then both servers post `struct urec` records into each other's windows (`kernel/diskproto.h`); diskd
+keeps its one-trap `replyrecv` loop and looks at the window each time it wakes, usbd waking it after news with a
+`DISK_LIST` past the end; diskd waits for usbd's answer at most 5 s and copies the sectors out of usbd's bounce
+buffer; usbd never waits for diskd but at the hello and that wake, when diskd's waits for it are answered first. On a machine without the controller usbd answers -ENODEV and stops with status 0. Its
+protocol (`usb/usbproto.h`), the limits and the first run on a real PiStorm: docs/d46-usb.md, docs/man/usbd.txt.
 
 ### Mouse and joystick (`kernel/input.c`)
 
@@ -1009,7 +1036,7 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
 ### diskd - the disk server (`user/diskd.c`, port `disk`)
 Owns the hardware through privileged raw-sector syscalls (`blk_read/blk_write/blk_size/blk_ram`, only for
 processes flagged `priv`). Reads the Amiga **RDB** partition table (`RDSK`/`PART` blocks, DosEnvec geometry) and
-serves named devices: `ide0` (the whole disk - IDE or the Pi SD card), `ide0p1`, `ide0p2`... (the partitions of an RDB, else of a PC MBR: type 0x83 = ext2, type 0x76 = an RDB inside, others listed and never mounted), `ram0` for the boot RAM disk, and `cd0` for an ATAPI CD drive (D44: always listed when the kernel found one, with the disc's size or 0 sectors; read-only, `DISKCAP_RO`, writes `-EROFS`; 512-byte sectors over the disc's 2048-byte blocks, any run read exactly through `SYS_atapi`'s kept window; an open looks at the disc again, waiting up to 10 s for a drive becoming ready; a UNIT ATTENTION or no medium raises a generation, and the server that mounted it before answers `-ESTALE`; at most 128 sectors a request). Handles are
+serves named devices: `ide0` (the whole disk - IDE or the Pi SD card), `ide0p1`, `ide0p2`... (the partitions of an RDB, else of a PC MBR: type 0x83 = ext2, type 0x76 = an RDB inside, others listed and never mounted), `ram0` for the boot RAM disk, `cd0` for an ATAPI CD drive (D44: always listed when the kernel found one, with the disc's size or 0 sectors; read-only, `DISKCAP_RO`, writes `-EROFS`; 512-byte sectors over the disc's 2048-byte blocks, any run read exactly through `SYS_atapi`'s kept window; an open looks at the disc again, waiting up to 10 s for a drive becoming ready; a UNIT ATTENTION or no medium raises a generation, and the server that mounted it before answers `-ESTALE`; at most 128 sectors a request), and `usb0`, `usb0p1`, ... for a USB stick through the USB server (D46: read-only, 128 sectors a request, both ways by posts, a pulled stick's mount -ESTALE; above, "USB"). Handles are
 confined to their partition (LBAs are partition-relative). RDB partitions are placed by their own DosEnvec geometry
 (`user/rdb.h`). A handle is a device's slot, kept across rescans (same sectors, same medium), so a mounted server's handle
 never moves. Devices that share sectors overlap (the whole disk and its partitions, a 0x76 container and the RDB inside,
@@ -1503,8 +1530,10 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   direction and those three bits of CIA-B's port A and direction, by read-modify-write; CIA-A's FLG interrupt, the ACK
   line, is on while it is held and its edges are counted by the level-2 handler at every read of the ICR, `par_acks`;
   DESIGN D39): the only owner, a second claim -EBUSY;
-  4 claims), `DRV_DMAMEM` (one region a claim, 64-byte aligned, whole lines, at most 4 MB, owned by the claim: neither
-  netd's nor the driver's end frees it before the driver is reaped), `DRV_QUIESCE` (at most 8 register writes or read-modify-writes inside the
+  4 claims), `DRV_DMAMEM` (one region a claim, 64-byte aligned, whole lines, at most 4 MB, from fast RAM only under
+  Emu68 (`HW_DT`: the Pi's DMA reaches no chip RAM, D46), owned by the claim: neither
+  netd's nor the driver's end frees it before the driver is reaped), `DRV_QUIESCE` (at most 8 register writes, read-modify-writes or, D46, bounded waits
+  `DRVS_WAIT` (until the register's masked bits say so, at most 20 ms by the E-clock; not on the parallel port) inside the
   claimed window, aligned), `DRV_CACHE` (write back, or write back and drop, whole 64-byte lines of the caller's DMA
   region: nothing on a 68k, whose data cache Zenix keeps off; Emu68's range opcodes with `HW_RANGEOPS`, else `cpushl`
   per line; never a bare invalidate), `DRV_PARACK` (the parallel port's claim: the ACK edges since boot, D39), and `DRV_ATTACH`/`DRV_XFER`, which the kernel checks (the block in the driver's

@@ -29,8 +29,10 @@ typedef unsigned char u8;
 #define MAXDEV 20
 static struct diskinfo dev[MAXDEV];
 static u8 used[MAXDEV];                 /* the slot holds a device */
-static u8 phys[MAXDEV];                 /* which medium: 0 the disk, 1 the RAM disk, 2+N floppy dfN, PH_CD the CD drive */
+static u8 phys[MAXDEV];                 /* which medium: 0 the disk, 1 the RAM disk, 2+N floppy dfN, PH_CD the CD drive,
+                                         * PH_USB the USB stick */
 #define PH_CD 6
+#define PH_USB 7
 static u8 order[MAXDEV];                /* DISK_LIST order: slots in the order the last scan found them */
 static int norder;
 static int fd_probe = 1;                /* floppy drives looked at: bit 0 = df0; df1-3 only when a name asks for them (probing an absent drive takes a third of a second) */
@@ -86,10 +88,77 @@ static void cd_look(void)
     }
 }
 
+/* ---- a USB stick through the USB server (DESIGN D46, docs/d46-usb.md 3.5; kernel/diskproto.h): usb0, read-only. Both
+ * ways by posts: diskd waits for usbd (at most 5 s a request), usbd never waits for diskd. ---- */
+static int usb_port;                    /* usbd's port once it said hello, 0 before */
+static int usb_port_self;               /* our own port (the window, the wait) */
+static u32 usb_sectors, usb_max, usb_gen; /* the stick's size (0: none), the most a request may ask, its generation */
+static u8 *usb_bounce;                  /* usbd's buffer the sectors are read into */
+static char usb_label[32];
+static struct urec usb_win[UREC_N];     /* usbd's records (our window) */
+static u32 usb_in, usb_out, usb_news;   /* the last record taken; the last request posted; news to scan for */
+static int usb_res;
+static struct diskinfo usb_cands[8];    /* the stick's devices as its table was read (a rescan for df0 or cd0 does not
+                                         * read the stick again), -1: read it at the next scan */
+static int usb_nc = -1;
+#define USB_DONE_WAIT 0x7FFFFFFF
+/* take usbd's new records: the answer to request "want", and news of the stick (looked at by the main loop). usbd is a
+ * registered root service: the bounce buffer and the label it names are trusted as the hardware table is */
+static void usb_take(u32 want)
+{
+    for (u32 k = 0; k < 2 * UREC_N; k++) {
+        struct urec *r = &usb_win[(usb_in + 1) % UREC_N];
+        if (r->seq != usb_in + 1) {
+            if ((int)(r->seq - usb_in) <= 1) break;
+            say("diskd: usb0: records from the USB server were lost: the stick is looked at again\n");
+            usb_in = r->seq - 1;                    /* the oldest still there; what the lost ones said is redone */
+            usb_gen++; usb_news = 1;
+            continue;
+        }
+        usb_in++;
+        if (r->kind == UR_DONE && r->a == want) usb_res = r->result;
+        else if (r->kind == UR_ADD && r->unit == 0 && r->lba && r->count) {
+            usb_sectors = r->lba; usb_max = r->count > 128 ? 128 : r->count;
+            usb_bounce = (u8 *)r->a;
+            memcpy(usb_label, (const void *)r->b, sizeof usb_label - 1);
+            usb_gen++; usb_news = 1; usb_nc = -1;
+        } else if (r->kind == UR_DEL && r->unit == 0) { usb_sectors = 0; usb_gen++; usb_news = 1; usb_nc = -1; }
+    }
+}
+/* n sectors of usb0 from lba into buf -> 0, -EIO, -ENODEV */
+static int usb_read(u32 lba, u32 n, void *buf)
+{
+    if (!usb_sectors) return -ENODEV;
+    struct urec q = { UR_READ, ++usb_out, 0, lba, n, 0, 0, 0 };
+    struct upost w = { (usb_out % UREC_N) * sizeof q, (u32)&q, sizeof q };
+    usb_res = USB_DONE_WAIT;
+    if (sys_post(POST_WRITE, usb_port, &w) < 0) { usb_sectors = 0; usb_news = 1; return -ENODEV; }
+    u32 gen = usb_gen, t0 = sys_ticks();
+    while (usb_res == USB_DONE_WAIT && sys_ticks() - t0 < 500 && usb_gen == gen) {
+        struct pollfd pf = { usb_port_self, POLLPORT | POLLRDBAND, 0 };
+        sys_evwait(&pf, 1, 50);
+        usb_take(usb_out);
+    }
+    if (usb_res == USB_DONE_WAIT) {
+        if (usb_gen == gen) { say("diskd: usb0: the USB server did not answer in 5 s: the stick is dropped\n"); usb_sectors = 0; usb_gen++; usb_news = 1; }
+        return -EIO;
+    }
+    if (usb_res) return usb_res;
+    memcpy(buf, usb_bounce, n * 512);
+    return 0;
+}
+
 /* the scan's result before it is merged into the slots */
 static struct diskinfo cand[MAXDEV];
 static int cfd[MAXDEV], ncand, dropped;
 static u8 cphys[MAXDEV];
+
+static void add(const char *name, const char *label, u32 start, u32 sectors, u32 dostype, u32 flags);
+/* the candidate just added is on the USB stick: read-only, its server's largest request */
+static void usb_cand(void)
+{
+    if (ncand) { cphys[ncand - 1] = PH_USB; cand[ncand - 1].caps = DISKCAP_RO; cand[ncand - 1].maxsect = usb_max; }
+}
 
 static void add(const char *name, const char *label, u32 start, u32 sectors, u32 dostype, u32 flags)
 {
@@ -107,11 +176,16 @@ static void add(const char *name, const char *label, u32 start, u32 sectors, u32
 }
 
 static u32 rd_base;                     /* first sector of the table being read (0, or an MBR partition) */
-static int disk_rd(unsigned lba, void *buf) { return sys_blk_read(rd_base + lba, 1, buf); }
+static u32 rd_limit;                    /* the medium's sectors */
+static const char *rd_dev = "ide0p";    /* the medium the table is read from: "ide0p" or "usb0p" */
+static int disk_rd(unsigned lba, void *buf)
+{
+    return *rd_dev == 'u' ? usb_read(rd_base + lba, 1, buf) : sys_blk_read(rd_base + lba, 1, buf);
+}
 
 static void part_name(char *name, int n)
 {
-    strcpy(name, "ide0p");
+    strcpy(name, rd_dev);
     if (n >= 10) { name[5] = (char)('0' + n / 10); name[6] = (char)('0' + n % 10); name[7] = 0; }
     else { name[5] = (char)('0' + n); name[6] = 0; }
 }
@@ -133,6 +207,7 @@ static int add_rdb(u32 base, u32 limit, int *count)
             continue;
         }
         add(name, p->label, base + p->start, p->sectors, p->dostype, p->bootable);
+        if (*rd_dev == 'u') usb_cand();
     }
     if (r.noedit) say("diskd: note: the partition table: %s\n", r.noedit);
     return 1;
@@ -157,7 +232,7 @@ static int add_mbr(int *count)
         if (e[0] != 0 && e[0] != 0x80) return 0;
         ty[i] = e[4]; st[i] = le32(e + 8); len[i] = le32(e + 12);
         if (ty[i] == 0 || len[i] == 0) continue;
-        if (st[i] == 0 || st[i] + len[i] < st[i] || st[i] + len[i] > disk_sectors) return 0;
+        if (st[i] == 0 || st[i] + len[i] < st[i] || st[i] + len[i] > rd_limit) return 0;
         nused++;
     }
     if (!nused) return 0;
@@ -167,6 +242,7 @@ static int add_mbr(int *count)
         part_name(name, ++*count);
         u32 dt = ty[i] == 0x83 ? DT_EXT2 : ty[i] == 0x76 ? DT_RDB_IN_MBR : DT_MBR | ty[i];
         add(name, "", st[i], len[i], dt, sec[446 + 16 * i] == 0x80);
+        if (*rd_dev == 'u') usb_cand();
         if (ty[i] == 0x76) add_rdb(st[i], len[i], count);
     }
     return 1;
@@ -178,7 +254,7 @@ static int same(int s, int c)
 {
     if (phys[s] == PH_CD) return cphys[c] == PH_CD;     /* one slot for the drive, whatever disc is in it */
     return phys[s] == cphys[c] && dev[s].start == cand[c].start && dev[s].sectors == cand[c].sectors &&
-           (!strcmp(dev[s].name, cand[c].name) || (!strncmp(dev[s].name, "ide0p", 5) && !strncmp(cand[c].name, "ide0p", 5)));
+           (!strcmp(dev[s].name, cand[c].name) || (dev[s].name[4] == 'p' && !strncmp(dev[s].name, cand[c].name, 5)));
 }
 
 /* read the tables again and merge: a device found again keeps its slot (and its mount), a mounted device that
@@ -196,7 +272,19 @@ static void scan(void)
         }
     }
     int count = 0;
+    rd_limit = disk_sectors;
     if (disk_sectors && !add_rdb(0, disk_sectors, &count)) add_mbr(&count);
+    if (usb_sectors && usb_nc >= 0) {                     /* D46: the stick's devices as last read */
+        for (int k = 0; k < usb_nc && ncand < MAXDEV; k++) { cand[ncand] = usb_cands[k]; cfd[ncand] = -1; cphys[ncand++] = PH_USB; }
+    } else if (usb_sectors) {                             /* the stick, then its partitions, read once */
+        int first = ncand;
+        add("usb0", usb_label, 0, usb_sectors, 0, 0);
+        usb_cand();
+        rd_dev = "usb0p"; rd_limit = usb_sectors; count = 0;
+        if (!add_rdb(0, usb_sectors, &count)) add_mbr(&count);
+        rd_dev = "ide0p";
+        for (usb_nc = 0; first + usb_nc < ncand && usb_nc < 8; usb_nc++) usb_cands[usb_nc] = cand[first + usb_nc];
+    }
     for (int f = 0; f < 4; f++) {                         /* floppy drives with a disk in them: df0 ... df3 */
         if (!(fd_probe & (1 << f))) continue;
         int r = sys_fd_info((u32)f);
@@ -223,6 +311,7 @@ static void scan(void)
         if (c < ncand) {
             u32 m = dev[s].mounted;
             dev[s] = cand[c]; dev[s].mounted = m; fdrive[s] = cfd[c]; phys[s] = cphys[c];
+            if (sgen[s] == ~0u) sgen[s] = usb_gen;     /* D46: a mount kept across a restart takes the stick seen there */
             taken[c] = 1;
         } else if (!dev[s].mounted) {
             used[s] = 0;
@@ -283,13 +372,14 @@ static int restore(void)
         const u8 *p = rec + 2;
         for (int s = 0; s < MAXDEV; s++, p += REC_SLOT) {
             if (p[0] == 0xFF) continue;
-            u32 st = get32(p + 1), sz = get32(p + 5), lim = p[0] == 0 ? disk_sectors : p[0] == 1 ? ram_sectors : p[0] == PH_CD ? ~0u : 3520;
-            if (p[0] > PH_CD || p[16] || !p[9] || st + sz < st || st + sz > lim) return -1;
+            u32 st = get32(p + 1), sz = get32(p + 5), lim = p[0] == 0 ? disk_sectors : p[0] == 1 ? ram_sectors : p[0] >= PH_CD ? ~0u : 3520;
+            if (p[0] > PH_USB || p[16] || !p[9] || st + sz < st || st + sz > lim) return -1;
             if (!pass) continue;
             used[s] = 1; phys[s] = p[0]; memset(&dev[s], 0, sizeof dev[s]);
             dev[s].start = st; dev[s].sectors = sz; strcpy(dev[s].name, (const char *)p + 9);
             dev[s].mounted = alive(get32(p + 17)) ? get32(p + 17) : 0;
             fdrive[s] = p[0] >= 2 && p[0] < PH_CD ? p[0] - 2 : -1;
+            if (p[0] == PH_USB) sgen[s] = ~0u;          /* D46: until the server's first stick (scan) */
         }
     }
     fd_probe = rec[0];
@@ -336,7 +426,9 @@ static int overlaps(int s, u32 lba, u32 n, int t)
 static int blocked(int s, u32 lba, u32 n, u32 pid)
 {
     for (int t = 0; t < MAXDEV; t++)
-        if (used[t] && dev[t].mounted && dev[t].mounted != pid && overlaps(s, lba, n, t) && holder(t))   /* (holder checks the pid only then: writes are hot) */
+        if (used[t] && dev[t].mounted && dev[t].mounted != pid && overlaps(s, lba, n, t) && holder(t) &&
+            !(phys[t] == PH_USB && sgen[t] != usb_gen))  /* (holder checks the pid only then: writes are hot; D46: the
+                                                          * mount of a stick that went blocks nothing) */
             return 1;
     return 0;
 }
@@ -361,17 +453,27 @@ static int handle(struct umsg *m)
              * request was in service when a diskd died, and it asks again) */
             if ((m->a[1] & DISK_MOUNT) && dev[h].mounted == (u32)m->from) return h;
             if (blocked(h, 0, dev[h].sectors, 0)) return -EBUSY;
-            if (m->a[1] & DISK_MOUNT) { dev[h].mounted = (u32)m->from; sgen[h] = cd_gen; save(); }
+            if (m->a[1] & DISK_MOUNT) { dev[h].mounted = (u32)m->from; sgen[h] = phys[h] == PH_USB ? usb_gen : cd_gen; save(); }
         }
         return h;
     }
     case DISK_UNMOUNT:
-        if (m->a[0] < MAXDEV && used[m->a[0]] && dev[m->a[0]].mounted == (u32)m->from) { dev[m->a[0]].mounted = 0; save(); return 0; }
+        if (m->a[0] < MAXDEV && used[m->a[0]] && dev[m->a[0]].mounted == (u32)m->from) {
+            dev[m->a[0]].mounted = 0;
+            if (phys[m->a[0]] == PH_USB) scan();        /* D46: a pulled stick's slot goes with its last mount */
+            else save();
+            return 0;
+        }
         return -EINVAL;
     case DISK_READ: case DISK_WRITE: {
         u32 h = m->a[0], lba = m->a[1], n = m->a[2];
         if (h >= MAXDEV || !used[h]) return -EBADF;
         if (phys[h] == PH_CD && dev[h].mounted == (u32)m->from && sgen[h] != cd_gen) return -ESTALE;  /* mounted on another disc */
+        if (phys[h] == PH_USB) {                                    /* D46: the stick, read-only, while it is the same */
+            if (dev[h].mounted == (u32)m->from && sgen[h] != usb_gen) return -ESTALE;
+            if (n == 0 || lba + n < lba || lba + n > dev[h].sectors || n > usb_max) return -EINVAL;
+            return m->type == DISK_WRITE ? -EROFS : usb_read(dev[h].start + lba, n, (void *)m->a[3]);
+        }
         if (n == 0 || lba + n < lba || lba + n > dev[h].sectors) return -EINVAL;
         if (phys[h] == PH_CD) {                                     /* D44: 2048-byte blocks, the sectors asked kept */
             if (m->type == DISK_WRITE) return -EROFS;
@@ -422,6 +524,18 @@ static int handle(struct umsg *m)
     case DISK_RESCAN:
         scan();
         return norder;
+    case DISK_USBHELLO: {                                           /* D46: usbd (re)starts: a fresh window */
+        int up = (int)m->a[0];
+        if (sys_peer(m, PEER_PORT, (void *)up) || up != sys_port_find("usb")) return -EPERM;
+        struct upostbuf b = { (u32)usb_win, sizeof usb_win, up };
+        memset(usb_win, 0, sizeof usb_win);
+        usb_in = usb_out = 0;
+        usb_nc = -1;
+        if (sys_post(POST_BUF, usb_port_self, &b) < 0) return -EIO;
+        usb_port = up;
+        if (usb_sectors) { usb_sectors = 0; usb_gen++; scan(); }  /* the old server's stick: gone (a mount: stale) */
+        return 0;
+    }
     }
     return -ENOSYS;
 }
@@ -448,8 +562,14 @@ int main(void)
     scan();
     int port = sys_port_create("disk");
     if (port < 0) return 1;
+    usb_port_self = port;
     struct umsg *m = sys_recv(port, 1);
-    while ((int)m != -1)
+    while ((int)m != -1) {
+        if (usb_port) {                                             /* D46: usbd's news; usbd sends a request after */
+            usb_take(0);                                            /* posting some, so they are seen at once */
+            if (usb_news) { usb_news = 0; scan(); }
+        }
         m = sys_replyrecv(m, handle(m), port);
+    }
     return 1;
 }

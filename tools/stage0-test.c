@@ -11,9 +11,22 @@
 typedef unsigned int u32;
 /* a GENET's register window as a previous owner left it (the receive and send DMA on, the MAC on), and the beam */
 static u32 genet_regs[0x10000 / 4], genet_at, genet_writes;
-static u32 gs_rd(u32 base, u32 off) { return base == genet_at ? genet_regs[off / 4] : 0xdeadbeef; }
+/* an xHCI's first registers (DESIGN D46): CAPLENGTH 0x20, HCIVERSION 1.0; USBCMD at 0x20, USBSTS at 0x24 */
+static u32 xhci_regs[0x40 / 4], xhci_at, xhci_writes, xhci_slow;
+static u32 gs_rd(u32 base, u32 off)
+{
+    if (base == xhci_at && off < sizeof xhci_regs)
+        return xhci_regs[off / 4];
+    return base == genet_at ? genet_regs[off / 4] : 0xdeadbeef;
+}
 static void gs_wr(u32 base, u32 off, u32 v)
 {
+    if (base == xhci_at && off < sizeof xhci_regs) {
+        xhci_regs[off / 4] = v;
+        xhci_writes++;
+        if (off == 0x20 && !(v & 1) && !xhci_slow) xhci_regs[0x24 / 4] |= 1;    /* Run/Stop off: halted */
+        return;
+    }
     if (base != genet_at) { printf("a write outside the GENET: %x+%x\n", base, off); genet_writes += 1000; return; }
     genet_regs[off / 4] = v;
     genet_writes++;
@@ -66,6 +79,8 @@ int main(int argc, char **argv)
     fdt_setprop_u32(buf, e, "dcache-range-ops", 1);
     u32 vc[2] = { cpu_to_fdt32(0x30000000), cpu_to_fdt32(16 << 20) };
     fdt_setprop(buf, e, "vc4-mem", vc, 8);
+    int xh = fdt_path_offset(buf, "/scb/xhci@7e9c0000");      /* what the firmware does for otg_mode=1 */
+    if (xh >= 0) fdt_setprop_string(buf, xh, "status", "okay");
     int eth = fdt_path_offset(buf, "/scb/ethernet@7d580000");
     if (eth >= 0) { u8 mac[6] = { 0xdc, 0xa6, 0x32, 1, 2, 3 }; fdt_setprop(buf, eth, "local-mac-address", mac, 6); }
 
@@ -127,6 +142,40 @@ int main(int argc, char **argv)
     CHECK("UMAC_CMD", genet_regs[0x808 / 4], 0x8);
     CHECK("INTRL2 mask", genet_regs[0x210 / 4] & genet_regs[0x250 / 4], 0xffffffff);
     CHECK("writes", genet_writes, 8);
+
+    /* DESIGN D46: the xHCI found through /__symbols__ (0x7e9c0000 in /scb's first range, 0x7c000000 -> 0xf6000000) */
+    CHECK("xhci", hw.xhci, 0xF89C0000);
+    CHECK("xhci_size", hw.xhci_size, 0x100000);
+    CHECK("xhci_stop (an address without an xHCI)", hw.xhci_stop, XSTOP_NOTXHCI);     /* the GENET checks' stops */
+    hw.xhci_stop = 0;
+    xhci_at = hw.xhci;
+    xhci_regs[0] = 0x01000020;                                  /* HCIVERSION 1.0, CAPLENGTH 0x20 */
+    xhci_regs[0x20 / 4] = 0x5;                                  /* USBCMD: Run/Stop, INTE */
+    xhci_regs[0x24 / 4] = 0;                                    /* USBSTS: running */
+    genet_writes = 0;
+    stage0_stop(&hw, 1);
+    CHECK("xhci dry run", xhci_writes << 8 | hw.xhci_stop, 0);
+    stage0_stop(&hw, 0);
+    CHECK("xhci_stop running", hw.xhci_stop, XSTOP_DONE | XSTOP_RAN);
+    CHECK("USBCMD", xhci_regs[0x20 / 4], 0);
+    CHECK("xhci writes", xhci_writes, 1);
+    xhci_writes = 0;
+    stage0_stop(&hw, 0);
+    CHECK("xhci_stop halted already", hw.xhci_stop << 8 | xhci_writes, XSTOP_DONE << 8);
+    xhci_regs[0x20 / 4] = 1; xhci_regs[0x24 / 4] = 0; xhci_slow = 1;
+    stage0_stop(&hw, 0);
+    CHECK("xhci_stop never halts", hw.xhci_stop, XSTOP_DONE | XSTOP_RAN | XSTOP_SLOW);
+    xhci_regs[0] = 0x12345678;                                  /* not an xHCI */
+    xhci_writes = 0;
+    stage0_stop(&hw, 0);
+    CHECK("not an xhci", hw.xhci_stop << 8 | xhci_writes, XSTOP_NOTXHCI << 8);
+    xh = fdt_path_offset(buf, "/scb/xhci@7e9c0000");          /* offsets moved with the properties added since */
+    if (xh >= 0) fdt_setprop_string(buf, xh, "status", "disabled");
+    struct hwinfo h2; memset(&h2, 0, sizeof h2);
+    stage0_fill(&c, &h2);
+    CHECK("xhci disabled (no otg_mode=1)", h2.xhci | h2.xhci_size, 0);
+    hw.xhci = 0; hw.xhci_stop = 0;
+
     hw.genet = 0; hw.genet_stop = 0; genet_writes = 0;
     stage0_stop(&hw, 0);
     CHECK("no genet", genet_writes << 8 | hw.genet_stop, 0);

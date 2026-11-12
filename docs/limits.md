@@ -77,6 +77,10 @@ pointers.
   world-readable; the hashes are 1000 rounds of salted SHA-256, a number chosen for a 14 MHz 68020, not measured on
   hardware); user and group ids are 16 bits.
 - Shared libraries; only static programs.
+- USB (D46): only a Pi 4's or CM4's own USB 2.0 port under Emu68 (the BCM2711's xHCI, `otg_mode=1`); one USB stick
+  plugged straight in (no hubs), read-only, 512-byte sectors, LUN 0, 64 KB a request, one request at a time, polled; a
+  stick that does not answer a read in 5 s is dropped; no exFAT yet (the next item), no keyboards or mice, no USB 3, no
+  Amiga USB card; not yet run on a real PiStorm (docs/d46-usb.md 6.2).
 - Sound (D40): two sound streams or one module at a time (the channels are allocated, not mixed); a server's queue of
   16 frames, a bank of at most 1 MB; a module's tick within about 5 ms of its time; floppy activity can starve the
   server (docs/d40-sound.md section 6).

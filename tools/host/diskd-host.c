@@ -16,6 +16,15 @@
  *   cd change               a disc changed: the next command answers UNIT ATTENTION
  *   cd eject | cd insert    no disc (NOT READY, medium not present) | the disc back, with a unit attention
  *   cd becoming N           the next N commands answer NOT READY, becoming ready
+ * A USB stick (DESIGN D46) when HOSTUSB names an image: a stub of the USB server behind the posts of kernel/diskproto.h
+ * (it reads the sectors asked into its bounce buffer and posts UR_DONE), and commands for it:
+ *   usb hello | usb hello-other   the server says hello (DISK_USBHELLO) | a process that does not own port usb does
+ *   usb add | usb del             the stick plugged in (UR_ADD, labelled "Corsair GTX") | pulled (UR_DEL)
+ *   usb dead | usb alive          the server stops answering requests | answers again
+ *   usb fail N                    the next N requests answer -EIO
+ *   usb late N                    answers come only at diskd's N-th wait for them (0: at once)
+ *   usb flood N                   N records of news posted at once (more than the window holds: some are lost)
+ *   usb beat                      the server's heartbeat: a diskd without our window (it started again) gets the hello
  * Every command prints one line "COMMAND LINE -> RESULT". */
 #include "zhost.h"
 #include "../../kernel/diskproto.h"
@@ -29,6 +38,60 @@ static u32 deadpid[16]; static int ndead;
 static int flush_result;
 /* the disk is read as the 68k sees it: longs are big-endian (the RDB code reads longs) */
 static void swap(void *buf, u32 n) { u32 *w = buf; for (u32 i = 0; i < n * 128; i++) w[i] = __builtin_bswap32(w[i]); }
+
+/* ---- the USB server's stub (D46): the posts both ways, the sectors from HOSTUSB ---- */
+#include <poll.h>
+#define POLLPORT 0x4000
+#define POST_BUF 1
+#define POST_WRITE 2
+#define PEER_PORT 4
+struct upostbuf { u32 addr, size; int from; };
+struct upost { u32 off, src, len; };
+#define USBPORT 77
+static int usbfd = -1, usb_dead, usb_fail, usb_other, usb_reads, usb_late, usb_waits;
+static struct urec pending;             /* a request whose answer is held back (usb late) */
+static int npending;
+static u32 usb_nsec, usb_seq;
+static struct urec *dwin;               /* diskd's window (its POST_BUF) */
+static u8 bounce[512 * 128];
+static const char label[32] = "Corsair GTX";
+static void to_diskd(struct urec r)
+{
+    if (!dwin) return;
+    r.seq = ++usb_seq;
+    dwin[r.seq % UREC_N] = r;
+}
+static int usb_answer(const struct urec *q);
+int sys_post(int op, int port, void *arg)
+{
+    if (op == POST_BUF) { const struct upostbuf *b = arg; if (b->from != USBPORT) return -1; dwin = (struct urec *)b->addr; return 0; }
+    if (op != POST_WRITE || port != USBPORT || !dwin) return -104;
+    const struct upost *w = arg;
+    const struct urec *q = (const struct urec *)w->src;
+    if (q->kind != UR_READ || usb_dead) return 0;               /* a dead server takes the post and never answers */
+    if (usb_late) { pending = *q; npending = 1; usb_waits = 0; return 0; }
+    return usb_answer(q);
+}
+static int usb_answer(const struct urec *q)
+{
+    usb_reads++;
+    int res = 0;
+    if (usb_fail) { usb_fail--; res = -5; }
+    else if (q->unit || q->count > 128 || q->lba + q->count > usb_nsec ||
+             pread(usbfd, bounce, q->count * 512, (off_t)q->lba * 512) != (ssize_t)(q->count * 512)) res = -5;
+    /* the bytes as they are on the stick (no swap as sys_blk_read's): the tables read from it here are MBRs, read bytewise */
+    to_diskd((struct urec){ UR_DONE, 0, 0, 0, 0, res, q->seq, 0 });
+    return 0;
+}
+int sys_peer(void *m, int op, void *arg) { (void)m; return op == PEER_PORT && (int)(long)arg == USBPORT && !usb_other ? 0 : -1; }
+int sys_evwait(struct pollfd *f, u32 n, int ticks)
+{
+    (void)f; (void)n; (void)ticks;
+    if (npending && ++usb_waits >= usb_late) { npending = 0; usb_answer(&pending); }
+    return 1;
+}
+static int port_find(const char *name) { return !strcmp(name, "usb") ? USBPORT : 1; }
+#define sys_port_find port_find
 int sys_blk_read(u32 lba, u32 n, void *buf)
 {
     if (lba + n > nsec || pread(fd, buf, n * 512, (off_t)lba * 512) != (ssize_t)n * 512) return -1;
@@ -103,6 +166,9 @@ int sys_svc_load(void *buf, u32 n) { if (n > nsaved) n = nsaved; memcpy(buf, sav
 #define main diskd_main
 #include "../../user/diskd.c"
 #undef main
+#undef sys_port_find
+/* what diskd's main loop does with the server's news */
+static void usb_loop(void) { usb_take(0); if (usb_news) { usb_news = 0; scan(); } }
 
 static unsigned cur_uid;
 static int req(u32 type, u32 a0, u32 a1, u32 a2, u32 a3, int from)
@@ -117,6 +183,8 @@ int main(void)
 {
     const char *cp = getenv("HOSTCD");
     if (cp && (cdfd = open(cp, O_RDONLY)) >= 0) { struct stat cs; fstat(cdfd, &cs); cd_blocks = (u32)(cs.st_size / 2048); cd_ua = 1; }
+    const char *up = getenv("HOSTUSB");
+    if (up && (usbfd = open(up, O_RDONLY)) >= 0) { struct stat us; fstat(usbfd, &us); usb_nsec = (u32)(us.st_size / 512); }
     const char *p = getenv("HOSTDISK");
     if (!p || (fd = open(p, O_RDWR)) < 0) { fprintf(stderr, "set HOSTDISK\n"); return 9; }
     struct stat st; fstat(fd, &st); nsec = (u32)(st.st_size / 512);
@@ -160,6 +228,34 @@ int main(void)
             else if (!strcmp(a, "becoming")) cd_becoming = atoi(b);
             else r = -1;
         }
+        else if (!strcmp(cmd, "usb")) {
+            r = 0;
+            if (!strcmp(a, "hello") || !strcmp(a, "hello-other")) {
+                usb_other = a[5] == '-';
+                usb_seq = 0;
+                r = req(DISK_USBHELLO, USBPORT, 0, 0, 0, 2);
+            } else if (!strcmp(a, "add")) { to_diskd((struct urec){ UR_ADD, 0, 0, usb_nsec, 128, 0, (u32)bounce, (u32)label }); usb_loop(); }
+            else if (!strcmp(a, "del")) { to_diskd((struct urec){ UR_DEL, 0, 0, 0, 0, 0, 0, 0 }); usb_loop(); }
+            else if (!strcmp(a, "dead")) usb_dead = 1;
+            else if (!strcmp(a, "alive")) usb_dead = 0;
+            else if (!strcmp(a, "fail")) usb_fail = atoi(b);
+            else if (!strcmp(a, "reads")) r = usb_reads;
+            else if (!strcmp(a, "late")) usb_late = atoi(b);
+            else if (!strcmp(a, "flood")) {
+                for (int k = 0; k < atoi(b); k++)
+                    to_diskd((struct urec){ k & 1 ? UR_ADD : UR_DEL, 0, 0, usb_nsec, 128, 0, (u32)bounce, (u32)label });
+                usb_loop();
+            }
+            else if (!strcmp(a, "beat")) {                       /* usbd's heartbeat: a len-0 post fails without a window */
+                if (!dwin) {
+                    usb_seq = 0;
+                    r = req(DISK_USBHELLO, USBPORT, 0, 0, 0, 2);
+                    to_diskd((struct urec){ UR_ADD, 0, 0, usb_nsec, 128, 0, (u32)bounce, (u32)label });
+                    usb_loop();
+                }
+            }
+            else r = -1;
+        }
         else if (!strcmp(cmd, "unmount")) r = req(DISK_UNMOUNT, (u32)atoi(a), 0, 0, 0, atoi(b));
         else if (!strcmp(cmd, "rescan")) r = req(DISK_RESCAN, 0, 0, 0, 0, 1);
         else if (!strcmp(cmd, "flush")) r = req(DISK_FLUSH, (u32)atoi(a), 0, 0, 0, 1);
@@ -168,6 +264,7 @@ int main(void)
         else if (!strcmp(cmd, "restart")) {           /* a new diskd: nothing but what it saved */
             memset(dev, 0, sizeof dev); memset(used, 0, sizeof used); memset(phys, 0, sizeof phys);
             memset(order, 0, sizeof order); norder = 0; fd_probe = 1; starts++;
+            usb_port = 0; usb_sectors = 0; dwin = 0;                /* D46: a new diskd knows no USB server */
             for (int s = 0; s < MAXDEV; s++) fdrive[s] = -1;
             r = restore();
             if (!r) scan();

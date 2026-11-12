@@ -17,6 +17,21 @@
 #include "../kernel/hwinfo.h"
 #include "../net/drv/genet.h"
 
+/* wait until a register's bit is set: at most 100 ms (about 1,560 lines of 64 us), as the driver's own wait; the read
+ * count is only a net for a clock that never moves (never a delay of its own) -> 0, or 1 when it timed out. Shared
+ * with xhci-stop.h; the GENET's two DMA engines are waited for one after the other (200 ms at worst). */
+static __attribute__((noinline)) int gs_wait(u32 base, u32 off, u32 bit)
+{
+    u32 last = gs_clock(), lines = 0, reads = 0;
+    while (!(gs_rd(base, off) & bit)) {
+        u32 now = gs_clock();
+        if (now != last) { last = now; lines++; }
+        if (lines > 1560 || ++reads > 4000000)
+            return 1;
+    }
+    return 0;
+}
+
 static u32 genet_stop(u32 base)
 {
     u32 rev = gs_rd(base, SYS_REV_CTRL);
@@ -36,14 +51,8 @@ static u32 genet_stop(u32 base)
         gs_wr(base, UMAC_CMD, cmd & ~CMD_RX_EN);
     gs_wr(base, RDMA_CTRL, 0);
     gs_wr(base, TDMA_CTRL, 0);
-    /* at most 100 ms (about 1,560 lines of 64 us), as the driver's own wait; the read count is only a net for a
-     * clock that never moves (never a delay of its own) */
-    u32 last = gs_clock(), lines = 0, reads = 0;
-    while (!(gs_rd(base, RDMA_STATUS) & DMA_DISABLED) || !(gs_rd(base, TDMA_STATUS) & DMA_DISABLED)) {
-        u32 now = gs_clock();
-        if (now != last) { last = now; lines++; }
-        if (lines > 1560 || ++reads > 4000000) { r |= GSTOP_SLOW; break; }
-    }
+    if (gs_wait(base, RDMA_STATUS, DMA_DISABLED) | gs_wait(base, TDMA_STATUS, DMA_DISABLED))
+        r |= GSTOP_SLOW;
     cmd = gs_rd(base, UMAC_CMD);
     if (!(cmd & CMD_SW_RESET))
         gs_wr(base, UMAC_CMD, cmd & ~(CMD_RX_EN | CMD_TX_EN));

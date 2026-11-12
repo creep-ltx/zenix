@@ -26,7 +26,11 @@ DESCRIPTION
     one, with the disc's size in 512-byte sectors, 0 with no disc; read
     only, a write answers -EROFS; an open looks at the disc again and
     waits up to 10 s for a drive spinning up; once the disc is changed or
-    taken out, the mount made before answers -ESTALE). Access through a
+    taken out, the mount made before answers -ESTALE), usb0 and usb0p1,
+    usb0p2 ... (a USB stick through the USB server usbd(8) on a PiStorm,
+    DESIGN D46: read only, at most 128 sectors a request; listed once
+    usbd has told it of a stick; a stick pulled out makes a mount of it
+    answer -ESTALE, and its devices go when unmounted). Access through a
     partition is limited to that partition.
     A handle is the device's slot. A slot keeps its device across rescans
     (the same sectors of the same medium; a partition renumbered by a change
@@ -81,4 +85,4 @@ NOTES
     frozen-interface rule, CLAUDE.md).
 
 SEE ALSO
-    fdisk(1), mkfs.ext2(1), fsck.ext2(1), docs/architecture.md
+    fdisk(1), mkfs.ext2(1), fsck.ext2(1), usbd(8), docs/architecture.md

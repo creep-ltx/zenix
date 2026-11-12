@@ -32,6 +32,7 @@ static u32 gs_clock(void) { return *(volatile u32 *)0xDFF004 >> 8 & 0x1FF; }
 #endif
 struct udrvquiesce;
 #include "genet-stop.h"
+#include "xhci-stop.h"
 
 static u32 cell(const void *v, u32 i)
 {
@@ -90,12 +91,15 @@ static u32 regaddr(struct ctx *c, void *key)
     return cell(dt_val(c, p), ac - 1);
 }
 
-static void *alias(struct ctx *c, const char *name)
+/* the node a name in /aliases (or another table of paths: /__symbols__) points to */
+static void *lookup(struct ctx *c, const char *table, const char *name)
 {
-    void *a = dt_open(c, "/aliases");
+    void *a = dt_open(c, table);
     void *p = a ? dt_find(c, a, name) : 0;
     return p ? dt_open(c, (const char *)dt_val(c, p)) : 0;
 }
+
+#define alias(c, name) lookup(c, "/aliases", name)
 
 static void *child_named(struct ctx *c, void *key, const char *pre)
 {
@@ -211,6 +215,20 @@ void stage0_fill(struct ctx *c, struct hwinfo *hw)
                 hw->phy_addr = cell(dt_val(c, r), 0);
         }
     }
+
+    /* DESIGN D46: the xHCI USB 2.0 controller on the CM4's USB port, enabled by the firmware for otg_mode=1; no alias
+     * names it, its label does (as AmigaOS's xhci.device finds it) */
+    if ((k = lookup(c, "/__symbols__", "xhci"))) {
+        void *p = dt_find(c, k, "status"), *r = dt_find(c, k, "reg");
+        void *par = dt_parent(c, k);
+        u32 ac = cellprop(c, par, "#address-cells", 2), sc = cellprop(c, par, "#size-cells", 1), sz;
+        /* the first <address size> entry's size (its last cell): 64 KB to 1 MB, else no controller (the window the
+         * kernel's quiesce checks are made against must be the controller's own) */
+        if (!(p && prefix((const char *)dt_val(c, p), "disabled")) && r && sc && dt_len(c, r) >= 4 * (ac + sc) &&
+            (sz = cell(dt_val(c, r), ac + sc - 1)) >= 0x10000 && sz <= 0x100000 &&
+            (hw->xhci = translate(c, "/scb", regaddr(c, k))))
+            hw->xhci_size = sz;
+    }
 }
 
 /* the hardware stage0 touches (only when the caller is not a dry run): a GENET a previous owner left running */
@@ -218,6 +236,8 @@ void stage0_stop(struct hwinfo *hw, int dry)
 {
     if (hw->genet && !dry)                      /* stopped before Zenix's memory is used (DESIGN D19 14, step 9) */
         hw->genet_stop = genet_stop(hw->genet);
+    if (hw->xhci && !dry)                       /* the same for the USB controller, last (DESIGN D46 3.6) */
+        hw->xhci_stop = xhci_stop(hw->xhci);
 }
 
 #ifndef HOST_TEST

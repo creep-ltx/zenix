@@ -4,7 +4,7 @@
  *   - a claim on a device the hardware table names (the only owner; a second claim is -EBUSY);
  *   - DMA memory that belongs to the claim, not to a process, so hardware still writing after a death never writes
  *     into memory the kernel gave someone else;
- *   - a quiesce program (register writes that stop the device), run when the driver ends and when the network server
+ *   - a quiesce program (register writes that stop the device, and bounded waits for it to say so: D46), run when the driver ends and when the network server
  *     ends, before anything of either is freed; then the claim's DMA memory is freed and the claim ends;
  *   - cache maintenance over its DMA memory (Emu68's ARM cache; a real 68040/68060's data cache, D37);
  *   - its blocks (DRV_ATTACH, DRV_XFER) carried to "net" as kernel messages that never start a server.
@@ -12,8 +12,10 @@
  *     while it is held, and the count of its edges (DRV_PARACK);
  *   - Paula's audio channels (DESIGN D40): a claim for the sound server (port "audio") alone, the bell silent while it
  *     is held, the channels stopped by the kernel itself at its end and before ZINE;
- * Every op is for a child of the running network server only (not merely root: no sudo session claims a device);
- * the claim's ops for its holder only. Cold code: -Os in its own file. */
+ *   - the xHCI USB controller (DESIGN D46): a claim for the USB server (service "usb") alone, which may do nothing
+ *     else here: its claim, the claim's DMA memory, quiesce and cache calls, and the hardware table;
+ * Every other op is for a child of the running network server only (not merely root: no sudo session claims a
+ * device); the claim's ops for its holder only. Cold code: -Os in its own file. */
 #include "kernel.h"
 #include "netproto.h"
 #include "hwinfo.h"
@@ -91,6 +93,10 @@ static long window(u32 base, u32 *size)
         *size = 0x10000;
         return 0;
     }
+    if (base == h->xhci) {              /* D46: only the USB server gets here (drv_sys) */
+        *size = h->xhci_size;
+        return 0;
+    }
     for (u32 i = 0; i < h->nboards && i < HW_MAXBOARDS; i++) {
         const struct hwboard *b = &h->board[i];
         if (b->addr == base && b->size && !(b->type & 0x20)) {
@@ -131,12 +137,24 @@ static void stop_base(const struct claim *c, int held)
         audio_hold(held);
 }
 
-static void quiesce(const struct claim *c)
+static u32 rd(const struct udrvstep *s)
 {
+    return s->size == 1 ? *(volatile u8 *)s->addr : s->size == 2 ? *(volatile u16 *)s->addr : *(volatile u32 *)s->addr;
+}
+
+/* -> 1 when a wait step ran out (the device may still be writing) */
+static int quiesce(const struct claim *c)
+{
+    int stuck = 0;
     for (u32 k = 0; k < c->nq; k++) {
         const struct udrvstep *s = &c->q[k];
         u32 v = s->value;
-        if (s->size == 1) {
+        if (s->op == DRVS_WAIT) {       /* D46: until (*addr & mask) == value, at most 20 ms by the E-clock (an xHCI's
+                                         * halt after Run/Stop is cleared: 16 ms at most, xHCI 5.4.1) */
+            u32 t = hr_time();
+            while ((rd(s) & s->mask) != v)
+                if (hr_time() - t > eclock_hz / 50) { stuck = 1; break; }
+        } else if (s->size == 1) {
             volatile u8 *a = (volatile u8 *)s->addr;
             *a = (u8)(s->op == DRVS_RMW ? (*a & ~s->mask) | v : v);
         } else if (s->size == 2) {
@@ -147,6 +165,7 @@ static void quiesce(const struct claim *c)
             *a = s->op == DRVS_RMW ? (*a & ~s->mask) | v : v;
         }
     }
+    return stuck;
 }
 
 /* the claim ends: the device stopped first; its DMA memory is given to the driver's process, freed with the rest of
@@ -155,9 +174,11 @@ static void quiesce(const struct claim *c)
  * driver still runs until it sees its doorbell close and may still touch the region. */
 static void release(struct claim *c, const char *why)
 {
-    quiesce(c);
+    int stuck = quiesce(c);
     stop_base(c, 0);
-    if (c->blk)
+    if (stuck)                          /* D46: its DMA may still run: the memory stays the claim's, never freed */
+        kprintf("drv: the device at %p did not say it stopped: its DMA memory is kept\n", c->base);
+    else if (c->blk)
         mem_set_owner(c->blk, (u32)c->pid);
     kprintf("drv: claim of %p (pid %d) released (%s): %u quiesce steps run%s\n", c->base, c->pid, why, c->nq,
             c->blk ? ", its DMA memory freed when the driver is reaped" : "");
@@ -165,13 +186,15 @@ static void release(struct claim *c, const char *why)
 }
 
 /* p is dying (proc_exit, before anything of it is freed): its claims end; the network server's end ends every claim
- * its children hold (all but the sound server's Paula, D40) */
+ * its children hold (not the sound server's Paula, D40, nor the USB server's controller, D46) */
 void drv_exit(struct proc *p)
 {
     int srv = svc_pid("net") == p->pid;
-    for (int i = 0; i < NCLAIM; i++)
-        if (claims[i].pid && (claims[i].pid == p->pid || (srv && claims[i].base != DRV_PAULA)))
+    for (int i = 0; i < NCLAIM; i++) {
+        struct proc *q = claims[i].pid ? proc_by_pid(claims[i].pid) : 0;
+        if (claims[i].pid && (claims[i].pid == p->pid || (srv && q && q->ppid == p->pid)))
             release(&claims[i], claims[i].pid == p->pid ? "the driver ended" : "the network server ended");
+    }
 }
 
 /* DESIGN D29 7.2 step 6: before ZINE hands the machine over, every claimed device is stopped by its quiesce program
@@ -259,7 +282,12 @@ static long forward(u32 type, u32 blk, u32 size, u32 first)
 long drv_sys(u32 opw, u32 a, u32 b)
 {
     u32 op = opw & 0xFF;
-    if (op == DRV_CLAIM && a == DRV_PAULA) {
+    const struct hwinfo *h = hw();
+    int usb = svc_pid("usb") == current->pid;
+    if (usb) {                          /* D46: the USB server: its claim (the xHCI's, below) and that claim's ops only */
+        if (op - 1 > DRV_CACHE - 1)
+            return -EPERM;
+    } else if (op == DRV_CLAIM && a == DRV_PAULA) {
         if (svc_pid("audio") != current->pid)
             return -EPERM;              /* D40: only the sound server the service manager runs */
     } else {
@@ -272,7 +300,6 @@ long drv_sys(u32 opw, u32 a, u32 b)
     mmu_sysmark(current);               /* D41 7: a driver: its registers and DMA memory in user mode */
     switch (op) {
     case DRV_HWINFO: {
-        const struct hwinfo *h = hw();
         u32 n = b ? b : HWINFO_FIRST;
         if (!h)
             return -ENODEV;
@@ -286,6 +313,8 @@ long drv_sys(u32 opw, u32 a, u32 b)
         return (long)n;
     }
     case DRV_CLAIM: {
+        if (usb != (h && a && h->xhci == a))
+            return -EPERM;              /* D46: the xHCI is the USB server's, and it claims nothing else */
         u32 size;
         long e = window(a, &size);
         int f = -1;
@@ -321,7 +350,8 @@ long drv_sys(u32 opw, u32 a, u32 b)
         if (!b || b > DMA_MAX)
             return -EINVAL;
         u32 n = (b + 63) & ~63u;
-        void *blk = mem_alloc(n + 64, 0, DRV_OWNER(c - claims));
+        void *blk = mem_alloc(n + 64, h && (h->flags & HW_DT) ? MEM_FASTONLY : 0, DRV_OWNER(c - claims));  /* D46: the
+                                         * Pi's DMA reaches Emu68's RAM only, never chip RAM */
         if (!blk)
             return -ENOMEM;
         c->blk = blk;
@@ -340,9 +370,13 @@ long drv_sys(u32 opw, u32 a, u32 b)
         memcpy(&q, (const void *)b, sizeof q);
         if (q.n > DRV_QSTEPS)
             return -EINVAL;
+        int waits = 0;
         for (u32 k = 0; k < q.n; k++) {
             const struct udrvstep *s = &q.step[k];
-            if ((s->op != DRVS_WRITE && s->op != DRVS_RMW) || (s->size != 1 && s->size != 2 && s->size != 4) ||
+            if (s->op == DRVS_WAIT && waits++)
+                return -EINVAL;         /* D46: one wait a program (20 ms at most with interrupts off) */
+            if ((s->op != DRVS_WRITE && s->op != DRVS_RMW && (s->op != DRVS_WAIT || c->base == DRV_PARPORT)) ||
+                (s->size != 1 && s->size != 2 && s->size != 4) ||
                 (s->addr & (s->size - 1)))
                 return -EINVAL;
             if (c->base == DRV_PARPORT ? !par_step_ok(s) : s->addr < c->base || s->addr - c->base > c->size - s->size)

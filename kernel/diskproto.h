@@ -48,3 +48,26 @@ struct uatapi {
     unsigned err;              /* back: the error register after a failed command, 0 otherwise */
 };
 #define UATAPI_FIRST   28      /* its first size */
+
+/* DESIGN D46 (docs/d46-usb.md 3.5; frozen, grows only at the end): a USB stick through the USB server (/sbin/usbd, port
+ * "usb"). usbd calls DISK_USBHELLO once it can serve (a0 its port): diskd forgets the USB disk it had (a mount of it
+ * stays, answering -ESTALE), opens a window that the owner of port usb may post into, and answers at once. From then
+ * on both ways go by posts (SYS_post, never a call that waits): diskd posts UR_READ records into usbd's window and
+ * waits for the UR_DONE with that request's number, at most 5 s; usbd posts UR_ADD, UR_DEL and UR_DONE into diskd's.
+ * Each window is a ring of UREC_N records; a record's seq counts from 1 after the hello, the slot is seq % UREC_N, and
+ * a reader takes the records whose seq is past the last it took. The sectors are read into usbd's bounce buffer (its
+ * address in UR_ADD) and copied out by diskd: usbd never writes into a client's memory. */
+#define DISK_USBHELLO 11   /* (D46) a0 the port of usbd: root, the owner of port "usb" only -> 0 */
+struct urec {
+    unsigned kind;              /* UR_* */
+    unsigned seq;               /* this record's number in its window */
+    unsigned unit;              /* the USB disk: 0 (usb0) */
+    unsigned lba, count;        /* UR_READ: sectors; UR_ADD: the size in 512-byte sectors and the most a request may ask */
+    int result;            /* UR_DONE: 0, or -errno */
+    unsigned a, b;              /* UR_DONE: a the request's seq; UR_ADD: a the bounce buffer, b its 32-byte label */
+};
+#define UREC_N   8
+#define UR_READ  1
+#define UR_DONE  16
+#define UR_ADD   17
+#define UR_DEL   18

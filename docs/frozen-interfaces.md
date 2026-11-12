@@ -354,3 +354,4 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 - **D35 (the installer, branch install, 2026-11-03):** `/etc/hostname` (one line, 1-63 of `a-z 0-9 -`; login shows it in its prompt and sets `$HOSTNAME`, `hostname` prints it); `zinstall`'s options `--list`, `--undo [FILE]`, `--hostname NAME`, `--root-password-file FILE`, `--user NAME`, `--user-password-file FILE`, `--user-name TEXT`, `--no-user`; `zpkg --fetch DIR [--zfs]`; the copy `/var/lib/zinstall/table-before` (`ZTB1`, read only by the same build's `--undo`). Grown (D35 3b, branch inst2, 2026-11-05): `zinstall`'s options `--startup`, `--root`, `--home` (`keep:NAME`, `format:NAME`, `none`) and `--server URL|none`.
+- **D46 placeholder

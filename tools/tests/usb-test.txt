@@ -1,0 +1,12 @@
+wait zenix:/# 90
+sleep 1
+send lsusb; echo "l0=$?"\r
+wait l0= 40
+send lsusb --hold; echo "h0=$?"\r
+wait h0= 30
+send /sbin/usbd; echo "u0=$?"\r
+wait u0= 20
+send lsusb -v; echo "l1=$?"\r
+wait l1= 40
+send echo D-START; dmesg | grep -E 'usbd|svc: usb'; echo usb-test-done\r
+wait usb-test-done 20
