@@ -7,7 +7,8 @@
  * moved once handed out: fragmentation is the enemy. Rules:
  *   - chip and fast RAM are separate pools; fast is preferred
  *   - big blocks are cut from the HIGH end of a free block, small ones
- *     from the low end, so the two kinds do not interleave
+ *     from the low end, so the two kinds do not interleave (a block that
+ *     must end below a limit, MEM_LOW1G or MEM_LOW16M: always the low end)
  *   - every block records its owner (a process id), so a dying or killed
  *     process gets everything back with mem_free_owner()
  * Each range is a run of contiguous blocks; a 16-byte header gives the
