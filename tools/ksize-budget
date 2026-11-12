@@ -87,7 +87,15 @@
 # +40 (their gates load the table); after the code reviews the gates' branches laid out for "off" (+32); kernel.bin
 # 193,716 -> 193,948, TOTAL 193,750 -> 194,000; the mount tests' RAM disk 689 -> 688 KB for it (Makefile). 2,928
 # bytes more given back after the boot when protection is off.
-start     4300   8200
+# 2026-11-12 (DESIGN D46, docs/d46-usb.md 3.6 and 13, USB: the controller and USB sticks read-only; the scope the main
+# session set after the partner's answers): start 4,136 -> 4,800 (stage0 finds the xHCI, checks its window and halts
+# one AmigaOS left running: boot-only, given back by D45), drv 2,602 -> 3,024 (the USB service's own narrow claim, the
+# quiesce's bounded wait step DRVS_WAIT with a device that does not stop keeping its DMA memory, fast RAM only under
+# Emu68, the network server's end releasing only its children's claims), embed -> 48,532 (the built-in diskd's usb0:
+# its window of usbd's posts, its requests by post, the stick's partitions read once, lost records, stale slots;
+# diskd.zx 10,464 -> 12,740); kernel.bin 193,948 -> 197,316, TOTAL 194,000 -> 197,400; the mount tests' RAM disk
+# 688 -> 685 KB for it (Makefile).
+start     4850   8200
 main      5950   1100
 serial    6100   6500
 mem       4200    240
@@ -114,11 +122,11 @@ event      700      0
 signal    2100      0
 random    3800    280
 sock      4700   1060
-drv       2650    640
+drv       3100    640
 zine      1600     16
 cache     1800     32
 gcon      3600     16
 mmu       5700    160
-embed    47500      0
-TOTAL   194000
+embed    48600      0
+TOTAL   197400
 ROOM       800
