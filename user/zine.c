@@ -496,22 +496,29 @@ int main(int argc, char **argv)
     /* 16.18: a big plain program's file is not kept either (zh_lean, hunk.h): its copy in the volume would only take
      * memory from the program (on the 68020 test machine 3-4 MB of 8, which three AGA demos then missed) */
     int lean = whole && zh_lean(&inf, len, info.chip_free, avail);
-    if (lean && inf.bytes[1]) {         /* its largest chip hunk must find a free piece of chip RAM now (path B puts it
-                                         * there), else the file stays (path A) */
-        u32 big = 0;
+    if (lean) {                         /* the largest chip hunk must find a free piece of chip RAM now (path B puts it
+                                         * there), and the largest other one a piece of fast RAM below 16 MB: Zenix's
+                                         * allocator gives big blocks from the top, so on a machine with 32-bit RAM too
+                                         * path B would put the program there, where path A's AllocMem starts low (a
+                                         * 1992 demo, sumea, then showed nothing on the 68030 machine); else path A */
+        u32 big[2] = { 0, 0 };
         for (u32 i = 0; i < inf.nhunks; i++) {
             zu32 memf, sz = zh_hunk_size(head, &inf, i, &memf);
-            if ((memf & ZMEMF_CHIP) && sz > big)
-                big = sz;
+            int k = (memf & ZMEMF_CHIP) != 0;
+            if (sz > big[k])
+                big[k] = sz;
         }
-        void *m = big ? sys_memalloc_chip((big + 8 + 15) & ~15u) : 0;
-        if (m)
-            sys_memfree(m);
-        else if (big)
-            lean = 0;
+        for (int k = 0; k < 2 && lean; k++) {
+            if (!big[k])
+                continue;
+            u32 n = (big[k] + 8 + 15) & ~15u;
+            void *m = k ? sys_memalloc_chip(n) : sys_memalloc(n);
+            if (!m || (!k && (u32)m + n > (16u << 20)))
+                lean = 0;
+            if (m)
+                sys_memfree(m);
+        }
     }
-    if (lean)
-        whole = 0;
     if (!whole && inf.ovl) {
         dprintf(2, "zine: %s does not fit in memory: its file (%u KB, all in memory during the session: it is "
                 "overlaid) and its hunks (%u KB) need more than the %u KB free\n", name, len >> 10, hunks >> 10,
@@ -668,8 +675,11 @@ int main(int argc, char **argv)
             vh->sp[1] = load_sp("/lib/zine/sp040", 40, &vh->sp_size[1]);
     }
     u32 bsize, blob = load_blob(&bsize);
-    /* the ZINE block: the saved chip RAM (Zenix's used chip blocks, low memory), the plan, the stack, the libraries */
-    u32 ksize = info.chip_total - info.chip_free + (256u << 10);
+    /* the ZINE block: the saved chip RAM (Zenix's used chip blocks, low memory), the plan, the stack, the libraries.
+     * 16.18: 128 KB beside the saved chip RAM (it was 256 KB; the blob used about 75 KB of it on the test machines,
+     * and the block's end borders the program's largest free chunk, so what it holds back is missed in one piece);
+     * the blob gives the rest to the program (zp_give), and asks for more when it is short (b->need, below) */
+    u32 ksize = info.chip_total - info.chip_free + (128u << 10);
     struct zine_blk *b = sys_memalloc(ksize);
     if (!b)
         die("zine: not enough memory for ZINE's own %s", "block");

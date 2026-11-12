@@ -2093,12 +2093,16 @@ name (a volume ZINE does not know is the program's folder, 16.13); a second GetD
 answers 0 and `ERROR_NO_MORE_ENTRIES`. Asked for by Reborn (CompareDates) and THE CURE (LockDosList, then
 GetDeviceProc of "ZINE:").
 
-**The ZINE block's spare end:** `zine` allocates the block as Zenix's used chip RAM plus 256 KB before the plan knows
-its tables; what the blob needs ends at its supervisor stack. The rest (about 180 KB on the 68020 test machine) was
-held for nothing during the session. The planner's new `zp_give` (zplan.c, host-tested) gives it to the program as one
-more chunk of its fast MemHeader, in address order, refused unless it lies inside one used Zenix block of a fast
-range and overlaps no chunk. Seen with Dual Panoply on the 68020: its 2,349 KB AllocMem missed the largest free block
-by 13 KB after round 7's blob grew.
+**The ZINE block's spare end:** `zine` allocated the block as Zenix's used chip RAM plus 256 KB before the plan
+knows its tables; what the blob needs ends at its supervisor stack (about 75 KB of the 256 on the test machines). The
+rest (about 180 KB on the 68020 test machine) was held for nothing during the session. The planner's new `zp_give`
+(zplan.c, host-tested) gives it to the program as one more chunk of its fast MemHeader, in address order, refused
+unless it lies inside one used Zenix block of a fast range and overlaps no chunk. That chunk is not next to the
+program's largest one (the block's own start lies between), so `zine` now allocates 128 KB beside the saved chip RAM
+instead of 256: the block ends 128 KB lower and the largest free chunk next to it is that much larger; a block that
+proves too small is asked for again with the size the blob names (b->need, as before). Seen with Dual Panoply on the
+68020: its 2,349 KB AllocMem missed the largest free block by 13 KB after round 7's blob grew, and still by 12 KB with
+the spare end given as a chunk of its own.
 
 **User Copper lists** (graphics/copper.h of the NDK 3.2 for the structures; asked for by Loonies' The Morning Trip
 on the 68030 and 68060): `UCopperListInit` (-594) makes a CopList block of n instructions for the UCopList,
@@ -2114,9 +2118,11 @@ beside its hunks whenever both fit; on the 68020 test machine that took 3-4 MB o
 AllocMem then failed (Smoke Bomb asked 3,162 KB with 3,048 KB in one piece; fake elektronik lightshow and Massive the
 same way). `zine` now takes path B (the hunks loaded from the file before the hand-over, the file not kept) also when
 the program is plain (no overlays, at most 4 bytes after its last hunk: nothing it could read itself), its file is at
-least 128 KB and a sixteenth of the free memory, and its chip hunks leave at least 64 KB of the chip RAM free now with
+least 128 KB and a sixteenth of the free memory, its chip hunks leave at least 64 KB of the chip RAM free now with
 the largest one finding a free piece (path B puts them in the chip RAM Zenix has free; in the session the program
-then has the same chip RAM as on path A); it says so ("its file (N KB) is not
+then has the same chip RAM as on path A), and its largest other hunk would land below 16 MB (Zenix's allocator gives
+big blocks from the top, so on a machine with 32-bit RAM as well path B would put the program there, where path A's
+AllocMem starts low: Virtual Dreams' sumea, from 1992, then showed nothing on the 68030 machine); it says so ("its file (N KB) is not
 kept during the session, which leaves the program that much more memory"). The rule is `zh_lean` (hunk.c,
 host-tested). A program that opens its own file to read its hunks' bytes would not find it; none of the Top 100 was
 seen doing that (the ones that read data from their own file keep it after an overlay table, and stay path A).
