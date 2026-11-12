@@ -548,6 +548,8 @@ int term_regrid(int rows)
                     memset(d, "\40\0\7"[g], COLS);   /* (a blank cell: a space, no attributes, CO_DEF) */
             }
         }
+        for (int y = trows; y < TROWS_MAX; y++)
+            t->rx[y] = 0;                               /* no offset past the smaller grids stays behind */
         kfree(och);
         kfree(ohi);
         t->cy -= drop;
