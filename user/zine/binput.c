@@ -69,7 +69,7 @@ static u8 prevk[4];                     /* the last two key-downs and their qual
 static struct zlist handlers;           /* IND_ADDHANDLER's Interrupts, highest priority first */
 #define NWIN 8
 static u8 *wins[NWIN];                  /* the open windows, the active one last */
-static u8 nwin, ncon, nkbd, ngp;
+static u8 nwin, ncon, nkbd, ngp, nll;    /* nll: lowlevel.library is open (its GetKey wants the keys) */
 static s16 px, py;                      /* the pointer on the active window's screen */
 static u8 joy[2], mready;               /* port 0's last counters (the pointer) */
 static u8 *pool;                        /* the IntuiMessages (IDCMP), allocated with the first window */
@@ -79,7 +79,7 @@ static u32 frames;
 
 static void update(void)
 {
-    zi_live = handlers.head->succ || nwin || ncon || nkbd || ngp;
+    zi_live = handlers.head->succ || nwin || ncon || nkbd || ngp || nll;
 }
 
 /* from blob.c's level 2 interrupt, the handshake given: the code into the ring (the HRM: inverted, rotated right).
@@ -371,9 +371,15 @@ static u16 joydat(int p) { return CUSTOM(p ? 0x00C : 0x00A); }
 static int lbutton(int p) { return !(CIAA(CIA_PRA) & (p ? 0x80 : 0x40)); }
 static int rbutton(int p) { return !(CUSTOM(0x016) & (p ? 0x4000 : 0x0400)); }
 
+static u8 llkey = 0xFF;                 /* lowlevel's GetKey: the last key down still held, 0xFF none */
+static void ll_kbints(void);
 static void key(u8 c)
 {
     u8 k = c & 0x7F;
+    if (!(c & IECODE_UP))
+        llkey = k;
+    else if (k == llkey)
+        llkey = 0xFF;
     if (k >= 0x60 && k <= 0x67) {       /* the qualifier keys: Shift, Caps Lock, Ctrl, Alt, Amiga */
         static const u16 qb[8] = { 1, 2, 4, 8, 0x10, 0x20, 0x40, 0x80 };
         if (c & IECODE_UP)
@@ -561,6 +567,7 @@ void zi_frame(void)
     while (kout != kin) {
         key(kring[kout]);
         kout = (u8)((kout + 1) & 31);
+        ll_kbints();                    /* lowlevel's keyboard interrupts: one call for each key event */
     }
     mouse();
     if (handlers.head->succ && frames % 5 == 0)     /* IECLASS_TIMER, about ten a second, for the handlers */
@@ -766,3 +773,267 @@ void zi_init(void)
     handlers.type = NT_INTERRUPT;
     update();
 }
+
+/* ---- lowlevel.library (16.18): the CD32-era calls games and demos use to read the ports and the keys and to get a
+ * vertical-blank or CIA timer interrupt without exec's lists. Names and numbers from the NDK 3.2's
+ * libraries/lowlevel.h and lowlevel_lib.fd; what each call does from its public description. A handle is a small
+ * record of ZINE's in the program's memory ("ZLLI"), so a wrong one is refused rather than followed. ---- */
+#define ZLLI 0x5A4C4C49u
+struct llint { struct zint is; u32 magic; u8 kind, cia, bit, pad; };   /* kind: 1 keyboard, 2 vertical blank, 3 timer */
+#define LLMAX 8
+static struct llint *kbints[LLMAX];
+static struct llint *vbint, *tmint;
+static s8 jtype[2] = { -1, -1 };        /* SetJoyPortAttrsA's forced type, -1 autosense */
+
+/* called at the vertical blank for each key event (GetKey gives that key): each keyboard interrupt routine, a1 its
+ * data */
+static void ll_kbints(void)
+{
+    for (int i = 0; i < LLMAX; i++)
+        if (kbints[i])
+            zb_call(kbints[i]->is.code, kbints[i]->is.data, 0);
+}
+
+/* lowlevel opened (bmore.c): the keys are taken from now on */
+void zi_ll_open(void)
+{
+    u16 s = zt_dis();
+    nll = 1;
+    update();
+    zt_en(s);
+}
+
+static struct llint *ll_new(u32 code, u32 data, u8 kind)
+{
+    if (!code || (code & 1) || !c_TypeOfMem(code))
+        return 0;                       /* the routine is code in the program's memory, or nothing is added */
+    struct llint *h = (struct llint *)zx_AllocMem(sizeof *h, MEMF_PUBLIC | MEMF_CLEAR);
+    if (h) {
+        h->is.node.type = NT_INTERRUPT;
+        h->is.code = code, h->is.data = data;
+        h->magic = ZLLI, h->kind = kind;
+    }
+    return h;
+}
+
+static struct llint *ll_is(u32 h, u8 kind)
+{
+    struct llint *l = (struct llint *)h;
+    return h && !(h & 1) && c_TypeOfMem(h) && l->magic == ZLLI && l->kind == kind ? l : 0;
+}
+
+static void ll_free(struct llint *l)
+{
+    l->magic = 0;
+    zx_FreeMem((u32)l, sizeof *l);
+}
+
+/* ReadJoyPort(port d0) (-30): port 0 the mouse (its counters, left button red, right blue), port 1 a joystick (the
+ * directions, fire red, the second button blue), unless SetJoyPortAttrsA forced another type; ports 2 and 3 have
+ * nothing (JP_TYPE_NOTAVAIL). A CD32 pad is read as a joystick (its extra buttons are not clocked). */
+#define JP_MOUSE (2u << 28)
+#define JP_JOY (3u << 28)
+#define JP_RED (1u << 22)
+#define JP_BLUE (1u << 23)
+u32 c_ReadJoyPort(u32 port)
+{
+    if (port > 1)
+        return 0;
+    u32 t = jtype[port] < 0 ? (port ? 3u : 2u) : (u32)jtype[port];
+    u16 d = joydat((int)port);
+    u32 b = (lbutton((int)port) ? JP_RED : 0) | (rbutton((int)port) ? JP_BLUE : 0);
+    if (t == 2)
+        return JP_MOUSE | b | d;        /* JOYxDAT: the vertical counter high, the horizontal low, as JP_MVERT/MHORZ */
+    u32 r = (d & 2 ? 1u : 0) | (d & 0x200 ? 2u : 0) | (((d >> 1) ^ d) & 1 ? 4u : 0) | (((d >> 9) ^ (d >> 8)) & 1 ? 8u : 0);
+    return (t == 1 ? 1u << 28 : JP_JOY) | b | r;    /* right 0, left 1, down 2, up 3 */
+}
+
+/* SetJoyPortAttrsA(port d0, tags a1) (-132): SJA_Type (0 autosense, 1 game controller, 2 mouse, 3 joystick),
+ * SJA_Reinitialize (autosense again); TRUE */
+u32 c_SetJoyPortAttrsA(u32 port, const u32 *tags)
+{
+    for (int n = 0; tags && n < 64 && c_TypeOfMem((u32)tags); tags += 2, n++) {
+        u32 t = tags[0];
+        if (t == 0)
+            break;
+        if (t == 0x80C00101u && port < 2)
+            jtype[port] = tags[1] && tags[1] <= 3 ? (s8)tags[1] : -1;
+        else if (t == 0x80C00102u && port < 2)
+            jtype[port] = -1;
+    }
+    return 1;
+}
+
+/* GetLanguageSelection (-36): LANG_ENGLISH (2), the ROM's default language */
+u32 c_GetLanguageSelection(void) { return 2; }
+
+/* GetKey (-48): the key held (its raw code, 0xFF when none) in the low word and the qualifier keys held as LLKF_ bits
+ * (bit 16 left Shift ... 23 right Amiga: IEQUALIFIER's low byte moved up) in the high word */
+u32 c_GetKey(void) { return (u32)(qual & 0xFF) << 16 | llkey; }
+
+/* QueryKeys(array a0, count d1) (-54): each KeyQuery (kq_KeyCode, kq_Pressed: 4 bytes) told whether its key is held */
+void c_QueryKeys(u16 *q, u32 n)
+{
+    for (u32 i = 0; q && i < n && i < 128 && c_TypeOfMem((u32)(q + 2 * i + 1)); i++) {
+        u32 k = q[2 * i] & 0x7F;
+        q[2 * i + 1] = matrix[k >> 3] & (1u << (k & 7)) ? 0xFFFF : 0;
+    }
+}
+
+/* AddKBInt(routine a0, data a1) (-60): called with a1 the data when keys come (at the vertical blank, where ZINE makes
+ * its key events); a handle, 0 when none is free. RemKBInt(handle a1) (-66). */
+u32 c_AddKBInt(u32 code, u32 data)
+{
+    for (int i = 0; i < LLMAX; i++)
+        if (!kbints[i]) {
+            struct llint *h = ll_new(code, data, 1);
+            if (h) {
+                u16 s = zt_dis();
+                kbints[i] = h;
+                zt_en(s);
+            }
+            return (u32)h;
+        }
+    return 0;
+}
+void c_RemKBInt(u32 h)
+{
+    struct llint *l = ll_is(h, 1);
+    for (int i = 0; l && i < LLMAX; i++)
+        if (kbints[i] == l) {
+            u16 s = zt_dis();
+            kbints[i] = 0;
+            zt_en(s);
+            ll_free(l);
+        }
+}
+
+/* AddVBlankInt(routine a0, data a1) (-108): one routine called every vertical blank with a1 the data, as a server of
+ * exec's VERTB chain; 0 when one is already there. RemVBlankInt(handle a1) (-114). */
+void c_AddIntServer(u32 n, struct zint *is);
+void c_RemIntServer(u32 n, struct zint *is);
+u32 c_AddVBlankInt(u32 code, u32 data)
+{
+    if (vbint)
+        return 0;
+    struct llint *h = ll_new(code, data, 2);
+    if (h) {
+        vbint = h;
+        c_AddIntServer(5, &h->is);
+    }
+    return (u32)h;
+}
+void c_RemVBlankInt(u32 h)
+{
+    struct llint *l = ll_is(h, 2);
+    if (l && l == vbint) {
+        c_RemIntServer(5, &l->is);
+        vbint = 0;
+        ll_free(l);
+    }
+}
+
+/* AddTimerInt(routine a0, data a1) (-78): a CIA-B timer (B, else A) through ciab.resource, the routine its interrupt
+ * handler (a1 the data); stopped until StartTimerInt; one at a time, 0 when none is free. StartTimerInt(handle a1,
+ * microseconds d0, continuous d1) (-96): the timer loaded with the time in E-clock ticks (at most 65,535: 92 ms PAL)
+ * and started, again and again or once. StopTimerInt(handle a1) (-90), RemTimerInt(handle a1) (-84). */
+u32 c_OpenResource(const char *name);
+u32 c_AddICRVector(u32 base, u32 bit, struct zint *iv);
+void c_RemICRVector(u32 base, u32 bit, struct zint *iv);
+static volatile u8 *tm_cr(const struct llint *l) { return &CIAB(l->bit ? CIA_CRB : CIA_CRA); }
+u32 c_AddTimerInt(u32 code, u32 data)
+{
+    u32 cia = c_OpenResource("ciab.resource");
+    if (tmint || !cia)
+        return 0;
+    struct llint *h = ll_new(code, data, 3);
+    if (!h)
+        return 0;
+    for (int bit = 1; bit >= 0; bit--) {
+        h->bit = (u8)bit;
+        *tm_cr(h) &= (u8)(bit ? 0x80 : 0xC0);   /* stopped first: its interrupt comes only after StartTimerInt */
+        if (!c_AddICRVector(cia, (u32)bit, &h->is)) {
+            tmint = h;
+            return (u32)h;
+        }
+    }
+    ll_free(h);
+    return 0;
+}
+void c_StopTimerInt(u32 h)
+{
+    struct llint *l = ll_is(h, 3);
+    if (l)
+        *tm_cr(l) &= (u8)~1;
+}
+void c_StartTimerInt(u32 h, u32 us, u32 continuous)
+{
+    struct llint *l = ll_is(h, 3);
+    if (!l)
+        return;
+    u32 t = us / 10 * (Z.a.eclock_hz / 1000) / 100;     /* 32 bits: up to 4.2 s of microseconds */
+    t = t < 1 ? 1 : t > 0xFFFF ? 0xFFFF : t;
+    volatile u8 *cr = tm_cr(l);
+    *cr &= (u8)(l->bit ? 0x80 : 0xC0);  /* stopped, counting E-clock ticks */
+    CIAB(l->bit ? CIA_TBLO : CIA_TALO) = (u8)t;
+    CIAB(l->bit ? CIA_TBHI : CIA_TAHI) = (u8)(t >> 8);
+    *cr |= (u8)(continuous ? 0x11 : 0x19);  /* force load, start; one-shot unless continuous */
+}
+void c_RemTimerInt(u32 h)
+{
+    struct llint *l = ll_is(h, 3);
+    if (l && l == tmint) {
+        c_StopTimerInt(h);
+        c_RemICRVector(c_OpenResource("ciab.resource"), l->bit, &l->is);
+        tmint = 0;
+        ll_free(l);
+    }
+}
+
+/* ElapsedTime(context a0) (-102): the time since the context's EClockVal (which is set to now), in seconds as 16.16
+ * fixed point, at most 0xFFFFFFFF */
+u32 c_ReadEClock(u32 *ev);
+u32 c_ElapsedTime(u32 *ctx)
+{
+    u32 now[2];
+    u32 hz = c_ReadEClock(now);
+    if (!ctx || !c_TypeOfMem((u32)ctx + 7))
+        return 0;
+    u32 hi = now[0] - ctx[0] - (now[1] < ctx[1]), lo = now[1] - ctx[1];
+    ctx[0] = now[0], ctx[1] = now[1];
+    if (hi >= hz >> 16 || !hz)
+        return 0xFFFFFFFFu;
+    /* (hi:lo << 16) / hz in 32 bits: whole seconds, then the fraction's 16 bits */
+    u32 secs = 0, rem = 0;
+    for (int i = 63; i >= 0; i--) {     /* a long division of the 64-bit tick count by hz */
+        rem = rem << 1 | ((i >= 32 ? hi >> (i - 32) : lo >> i) & 1);
+        secs <<= 1;
+        if (rem >= hz)
+            rem -= hz, secs |= 1;
+    }
+    u32 frac = 0;
+    for (int i = 0; i < 16; i++) {
+        rem <<= 1;
+        frac <<= 1;
+        if (rem >= hz)
+            rem -= hz, frac |= 1;
+    }
+    return secs > 0xFFFF ? 0xFFFFFFFFu : secs << 16 | frac;
+}
+
+/* SystemControlA(tags a1) (-72): SCON_TakeOverSys, KillReq, CDReboot, StopInput, Add/RemCreateKeys taken (the program
+ * has the machine already: ZINE runs nothing of its own); 0, every tag done */
+u32 c_SystemControlA(const u32 *tags) { (void)tags; return 0; }
+
+#define F(x) extern void zs_##x(void)
+F(ReadJoyPort); F(GetLanguageSelection); F(GetKey); F(QueryKeys); F(AddKBInt); F(RemKBInt); F(SystemControlA);
+F(AddTimerInt); F(RemTimerInt); F(StopTimerInt); F(StartTimerInt); F(ElapsedTime); F(AddVBlankInt);
+F(RemVBlankInt); F(SetJoyPortAttrsA);
+static const u16 ll_lvo[] = { 30, 36, 48, 54, 60, 66, 72, 78, 84, 90, 96, 102, 108, 114, 132 };
+static void (*const ll_fn[])(void) = { zs_ReadJoyPort, zs_GetLanguageSelection, zs_GetKey, zs_QueryKeys, zs_AddKBInt,
+    zs_RemKBInt, zs_SystemControlA, zs_AddTimerInt, zs_RemTimerInt, zs_StopTimerInt, zs_StartTimerInt,
+    zs_ElapsedTime, zs_AddVBlankInt, zs_RemVBlankInt, zs_SetJoyPortAttrsA };
+_Static_assert(sizeof ll_lvo / 2 == sizeof ll_fn / sizeof ll_fn[0], "lowlevel table");
+const u16 *const zb_ll_lvo = ll_lvo;
+void (*const *const zb_ll_fn)(void) = ll_fn;
+const u16 zb_ll_n = sizeof ll_lvo / 2;

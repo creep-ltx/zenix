@@ -662,6 +662,31 @@ static void test_plan(void)
         memset(&o, 0, sizeof o);
         o.piece = pc, o.piece_cap = 80, o.chunk = ch, o.chunk_cap = 80;
     }
+    /* 16.18: the unused end of a used block (the ZINE block's) given too, in address order; refused in a free block,
+     * over a chunk, in chip RAM, across two blocks */
+    {
+        memset(&o, 0, sizeof o);
+        o.piece = pc, o.piece_cap = 80, o.chunk = ch, o.chunk_cap = 80;
+        CHECK(zp_plan(&in, &o) == 0, "give: planned");
+        zu32 n0 = o.nchunk, ff0 = o.fast_free, top = FASTLO + FASTSZ - 0x20000;
+        int g1 = zp_give(&in, &o, top + 0x8001, top + 0x10000);     /* rounded in to top + 0x8010 */
+        int g2 = zp_give(&in, &o, kend + 0x100, kend + 0x400);      /* the first small used block: before the chunks */
+        int order = 1;
+        for (zu32 i = 1; i < o.nchunk; i++)
+            if (ch[i].reg == ch[i - 1].reg && ch[i].addr <= ch[i - 1].addr) order = 0;
+        CHECK(g1 == 0 && g2 == 0 && o.nchunk == n0 + 2 && o.fast_free == ff0 + (0x8000 - 0x10) + 0x300 && order &&
+              o.fast_largest >= 0x7FF0, "give: two used blocks' ends become chunks, in address order (%d %d)", g1, g2);
+        CHECK(zp_give(&in, &o, top - 0x1000, top - 0x800) == -ZE_INVAL, "give: memory of a free block is refused");
+        CHECK(zp_give(&in, &o, top + 0x9000, top + 0xA000) == -ZE_INVAL, "give: over a chunk given before: refused");
+        CHECK(zp_give(&in, &o, 0x2100, 0x2800) == -ZE_INVAL, "give: chip RAM is refused");
+        CHECK(zp_give(&in, &o, top + 0x10010, top + 0x10000 + 0x10000) == 0 &&
+              zp_give(&in, &o, top + 0xF000, top + 0x10000 + 0x100) == -ZE_INVAL, "give: across two blocks: refused");
+        CHECK(zp_give(&in, &o, top, top + 0x100) == -ZE_INVAL, "give: a block's header is never given");
+        o.chunk_cap = o.nchunk;
+        CHECK(zp_give(&in, &o, kend + 0x800, kend + 0xA00) == -ZE_NOMEM, "give: a full array");
+        memset(&o, 0, sizeof o);
+        o.piece = pc, o.piece_cap = 80, o.chunk = ch, o.chunk_cap = 80;
+    }
     /* refusals and bad walks */
     blk[nb - 3].used = 1;
     CHECK(zp_plan(&in, &o) == 0 && o.why == ZP_HOLDS, "plan: Zenix holding more than half the fast RAM is refused");

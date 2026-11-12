@@ -1049,13 +1049,17 @@ extern const struct zb_mlib zb_mlibs[6];
 u32 zb_xlib[ZB_NXLIB];                  /* the bases, by number - 4 (kernel/zine.h ZINE_LIB_ numbers) */
 static const char *const xname[ZB_NXLIB] = { "utility.library", "mathffp.library", "mathtrans.library",
     "mathieeedoubbas.library", "mathieeedoubtrans.library", "mathieeesingbas.library", "mathieeesingtrans.library",
-    "diskfont.library", "keymap.library", "gadtools.library" };
+    "diskfont.library", "keymap.library", "gadtools.library", "lowlevel.library" };
 extern const u16 *const zb_df_lvo;      /* bfont.c (16.13) */
 extern void (*const *const zb_df_fn)(void);
 extern const u16 zb_df_n;
 extern const u16 *const zb_gt_lvo, *const zb_km_lvo;   /* bgad.c (16.17) */
 extern void (*const *const zb_gt_fn)(void), (*const *const zb_km_fn)(void);
 extern const u16 zb_gt_n, zb_km_n;
+extern const u16 *const zb_ll_lvo;      /* binput.c (16.18) */
+extern void (*const *const zb_ll_fn)(void);
+extern const u16 zb_ll_n;
+void zi_ll_open(void);
 
 static u32 xlib(u32 (*take)(u32), const char *name, u16 slots, const u16 *lvo, void (*const *fn)(void), u16 n)
 {
@@ -1081,6 +1085,7 @@ void zb_more_init(u32 (*take)(u32))
     zb_xlib[7] = xlib(take, xname[7], 22, zb_df_lvo, zb_df_fn, zb_df_n);     /* diskfont_lib.fd: 18 + 4 */
     zb_xlib[8] = xlib(take, xname[8], 8, zb_km_lvo, zb_km_fn, zb_km_n);       /* keymap_lib.fd: up to -48 */
     zb_xlib[9] = xlib(take, xname[9], 29, zb_gt_lvo, zb_gt_fn, zb_gt_n);      /* gadtools_lib.fd: up to -174 */
+    zb_xlib[10] = xlib(take, xname[10], 22, zb_ll_lvo, zb_ll_fn, zb_ll_n);    /* lowlevel_lib.fd: up to -162 */
     extern u8 zm_fpu;                   /* bfpu.S: the math libraries' arithmetic on the FPU (16.13) */
     zm_fpu = (Z.attn & 0x70) != 0;      /* AFF_68881, AFF_68882, AFF_FPU40 */
     extern u32 zb_tracing;
@@ -1099,6 +1104,8 @@ u32 zb_more_open(const char *name, u32 version)
             if (version > l->version)
                 return 0;
             l->opencnt++;
+            if (i == 10)
+                zi_ll_open();               /* lowlevel: its GetKey and keyboard interrupts want the keys */
             return (u32)l;
         }
     return 0;

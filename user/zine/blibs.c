@@ -3102,7 +3102,7 @@ F(ScreenToBack); F(FreeCprList); F(FindDisplayInfo); F(NextDisplayInfo); F(GetDi
 F(LoadRGB32); F(SetRGB32); F(OpenScreenTagList); F(OpenScreen); F(CloseScreen); F(ScreenToFront);
 F(LoadView); F(WaitTOF); F(WaitBlit); F(OwnBlitter); F(DisownBlitter); F(VBeamPos); F(SetRGB4); F(LoadRGB4);
 F(Output); F(Input); F(Write); F(Read); F(PutStr); F(VPrintf); F(VFPrintf); F(FPuts); F(FPutC); F(Flush); F(IoErr);
-F(SetIoErr); F(Delay); F(Execute); F(CloseWorkBench); F(OpenWorkBench); F(rts);
+F(SetIoErr); F(CompareDates); F(LockDosList); F(UnLockDosList); F(NextDosEntry); F(FindDosEntry); F(GetDeviceProc); F(FreeDeviceProc); F(DeviceProc); F(Delay); F(Execute); F(CloseWorkBench); F(OpenWorkBench); F(rts);
 F(InitStruct); F(MakeLibrary); F(MakeFunctions); F(FindResident); F(InitResident); F(AddLibrary); F(RemLibrary);
 F(SumLibrary); F(AddResource); F(InitSemaphore); F(ObtainSemaphore); F(ReleaseSemaphore); F(AttemptSemaphore);
 F(DeleteFile); F(AudioBeginIO); F(AudioAbortIO); F(ConBeginIO); F(ConAbortIO); F(ViewAddress); F(InpBeginIO); F(ZiBeginIO); F(ZiAbortIO); F(RawKeyConvert); F(PeekQualifier); F(RetA0);
@@ -3166,14 +3166,17 @@ static void (*const gfx_fn[])(void) = { zs_LoadRGB4, zs_LoadView, zs_WaitBlit, z
     zs_GetDisplayInfoData };
 static const u16 dos_lvo[] = { 42, 48, 54, 60, 132, 144, 198, 312, 342, 354, 360, 462, 948, 954, 30, 36, 66, 150,
     156, 222, 72, 216, 324, 330, 576, 534, 798, 858, 228, 234,
-    84, 90, 96, 102, 108, 114, 126, 210, 192, 372, 378, 384, 390, 402, 420, 870, 876, 882, 468, 474, 498, 138 };
+    84, 90, 96, 102, 108, 114, 126, 210, 192, 372, 378, 384, 390, 402, 420, 870, 876, 882, 468, 474, 498, 138,
+    738, 654, 660, 666, 690, 684, 642, 648, 174 };
 static void (*const dos_fn[])(void) = { zs_Read, zs_Write, zs_Input, zs_Output, zs_IoErr, zx_Exit, zs_Delay,
     zs_FPutC, zs_FPuts, zs_VFPrintf, zs_Flush, zs_SetIoErr, zs_PutStr, zs_VPrintf, zs_Open, zs_Close, zs_Seek,
     zs_LoadSeg, zs_UnLoadSeg, zs_Execute, zs_DeleteFile, zs_IsInteractive, zs_FRead, zs_FWrite, zs_GetProgramName,
     zs_GetArgStr, zs_ReadArgs, zs_FreeArgs, zs_AllocDosObject, zs_FreeDosObject,
     zs_Lock, zs_UnLock, zs_DupLock, zs_Examine, zs_ExNext, zs_Info, zs_CurrentDir, zs_ParentDir, zs_DateStamp,
     zs_DupLockFromFH, zs_OpenFromLock, zs_ParentOfFH, zs_ExamineFH, zs_NameFromLock, zs_SameLock, zs_FilePart,
-    zs_PathPart, zs_AddPart, zs_Fault, zs_PrintFault, zs_CreateNewProc, zs_CreateProc };
+    zs_PathPart, zs_AddPart, zs_Fault, zs_PrintFault, zs_CreateNewProc, zs_CreateProc, zs_CompareDates, zs_LockDosList,
+    zs_UnLockDosList, zs_LockDosList, zs_NextDosEntry, zs_FindDosEntry, zs_GetDeviceProc, zs_FreeDeviceProc,
+    zs_DeviceProc };
 static const u16 int_lvo[] = { 78, 210, 612, 198, 66, 252, 246, 606, 204, 72, 150, 270, 60, 300,
     510, 516, 768, 774, 780,
     474, 342, 336, 450, 90, 396, 408, 108, 588, 390, 384, 378, 162, 294 };

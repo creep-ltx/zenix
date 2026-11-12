@@ -229,8 +229,8 @@ void zi_abort(u8 *io);
 int zi_pending(u8 *io);
 void c_GetSysTime(u32 *tv);
 /* bmore.c, bmath.c (d29 16.12): the libraries beyond the four (utility and the math ones), the ROM font */
-#define ZB_NXLIB 10                     /* utility, mathffp, mathtrans, mathieeedoubbas/-doubtrans, -singbas/-singtrans,
-                                         * diskfont (16.13), keymap, gadtools (16.17) */
+#define ZB_NXLIB 11                     /* utility, mathffp, mathtrans, mathieeedoubbas/-doubtrans, -singbas/-singtrans,
+                                         * diskfont (16.13), keymap, gadtools (16.17), lowlevel (16.18) */
 extern u32 zb_xlib[ZB_NXLIB];           /* their bases: zine_blk lib numbers 4 and on (kernel/zine.h) */
 void zb_more_init(u32 (*take)(u32));
 u32 zb_more_open(const char *name, u32 version);

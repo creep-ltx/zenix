@@ -142,7 +142,10 @@ DESCRIPTION
     reads (the USA keymap), input.device handlers, keyboard.device and
     gameport.device; a program that reads the hardware itself is left
     alone. gadtools.library makes gadgets and menus (none are drawn);
-    keymap.library maps keys. The first large AllocMem that fails is
+    keymap.library maps keys. lowlevel.library reads the ports and
+    the keys and gives vertical-blank, keyboard and CIA timer
+    interrupts. The DOS list has the program's volume and RAM:.
+    The first large AllocMem that fails is
     said, with the
     largest free block (a program that quits at once for want of
     memory shows why).

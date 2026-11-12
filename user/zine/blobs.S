@@ -792,6 +792,22 @@ zs_RetA0:                               /* console.device's CDInputHandler: the 
     CF  zs_GetVisualInfoA, c_GetVisualInfoA, 1, %a0
     CF  zs_FreeVisualInfo, c_FreeVisualInfo, 1, %a0
     CF  zs_AskKeyMapDefault, c_AskKeyMapDefault, 0
+    /* lowlevel.library (binput.c, 16.18) */
+    CF  zs_ReadJoyPort, c_ReadJoyPort, 1, %d0
+    CF  zs_GetLanguageSelection, c_GetLanguageSelection, 0
+    CF  zs_GetKey, c_GetKey, 0
+    CF  zs_QueryKeys, c_QueryKeys, 2, %a0, %d1
+    CF  zs_AddKBInt, c_AddKBInt, 2, %a0, %a1
+    CF  zs_RemKBInt, c_RemKBInt, 1, %a1
+    CF  zs_SystemControlA, c_SystemControlA, 1, %a1
+    CF  zs_AddTimerInt, c_AddTimerInt, 2, %a0, %a1
+    CF  zs_RemTimerInt, c_RemTimerInt, 1, %a1
+    CF  zs_StopTimerInt, c_StopTimerInt, 1, %a1
+    CF  zs_StartTimerInt, c_StartTimerInt, 3, %a1, %d0, %d1
+    CF  zs_ElapsedTime, c_ElapsedTime, 1, %a0
+    CF  zs_AddVBlankInt, c_AddVBlankInt, 2, %a0, %a1
+    CF  zs_RemVBlankInt, c_RemVBlankInt, 1, %a1
+    CF  zs_SetJoyPortAttrsA, c_SetJoyPortAttrsA, 2, %d0, %a1
     .globl  zs_RetA1, zs_Ret0, zs_Ret1
 zs_RetA1:                               /* GT_FilterIMsg, GT_PostFilterIMsg: the message itself */
     move.l  %a1,%d0
@@ -918,6 +934,14 @@ zs_ReleaseSemaphore:
     CF  zs_CurrentDir, c_CurrentDir, 1, %d1
     CF  zs_ParentDir, c_ParentDir, 1, %d1
     CF  zs_DateStamp, c_DateStamp, 1, %d1
+    CF  zs_CompareDates, c_CompareDates, 2, %d1, %d2
+    CF  zs_LockDosList, c_LockDosList, 1, %d1
+    CF  zs_UnLockDosList, c_UnLockDosList, 1, %d1
+    CF  zs_NextDosEntry, c_NextDosEntry, 2, %d1, %d2
+    CF  zs_FindDosEntry, c_FindDosEntry, 3, %d1, %d2, %d3
+    CF  zs_GetDeviceProc, c_GetDeviceProc, 2, %d1, %d2
+    CF  zs_FreeDeviceProc, c_FreeDeviceProc, 1, %d1
+    CF  zs_DeviceProc, c_DeviceProc, 1, %d1
     CF  zs_DupLockFromFH, c_DupLockFromFH, 1, %d1
     CF  zs_OpenFromLock, c_OpenFromLock, 1, %d1
     CF  zs_ParentOfFH, c_ParentOfFH, 1, %d1

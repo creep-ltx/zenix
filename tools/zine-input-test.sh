@@ -4,7 +4,8 @@
 # runs under ZINE while keys are pressed on the emulated keyboard (wtype in the headless cage rig, tools/shot.py's
 # `shot key-NAME`): a, b, c, F1, the fire button of a joystick in port 0 (the left mouse button's line: FS-UAE's
 # keyboard joystick, Right Ctrl) and q. The window is on a screen of its own (IntuitionBase's FirstScreen checked). zinput writes what reached it each way (a window's IDCMP through gadtools,
-# console.device's reads, an input.device handler, keyboard.device, keymap.library); the line is compared.
+# console.device's reads, an input.device handler, keyboard.device, keymap.library, lowlevel.library's interrupts,
+# GetKey and ReadJoyPort); the line is compared.
 # The machine: the A1200 with 4 MB fast RAM (68EC020); MACH=060 the 68060 one. ZENIX_SERIAL=/tmp/name gives the run
 # its own serial port, ZENIX_OUT its folder.
 cd "$(dirname "$0")/.." || exit 1
@@ -16,7 +17,7 @@ CONF=fsuae/a1200-020-fast.fs-uae
 [ "$MACH" = 060 ] && CONF=fsuae/zine/a1200-060fpu.fs-uae
 sed 's/^joystick_port_0 = .*/joystick_port_0 = keyboard/' $CONF > $OUT/zinput.fs-uae
 grep -q '^joystick_port_0' $OUT/zinput.fs-uae || echo 'joystick_port_0 = keyboard' >> $OUT/zinput.fs-uae
-sed -i "s|\.\./build/|$(realpath $BD)/|g" $OUT/zinput.fs-uae
+sed -i "s|\(\.\./\)*build/|$(realpath $BD)/|g" $OUT/zinput.fs-uae    # ../build/, and ../../build/ in fsuae/zine/'s 68060
 cat > $OUT/script.txt <<'EOF'
 wait zenix:/# 240
 sleep 2
@@ -54,6 +55,9 @@ chk ' buttons DU ' "IDCMP MOUSEBUTTONS: SELECTDOWN and SELECTUP from port 0's bu
 chk ' map A ' "keymap.library's MapRawKey: Shift+a is A"
 chk ' gadtools 1 ' "gadtools: CreateContext, CreateGadgetA, FreeGadgets, CreateMenusA (user data), FreeMenus"
 chk ' front 1 ' "IntuitionBase's FirstScreen: the screen shown (the window is on it)"
-chk ' rows 312$' "GetDisplayInfoData: the PAL monitor's 312 rows (DTAG_MNTR)"
+chk ' rows 312 ' "GetDisplayInfoData: the PAL monitor's 312 rows (DTAG_MNTR)"
+chk ' lowlevel 0 23 ' "lowlevel.library: SystemControlA took its tags (0); ReadJoyPort: port 0 a mouse, port 1 a joystick"
+chk ' lowlevel 0 23 20 ' "lowlevel.library's GetKey in its keyboard interrupt: the first key, a (0x20)"
+chk ' lowlevel 0 23 20 ([5-9]|[1-9][0-9]+) [1-9][0-9][0-9]+ [1-9][0-9][0-9]+ ([2-9]|[1-9][0-9]+)$' "lowlevel.library: AddKBInt (5 or more key events), AddVBlankInt and a 20 ms AddTimerInt (100 or more each), ElapsedTime (2 s or more)"
 echo "$log" | grep -aq '^ZINE: zinput ended (return code 0) after .*Zenix is back' && echo "PASS Zenix is back" || { echo "FAIL Zenix is not back"; pass=0; }
 [ $pass = 1 ] && echo "zine-input-test: all passed" || { echo "zine-input-test: FAILED (log $OUT/run.serial.log)"; exit 1; }
