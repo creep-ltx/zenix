@@ -39,7 +39,7 @@ UDIAG   ?=
 # 68060 multilib's do not and run on every 68020+, so that one is linked (the check below covers it too)
 LIBGCC  := $(shell $(CC) -mcpu=68060 -msoft-float -print-libgcc-file-name 2>/dev/null)
 
-KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/floppy.o $(BUILD)/input.o $(BUILD)/audio.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/confont.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/svc.o $(BUILD)/seg.o $(BUILD)/event.o $(BUILD)/signal.o $(BUILD)/random.o $(BUILD)/sock.o $(BUILD)/drv.o $(BUILD)/zine.o $(BUILD)/cache.o $(BUILD)/gcon.o $(BUILD)/embed.o
+KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/floppy.o $(BUILD)/input.o $(BUILD)/audio.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/confont.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/svc.o $(BUILD)/seg.o $(BUILD)/event.o $(BUILD)/signal.o $(BUILD)/random.o $(BUILD)/sock.o $(BUILD)/drv.o $(BUILD)/zine.o $(BUILD)/cache.o $(BUILD)/mmu.o $(BUILD)/gcon.o $(BUILD)/embed.o
 
 UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash badptr boot \
           mkdir rmdir rm cp mv touch msgpingd msgping socktestd socktest bench fdisk mkfs_ext2 fsck_ext2 df sync termtest \
@@ -243,8 +243,9 @@ RAMDISK_K := 640
 # (2026-11-04, the console handed to the display server: 4 KB of kernel). 699 since DESIGN D28 20 (2026-11-04, the
 # console's ring of rows: 1.3 KB of kernel). Its free blocks are the room the mount tests write into (about 13 blocks:
 # mount points and files in / and /tmp; tools/mounttest.sh refuses to run below 16): by 2026-11-06 only 1 was left,
-# and LEAN=1 (tools/mkroot.sh: no /etc/zdesk, a one-block /lost+found) gave 25 back (26 free).
-RAMDISK_MOUNT_K := 699
+# and LEAN=1 (tools/mkroot.sh: no /etc/zdesk, a one-block /lost+found) gave 25 back (26 free). 692 since DESIGN D41
+# (2026-11-12, memory protection: about 7 KB of kernel, kernel/mmu.c and its hooks).
+RAMDISK_MOUNT_K := 692
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/ksize-check.sh tools/ksize-budget
