@@ -153,10 +153,10 @@ RAM about 82 KB less than on the chipset (no screen); the card's memory is the c
 `dpytest mem`, two windows): displayd 606 KB with an 800 x 600 card (480,000 bytes of pens), 905 KB with 1024 x 768
 (786,432). On the PiStorm (2 GB) none of this matters; the minimum machine (4 MB fast) has no card.
 
-Sizes (measured, `make`, 2026-11-12): the kernel 0 bytes; `displayd` 65,184 -> 70,440 bytes on the disk (+5,256:
+Sizes (measured, `make`, 2026-11-12): the kernel 0 bytes; `displayd` 65,184 -> 70,536 bytes on the disk (+5,352:
 fb.c 1,976 bytes of code at -Os, the chunky branches in draw.c about 1,100, the card's start, the pointer and the
 Pi's switch in displayd.c about 1,600, the relocations); every chipset desktop carries it. `zenixboot` 53,612 ->
-55,688 (+2,076). `dpytest` (a test program) 12,076 -> 13,788. The DD demo floppy: 64,000 -> 60,416 bytes free
+55,960 (+2,348). `dpytest` (a test program) 12,076 -> 13,616. The DD demo floppy: 64,000 -> 60,416 bytes free
 (-3,584, packed).
 
 ## 8. What does not change
