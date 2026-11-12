@@ -23,10 +23,18 @@ void *zmemcpy(void *d, const void *s, u32 n)
 {
     u8 *p = d;
     const u8 *q = s;
-    if (n >= 8 && !(((u32)p | (u32)q) & 3)) {
+    if (n >= 16) {                      /* the destination aligned, then longs four at a time: a 68020 and later read a
+                                         * long at any address (16.18: dos Read and CopyMem copy this way, and demos
+                                         * read their data in pieces of any alignment) */
+        while ((u32)p & 3)
+            *p++ = *q++, n--;
         u32 *pl = (u32 *)p;
         const u32 *ql = (const u32 *)q;
-        for (u32 k = n >> 2; k; k--)
+        for (u32 k = n >> 4; k; k--) {
+            pl[0] = ql[0], pl[1] = ql[1], pl[2] = ql[2], pl[3] = ql[3];
+            pl += 4, ql += 4;
+        }
+        for (u32 k = (n >> 2) & 3; k; k--)
             *pl++ = *ql++;
         p = (u8 *)pl;
         q = (const u8 *)ql;
@@ -176,7 +184,7 @@ long zb_prepare(const struct zine_args *a)
     o.piece_cap = nblk + 1;
     p += align16(o.piece_cap * sizeof *o.piece);
     o.chunk = (struct zp_chunk *)p;
-    o.chunk_cap = nblk + a->nranges + 1;
+    o.chunk_cap = nblk + a->nranges + 2;    /* zp_plan's, and the block's own unused end (zp_give) */
     p += align16(o.chunk_cap * sizeof *o.chunk);
     if (p > end)
         goto small;
@@ -201,6 +209,12 @@ long zb_prepare(const struct zine_args *a)
     if (p > end)
         goto small;
     Z.stack_top = zb_stack_top = (u32)p;
+    /* 16.18: what lies above the stack is nobody's during the session (zine allocates the block with room to spare,
+     * before the plan knows the tables): the program's too */
+    if (!zp_give(&in, &o, (u32)p, (u32)end)) {
+        Z.nchunk = o.nchunk;
+        b->fast_free = o.fast_free, b->fast_largest = o.fast_largest;
+    }
     return 0;
 small:
     b->need = (u32)(p - (u8 *)a->blk) + (u32)(p - (u8 *)a->blk) / 4 + AREA + STACK + (64u << 10);
@@ -491,6 +505,21 @@ void zb_crash(u32 *rb)
         for (int i = 17; i < 21; i++)   /* the code before stacked addresses that may be returns */
             if (v[i] >= 0x1000 && !(v[i] & 1) && v[i] < 0x80000000u)
                 zb_serial_hex('C', (const u32 *)(v[i] - 32), 12);
+        if (*(u16 *)fr & 0x2000) {      /* a crash in supervisor mode (an interrupt, Supervisor()): the supervisor
+                                         * stack above the crash's frame ('S': its 8 longs; an interrupted program's
+                                         * SR and PC are among them), and the code before what looks like a return */
+            static const u8 fsz[16] = { 8, 8, 12, 12, 16, 0, 0, 60, 0, 20, 32, 92 };
+            u32 n = fsz[fmt] ? fsz[fmt] : 8;
+            const u32 *s = (const u32 *)(fr + n);
+            zb_serial_hex('S', s, 8);
+            for (int i = 0; i < 8; i++) {
+                u32 a = ((const u32 *)((const u8 *)s + 2))[i];  /* a stacked SR word then a PC: the PC is 2 bytes in */
+                if (a >= 0x1000 && !(a & 1) && a < 0x80000000u && c_TypeOfMem(a)) {
+                    zb_serial_hex('C', (const u32 *)(a - 32), 12);
+                    break;
+                }
+            }
+        }
     }
     zb_goback();
 }
@@ -893,6 +922,11 @@ u32 zx_AllocMem(u32 size, u32 attrs)
         flushing = 0;
         if (!r)
             say_refused(size, attrs);
+    }
+    extern u32 zb_tracing;
+    if (zb_tracing) {                   /* the trace build: each AllocMem's size, attributes and answer ('M') */
+        u32 v[3] = { size, attrs, r };
+        zb_serial_hex('M', v, 3);
     }
     return r;
 }

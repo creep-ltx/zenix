@@ -67,3 +67,8 @@ struct zp_out {
  * (blocks that do not tile their range, ranges outside a region or over each other, a chip range in low memory),
  * -ZE_NOMEM if out's arrays are too small. */
 int zp_plan(const struct zp_in *in, struct zp_out *out);
+
+/* 16.18: [lo, hi) (rounded in to 16 bytes), the unused end of a used Zenix block (the ZINE block's), added to out's
+ * chunks in address order (one more than zp_plan needs: out's chunk array holds nblk + nrng + 2); 0, -ZE_INVAL when it
+ * is not inside one used block of a fast range or overlaps a chunk, -ZE_NOMEM when the array is full */
+int zp_give(const struct zp_in *in, struct zp_out *out, zu32 lo, zu32 hi);

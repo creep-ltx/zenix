@@ -115,3 +115,10 @@ int zh_load_node(const zu8 *f, zu32 len, const struct zh_info *inf, const struct
 /* The hunk table entries of a loaded node (the root's after zh_load): tab[first + i] = segment i's BPTR, every
  * entry after them 0 */
 void zh_table(const struct zh_info *inf, const struct zh_seg *work, zu8 *tab, zu32 tabn);
+
+/* d29 16.18: 1 when `zine` should load the program from its file before the hand-over even though its file and hunks
+ * fit together (path B, 16.12), so the file's copy in the volume takes no memory from the program: a plain program
+ * (no overlays, at most 4 bytes after its last hunk: nothing it could read itself), its file at least 128 KB and a
+ * sixteenth of the free memory (avail), its chip hunks 64 KB less than the chip RAM free now at most (zine also
+ * checks that the largest one fits in one piece, and that the largest other one would land below 16 MB) */
+int zh_lean(const struct zh_info *inf, zu32 len, zu32 chip_free, zu32 avail);

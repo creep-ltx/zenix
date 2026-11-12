@@ -142,3 +142,45 @@ int zp_plan(const struct zp_in *in, struct zp_out *o)
         o->why = ZP_HOLDS;
     return 0;
 }
+
+/* the unused end of a used block (the ZINE block's, d29 16.18) given to the program as one more chunk, in its place in
+ * address order; it must lie inside one used Zenix block of a fast range and overlap no chunk */
+int zp_give(const struct zp_in *in, struct zp_out *o, zu32 lo, zu32 hi)
+{
+    lo = (lo + 15) & ~15u, hi &= ~15u;
+    if (lo >= hi)
+        return -ZE_INVAL;
+    zu32 g = region_of(in, lo, hi), inside = 0;
+    if (g == in->nreg || (in->reg[g].attrs & ZMEMF_CHIP))
+        return -ZE_INVAL;
+    for (zu32 i = 0; i < in->nblk; i++)
+        if (in->blk[i].used == 1 && lo >= in->blk[i].addr + ZP_HDR && hi <= in->blk[i].addr + in->blk[i].size)
+            inside = 1;
+    if (!inside)
+        return -ZE_INVAL;
+    zu32 at = o->nchunk;
+    for (zu32 i = 0; i < o->nchunk; i++) {
+        const struct zp_chunk *c = &o->chunk[i];
+        if (lo < c->addr + c->len && c->addr < hi)
+            return -ZE_INVAL;
+        if (at == o->nchunk && c->reg == g && c->addr > lo)
+            at = i;
+    }
+    if (at == o->nchunk)                /* after the region's last chunk */
+        for (zu32 i = 0; i < o->nchunk; i++)
+            if (o->chunk[i].reg == g)
+                at = i + 1;
+    if (o->nchunk == o->chunk_cap)
+        return -ZE_NOMEM;
+    for (zu32 i = o->nchunk; i > at; i--) {   /* field by field: no memcpy (the cores call nothing outside) */
+        o->chunk[i].addr = o->chunk[i - 1].addr;
+        o->chunk[i].len = o->chunk[i - 1].len;
+        o->chunk[i].reg = o->chunk[i - 1].reg;
+    }
+    o->chunk[at].addr = lo, o->chunk[at].len = hi - lo, o->chunk[at].reg = g;
+    o->nchunk++;
+    o->fast_free += hi - lo;
+    if (hi - lo > o->fast_largest)
+        o->fast_largest = hi - lo;
+    return 0;
+}

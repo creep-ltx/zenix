@@ -54,8 +54,31 @@
 #define v_front 98
 #define v_scr 140
 #define v_rows 144
-#define v_args 100
+#define v_args 360
 #define v_line 148
+#define v_ll 300
+#define v_llkb 304
+#define v_llvb 308
+#define v_lltm 312
+#define v_llports 316
+#define v_llsecs 320
+#define v_llkey 324
+#define v_llctx 328
+#define v_llkbh 336
+#define v_llvbh 340
+#define v_lltmh 344
+#define v_llscon 348
+#define LVO_ReadJoyPort -30
+#define LVO_GetKey -48
+#define LVO_AddKBInt -60
+#define LVO_RemKBInt -66
+#define LVO_SystemControlA -72
+#define LVO_AddTimerInt -78
+#define LVO_RemTimerInt -84
+#define LVO_StartTimerInt -96
+#define LVO_ElapsedTime -102
+#define LVO_AddVBlankInt -108
+#define LVO_RemVBlankInt -114
     .text
     movem.l %d2-%d7/%a2-%a6,-(%sp)
     lea     vars(%pc),%a4           /* a4: the variables */
@@ -210,6 +233,50 @@
     move.l  %d0,36(%a3)
     move.l  %a3,%a1
     jsr     LVO_SendIO(%a6)
+    /* lowlevel.library (16.18): a keyboard, a vertical-blank and a timer interrupt counting, the ports' types,
+     * SystemControlA, ElapsedTime started */
+    move.l  #-1,v_llscon(%a4)
+    move.l  #0xFF,v_llkey(%a4)
+    lea     llname(%pc),%a1
+    moveq   #0,%d0
+    jsr     LVO_OpenLibrary(%a6)
+    move.l  %d0,v_ll(%a4)
+    beq.w   99f
+    move.l  %d0,%a6
+    lea     sctags(%pc),%a1
+    jsr     LVO_SystemControlA(%a6)
+    move.l  %d0,v_llscon(%a4)
+    moveq   #0,%d0
+    jsr     LVO_ReadJoyPort(%a6)
+    rol.l   #8,%d0                  /* the type (bits 28-31) to bits 4-7 */
+    and.l   #0xF0,%d0
+    move.l  %d0,%d2
+    moveq   #1,%d0
+    jsr     LVO_ReadJoyPort(%a6)
+    rol.l   #4,%d0
+    and.l   #0x0F,%d0
+    or.l    %d2,%d0
+    move.l  %d0,v_llports(%a4)
+    lea     v_llctx(%a4),%a0
+    jsr     LVO_ElapsedTime(%a6)
+    lea     llkb(%pc),%a0
+    move.l  %a4,%a1
+    jsr     LVO_AddKBInt(%a6)
+    move.l  %d0,v_llkbh(%a4)
+    lea     llvb(%pc),%a0
+    move.l  %a4,%a1
+    jsr     LVO_AddVBlankInt(%a6)
+    move.l  %d0,v_llvbh(%a4)
+    lea     lltm(%pc),%a0
+    move.l  %a4,%a1
+    jsr     LVO_AddTimerInt(%a6)
+    move.l  %d0,v_lltmh(%a4)
+    beq.s   1f
+    move.l  %d0,%a1
+    move.l  #20000,%d0              /* 20 ms, again and again */
+    moveq   #1,%d1
+    jsr     LVO_StartTimerInt(%a6)
+1:  move.l  4.w,%a6
     lea     ready(%pc),%a0
     bsr.w   say
     /* the loop: until the VANILLAKEY q */
@@ -321,6 +388,21 @@
     move.l  4.w,%a6
     move.l  v_port(%a4),%a0
     jsr     LVO_DeleteMsgPort(%a6)
+    move.l  v_ll(%a4),%a6           /* lowlevel: the seconds since the start, the interrupts removed */
+    lea     v_llctx(%a4),%a0
+    jsr     LVO_ElapsedTime(%a6)
+    swap    %d0
+    and.l   #0xFFFF,%d0
+    move.l  %d0,v_llsecs(%a4)
+    move.l  v_llkbh(%a4),%a1
+    jsr     LVO_RemKBInt(%a6)
+    move.l  v_llvbh(%a4),%a1
+    jsr     LVO_RemVBlankInt(%a6)
+    move.l  v_lltmh(%a4),%a1
+    jsr     LVO_RemTimerInt(%a6)
+    move.l  %a6,%a1
+    move.l  4.w,%a6
+    jsr     LVO_CloseLibrary(%a6)
     /* the line */
     lea     v_con(%a4),%a0
     move.l  %a0,v_args(%a4)
@@ -338,17 +420,24 @@
     lea     v_front(%a4),%a0
     move.l  %a0,v_args+32(%a4)
     move.l  v_rows(%a4),v_args+36(%a4)
+    move.l  v_llscon(%a4),v_args+40(%a4)
+    move.l  v_llports(%a4),v_args+44(%a4)
+    move.l  v_llkey(%a4),v_args+48(%a4)
+    move.l  v_llkb(%a4),v_args+52(%a4)
+    move.l  v_llvb(%a4),v_args+56(%a4)
+    move.l  v_lltm(%a4),v_args+60(%a4)
+    move.l  v_llsecs(%a4),v_args+64(%a4)
     lea     fmt(%pc),%a0
     lea     v_args(%a4),%a1
     lea     putch(%pc),%a2
     lea     v_line(%a4),%a3
     jsr     LVO_RawDoFmt(%a6)
     lea     v_line(%a4),%a0
-    bsr.s   say
+    bsr.w   say
     moveq   #0,%d0
     bra.s   98f
 99: lea     failed(%pc),%a0
-    bsr.s   say
+    bsr.w   say
     moveq   #20,%d0
 98: movem.l (%sp)+,%d2-%d7/%a2-%a6
     rts
@@ -390,6 +479,28 @@ putch:
     move.b  %d0,(%a3)+
     rts
 
+llkb:                               /* lowlevel's keyboard interrupt (a1 the variables): counted; the first key GetKey
+                                     * gives kept */
+    addq.l  #1,v_llkb(%a1)
+    cmp.l   #0xFF,v_llkey(%a1)
+    bne.s   1f
+    move.l  %a6,-(%sp)
+    move.l  %a1,-(%sp)
+    move.l  v_ll(%a1),%a6
+    jsr     LVO_GetKey(%a6)
+    move.l  (%sp)+,%a1
+    move.l  (%sp)+,%a6
+    and.l   #0xFF,%d0
+    move.l  %d0,v_llkey(%a1)
+1:  rts
+llvb:                               /* lowlevel's vertical-blank interrupt: counted */
+    addq.l  #1,v_llvb(%a1)
+    moveq   #0,%d0
+    rts
+lltm:                               /* lowlevel's timer interrupt: counted */
+    addq.l  #1,v_lltm(%a1)
+    rts
+
 say:                                /* a0: a 0-ended line */
     movem.l %d2-%d3/%a6,-(%sp)
     move.l  %a0,%d2
@@ -412,9 +523,10 @@ gfxname: .asciz "graphics.library"
 conname: .asciz "console.device"
 inpname: .asciz "input.device"
 kbdname: .asciz "keyboard.device"
+llname:  .asciz "lowlevel.library"
 ready:   .asciz "zinput: ready\n"
 failed:  .asciz "zinput: a library, the window or a device could not be opened\n"
-fmt:     .asciz "zinput: console %s vanilla %s raw %lx keyboard %lx handler %ld buttons %s map %s gadtools %s front %s rows %ld\n"
+fmt:     .asciz "zinput: console %s vanilla %s raw %lx keyboard %lx handler %ld buttons %s map %s gadtools %s front %s rows %ld lowlevel %ld %lx %lx %ld %ld %ld %ld\n"
 gtitle:  .asciz "Project"
 gitem:   .asciz "Quit"
     .balign 2
@@ -438,6 +550,7 @@ fakeev:  .long 0                       /* an InputEvent: RAWKEY 0x20 ('a') with 
          .byte 1, 0
          .word 0x20, 0x0001
          .long 0, 0, 0
+sctags:  .long 0x80C00000, 1, 0x80C00003, 0, 0     /* SCON_TakeOverSys, SCON_StopInput */
 stags:   .long 0x80000023, 320, 0x80000024, 200, 0x80000025, 2, 0    /* SA_Width, SA_Height, SA_Depth */
 wtags:   .long 0x80000066, 320         /* WA_Width */
          .long 0x80000067, 200         /* WA_Height */
@@ -455,4 +568,4 @@ inpio:   .space 48
 kbdio:   .space 48
 kev:     .space 24
 cbuf:    .space 4
-vars:    .space 300
+vars:    .space 440

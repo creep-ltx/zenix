@@ -361,6 +361,120 @@ u32 c_DateStamp(u32 *ds)
     return (u32)ds;
 }
 
+/* CompareDates(date1 d1, date2 d2) (-738): the AmigaDOS manual's order, not strcmp's: below 0 when date1 is the
+ * later one, 0 when they are equal, above 0 when date2 is later */
+s32 c_CompareDates(const u32 *a, const u32 *b)
+{
+    if (!a || !b)
+        return 0;
+    for (int i = 0; i < 3; i++)
+        if (a[i] != b[i])
+            return a[i] > b[i] ? -1 : 1;
+    return 0;
+}
+
+/* ---- the DOS list (16.18): LockDosList(flags d1) (-654), AttemptLockDosList (-666), UnLockDosList (-660),
+ * NextDosEntry(dlist d1, flags d2) (-690), FindDosEntry(dlist d1, name d2, flags d3) (-684). ZINE's has the program's
+ * volume (DLT_VOLUME, its name as Info and Lock know it) and the RAM device with its volume "Ram Disk"; dol_Task is
+ * ZINE's handler port (packets: 16.7). Lock answers the list's head, which is no entry (the manual: "a special
+ * value"); the walk starts from it. DosList (dos/dosextens.h): dol_Next 0 (BPTR), dol_Type 4, dol_Task 8, dol_Lock
+ * 12, dol_Name 40 (BSTR); 44 bytes, then the name here. ---- */
+#define DL_N 4                          /* the head and three entries */
+#define DL_SIZE 80
+static u8 *dl;                          /* DL_N records of DL_SIZE, made at the first lock */
+static int dl_make(void)
+{
+    if (dl)
+        return 1;
+    dl = (u8 *)zx_AllocMem(DL_N * DL_SIZE, MEMF_PUBLIC | MEMF_CLEAR);
+    if (!dl)
+        return 0;
+    static const s8 type[DL_N] = { -1, 2, 0, 2 };           /* the head (DLT_PRIVATE), volume, device, volume */
+    const char *name[DL_N] = { "", ((const struct zv_hdr *)Z.a.vol)->volname, "RAM", "Ram Disk" };
+    for (int i = 0; i < DL_N; i++) {
+        u8 *e = dl + i * DL_SIZE;
+        *(u32 *)e = i + 1 < DL_N ? (u32)(e + DL_SIZE) >> 2 : 0;
+        *(s32 *)(e + 4) = type[i];
+        *(u32 *)(e + 8) = i ? Z.hport : 0;
+        u8 *b = e + 44;                 /* the BSTR, longword aligned */
+        u32 n = 0;
+        while (name[i][n] && n < DL_SIZE - 46)
+            b[1 + n] = (u8)name[i][n], n++;
+        b[0] = (u8)n;
+        *(u32 *)(e + 40) = (u32)b >> 2;
+    }
+    return 1;
+}
+u32 c_LockDosList(u32 flags) { (void)flags; return dl_make() ? (u32)dl : 0; }
+void c_UnLockDosList(u32 flags) { (void)flags; }
+
+static int dl_wanted(const u8 *e, u32 flags)
+{
+    s32 t = *(const s32 *)(e + 4);
+    return (t == 0 && (flags & 4)) || (t == 2 && (flags & 8)) || (t >= 1 && t != 2 && (flags & 16));
+}
+static int dl_mine(u32 d) { return dl && d >= (u32)dl && d < (u32)dl + DL_N * DL_SIZE && !((d - (u32)dl) % DL_SIZE); }
+
+u32 c_NextDosEntry(u32 d, u32 flags)
+{
+    if (!dl_mine(d))
+        return 0;
+    for (u32 n = *(const u32 *)d << 2; n; n = *(const u32 *)n << 2)
+        if (dl_wanted((const u8 *)n, flags))
+            return n;
+    return 0;
+}
+
+u32 c_FindDosEntry(u32 d, const char *name, u32 flags)
+{
+    if (!dl_mine(d) || !name)
+        return 0;
+    for (u32 n = d; n; n = *(const u32 *)n << 2) {
+        const u8 *b = (const u8 *)(*(const u32 *)(n + 40) << 2);
+        if (n == (u32)dl || !dl_wanted((const u8 *)n, flags))
+            continue;
+        u32 k = 0;
+        while (k < b[0] && name[k] && ((name[k] ^ b[1 + k]) & 0xDF) == 0 && ((name[k] | 0x20) >= 'a' ||
+               name[k] == b[1 + k]))
+            k++;
+        if (k == b[0] && (!name[k] || name[k] == ':'))
+            return n;
+    }
+    return 0;
+}
+
+/* GetDeviceProc(name d1, devproc d2) (-642), FreeDeviceProc(devproc d1) (-648), DeviceProc(name d1) (-174) (16.18):
+ * every name's handler is ZINE's (its handler port, 16.7; a volume ZINE does not know is the program's folder,
+ * 16.13): a DevProc (dvp_Port, dvp_Lock 0: the volume's root, dvp_Flags 0, dvp_DevNode the program's volume in the
+ * DOS list); with the DevProc of an earlier call (an assign's next directory) 0 and IoErr ERROR_NO_MORE_ENTRIES */
+#define ZDVP 0x5A445650u
+u32 c_SetIoErr(u32 e);
+u32 c_GetDeviceProc(const char *name, u32 old)
+{
+    (void)name;
+    if (old) {
+        c_SetIoErr(232);
+        return 0;
+    }
+    u32 *d = (u32 *)zx_AllocMem(20, MEMF_PUBLIC | MEMF_CLEAR);
+    if (!d) {
+        c_SetIoErr(103);                /* ERROR_NO_FREE_STORE */
+        return 0;
+    }
+    d[0] = Z.hport;
+    d[3] = dl_make() ? (u32)dl + DL_SIZE : 0;
+    d[4] = ZDVP;
+    return (u32)d;
+}
+void c_FreeDeviceProc(u32 *d)
+{
+    if (d && !((u32)d & 1) && c_TypeOfMem((u32)d) && d[4] == ZDVP) {
+        d[4] = 0;
+        zx_FreeMem((u32)d, 20);
+    }
+}
+u32 c_DeviceProc(const char *name) { (void)name; c_SetIoErr(0); return Z.hport; }
+
 /* FilePart(path d1) (-870): the part after the last ':' or '/'; PathPart(path d1) (-876): where that part starts (the
  * '/' before it dropped, a ':' kept); AddPart(dir d1, name d2, size d3) (-882): name joined to dir in place with a
  * '/' as needed (a name with a ':' replaces it; leading '/' go up one each), FALSE when it does not fit */

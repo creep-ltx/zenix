@@ -662,6 +662,31 @@ static void test_plan(void)
         memset(&o, 0, sizeof o);
         o.piece = pc, o.piece_cap = 80, o.chunk = ch, o.chunk_cap = 80;
     }
+    /* 16.18: the unused end of a used block (the ZINE block's) given too, in address order; refused in a free block,
+     * over a chunk, in chip RAM, across two blocks */
+    {
+        memset(&o, 0, sizeof o);
+        o.piece = pc, o.piece_cap = 80, o.chunk = ch, o.chunk_cap = 80;
+        CHECK(zp_plan(&in, &o) == 0, "give: planned");
+        zu32 n0 = o.nchunk, ff0 = o.fast_free, top = FASTLO + FASTSZ - 0x20000;
+        int g1 = zp_give(&in, &o, top + 0x8001, top + 0x10000);     /* rounded in to top + 0x8010 */
+        int g2 = zp_give(&in, &o, kend + 0x100, kend + 0x400);      /* the first small used block: before the chunks */
+        int order = 1;
+        for (zu32 i = 1; i < o.nchunk; i++)
+            if (ch[i].reg == ch[i - 1].reg && ch[i].addr <= ch[i - 1].addr) order = 0;
+        CHECK(g1 == 0 && g2 == 0 && o.nchunk == n0 + 2 && o.fast_free == ff0 + (0x8000 - 0x10) + 0x300 && order &&
+              o.fast_largest >= 0x7FF0, "give: two used blocks' ends become chunks, in address order (%d %d)", g1, g2);
+        CHECK(zp_give(&in, &o, top - 0x1000, top - 0x800) == -ZE_INVAL, "give: memory of a free block is refused");
+        CHECK(zp_give(&in, &o, top + 0x9000, top + 0xA000) == -ZE_INVAL, "give: over a chunk given before: refused");
+        CHECK(zp_give(&in, &o, 0x2100, 0x2800) == -ZE_INVAL, "give: chip RAM is refused");
+        CHECK(zp_give(&in, &o, top + 0x10010, top + 0x10000 + 0x10000) == 0 &&
+              zp_give(&in, &o, top + 0xF000, top + 0x10000 + 0x100) == -ZE_INVAL, "give: across two blocks: refused");
+        CHECK(zp_give(&in, &o, top, top + 0x100) == -ZE_INVAL, "give: a block's header is never given");
+        o.chunk_cap = o.nchunk;
+        CHECK(zp_give(&in, &o, kend + 0x800, kend + 0xA00) == -ZE_NOMEM, "give: a full array");
+        memset(&o, 0, sizeof o);
+        o.piece = pc, o.piece_cap = 80, o.chunk = ch, o.chunk_cap = 80;
+    }
     /* refusals and bad walks */
     blk[nb - 3].used = 1;
     CHECK(zp_plan(&in, &o) == 0 && o.why == ZP_HOLDS, "plan: Zenix holding more than half the fast RAM is refused");
@@ -835,6 +860,31 @@ static void test_path(void)
     passes++;
 }
 
+/* d29 16.18: zh_lean, the plain big program loaded from its file even when it would fit beside its hunks */
+static void test_lean(void)
+{
+    struct zh_info i;
+    memset(&i, 0, sizeof i);
+    zu32 K = 1024;
+    i.end = 3339 * K;
+    i.bytes[1] = 200 * K;
+    CHECK(zh_lean(&i, 3339 * K, 1700 * K, 9300 * K), "lean: a big plain program is loaded from its file");
+    i.end = 200 * K - 2, i.bytes[1] = 0;
+    CHECK(zh_lean(&i, 200 * K, 1700 * K, 2000 * K), "lean: a few bytes of padding after its hunks are no data");
+    i.end = 3339 * K, i.ovl = 1;
+    CHECK(!zh_lean(&i, 3339 * K, 1700 * K, 9300 * K), "lean: not an overlaid one");
+    i.ovl = 0, i.end = 3000 * K;
+    CHECK(!zh_lean(&i, 3339 * K, 1700 * K, 9300 * K), "lean: not one with data after its hunks");
+    i.end = 100 * K;
+    CHECK(!zh_lean(&i, 100 * K, 1700 * K, 1000 * K), "lean: not below 128 KB");
+    i.end = 400 * K;
+    CHECK(!zh_lean(&i, 400 * K, 1700 * K, 9300 * K), "lean: not below a sixteenth of the free memory");
+    i.end = 3339 * K, i.bytes[1] = 1476 * K;
+    CHECK(zh_lean(&i, 3339 * K, 1700 * K, 9300 * K), "lean: chip hunks that fit in the free chip RAM with 64 KB to spare");
+    i.bytes[1] = 1650 * K;
+    CHECK(!zh_lean(&i, 3339 * K, 1700 * K, 9300 * K), "lean: not when its chip hunks leave less than 64 KB of chip RAM");
+}
+
 int main(int argc, char **argv)
 {
     if (argc == 3 && !strcmp(argv[1], "seeds")) {      /* the test programs, as the hunk fuzzer's seeds */
@@ -857,6 +907,7 @@ int main(int argc, char **argv)
         return 0;
     }
     test_hunk();
+    test_lean();
     test_overlay();
     test_vol();
     test_plan();

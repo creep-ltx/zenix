@@ -2057,6 +2057,102 @@ IntuiMessage pool (32 x 60 bytes) comes from the program's memory with its first
 48,213 bytes in memory (two library names); the kernel unchanged; the HD demo floppy 296,960 -> 289,280 bytes free
 (its RAM disk 12 KB larger unpacked).
 
+### 16.18 Round 7's "regressions", lowlevel.library, the DOS list, the ZINE block's spare end (2026-11-12, branch zine8)
+
+**The 68060's twelve "regressions" were not caused by round 7.** The 68060's "before" results were the round 4 rerun
+(`runs-060-before-zine5`); 11 of the 12 had ended there with return code 0 after 7-258 s, which the counting rule
+takes as working, but each had printed why it quit: "FPU required", "error: fpu required (if you have 040/060, run
+setpatch first)", "68020+ and FPU required!", "FPU: None ... These were not detected on your system". Round 5 made
+AttnFlags say the FPU the 68060 package gives (16.15), so they now go on and meet what ZINE still lacks
+(zine-top100-findings.md "Round 8"). Read from the old and new runs' logs.
+
+**lowlevel.library** (library number 14; `user/zine/binput.c`, beside the input it reads; names and numbers from the
+NDK 3.2's `libraries/lowlevel.h` and `lowlevel_lib.fd`, what each call does from its public description). Flex's and
+Ephidrena's demo system opens it and calls through the answer unchecked (Sojourn of the Soul and Dead Ahead crashed
+through base 0; Software Make The Dance Foam Oil, fake elektronik lightshow and Respirator Stories quit after 70-90 s).
+- `ReadJoyPort(port d0)` (-30): port 0 a mouse (`JP_TYPE_MOUSE`, JOY0DAT's counters, left button red, right blue),
+  port 1 a joystick (`JP_TYPE_JOYSTK`, the four directions from JOY1DAT, fire red, the second button blue), unless
+  `SetJoyPortAttrsA` (-132, `SJA_Type`, `SJA_Reinitialize`) forced a type; ports 2 and 3 `JP_TYPE_NOTAVAIL`. A CD32
+  pad reads as a joystick (its extra buttons are not clocked).
+- `GetKey` (-48): the key held (its raw code, 0xFF none) and the qualifier keys as `LLKF_` bits (the IEQUALIFIER low
+  byte moved to bit 16); `QueryKeys` (-54) from the key matrix; `AddKBInt`/`RemKBInt` (-60/-66): routines called for
+  each key event (at the vertical blank, where ZINE makes its key events, 16.17). Opening the library makes ZINE take
+  the keys (it counts as a listener, `zi_live`).
+- `AddVBlankInt`/`RemVBlankInt` (-108/-114): one routine, a server on exec's VERTB chain. `AddTimerInt`,
+  `StartTimerInt`, `StopTimerInt`, `RemTimerInt` (-78 .. -96): CIA-B's timer B (else A) through ZINE's ciab.resource,
+  loaded with the microseconds in E-clock ticks (at most 65,535: 92 ms PAL), continuous or one-shot.
+- `ElapsedTime` (-102): seconds since the context's EClockVal as 16.16 fixed point (ZINE's E-clock has a frame's
+  resolution, 5.4); `GetLanguageSelection` (-36) LANG_ENGLISH; `SystemControlA` (-72) takes every tag and answers 0
+  (the program has the machine already).
+
+**dos:** `CompareDates` (-738, the AmigaDOS manual's order: below 0 when the first date is the later);
+`LockDosList`/`AttemptLockDosList`/`UnLockDosList`, `NextDosEntry`, `FindDosEntry` (-654 .. -690): a DOS list of the
+program's volume (`DLT_VOLUME`, the name Info and Lock know), the RAM device and its volume "Ram Disk", `dol_Task` the
+handler port (16.7); `GetDeviceProc`/`FreeDeviceProc` (-642/-648) and `DeviceProc` (-174): the handler port for every
+name (a volume ZINE does not know is the program's folder, 16.13); a second GetDeviceProc with the first's DevProc
+answers 0 and `ERROR_NO_MORE_ENTRIES`. Asked for by Reborn (CompareDates) and THE CURE (LockDosList, then
+GetDeviceProc of "ZINE:").
+
+**The ZINE block's spare end:** `zine` allocated the block as Zenix's used chip RAM plus 256 KB before the plan
+knows its tables; what the blob needs ends at its supervisor stack (about 75 KB of the 256 on the test machines). The
+rest (about 180 KB on the 68020 test machine) was held for nothing during the session. The planner's new `zp_give`
+(zplan.c, host-tested) gives it to the program as one more chunk of its fast MemHeader, in address order, refused
+unless it lies inside one used Zenix block of a fast range and overlaps no chunk. That chunk is not next to the
+program's largest one (the block's own start lies between), so `zine` now allocates 128 KB beside the saved chip RAM
+instead of 256: the block ends 128 KB lower and the largest free chunk next to it is that much larger; a block that
+proves too small is asked for again with the size the blob names (b->need, as before). Seen with Dual Panoply on the
+68020: its 2,349 KB AllocMem missed the largest free block by 13 KB after round 7's blob grew, and still by 12 KB with
+the spare end given as a chunk of its own.
+
+**User Copper lists** (graphics/copper.h of the NDK 3.2 for the structures; asked for by Loonies' The Morning Trip
+on the 68030 and 68060): `UCopperListInit` (-594) makes a CopList block of n instructions for the UCopList,
+`CMove` (-372) and `CWait` (-378) write the one at `CopPtr`, `CBump` (-366) moves on (a full block gets another of
+the same size behind it), `FreeCopList` (-546) and `FreeVPortCopLists` (-540) free them. When a screen or a View of
+the program's own is shown, the ViewPort's `UCopIns` instructions follow the screen's own in its Copper list: a MOVE
+as it is (none to the copper's own registers or below $40, which would stop the copper), a WAIT at the ViewPort's
+line plus its DyOffset and the display window's first line ($2C), past line 255 after the copper's wait for the end
+of line 255. The screen's Copper list grows to hold them (its size kept beside it).
+
+**A big program's file is not kept when nothing needs it.** Path A (16.12) keeps the program's file in the volume
+beside its hunks whenever both fit; on the 68020 test machine that took 3-4 MB of 8 from AGA demos whose next
+AllocMem then failed (Smoke Bomb asked 3,162 KB with 3,048 KB in one piece; fake elektronik lightshow and Massive the
+same way). `zine` now takes path B (the hunks loaded from the file before the hand-over, the file not kept) also when
+the program is plain (no overlays, at most 4 bytes after its last hunk: nothing it could read itself), its file is at
+least 128 KB and a sixteenth of the free memory, its chip hunks leave at least 64 KB of the chip RAM free now with
+the largest one finding a free piece (path B puts them in the chip RAM Zenix has free; in the session the program
+then has the same chip RAM as on path A), and its largest other hunk would land below 16 MB (Zenix's allocator gives
+big blocks from the top, so on a machine with 32-bit RAM as well path B would put the program there, where path A's
+AllocMem starts low: Virtual Dreams' sumea, from 1992, then showed nothing on the 68030 machine); it says so ("its file (N KB) is not
+kept during the session, which leaves the program that much more memory"). The rule is `zh_lean` (hunk.c,
+host-tested). A program that opens its own file to read its hunks' bytes would not find it; none of the Top 100 was
+seen doing that (the ones that read data from their own file keep it after an overlay table, and stay path A).
+
+**Copying:** the blob's `zmemcpy` (dos `Read`, `CopyMem`, the saved chip RAM) copied bytes whenever source and
+destination were not both long-aligned; it now aligns the destination and copies longs four at a time (a 68020 and
+later read a long at any address). Demos that read their data in odd-sized pieces spent minutes of the 68060's
+emulated time there (The Martini Effect: a `Read`, then a thousand `CopyMem` calls of a few bytes each).
+`RectFill` set or complemented a pixel at a time, plane by plane; it now works a
+byte at a time, the edges masked. Efreet's deeppan clears its window with RectFill every frame: its frames stayed
+off the screen for minutes of emulated time.
+
+**The trace build** writes each AllocMem's size, attributes and answer (`M`), and on a crash in supervisor mode the
+supervisor stack above the frame (`S`) with the code before the first stacked address that looks like a return.
+
+*Verified* in FS-UAE: `tools/zine-input-test.sh` on the 68020 and the 68060 machine (zinput opens lowlevel.library:
+SystemControlA, ReadJoyPort's two types, GetKey in its keyboard interrupt, the keyboard, vertical-blank and 20 ms
+timer interrupts counted, ElapsedTime; the test's 68060 run had never found its disk images before, fixed),
+`tools/zine-emu-test.sh` (zscreen: a user Copper list's MOVE to DMACON at line 10 seen in DMACONR, gone after
+FreeVPortCopLists; znext: the DOS list, GetDeviceProc, CompareDates, CopyMem at odd addresses, RectFill set
+and complemented across bytes; znext had 2,709
+KB of fast RAM before and 2,890 KB with the block's spare end), `tools/host/zine-test.sh` (zp_give: in address order,
+refused in a free block, over a chunk, in chip RAM, across two blocks, over a header, with a full array; zh_lean's
+eight cases). Not yet on a real machine.
+
+Sizes (*measured*, the 68020-60 build): the blob's code 117,252 -> 122,470 bytes (memory 125,373 -> 130,645):
+lowlevel.library about 2.3 KB, user Copper lists about 1.2 KB, the DOS list, GetDeviceProc and CompareDates about
+1 KB, the rest the copy, RectFill, zp_give and the trace lines. `/bin/zine` 45,904 -> 46,376 bytes in memory (a
+library name, zh_lean, the chip probe and its message); the kernel unchanged.
+
 ## 17. Questions for the owner (what ZINE should be)
 
 1. Owner answer 1 allowed "the Amiga's own console or through Wasabi". Typing into the console through Wasabi counts

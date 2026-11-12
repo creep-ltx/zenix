@@ -764,21 +764,43 @@ u32 c_Text(u8 *rp, const u8 *s, u32 n)
 
 /* RectFill(rp a1, xmin d0, ymin d1, xmax d2, ymax d3) (-306) and SetRast(rp a1, pen d0) (-234): FgPen's colour (SetRast
  * the pen given) into the BitMap's planes the Mask allows, clipped; COMPLEMENT flips them */
+/* a rectangle in the pen, or complemented (16.18: a byte at a time, the edges masked, the middle of a row whole; it
+ * was a pixel at a time, which kept deeppan's frames from the screen for minutes) */
 static void fill(u8 *rp, s32 x0, s32 y0, s32 x1, s32 y1, u8 pen, u8 mode)
 {
     u8 *bm = rp ? *(u8 **)(rp + RP_BitMap) : 0;
     if (!bm)
         return;
-    s32 w = *(u16 *)(bm + ZO_BitMap_BytesPerRow) * 8, h = *(u16 *)(bm + ZO_BitMap_Rows);
+    u32 bpr = *(u16 *)(bm + ZO_BitMap_BytesPerRow);
+    s32 w = (s32)bpr * 8, h = *(u16 *)(bm + ZO_BitMap_Rows);
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
     if (x1 >= w) x1 = w - 1;
     if (y1 >= h) y1 = h - 1;
-    for (s32 y = y0; y <= y1; y++)
-        for (s32 x = x0; x <= x1; x += 8) {
-            s32 n = x1 - x + 1 < 8 ? x1 - x + 1 : 8;
-            put8(bm, x, y, 0xFF, (u32)n, pen, pen, mode & COMPLEMENT, rp[RP_Mask]);
+    if (x0 > x1 || y0 > y1)
+        return;
+    u32 b0 = (u32)x0 >> 3, b1 = (u32)x1 >> 3;
+    u8 lm = (u8)(0xFF >> (x0 & 7)), rm = (u8)(0xFF << (7 - (x1 & 7)));
+    if (b0 == b1)
+        lm &= rm;
+    for (u32 pl = 0; pl < bm[ZO_BitMap_Depth] && pl < 8; pl++) {
+        u8 *p = *(u8 **)(bm + ZO_BitMap_Planes + 4 * pl);
+        if (!p || p == (u8 *)-1 || !(rp[RP_Mask] & (1u << pl)))
+            continue;
+        int cpl = mode & COMPLEMENT, set = (pen >> pl) & 1;
+        for (s32 y = y0; y <= y1; y++) {
+            u8 *r = p + (u32)y * bpr;
+            for (u32 b = b0; b <= b1; b++) {
+                u8 m = b == b0 ? lm : b == b1 ? rm : 0xFF;
+                if (cpl)
+                    r[b] ^= m;
+                else if (set)
+                    r[b] |= m;
+                else
+                    r[b] &= (u8)~m;
+            }
         }
+    }
 }
 void c_RectFill(u8 *rp, s32 x0, s32 y0, s32 x1, s32 y1)
 {
@@ -1049,13 +1071,17 @@ extern const struct zb_mlib zb_mlibs[6];
 u32 zb_xlib[ZB_NXLIB];                  /* the bases, by number - 4 (kernel/zine.h ZINE_LIB_ numbers) */
 static const char *const xname[ZB_NXLIB] = { "utility.library", "mathffp.library", "mathtrans.library",
     "mathieeedoubbas.library", "mathieeedoubtrans.library", "mathieeesingbas.library", "mathieeesingtrans.library",
-    "diskfont.library", "keymap.library", "gadtools.library" };
+    "diskfont.library", "keymap.library", "gadtools.library", "lowlevel.library" };
 extern const u16 *const zb_df_lvo;      /* bfont.c (16.13) */
 extern void (*const *const zb_df_fn)(void);
 extern const u16 zb_df_n;
 extern const u16 *const zb_gt_lvo, *const zb_km_lvo;   /* bgad.c (16.17) */
 extern void (*const *const zb_gt_fn)(void), (*const *const zb_km_fn)(void);
 extern const u16 zb_gt_n, zb_km_n;
+extern const u16 *const zb_ll_lvo;      /* binput.c (16.18) */
+extern void (*const *const zb_ll_fn)(void);
+extern const u16 zb_ll_n;
+void zi_ll_open(void);
 
 static u32 xlib(u32 (*take)(u32), const char *name, u16 slots, const u16 *lvo, void (*const *fn)(void), u16 n)
 {
@@ -1081,6 +1107,7 @@ void zb_more_init(u32 (*take)(u32))
     zb_xlib[7] = xlib(take, xname[7], 22, zb_df_lvo, zb_df_fn, zb_df_n);     /* diskfont_lib.fd: 18 + 4 */
     zb_xlib[8] = xlib(take, xname[8], 8, zb_km_lvo, zb_km_fn, zb_km_n);       /* keymap_lib.fd: up to -48 */
     zb_xlib[9] = xlib(take, xname[9], 29, zb_gt_lvo, zb_gt_fn, zb_gt_n);      /* gadtools_lib.fd: up to -174 */
+    zb_xlib[10] = xlib(take, xname[10], 22, zb_ll_lvo, zb_ll_fn, zb_ll_n);    /* lowlevel_lib.fd: up to -162 */
     extern u8 zm_fpu;                   /* bfpu.S: the math libraries' arithmetic on the FPU (16.13) */
     zm_fpu = (Z.attn & 0x70) != 0;      /* AFF_68881, AFF_68882, AFF_FPU40 */
     extern u32 zb_tracing;
@@ -1099,6 +1126,8 @@ u32 zb_more_open(const char *name, u32 version)
             if (version > l->version)
                 return 0;
             l->opencnt++;
+            if (i == 10)
+                zi_ll_open();               /* lowlevel: its GetKey and keyboard interrupts want the keys */
             return (u32)l;
         }
     return 0;

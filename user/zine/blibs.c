@@ -2093,9 +2093,10 @@ void c_SetRGB32(u32 vp, u32 n, u32 r, u32 g, u32 b) { (void)vp; rgb32(n, r, g, b
 #define RP_DrawMode 28
 #define CM_Count 2
 #define CM_ColorTable 4
-#define ZSCR_EXTRA 84                   /* after the Screen: a flag, the RasInfo (12), the ColorMap (52), the Copper
+#define ZSCR_EXTRA 88                   /* after the Screen: a flag, the RasInfo (12), the ColorMap (52), the Copper
                                          * list (+68), its plane pointers (+72), the program's own BitMap (+76), the
-                                         * BitMap a Copper list chosen by LoadView shows (+80, 16.17) */
+                                         * BitMap a Copper list chosen by LoadView shows (+80, 16.17), the Copper
+                                         * list's size (+84, 16.18: with the ViewPort's user Copper list) */
 
 /* the screen shown (5.5, the screens' first form): its BitMap's planes from the top, the standard display window
  * (320 or 640 wide, 256 or 200 lines), lowres, hires, HAM or EHB from its mode; colours stay what the program set */
@@ -2130,6 +2131,143 @@ static void scr_place(u8 *sc, int front)
     }
 }
 
+/* ---- user Copper lists (16.18; graphics/copper.h of the NDK 3.2 for the structures, the RKRM Libraries' graphics
+ * chapter for their use): UCopperListInit(ucl a0, n d0) (-594) a CopList block of n CopIns, CMove(ucl a1, reg d0,
+ * value d1) (-372) and CWait(ucl a1, v d0, h d1) (-378) write the instruction at CopPtr, CBump(ucl a1) (-366) moves
+ * on (a full block: another of the same size chained by Next), FreeCopList(cl a0) (-546), FreeVPortCopLists(vp a0)
+ * (-540). The ViewPort's UCopIns (+20) list is put after the screen's own instructions when it is shown: a MOVE as
+ * it is, a WAIT at the ViewPort's line v (its DyOffset and the display window's first line $2C added; past line 255
+ * after the copper's wait for the end of line 255), h as the copper's horizontal position. UCopList: Next 0,
+ * FirstCopList 4, CopList 8; CopList: Next 0, CopIns 12, CopPtr 16, Count 28, MaxCount 30; CopIns 6 bytes: OpCode,
+ * then DestAddr/VWaitPos and DestData/HWaitPos. ---- */
+#define ZUCL 0x5A55434Cu                /* "ZUCL" after a CopList block of ZINE's: FreeCopList frees only those */
+#define CL_HDR 40
+static u8 *cl_new(u32 n)
+{
+    if (!n || n > 16384)
+        return 0;
+    u8 *cl = (u8 *)zx_AllocMem(CL_HDR + 6 * n + 8, MEMF_PUBLIC | MEMF_CLEAR);
+    if (!cl)
+        return 0;
+    *(u32 *)(cl + 12) = *(u32 *)(cl + 16) = (u32)(cl + CL_HDR);
+    *(u16 *)(cl + 30) = (u16)n;
+    *(u32 *)(cl + CL_HDR + 6 * n) = ZUCL;
+    *(u32 *)(cl + CL_HDR + 6 * n + 4) = n;
+    return cl;
+}
+static int cl_mine(const u8 *cl)
+{
+    if (!cl || ((u32)cl & 1) || !c_TypeOfMem((u32)cl))
+        return 0;
+    u32 n = *(const u16 *)(cl + 30);
+    return n && c_TypeOfMem((u32)cl + CL_HDR + 6 * n + 7) && *(const u32 *)(cl + CL_HDR + 6 * n) == ZUCL &&
+           *(const u32 *)(cl + CL_HDR + 6 * n + 4) == n;
+}
+u32 c_UCopperListInit(u8 *ucl, u32 n)
+{
+    u8 *cl = ucl ? cl_new(n & 0xFFFF) : 0;
+    if (cl)
+        *(u32 *)(ucl + 4) = *(u32 *)(ucl + 8) = (u32)cl;
+    return (u32)cl;
+}
+static u8 *ucl_ins(u8 *ucl)             /* the instruction at the block's CopPtr, or 0 */
+{
+    u8 *cl = ucl && c_TypeOfMem((u32)ucl) ? *(u8 **)(ucl + 8) : 0;
+    if (!cl_mine(cl) || *(u16 *)(cl + 28) >= *(u16 *)(cl + 30))
+        return 0;
+    return *(u8 **)(cl + 16);
+}
+void c_CMove(u8 *ucl, u32 reg, u32 val)
+{
+    u8 *i = ucl_ins(ucl);
+    if (i)
+        *(u16 *)i = 0, *(u16 *)(i + 2) = (u16)reg, *(u16 *)(i + 4) = (u16)val;
+}
+void c_CWait(u8 *ucl, u32 v, u32 h)
+{
+    u8 *i = ucl_ins(ucl);
+    if (i)
+        *(u16 *)i = 1, *(u16 *)(i + 2) = (u16)v, *(u16 *)(i + 4) = (u16)h;
+}
+void c_CBump(u8 *ucl)
+{
+    u8 *cl = ucl && c_TypeOfMem((u32)ucl) ? *(u8 **)(ucl + 8) : 0;
+    if (!cl_mine(cl))
+        return;
+    u16 *cnt = (u16 *)(cl + 28), max = *(u16 *)(cl + 30);
+    if (*cnt < max) {
+        (*cnt)++;
+        *(u32 *)(cl + 16) += 6;
+    }
+    if (*cnt == max) {                  /* full: the next block, as big */
+        u8 *nx = cl_new(max);
+        if (nx) {
+            *(u32 *)cl = (u32)nx;
+            *(u32 *)(ucl + 8) = (u32)nx;
+        }
+    }
+}
+void c_FreeCopList(u8 *cl)
+{
+    while (cl_mine(cl)) {
+        u8 *nx = *(u8 **)cl;
+        u32 n = *(u16 *)(cl + 30);
+        *(u32 *)(cl + CL_HDR + 6 * n) = 0;
+        zx_FreeMem((u32)cl, CL_HDR + 6 * n + 8);
+        cl = nx;
+    }
+}
+void c_FreeVPortCopLists(u8 *vp)
+{
+    u8 *ucl = vp && c_TypeOfMem((u32)vp) ? *(u8 **)(vp + 20) : 0;
+    if (ucl && c_TypeOfMem((u32)ucl)) {
+        c_FreeCopList(*(u8 **)(ucl + 4));
+        *(u32 *)(ucl + 4) = *(u32 *)(ucl + 8) = 0;
+    }
+    if (vp)
+        *(u32 *)(vp + 20) = 0;
+}
+/* the instructions of the ViewPort's user Copper list (each block's Count), 4096 at most */
+static u32 ucop_count(const u8 *vp)
+{
+    const u8 *ucl = *(const u8 *const *)(vp + 20);
+    u32 n = 0;
+    for (; ucl && c_TypeOfMem((u32)ucl) && n < 4096; ucl = *(const u8 *const *)ucl)
+        for (const u8 *cl = *(const u8 *const *)(ucl + 4); cl_mine(cl) && n < 4096; cl = *(const u8 *const *)cl)
+            n += *(const u16 *)(cl + 28);
+    return n < 4096 ? n + 1 : 4096;     /* and the wait for the end of line 255 */
+}
+static u16 *ucop_emit(const u8 *vp, u16 *l, const u16 *end)
+{
+    const u8 *ucl = *(const u8 *const *)(vp + 20);
+    s32 dy = *(const s16 *)(vp + 30);
+    int wrapped = 0;
+    for (u32 k = 0; ucl && c_TypeOfMem((u32)ucl) && k < 64; ucl = *(const u8 *const *)ucl, k++)
+        for (const u8 *cl = *(const u8 *const *)(ucl + 4); cl_mine(cl); cl = *(const u8 *const *)cl) {
+            const u8 *i = *(const u8 *const *)(cl + 12);
+            for (u32 n = *(const u16 *)(cl + 28); n--; i += 6) {
+                if (l + 4 > end)
+                    return l;
+                u16 op = *(const u16 *)i & 3, a = *(const u16 *)(i + 2), b = *(const u16 *)(i + 4);
+                if (op == 0 && a >= 0x40 && a < 0x200) {    /* MOVE: the copper's own registers and below left out */
+                    *l++ = a & 0x1FE, *l++ = b;
+                } else if (op == 1) {
+                    s32 y = 0x2C + dy + (s16)a;
+                    if (y < 0)
+                        y = 0;
+                    if (y > 255 && !wrapped) {
+                        *l++ = 0xFFDF, *l++ = 0xFFFE;
+                        wrapped = 1;
+                    }
+                    if (y > 255 + 63)
+                        y = 255 + 63;
+                    *l++ = (u16)((y & 0xFF) << 8 | (b & 0xFE) | 1), *l++ = 0xFFFE;
+                }
+            }
+        }
+    return l;
+}
+
 static void show_screen(u8 *sc)
 {
     u8 *bm = *(u8 **)(sc + SC_SIZEOF + 76) ? *(u8 **)(sc + SC_SIZEOF + 76) : sc + SC_BitMap;
@@ -2137,13 +2275,22 @@ static void show_screen(u8 *sc)
     u32 depth = bm[ZO_BitMap_Depth], bpr = *(u16 *)(bm + ZO_BitMap_BytesPerRow);
     int hires = (modes & 0x8000) != 0;
     u32 shown = hires ? 80 : 40;
+    u32 need = 400 + 8 * ucop_count(sc + SC_ViewPort);   /* the system part, then the user Copper list (16.18) */
     u16 *c = *(u16 **)(sc + SC_SIZEOF + 68);
+    if (c && *(u32 *)(sc + SC_SIZEOF + 84) < need) {
+        zx_FreeMem((u32)c, *(u32 *)(sc + SC_SIZEOF + 84));
+        c = 0;
+    }
     if (!c) {
-        c = (u16 *)zx_AllocMem(400, 2);
+        c = (u16 *)zx_AllocMem(need, 2);
+        if (!c && need > 400)
+            c = (u16 *)zx_AllocMem(need = 400, 2);  /* no room for the user list: the screen without it */
         if (!c)
             return;
         *(u16 **)(sc + SC_SIZEOF + 68) = c;
+        *(u32 *)(sc + SC_SIZEOF + 84) = need;
     }
+    u32 room = *(u32 *)(sc + SC_SIZEOF + 84);
     u16 *l = c;
     for (int i = 0; i < 16; i++)
         *l++ = (u16)(0x120 + 2 * i), *l++ = (u16)(i & 1 ? ZNULLSPR : 0);
@@ -2187,6 +2334,8 @@ static void show_screen(u8 *sc)
         *l++ = (u16)(0xE0 + 4 * i), *l++ = (u16)(p >> 16);
         *l++ = (u16)(0xE2 + 4 * i), *l++ = (u16)p;
     }
+    if (room > 400)
+        l = ucop_emit(sc + SC_ViewPort, l, c + (room - 8) / 2);
     *l++ = 0xFFFF, *l++ = 0xFFFE;
     Z.shown = (u32)sc;
     zb_screen_frame();                  /* the RasInfo's offsets and BitMap (16.13) */
@@ -2318,7 +2467,7 @@ u32 c_CloseScreen(u8 *sc)
     }
 
     if (*(u32 *)(sc + SC_SIZEOF + 68))
-        zx_FreeMem(*(u32 *)(sc + SC_SIZEOF + 68), 400);
+        zx_FreeMem(*(u32 *)(sc + SC_SIZEOF + 68), *(u32 *)(sc + SC_SIZEOF + 84));
     zx_FreeMem((u32)sc, SC_SIZEOF + ZSCR_EXTRA);
     return 1;
 }
@@ -3098,11 +3247,11 @@ F(Open); F(Close); F(Seek); F(LoadSeg); F(UnLoadSeg);
 F(DoIO); F(SendIO); F(CheckIO); F(WaitIO); F(AbortIO);
 F(TimerBeginIO); F(TimerAbortIO); F(AddTime); F(SubTime); F(CmpTime); F(ReadEClock); F(GetSysTime);
 F(GetMsg); F(PutMsg); F(ReplyMsg); F(WaitPort); F(CreateMsgPort); F(DeleteMsgPort);
-F(ScreenToBack); F(FreeCprList); F(FindDisplayInfo); F(NextDisplayInfo); F(GetDisplayInfoData); F(OpenWindowTagList); F(OpenWindow); F(CloseWindow); F(ModifyIDCMP); F(SetPointer); F(ViewPortAddress);
+F(ScreenToBack); F(FreeCprList); F(UCopperListInit); F(CMove); F(CWait); F(CBump); F(FreeCopList); F(FreeVPortCopLists); F(FindDisplayInfo); F(NextDisplayInfo); F(GetDisplayInfoData); F(OpenWindowTagList); F(OpenWindow); F(CloseWindow); F(ModifyIDCMP); F(SetPointer); F(ViewPortAddress);
 F(LoadRGB32); F(SetRGB32); F(OpenScreenTagList); F(OpenScreen); F(CloseScreen); F(ScreenToFront);
 F(LoadView); F(WaitTOF); F(WaitBlit); F(OwnBlitter); F(DisownBlitter); F(VBeamPos); F(SetRGB4); F(LoadRGB4);
 F(Output); F(Input); F(Write); F(Read); F(PutStr); F(VPrintf); F(VFPrintf); F(FPuts); F(FPutC); F(Flush); F(IoErr);
-F(SetIoErr); F(Delay); F(Execute); F(CloseWorkBench); F(OpenWorkBench); F(rts);
+F(SetIoErr); F(CompareDates); F(LockDosList); F(UnLockDosList); F(NextDosEntry); F(FindDosEntry); F(GetDeviceProc); F(FreeDeviceProc); F(DeviceProc); F(Delay); F(Execute); F(CloseWorkBench); F(OpenWorkBench); F(rts);
 F(InitStruct); F(MakeLibrary); F(MakeFunctions); F(FindResident); F(InitResident); F(AddLibrary); F(RemLibrary);
 F(SumLibrary); F(AddResource); F(InitSemaphore); F(ObtainSemaphore); F(ReleaseSemaphore); F(AttemptSemaphore);
 F(DeleteFile); F(AudioBeginIO); F(AudioAbortIO); F(ConBeginIO); F(ConAbortIO); F(ViewAddress); F(InpBeginIO); F(ZiBeginIO); F(ZiAbortIO); F(RawKeyConvert); F(PeekQualifier); F(RetA0);
@@ -3153,7 +3302,7 @@ static void (*const exec_fn[])(void) = { zx_Supervisor, zs_Alert, zs_rts, zx_Dis
 static const u16 gfx_lvo[] = { 192, 222, 228, 270, 288, 384, 456, 462, 390, 492, 498, 918, 924, 882, 852, 198,
     72, 78, 66, 474, 54, 60, 240, 342, 348, 354, 306, 234, 888, 960, 1050,
     792, 798, 300, 408, 414, 246, 336, 708, 588, 216, 210, 966, 972, 942,
-    570, 576, 582, 630, 996, 900, 204, 360, 402, 324, 318, 564, 726, 732, 756 };
+    570, 576, 582, 630, 996, 900, 204, 360, 402, 324, 318, 564, 726, 732, 756, 594, 372, 378, 366, 546, 540 };
 static void (*const gfx_fn[])(void) = { zs_LoadRGB4, zs_LoadView, zs_WaitBlit, zs_WaitTOF, zs_SetRGB4, zs_VBeamPos,
     zs_OwnBlitter, zs_DisownBlitter, zs_InitBitMap, zs_AllocRaster, zs_FreeRaster, zs_AllocBitMap, zs_FreeBitMap,
     zs_LoadRGB32, zs_SetRGB32, zs_InitRastPort,
@@ -3163,17 +3312,20 @@ static void (*const gfx_fn[])(void) = { zs_LoadRGB4, zs_LoadView, zs_WaitBlit, z
     zs_VideoControl, zs_ScrollVPort, zs_MakeVPort, zs_MrgCop, zs_AllocDBufInfo, zs_FreeDBufInfo, zs_ChangeVPBitMap,
     zs_GetColorMap, zs_FreeColorMap, zs_GetRGB4, zs_SetRGB4CM, zs_SetRGB32CM, zs_GetRGB32, zs_InitVPort, zs_InitView,
     zs_WaitBOVP, zs_WritePixel, zs_ReadPixel, zs_FreeCprList, zs_FindDisplayInfo, zs_NextDisplayInfo,
-    zs_GetDisplayInfoData };
+    zs_GetDisplayInfoData, zs_UCopperListInit, zs_CMove, zs_CWait, zs_CBump, zs_FreeCopList, zs_FreeVPortCopLists };
 static const u16 dos_lvo[] = { 42, 48, 54, 60, 132, 144, 198, 312, 342, 354, 360, 462, 948, 954, 30, 36, 66, 150,
     156, 222, 72, 216, 324, 330, 576, 534, 798, 858, 228, 234,
-    84, 90, 96, 102, 108, 114, 126, 210, 192, 372, 378, 384, 390, 402, 420, 870, 876, 882, 468, 474, 498, 138 };
+    84, 90, 96, 102, 108, 114, 126, 210, 192, 372, 378, 384, 390, 402, 420, 870, 876, 882, 468, 474, 498, 138,
+    738, 654, 660, 666, 690, 684, 642, 648, 174 };
 static void (*const dos_fn[])(void) = { zs_Read, zs_Write, zs_Input, zs_Output, zs_IoErr, zx_Exit, zs_Delay,
     zs_FPutC, zs_FPuts, zs_VFPrintf, zs_Flush, zs_SetIoErr, zs_PutStr, zs_VPrintf, zs_Open, zs_Close, zs_Seek,
     zs_LoadSeg, zs_UnLoadSeg, zs_Execute, zs_DeleteFile, zs_IsInteractive, zs_FRead, zs_FWrite, zs_GetProgramName,
     zs_GetArgStr, zs_ReadArgs, zs_FreeArgs, zs_AllocDosObject, zs_FreeDosObject,
     zs_Lock, zs_UnLock, zs_DupLock, zs_Examine, zs_ExNext, zs_Info, zs_CurrentDir, zs_ParentDir, zs_DateStamp,
     zs_DupLockFromFH, zs_OpenFromLock, zs_ParentOfFH, zs_ExamineFH, zs_NameFromLock, zs_SameLock, zs_FilePart,
-    zs_PathPart, zs_AddPart, zs_Fault, zs_PrintFault, zs_CreateNewProc, zs_CreateProc };
+    zs_PathPart, zs_AddPart, zs_Fault, zs_PrintFault, zs_CreateNewProc, zs_CreateProc, zs_CompareDates, zs_LockDosList,
+    zs_UnLockDosList, zs_LockDosList, zs_NextDosEntry, zs_FindDosEntry, zs_GetDeviceProc, zs_FreeDeviceProc,
+    zs_DeviceProc };
 static const u16 int_lvo[] = { 78, 210, 612, 198, 66, 252, 246, 606, 204, 72, 150, 270, 60, 300,
     510, 516, 768, 774, 780,
     474, 342, 336, 450, 90, 396, 408, 108, 588, 390, 384, 378, 162, 294 };

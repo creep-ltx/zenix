@@ -13,6 +13,16 @@
 #define LVO_Deallocate -192
 #define LVO_FindSemaphore -594
 #define LVO_Lock -84
+#define LVO_CompareDates -738
+#define LVO_SetDrMd -354
+#define LVO_RectFill -306
+#define LVO_CopyMem -624
+#define LVO_GetDeviceProc -642
+#define LVO_FreeDeviceProc -648
+#define LVO_LockDosList -654
+#define LVO_UnLockDosList -660
+#define LVO_NextDosEntry -690
+#define LVO_FindDosEntry -684
 #define LVO_UnLock -90
 #define LVO_Examine -102
 #define LVO_ExNext -108
@@ -911,6 +921,161 @@ main:
     jsr     LVO_AvailFonts(%a6)
     tst.l   %d0                 /* a buffer too small: the bytes more it needs */
     beq     fail
+    STEP    23                  /* 16.18: the DOS list (the program's volume ZINE, the RAM device) and CompareDates */
+    move.l  #13,%d1             /* LDF_READ, LDF_DEVICES, LDF_VOLUMES */
+    CALL    V_dos, LVO_LockDosList
+    move.l  %d0,%d5
+    beq     fail
+    move.l  %d5,%d1
+    moveq   #8,%d2              /* LDF_VOLUMES: the program's volume first */
+    jsr     LVO_NextDosEntry(%a6)
+    tst.l   %d0
+    beq     fail
+    move.l  %d0,%a0
+    cmp.l   #2,4(%a0)           /* DLT_VOLUME */
+    bne     fail
+    move.l  40(%a0),%d0         /* dol_Name, a BSTR: "ZINE" */
+    lsl.l   #2,%d0
+    move.l  %d0,%a1
+    cmp.l   #0x045A494E,(%a1)   /* length 4, "ZIN" */
+    bne     fail
+    cmp.b   #'E',4(%a1)
+    bne     fail
+    move.l  %a0,%d1
+    moveq   #4,%d2              /* LDF_DEVICES: then the RAM device */
+    jsr     LVO_NextDosEntry(%a6)
+    tst.l   %d0
+    beq     fail
+    move.l  %d0,%a0
+    tst.l   4(%a0)              /* DLT_DEVICE */
+    bne     fail
+    move.l  %d5,%d1
+    lea     p_ramdisk(%pc),%a0
+    move.l  %a0,%d2
+    moveq   #8,%d3
+    jsr     LVO_FindDosEntry(%a6)
+    tst.l   %d0                 /* "ram disk" found without case */
+    beq     fail
+    move.l  %d5,%d1
+    lea     p_none(%pc),%a0
+    move.l  %a0,%d2
+    moveq   #12,%d3
+    jsr     LVO_FindDosEntry(%a6)
+    tst.l   %d0
+    bne     fail
+    move.l  #13,%d1
+    jsr     LVO_UnLockDosList(%a6)
+    lea     p_disk(%pc),%a0     /* GetDeviceProc: ZINE's handler port, the volume's node; again: 0 */
+    move.l  %a0,%d1
+    moveq   #0,%d2
+    jsr     LVO_GetDeviceProc(%a6)
+    tst.l   %d0
+    beq     fail
+    move.l  %d0,%a2
+    tst.l   (%a2)               /* dvp_Port */
+    beq     fail
+    tst.l   12(%a2)             /* dvp_DevNode */
+    beq     fail
+    lea     p_disk(%pc),%a0
+    move.l  %a0,%d1
+    move.l  %a2,%d2
+    jsr     LVO_GetDeviceProc(%a6)
+    tst.l   %d0
+    bne     fail
+    move.l  %a2,%d1
+    jsr     LVO_FreeDeviceProc(%a6)
+    lea     ds_late(%pc),%a0
+    move.l  %a0,%d1
+    lea     ds_early(%pc),%a0
+    move.l  %a0,%d2
+    jsr     LVO_CompareDates(%a6)
+    tst.l   %d0                 /* date1 the later: below 0 */
+    bpl     fail
+    lea     ds_early(%pc),%a0
+    move.l  %a0,%d1
+    lea     ds_late(%pc),%a0
+    move.l  %a0,%d2
+    jsr     LVO_CompareDates(%a6)
+    tst.l   %d0                 /* date2 the later: above 0 */
+    ble     fail
+    move.l  %d2,%d1
+    jsr     LVO_CompareDates(%a6)
+    tst.l   %d0
+    bne     fail
+    moveq   #3,%d4              /* CopyMem at odd alignments (16.18's copy: longs once the destination is aligned) */
+    moveq   #1,%d7
+50: lea     V_av(%a4),%a0
+    moveq   #15,%d0
+52: clr.l   (%a0)+
+    dbra    %d0,52b
+    lea     cm_src(%pc),%a0
+    add.l   %d7,%a0
+    lea     V_av(%a4),%a1
+    add.l   %d4,%a1
+    move.l  #45,%d0
+    move.l  4.w,%a6
+    jsr     LVO_CopyMem(%a6)
+    lea     cm_src(%pc),%a0
+    add.l   %d7,%a0
+    lea     V_av(%a4),%a1
+    add.l   %d4,%a1
+    moveq   #44,%d0
+51: cmpm.b  (%a0)+,(%a1)+
+    dbne    %d0,51b
+    bne     fail
+    tst.b   (%a1)               /* the byte after: untouched (cleared before) */
+    bne     fail
+    subq.l  #1,%d4
+    bpl.s   50b
+    lea     V_bm(%a4),%a0       /* RectFill (16.18: a byte at a time): 64 x 4, one plane */
+    moveq   #1,%d0
+    moveq   #64,%d1
+    moveq   #4,%d2
+    CALL    V_gfx, LVO_InitBitMap
+    moveq   #64,%d0
+    moveq   #4,%d1
+    jsr     LVO_AllocRaster(%a6)
+    move.l  %d0,V_bm+bm_Planes(%a4)
+    beq     fail
+    lea     V_rp(%a4),%a1
+    jsr     LVO_InitRastPort(%a6)
+    lea     V_bm(%a4),%a0
+    move.l  %a0,V_rp+4(%a4)
+    lea     V_rp(%a4),%a1
+    moveq   #1,%d0
+    jsr     LVO_SetAPen(%a6)
+    lea     V_rp(%a4),%a1
+    moveq   #3,%d0
+    moveq   #1,%d1
+    moveq   #40,%d2
+    moveq   #2,%d3
+    jsr     LVO_RectFill(%a6)
+    lea     V_rp(%a4),%a1
+    moveq   #2,%d0              /* COMPLEMENT */
+    jsr     LVO_SetDrMd(%a6)
+    lea     V_rp(%a4),%a1
+    moveq   #4,%d0
+    moveq   #1,%d1
+    moveq   #7,%d2
+    moveq   #1,%d3
+    jsr     LVO_RectFill(%a6)
+    move.l  V_bm+bm_Planes(%a4),%a0
+    tst.l   (%a0)               /* row 0 untouched */
+    bne     fail
+    cmp.l   #0x10FFFFFF,8(%a0)  /* row 1: 3-40 set, then 4-7 complemented */
+    bne     fail
+    cmp.l   #0xFF800000,12(%a0)
+    bne     fail
+    cmp.l   #0x1FFFFFFF,16(%a0) /* row 2: 3-40 */
+    bne     fail
+    cmp.l   #0xFF800000,20(%a0)
+    bne     fail
+    tst.l   24(%a0)             /* row 3 untouched */
+    bne     fail
+    moveq   #64,%d0
+    moveq   #4,%d1
+    jsr     LVO_FreeRaster(%a6)
+    SAY     m_dosl
     SAY     m_font
     moveq   #0,%d0
     movem.l (%sp)+,%d2-%d7/%a2-%a6
@@ -957,6 +1122,14 @@ p_up:     .asciz "/znext"
 p_none:   .asciz "nosuch.file"
 p_disk:   .asciz "ZDisk:Data/Sub/f.txt"
 p_t:      .asciz "T:znext"
+p_ramdisk: .asciz "ram disk"
+m_dosl:   .asciz "znext: the DOS list, GetDeviceProc, CompareDates, CopyMem and RectFill answered\n"
+    .balign 4
+cm_src:   .ascii "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJ"
+          .byte 0x5A
+    .balign 4
+ds_late:  .long 17000, 600, 10
+ds_early: .long 17000, 599, 2000
 s_ftxt:   .asciz "f.txt"
 s_sub:    .asciz "Sub"
 s_zdata:  .asciz "ZINE:Data"

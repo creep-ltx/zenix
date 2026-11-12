@@ -160,11 +160,11 @@ static u32 load_sp(const char *path, u32 cpu, zu32 *size)
 }
 
 /* ZINE's own libraries by their number in the block's lib (kernel/zine.h): the four, then those of d29 16.12 */
-#define NLIBS 14
+#define NLIBS 15
 static const char *const libs[NLIBS] = { "exec.library", "graphics.library", "dos.library", "intuition.library",
     "utility.library", "mathffp.library", "mathtrans.library", "mathieeedoubbas.library",
     "mathieeedoubtrans.library", "mathieeesingbas.library", "mathieeesingtrans.library", "diskfont.library",
-    "keymap.library", "gadtools.library" };
+    "keymap.library", "gadtools.library", "lowlevel.library" };
 const char *zl_name40(const char *lib, unsigned offset);    /* user/zine/lvo40.c: the NDK 3.2's names */
 
 static const char *vecname(u32 v)
@@ -493,6 +493,32 @@ int main(int argc, char **argv)
                 (inf.ovl ? inf.ovl_words * 4 + (inf.tabsize + 1) * 4 : 0);
     u32 avail = info.chip_free + info.fast_free;
     int whole = len <= avail && hunks <= avail - len;
+    /* 16.18: a big plain program's file is not kept either (zh_lean, hunk.h): its copy in the volume would only take
+     * memory from the program (on the 68020 test machine 3-4 MB of 8, which three AGA demos then missed) */
+    int lean = whole && zh_lean(&inf, len, info.chip_free, avail);
+    if (lean) {                         /* the largest chip hunk must find a free piece of chip RAM now (path B puts it
+                                         * there), and the largest other one a piece of fast RAM below 16 MB: Zenix's
+                                         * allocator gives big blocks from the top, so on a machine with 32-bit RAM too
+                                         * path B would put the program there, where path A's AllocMem starts low (a
+                                         * 1992 demo, sumea, then showed nothing on the 68030 machine); else path A */
+        u32 big[2] = { 0, 0 };
+        for (u32 i = 0; i < inf.nhunks; i++) {
+            zu32 memf, sz = zh_hunk_size(head, &inf, i, &memf);
+            int k = (memf & ZMEMF_CHIP) != 0;
+            if (sz > big[k])
+                big[k] = sz;
+        }
+        for (int k = 0; k < 2 && lean; k++) {
+            if (!big[k])
+                continue;
+            u32 n = (big[k] + 8 + 15) & ~15u;
+            void *m = k ? sys_memalloc_chip(n) : sys_memalloc(n);
+            if (!m || (!k && (u32)m + n > (16u << 20)))
+                lean = 0;
+            if (m)
+                sys_memfree(m);
+        }
+    }
     if (!whole && inf.ovl) {
         dprintf(2, "zine: %s does not fit in memory: its file (%u KB, all in memory during the session: it is "
                 "overlaid) and its hunks (%u KB) need more than the %u KB free\n", name, len >> 10, hunks >> 10,
@@ -649,8 +675,11 @@ int main(int argc, char **argv)
             vh->sp[1] = load_sp("/lib/zine/sp040", 40, &vh->sp_size[1]);
     }
     u32 bsize, blob = load_blob(&bsize);
-    /* the ZINE block: the saved chip RAM (Zenix's used chip blocks, low memory), the plan, the stack, the libraries */
-    u32 ksize = info.chip_total - info.chip_free + (256u << 10);
+    /* the ZINE block: the saved chip RAM (Zenix's used chip blocks, low memory), the plan, the stack, the libraries.
+     * 16.18: 128 KB beside the saved chip RAM (it was 256 KB; the blob used about 75 KB of it on the test machines,
+     * and the block's end borders the program's largest free chunk, so what it holds back is missed in one piece);
+     * the blob gives the rest to the program (zp_give), and asks for more when it is short (b->need, below) */
+    u32 ksize = info.chip_total - info.chip_free + (128u << 10);
     struct zine_blk *b = sys_memalloc(ksize);
     if (!b)
         die("zine: not enough memory for ZINE's own %s", "block");
@@ -670,8 +699,12 @@ int main(int argc, char **argv)
             return 1;
         }
         free(work);
-        dprintf(1, "ZINE: %s is loaded from its file now (its file, %u KB, and its hunks, %u KB, do not fit in memory "
-                "together); its file is not kept during the session\n", name, len >> 10, hunks >> 10);
+        if (lean)
+            dprintf(1, "ZINE: %s is loaded from its file now; its file (%u KB) is not kept during the session, which "
+                    "leaves the program that much more memory\n", name, len >> 10);
+        else
+            dprintf(1, "ZINE: %s is loaded from its file now (its file, %u KB, and its hunks, %u KB, do not fit in "
+                    "memory together); its file is not kept during the session\n", name, len >> 10, hunks >> 10);
         struct zv_hdr *vh = (struct zv_hdr *)vol;
         vh->pre_seg = preseg;
         vh->nkeep = P.n;
