@@ -27,6 +27,7 @@ Claim a number here **before** using it (system calls, message types, port names
 | 89 `console`'s `CON_INPUT` kind `CONI_MOUSE` 2 (DESIGN D38 step 5: mouse records dx, dy, buttons for the desktop's tests, root only as CON_INPUT) | branch desk, 2026-11-04 |
 | 93 `zine`'s `struct uzine_info` field `machine` (`UZINE_INFO_MACHINE` 32; `UZI_EMU68` 1: the CPU the desktop names) | branch desk, 2026-11-04 |
 | 89 `console`'s op 10 `CON_MOUSE` (DESIGN D38: the grab's descriptor; a2 THRESHOLD 0..127 \| MULTIPLIER 1..8 << 8, the mouse's acceleration a frame; -EINVAL otherwise) | branch desk, 2026-11-04 |
+| 92 `drv`'s `DRV_CLAIM` base `DRV_PAULA` 0xDFF0A0 (Paula's four channels: the process of port `audio` only, before the network gate; DESIGN D40) | branch sound, 2026-11-12 |
 | **next free: 98** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
 Message types claimed so far: `NET_*` 1-19 on port `net` (`kernel/netproto.h`, DESIGN D19 step 3: the `SOCK_*` op
@@ -61,6 +62,9 @@ manager's `DPY_WM_HELLO` 32 .. `DPY_WM_KILL` 42, events `EV_KEY` 1 .. `EV_MINIMI
 `EV_WM_MENU` 40, `EV_MENU` 9, `DPY_MENU` 12, `DPY_WM_MENUGET` 43, `DPY_WM_MENUPICK` 44, `DPY_WM_PGRAB` 45 (step 5), `DPY_WM_MOUSE` 47 (the mouse's acceleration, the kernel's `CON_MOUSE`), `DPY_STAT` 14 (the server's counters, for the tests), `DPY_SESSION` 13 and `DPY_WM_BYE` 46 (D38 revision 3, `dlogin`), `DPY_MODE` 15 with `DPYM_HIRES` 0, `DPYM_LACE` 1, `DPYM_ASK` 0xFF and the event `EV_SCREEN` 10 (D38 "Screen modes", branch modes, 2026-11-06), `DPY_FONT_INFO` 16 with O_TEXT's font `DPYF_UI` 1 and the flags `DPYFF_PROP` 1, `DPYFF_BUILTIN` 2 (D38 "Fonts", branch fonts, 2026-11-07), `DPY_FONT_SET` 17 with `DPY_FONTNAME` 32 and `EV_SCREEN`'s code `DPYS_FONT` 1 (D38 "Preferences", branch prefs, 2026-11-07), drawing orders `O_CLIP` 1 .. `O_XLINE` 6, and the flags and structs named there (branch desk,
 2026-11-04). Port names
 registered as services (D11):
+`audio` (D40, branch sound 2026-11-12: the sound server `/sbin/sndd`, reserved for root like `net`; its protocol
+`user/sndproto.h`: requests `SND_OPEN` 1 .. `SND_PAUSE` 9 and the tests' `SND_STATE` 10, `SNDF_STEREO` 1, `SNDF_FRAMES`
+2, `SNDI_NTSC` 1, `SNDC_TRIG` 1, `SNDC_PER` 2, `SNDC_VOL` 4, `SNDC_LOOP` 8, `SNDC_STOP` 16, `SND_SILENT` 0xFFFFFFFF);
 `disk`, `fs`, `fs.*`; `ping` (the test service, served by `msgpingd` since D19 step 0); `net` (D19, the network server:
 reserved for root like `fs` and `disk`; `socktestd` serves it in the tests until netd).
 
