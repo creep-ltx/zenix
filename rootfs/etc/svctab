@@ -7,3 +7,6 @@
 #ping      0     /bin/msgpingd
 # the display server (DESIGN D38): started by the first program of the desktop (zdesk), on that program's console
 display   -5    /sbin/displayd
+# the sound server (DESIGN D40): Paula's channels for play, modplay and other programs; it ends after 30 s with nothing
+# to play (the terminal's bell sounds again) and the next call starts it
+audio     -10   /sbin/sndd

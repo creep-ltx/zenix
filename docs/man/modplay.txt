@@ -1,0 +1,58 @@
+MODPLAY(1)			Zenix manual
+
+NAME
+    modplay - play a ProTracker module
+
+SYNOPSIS
+    modplay [-v VOL] [-l] [-q] FILE
+
+DESCRIPTION
+    Plays a 4-channel ProTracker or NoiseTracker module (the tags
+    "M.K.", "M!K!", "4CHN", "FLT4", or the old 15-sample kind without
+    a tag) on Paula's four channels, through the sound server sndd(8).
+    modplay works out each tick's periods, volumes and note starts;
+    the server applies them at their time. The tempo is ProTracker's:
+    F with a value below 32 the speed (ticks a row), from 32 the BPM
+    (a tick is 2.5 / BPM s, the CIA timing).
+    A line shows the module's name; then a status line, updated in
+    place, the row being heard: the position, pattern, row, speed,
+    BPM and each channel's last note and sample.
+    The song ends when its order list has been played, at a jump back
+    to an earlier position, or at F00.
+
+OPTIONS
+    -v VOL    the volume, 0-64 (64), applied to every channel
+    -l        loop the song (F00 still ends it)
+    -q        no lines and no keys: the terminal is left alone
+
+KEYS
+    q, Esc, Ctrl-C   stop
+    space            pause, and go on
+    n, p             the next, the previous position
+
+EFFECTS
+    0 arpeggio, 1 and 2 portamento up and down (to 113 and 856), 3 tone
+    portamento, 4 vibrato, 5 and 6 (3 and 4 with a volume slide), 7
+    tremolo, 9 sample offset, A volume slide, B position jump, C set
+    volume, D pattern break, F speed and tempo; E1 E2 fine portamento,
+    E3 glissando, E4 E7 vibrato and tremolo waveforms, E5 finetune, E6
+    pattern loop, E9 retrigger, EA EB fine volume slide, EC note cut,
+    ED note delay, EE pattern delay.
+
+EXIT STATUS
+    0 played; 1 not a module it plays; 2 no sound (no server, the
+    channels in use, not enough chip RAM).
+
+NOTES
+    Not done: E0 (the filter: the machine's), E8 and EF; 6- and
+    8-channel modules and other trackers' formats. ProTracker's
+    behaviour on broken modules is not copied: an arpeggio past the
+    period table plays its last note, a sample offset past the end
+    plays the loop (or silence). Each tick is applied within about
+    5 ms of its time (the system's 100 Hz tick); at 125 BPM, the usual
+    tempo, exactly on every second tick. Keys are felt within the
+    server's queue, about a third of a second. The whole module is
+    read into memory, its samples copied to chip RAM (at most 1 MB).
+
+SEE ALSO
+    play(1), sndd(8), docs/d40-sound.md

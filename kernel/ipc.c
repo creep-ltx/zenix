@@ -22,11 +22,13 @@ static int strncmp_(const char *a, const char *b, int n)
 }
 
 /* Reserved port names (audit D): "fs" (the root filesystem), "fs.*" (mounted filesystems, named by mount) and "disk"
- * belong to the system, and "net" (the network server, DESIGN D19: the kernel sends it every socket call): only root may
+ * belong to the system, "net" (the network server, DESIGN D19: the kernel sends it every socket call) and "audio" (the
+ * sound server, DESIGN D40: its process alone claims Paula): only root may
  * create them, so a normal user cannot put a fake server in their place, also not after the real one died. */
 static int reserved(const char *n)
 {
-    return (n[0] == 'f' && n[1] == 's' && (!n[2] || n[2] == '.')) || !strncmp_(n, "disk", 16) || !strncmp_(n, "net", 16);
+    return (n[0] == 'f' && n[1] == 's' && (!n[2] || n[2] == '.')) || !strncmp_(n, "disk", 16) || !strncmp_(n, "net", 16) ||
+           !strncmp_(n, "audio", 16);
 }
 
 /* A port number is (generation << 8) | slot. Each create of a slot counts its generation up, so a number someone kept

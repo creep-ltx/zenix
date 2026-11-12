@@ -236,6 +236,7 @@ FAMILIES = [
     ("zine", "ZINE: AmigaOS programs on Zenix (zine PROGRAM)", "zine"),
     ("zinstall", "the installer: put Zenix on a disk; the boot partition's programs", "zinstall"),
     ("desktop", "Zenix Desktop: the display server, the window manager, the terminal", "zdesk term deskprefs"),
+    ("sound", "the sound server, play (WAV, 8SVX, AIFF) and modplay (modules)", "play modplay"),
     ("zenix-tests", "Zenix's test programs and the start-up programs' copies", "hello spin crash badptr msgpingd msgping "
                     "socktestd socktest bench termtest priotest svctest sigtest ptytest gcontest dpytest nettest cryptotest boot diskd"),
 ]
@@ -249,7 +250,7 @@ LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz"), ("too
 # (the text-UI library's notice once a package: sumi's is "tui" since it shipped first, the others' "PROG-tui"; two
 # packages may not own one file, zpkg 4.3)
 # files beside a family's programs, from the build directory (DESIGN D29: ZINE's blob, the small AmigaOS zine loads)
-FAMILY_SBIN = {"disktools": ["fatd", "ffsd", "pfs3d"], "desktop": ["displayd", "dlogin"]}     # DESIGN D30, D31, D32: mount's servers for a FAT volume, an OFS or FFS volume, a PFS3 volume
+FAMILY_SBIN = {"disktools": ["fatd", "ffsd", "pfs3d"], "desktop": ["displayd", "dlogin"], "sound": ["sndd"]}     # DESIGN D30, D31, D32: mount's servers for a FAT volume, an OFS or FFS volume, a PFS3 volume
 # (DESIGN D35: the two AmigaOS programs of a boot partition, what zinstall puts there)
 # a family's own configuration files, from rootfs/ (kind "c": zup keeps a copy the owner changed, as for base's)
 FAMILY_CONFIG = {"desktop": ["etc/dlogin", "etc/zdesk/keys", "etc/zdesk/menu", "etc/zdesk/icons", "etc/zdesk/mouse", "etc/zdesk/screen",

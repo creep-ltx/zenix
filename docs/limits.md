@@ -67,7 +67,10 @@ pointers.
   world-readable; the hashes are 1000 rounds of salted SHA-256, a number chosen for a 14 MHz 68020, not measured on
   hardware); user and group ids are 16 bits.
 - Shared libraries; only static programs.
-- A graphical programs API, a mouse pointer (the mouse is only read, `input`; untested), sound beyond the bell, a
+- Sound (D40): two sound streams or one module at a time (the channels are allocated, not mixed); a server's queue of
+  16 frames, a bank of at most 1 MB; a module's tick within about 5 ms of its time; floppy activity can starve the
+  server (docs/d40-sound.md section 6).
+- A graphical programs API, a mouse pointer (the mouse is only read, `input`; untested), a
   network card (the network runs over the loopback and SLIP; drivers from D19 step 7), DHCP (step 6), USB, RTG. The floppy driver is experimental: DD disks only (an HD drive or disk is not recognised), no drive-type
   ID, never run on a real drive or a Gotek.
 - Display server (the terminal and the consoles are inside the kernel; workspaces and a bar come with the desktop),

@@ -298,6 +298,7 @@ int input_inject(const u8 *rec, int n); /* CON_INPUT's mouse records -> n (a par
 /* audio.c: Paula beep (the terminal bell) */
 void beep(u32 hz, u32 ms);
 void audio_tick(void);                  /* from the 100 Hz tick */
+void audio_hold(int on);                /* D40: the sound server holds Paula (1) or let it go (0): the channels stopped */
 
 /* a3000.c: the Amiga 3000's on-board SCSI (WD33C93A + DMAC) */
 int a3000_init(void);

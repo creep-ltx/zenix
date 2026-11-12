@@ -1,0 +1,36 @@
+wait zenix:/# 90
+sleep 1
+send play -S; echo "s0=$?"\r
+wait s0= 30
+send beep; sleep 1; dmesg | grep -E 'drv: pid|audio:'; echo d0-done\r
+wait d0-done 20
+send play -q /snd/long.wav; echo U1; play -S\r
+wait ch3: 40
+send play /snd/tone8.wav & sleep 1; echo M1; play -S; wait; echo "p1=$?"\r
+wait p1= 30
+send play /snd/st16.wav & sleep 1; echo M2; play -S; wait; echo "p2=$?"\r
+wait p2= 30
+send play -q /snd/long.wav & sleep 1; play -q /snd/long.wav & sleep 1; echo M3; play -S; play /snd/tone8.wav; echo "busy=$?"; wait; echo "p3=$?"\r
+wait p3= 60
+send play /snd/tone.8svx; echo "p4=$?"; play -v 40 /snd/tone.aiff; echo "p5=$?"\r
+wait p5= 30
+send printf 'not sound' > /tmp/x; play /tmp/x; echo "p6=$?"\r
+wait p6= 20
+send play /snd/long.wav\r
+sleep 1.5
+send \x03
+sleep 1
+send echo "p7=$?"; play -S; echo M7\r
+wait M7 20
+send modplay /snd/test.mod; echo "m1=$?"\r
+wait m1= 60
+send modplay -q /snd/test.mod & sleep 2; echo M8; play -S; wait; echo "m2=$?"\r
+wait m2= 60
+send play -q /snd/long.wav & sleep 1; kill $(pgrep sndd); wait; echo "k1=$?"; dmesg | grep -E 'drv: (pid|claim)' | tail -3; echo M9\r
+wait M9 30
+send beep; sleep 1; dmesg | grep -c 'first beep'; echo "b1=$?"\r
+wait b1= 20
+send sleep 34; pgrep sndd; echo "n=$?"; beep; sleep 1; dmesg | grep 'first beep'; echo b2-done\r
+wait b2-done 70
+send echo sound-test-done\r
+wait sound-test-done 10

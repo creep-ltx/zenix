@@ -194,6 +194,20 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   quiesce steps only bytes at 0xBFE101, 0xBFE301, and `DRVS_RMW` of bits 0-2 at 0xBFD000, 0xBFD200; CIA-A's FLG
   interrupt on while claimed); `/sbin/net/plipbox` in `NETDRVS` and its driver line words `mac=XX:XX:XX:XX:XX:XX` and
   `noburst`.
+  Since D40 (branch sound, 2026-11-12): `DRV_CLAIM`'s base `DRV_PAULA` 0xDFF0A0 (Paula's four channels), taken only by
+  the process the service manager runs for port `audio` and answered before the network gate (-EPERM for anyone
+  else); every other op keeps the gate, so -EPERM and -ECONNRESET above read "anyone but netd's children, except
+  `DRV_CLAIM` of `DRV_PAULA`"; the claim's stop (the four volumes 0, the channels' DMA off) at its end and before
+  ZINE, the bell silent while it is held; netd's end does not end it.
+- **D40 (sound, branch sound, 2026-11-12):** the port name `audio` (reserved: only root creates it) and its
+  `/etc/svctab` line (`audio -10 /sbin/sndd`); the sound protocol `user/sndproto.h` whole but `SND_STATE`: the
+  request numbers `SND_OPEN` 1 .. `SND_PAUSE` 9 with their arguments and answers, the handle `(start << 8) | slot`
+  (a handle of an earlier sndd answered -ECONNRESET), `SNDF_STEREO` 1, `SNDF_FRAMES` 2, `struct sndinfo` (first size
+  32, `SNDI_NTSC` 1), `struct sndch` (24 bytes) and `struct sndframe` (first size 100, passed in `SND_FRAMES`' a[3]),
+  `SNDC_TRIG` 1, `SNDC_PER` 2, `SNDC_VOL` 4, `SNDC_LOOP` 8, `SNDC_STOP` 16, `SND_SILENT` 0xFFFFFFFF, the limits
+  `SND_BANKMAX` 1 MB, the periods (PCM 124 up, frames 113-4,095), lengths 2-131,070; `SND_STATE` 10 and `struct
+  sndstate` are the tests' and may change. The commands `play` (`-v -m -q -b -r -u -2 -R -S`, exit 0/1/2) and
+  `modplay` (`-v -l -q`, its keys).
   Since the quiet card probe (2026-11-05, D19 6.3): the driver line word `probe`, taken by every shipped driver
   (genet, a2065, ne2000, plipbox; netd's card probe gives it): nothing is logged until the hardware is there.
 - **D20 (telnet's console, step 1, 2026-10-27):** `SYS_console`'s op word `op | (fd + 1) << 8` (0 above the op: no

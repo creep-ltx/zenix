@@ -1,6 +1,6 @@
 # Command reference
 
-Zenix has 149 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
+Zenix has 151 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
 page in `docs/man/NAME.txt`; a few more pages are for names that start the same program (`gunzip`, `zcat`, `chgrp`,
 `more`, `pkill`, `ifup`, `ifdown`, `unlzx`). The pages use the exact format that Zenix's own `man` reads (plain text of at most 78 columns, a
 `NAME(section)` header, `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`, `EXAMPLES`, `EXIT STATUS`, `SEE ALSO`); the
@@ -53,7 +53,7 @@ spot-checked against the code that day.
 | Command | Summary |
 |---|---|
 | [sh](man/sh.txt) | the shell |
-| [ps](man/ps.txt), [dmesg](man/dmesg.txt), [conmirror](man/conmirror.txt), [beep](man/beep.txt), [input](man/input.txt), [free](man/free.txt), [uptime](man/uptime.txt), [uname](man/uname.txt), [date](man/date.txt), [sleep](man/sleep.txt) | system state and time |
+| [ps](man/ps.txt), [dmesg](man/dmesg.txt), [conmirror](man/conmirror.txt), [beep](man/beep.txt), [play](man/play.txt), [modplay](man/modplay.txt), [input](man/input.txt), [free](man/free.txt), [uptime](man/uptime.txt), [uname](man/uname.txt), [date](man/date.txt), [sleep](man/sleep.txt) | system state and time |
 | [nice](man/nice.txt), [renice](man/renice.txt) | run a command at a priority, change a running one's |
 | [kill](man/kill.txt), [pgrep](man/pgrep.txt) ([pkill](man/pkill.txt)), [time](man/time.txt), [timeout](man/timeout.txt), [watch](man/watch.txt), [cal](man/cal.txt), [mktemp](man/mktemp.txt), [realpath](man/realpath.txt) | processes, timing, calendar, temporary files, real paths |
 | [env](man/env.txt), [printenv](man/printenv.txt), [which](man/which.txt), [whoami](man/whoami.txt), [id](man/id.txt), [hostname](man/hostname.txt), [clear](man/clear.txt), [true](man/true.txt), [false](man/false.txt) | small utilities |
@@ -89,6 +89,7 @@ spot-checked against the code that day.
 | [sntp](man/sntp.txt) | set the clock from the network, the certificate time's floor (root; DESIGN D21) |
 | [netd](man/netd.txt) | not a command: the network server (`/sbin/netd`, DESIGN D19), started at the first socket call |
 | [dlogin](man/dlogin.txt) | not a command: the graphical login (`/sbin/dlogin`, DESIGN D38 revision 3), started by init on console 1 with /etc/console's `login graphical` |
+| [sndd](man/sndd.txt) | not a command: the sound server (`/sbin/sndd`, DESIGN D40, port `audio`), started by the first call (play, modplay) |
 | [displayd](man/displayd.txt) | not a command: the display server of Zenix Desktop (`/sbin/displayd`, DESIGN D38), started by the desktop's first program |
 | [a2065](man/a2065.txt) | not a command: the Commodore A2065 Ethernet board's driver (`/sbin/net/a2065`), started by netd |
 | [genet](man/genet.txt) | not a command: the Ethernet driver of a Raspberry Pi CM4 or Pi 4 under Emu68 (`/sbin/net/genet`), started by netd |
@@ -107,7 +108,7 @@ spot-checked against the code that day.
 
 ## Run on AmigaOS, not on Zenix
 [zenixboot](man/zenixboot.txt) starts Zenix from files on a hard disk, CF or SD card partition, so that no floppy is
-needed (not one of the 149 programs: it is an AmigaOS program on the AmigaDOS boot partition).
+needed (not one of the 151 programs: it is an AmigaOS program on the AmigaDOS boot partition).
 [bootmenu](man/bootmenu.txt) is the boot menu of a disk with AmigaOS and Zenix on it (the SD card of
 `tools/mkdualcard.sh`): it boots a chosen AmigaOS partition or runs zenixboot.
 

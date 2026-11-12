@@ -60,6 +60,10 @@
 # 8,900, bss 2,300 -> 2,450, term 13,800 -> 14,500, bss 128 -> 256. The room for it: fsd's printf at -Os (user/libz.c
 # fmt_num and vfmt, in every program; fsd.zx 29,372 -> 27,472 in embed): kernel.bin 182,820 -> 182,896 with both (the review's fixes: the old lists and a
 # display server's list named at the field's end, the short field's wait below lastl).
+# 2026-11-12 (DESIGN D40, the sound server's claim of Paula): drv 2,444 -> 2,592 (DRV_PAULA: the claim for port "audio"
+# alone, the stop at the end and before ZINE), audio 526 -> 584 and bss + 1 (audio_hold: the four channels stopped, the
+# bell silent while held, with interrupts masked), ipc 3,937 -> 3,959 ("audio" a reserved port name); after the review:
+# drv 2,600, audio 612; budgets drv 2,500 -> 2,650, audio 560 -> 620, ipc 3,950 -> 4,000, bss unchanged.
 start     4300   8200
 main      5950   1100
 serial    6100   6500
@@ -68,7 +72,7 @@ ide       3400    560
 emmc      4900    640
 floppy    4500    160
 input      550     32
-audio      560     32
+audio      620     32
 a3000     2400    100
 blk        460     16
 rtc       1550      4
@@ -80,14 +84,14 @@ gfx       8900   2450
 term     14500    256
 confont   3100     32
 kbd       4300    180
-ipc       3950   2150
+ipc       4000   2150
 svc       5600   1420
 seg       1250    256
 event      700      0
 signal    2100      0
 random    3800    280
 sock      4700   1060
-drv       2500    640
+drv       2650    640
 zine      1600     16
 cache     1700     32
 gcon      3600     16
