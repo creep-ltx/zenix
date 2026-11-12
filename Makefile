@@ -245,8 +245,9 @@ RAMDISK_K := 640
 # mount points and files in / and /tmp; tools/mounttest.sh refuses to run below 16): by 2026-11-06 only 1 was left,
 # and LEAN=1 (tools/mkroot.sh: no /etc/zdesk, a one-block /lost+found) gave 25 back (26 free). 692 since DESIGN D41
 # (2026-11-12, memory protection: about 7 KB of kernel, kernel/mmu.c and its hooks). 689 since DESIGN D44 (2026-11-12,
-# the CD drive: about 2.4 KB of kernel, ATAPI in kernel/ide.c and cd0 in the built-in diskd).
-RAMDISK_MOUNT_K := 689
+# the CD drive: about 2.4 KB of kernel, ATAPI in kernel/ide.c and cd0 in the built-in diskd). 688 since DESIGN D45
+# revision 3 (2026-11-12, memory protection's code in a span of its own: 200 bytes of kernel.bin).
+RAMDISK_MOUNT_K := 688
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/check-init.py tools/ksize-check.sh tools/ksize-budget
