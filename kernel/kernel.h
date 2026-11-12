@@ -149,6 +149,7 @@ extern u8 cache_dmode;               /* CACHE_D_*: what the data cache does (Emu
 #define MEM_FASTONLY 2u         /* fast RAM only, fail rather than use chip */
 #define MEM_LOW1G    4u         /* fast RAM ending below 1 GB: what the Pi 4's VideoCore can read (the mailbox) */
 #define MEM_USER     8u         /* DESIGN D41: a process's own memory: whole pages while memory protection is on */
+#define MEM_LOW16M  16u         /* ending below 16 MB, the 24-bit addresses (SYS_memalloc's MEMA_LOW, d29 16.19) */
 void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem);
 /* DESIGN D15: the update bundle zenixboot left in memory (bootinfo +0x78..+0x80), checked and reserved by mem_init as
  * a block in use, given back by SYS_update RELEASE; SYS_update itself is in syscall.c */
@@ -844,8 +845,10 @@ void tty_proc_gone(struct proc *p);     /* p is a zombie: its leadership ends, a
 #define SYS_chdir   15
 #define SYS_getcwd  16
 #define SYS_pipe    17   /* int fds[2], flags (0, or O_NONBLOCK for both ends: Linux's pipe2; D20 step 4) */
-#define SYS_memalloc 18   /* size, flags (MEMA_CHIP chip RAM, DESIGN D38: the display server's screen; other bits ignored) */
+#define SYS_memalloc 18   /* size, flags (MEMA_CHIP chip RAM, DESIGN D38: the display server's screen; MEMA_LOW below 16 MB,
+                           * d29 16.19: ZINE's loader; other bits ignored) */
 #define MEMA_CHIP    1
+#define MEMA_LOW     2
 #define SYS_memfree  19
 #define SYS_ticks   20   /* 0 -> the 100 Hz tick count (wraps); 1 -> whole seconds since boot (unsigned, F9); 2 -> CLOCK_* bits */
 #define CLOCK_RTC   1    /* SYS_ticks 2: the battery clock set the time at boot (D21 8.3) */

@@ -2153,6 +2153,17 @@ lowlevel.library about 2.3 KB, user Copper lists about 1.2 KB, the DOS list, Get
 1 KB, the rest the copy, RectFill, zp_give and the trace lines. `/bin/zine` 45,904 -> 46,376 bytes in memory (a
 library name, zh_lean, the chip probe and its message); the kernel unchanged.
 
+### 16.19 Low memory on request, sprites, the null bases (2026-11-12, branch zine9)
+
+**Low memory on request** (the main session's decision on round 8's question). `SYS_memalloc`'s second argument has a
+new bit, `MEMA_LOW` 2 (docs/claims.md, docs/frozen-interfaces.md): the region ends below 16 MB, cut from the low end
+of a free block (the kernel's `MEM_LOW16M`, beside the SD driver's `MEM_LOW1G`); without fast RAM there it falls back
+to chip RAM as a plain call does, and is 0 when nothing fits. With memory protection on it is whole pages as before,
+also taken from the low end (a limited block was cut from the high end of a free block that crossed the limit before,
+which could end above it). *Verified* on the host: `tools/mem-test.sh` (a range crossing 16 MB: small and big blocks
+below it, an ordinary big one still above, one too big refused, whole pages with protection on, a range wholly above
+gives none). The kernel's mem.o grew 40 bytes, kernel.bin 193,948 -> 194,012.
+
 ## 17. Questions for the owner (what ZINE should be)
 
 1. Owner answer 1 allowed "the Amiga's own console or through Wasabi". Typing into the console through Wasabi counts

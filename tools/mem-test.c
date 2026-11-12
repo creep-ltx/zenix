@@ -6,7 +6,8 @@
  * link, tools/mem-test.sh) reserved as ranges of one used block, given back by mem_boot_release (filled with ILLEGAL,
  * the free count up by exactly the span), the CD's kept while a drive is there, memory protection's kept while it is on
  * and given back (the table disarmed first) when it is off (section 13), nothing reserved or freed when the range table
- * is full. Build and run: tools/mem-test.sh */
+ * is full; MEM_LOW16M (d29 16.19) below 16 MB in a range that crosses it, with and without protection. Build and run:
+ * tools/mem-test.sh */
 #include <stdio.h>
 #include <stdarg.h>
 #include <sys/mman.h>
@@ -83,6 +84,34 @@ int main(void)
     u8 *g = mem_alloc(64 * 1024, MEM_FASTONLY, 0);
     EXPECT_TRUE(g && (u32)g + 64 * 1024 == 0x30100000, "... an ordinary big one from the high end");
     munmap((void *)0x30000000, 0x100000);
+
+    /* 5. d29 16.19: MEM_LOW16M (SYS_memalloc's MEMA_LOW) in a fast range crossing 16 MB (Zorro II and III RAM side by
+     * side would be two ranges; one crossing is the harder case): blocks that end below 16 MB, big ones too, from the
+     * low end; with memory protection on (whole pages) as well */
+    {
+        const u32 M = 0x01000000u;
+        pool(M - 0x100000, M + 0x100000);
+        u8 *a = mem_alloc(128, MEM_FASTONLY | MEM_LOW16M, 0);
+        EXPECT_TRUE(a && (u32)a + 128 <= M, "MEM_LOW16M: a small block below 16 MB");
+        u8 *b = mem_alloc(0x40000, MEM_LOW16M, 0);
+        EXPECT_TRUE(b && (u32)b + 0x40000 <= M && (u32)b < M - 0x80000, "... a big one too, from the low end");
+        u8 *c = mem_alloc(0x40000, 0, 0);
+        EXPECT_TRUE(c && (u32)c >= M, "... an ordinary big block still from the high end (above 16 MB here)");
+        EXPECT_TRUE(!mem_alloc(0xC0000, MEM_LOW16M, 0), "... one that does not fit below 16 MB: refused (no chip RAM here)");
+        mmu_on = 2;
+        u8 *d = mem_alloc(0x20000, MEM_LOW16M | MEM_USER, 0);
+        EXPECT_TRUE(d && (u32)d + 0x20000 <= M && !((u32)d & (MMU_PG - 1)), "... with protection on: whole pages, below 16 MB");
+        u8 *e = mem_alloc(0xA0000, MEM_LOW16M | MEM_USER, 0);   /* 0x9F000 or so is left below */
+        EXPECT_TRUE(!e, "... and refused when the pages would cross it");
+        mmu_on = 0;
+        mem_free(a); mem_free(b); mem_free(c); mem_free(d); mem_free(e);
+        u32 cf, ff; mem_stats(&cf, &ff);
+        EXPECT_TRUE(ff == 0x200000, "... everything freed merges back");
+        munmap((void *)(M - 0x100000), 0x200000);
+        pool(M, M + 0x100000);
+        EXPECT_TRUE(!mem_alloc(128, MEM_LOW16M, 0), "a range wholly above 16 MB gives no MEM_LOW16M block");
+        munmap((void *)M, 0x100000);
+    }
 
     /* 4. DESIGN D45: a fast region 0x20000000-0x20100000 with the "kernel" at 0x20010000 (128 KB); its spans as
      * tools/mem-test.sh links them: the boot's 0x20010100-0x20018100 (32 KB), the CD's 0x20018100-0x20018400, memory

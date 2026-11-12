@@ -579,10 +579,12 @@ void syscall_c(u32 *rb)
     case SYS_memalloc:                  /* the region's address, or 0 (NULL) when it cannot be given: never -1 */
         r = 0;
         if (a1 == 0 || a1 > MEMALLOC_MAX)
-            break;                      /* a2: MEMA_CHIP chip RAM (D38); its other bits are ignored, as all of a2 was */
+            break;                      /* a2: MEMA_CHIP chip RAM (D38), MEMA_LOW ending below 16 MB (d29 16.19); its
+                                         * other bits are ignored, as all of a2 was */
         for (int i = 0; i < NREG; i++)
             if (!current->reg[i].base) {
-                void *m = mem_alloc(a1, (a2 & MEMA_CHIP ? MEM_CHIP : 0) | (mmu_is_sys(current) ? 0 : MEM_USER),
+                void *m = mem_alloc(a1, (a2 & MEMA_CHIP ? MEM_CHIP : 0) | (a2 & MEMA_LOW ? MEM_LOW16M : 0) |
+                                    (mmu_is_sys(current) ? 0 : MEM_USER),
                                     (u32)current->pid);         /* D41: whole pages for a protected process */
                 if (m) {
                     current->reg[i].base = (u32)m;

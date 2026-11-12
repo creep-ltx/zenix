@@ -87,10 +87,13 @@
 # +40 (their gates load the table); after the code reviews the gates' branches laid out for "off" (+32); kernel.bin
 # 193,716 -> 193,948, TOTAL 193,750 -> 194,000; the mount tests' RAM disk 689 -> 688 KB for it (Makefile). 2,928
 # bytes more given back after the boot when protection is off.
+# 2026-11-12 (d29 16.19, SYS_memalloc's MEMA_LOW: a region below 16 MB for ZINE's loader): mem 4,167 -> 4,207, budget
+# 4,200 -> 4,250 (MEM_LOW16M; a limited block with protection on now also from the low end), syscall + 24; kernel.bin
+# 193,948 -> 194,012, TOTAL 194,000 -> 194,050.
 start     4300   8200
 main      5950   1100
 serial    6100   6500
-mem       4200    240
+mem       4250    240
 ide       4750    560
 emmc      4900    640
 floppy    4500    160
@@ -120,5 +123,5 @@ cache     1800     32
 gcon      3600     16
 mmu       5700    160
 embed    47500      0
-TOTAL   194000
+TOTAL   194050
 ROOM       800

@@ -588,7 +588,9 @@ Nothing can be moved once handed out (no MMU, no paging), so fragmentation is th
 - Free-byte counters are O(1), so `free` and `SYS_meminfo` read them cheaply.
 - `kmalloc`/`kfree` for kernel objects; `SYS_memalloc` gives processes extra regions (at most `NREG` = 16 at a time,
   each at most `MEMALLOC_MAX` = 64 MB; its second argument `MEMA_CHIP` asks for chip RAM, DESIGN D38: the display
-  server's screen; other bits are ignored, as all of it was). **Every memory call answers 0 (NULL) on failure, never -1.** `mem_alloc`
+  server's screen; `MEMA_LOW` (`MEM_LOW16M` inside) for a region ending below 16 MB, cut from the low end like
+  `MEM_LOW1G`, d29 16.19: ZINE's loader puts an old program's hunks where a 24-bit program expects them; without fast
+  RAM there it falls back to chip RAM as a plain call does; other bits are ignored, as all of it was). **Every memory call answers 0 (NULL) on failure, never -1.** `mem_alloc`
   refuses 0 and sizes above `MEM_ALLOC_MAX` before rounding, so no size near 4 GB can wrap into a tiny block.
 - **With memory protection on** (D41): a process's own blocks (`MEM_USER`: its image block, a ZEX2 program's code
   copy, `SYS_memalloc` regions; not for a process that is a system one from its start, a service's server) are whole

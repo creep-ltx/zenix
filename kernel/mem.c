@@ -239,33 +239,35 @@ __attribute__((noinline)) static void *carve(struct range *r, struct mblk *b, u3
 }
 
 /* NEED: the block's bytes with its header. LIMIT (0: none): the block must end at or below it, cut from the low end of
- * a free block (MEM_LOW1G). PG (DESIGN D41, a MEM_USER block with protection on): NEED is the data's bytes, whole
- * pages, the data starts on a page; its header is the last 16 bytes of the page below, which holds no other such
- * block's data (that one ends on a page at or below it). Big blocks from the high end, small ones from the low end. */
+ * a free block (MEM_LOW1G, MEM_LOW16M). PG (DESIGN D41, a MEM_USER block with protection on): NEED is the data's
+ * bytes, whole pages, the data starts on a page; its header is the last 16 bytes of the page below, which holds no
+ * other such block's data (that one ends on a page at or below it). Big blocks from the high end, small ones from the
+ * low end. */
 __attribute__((noinline)) static void *alloc_in(struct range *r, u32 need, u32 owner, u32 limit, int pg)
 {
+    int top = need >= BIG && !limit;           /* from the high end (a limit: always the low end) */
     for (struct mblk *b = (struct mblk *)r->lo; b; b = next_of(r, b)) {
         check_blk(r, b);
         u32 lo = (u32)b, e = lo + SZ(b), h = lo, u;
-        if (limit && lo + need > limit)
-            break;                              /* the blocks only get higher from here */
         if (USED(b) || SZ(b) < need + (pg ? HDR : 0))
             continue;
         if (pg) {
-            u32 a = need >= BIG ? (e - need) & ~(MMU_PG - 1) : (lo + HDR + MMU_PG - 1) & ~(MMU_PG - 1);
+            u32 a = top ? (e - need) & ~(MMU_PG - 1) : (lo + HDR + MMU_PG - 1) & ~(MMU_PG - 1);
             if (a - HDR > lo && a - HDR - lo < 2 * HDR)
-                a = need >= BIG ? a - MMU_PG : a + MMU_PG;  /* no room for a free block in front: a page further */
+                a = top ? a - MMU_PG : a + MMU_PG;  /* no room for a free block in front: a page further */
             if (a < lo + HDR || a + need > e || a + need < a)
                 continue;
             h = a - HDR;
             u = a + need;
-        } else if (need >= BIG && !limit) {
+        } else if (top) {
             h = e - need;
             u = e;
         } else
             u = lo + need;
         if (e - u < 2 * HDR)
             u = e;                              /* too small to stay free: taken into the block */
+        if (limit && u > limit)
+            break;                              /* past the limit; the blocks only get higher from here */
         if (!pg && h - lo < 2 * HDR)
             h = lo;
         return carve(r, b, h, u, owner);
@@ -278,6 +280,8 @@ void *mem_alloc(u32 n, u32 flags, u32 owner)
     if (n == 0 || n > MEM_ALLOC_MAX)            /* the size arithmetic below cannot wrap */
         return 0;
     u32 need = ((n + 15) & ~15u) + HDR;
+    u32 limit = (flags & MEM_LOW16M) ? 0x01000000u : (flags & MEM_LOW1G) ? 0x40000000u : 0;
+    int pg = (flags & MEM_USER) && mmu_on;
     for (int pass = 0; pass < 2; pass++) {
         /* pass 0: the wanted pool; pass 1: the other, unless chip-only */
         int want_chip = (flags & MEM_CHIP) ? 1 : 0;
@@ -289,10 +293,8 @@ void *mem_alloc(u32 n, u32 flags, u32 owner)
         for (int i = 0; i < nranges; i++) {
             if (ranges[i].chip != want_chip)
                 continue;
-            u32 limit = (flags & MEM_LOW1G) ? 0x40000000u : 0;
             if (limit && ranges[i].lo >= limit)
-                continue;                       /* wholly above 1 GB; one crossing it gives from its low part (A15) */
-            int pg = (flags & MEM_USER) && mmu_on;
+                continue;                       /* wholly above the limit; one crossing it gives from its low part (A15) */
             void *p = alloc_in(&ranges[i], pg ? (n + MMU_PG - 1) & ~(MMU_PG - 1) : need, owner, limit, pg);
             if (p) {
                 if (__builtin_expect(pg, 0))    /* pg holds mmu_on: the table directly, not the gate (D45 13.5) */
