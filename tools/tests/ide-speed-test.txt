@@ -1,0 +1,19 @@
+wait zenix:/# 150
+sleep 1
+send dd if=/dev/urandom of=/r bs=4096 count=256 2>/dev/null; sync; echo GEN-DONE\r
+wait GEN-DONE 900
+send echo T-write64k; time dd if=/dev/zero of=/z bs=65536 count=16\r
+wait real\s+\d+m[\d.]+s 600
+send sync; echo T-read1k; time cat /r > /dev/null\r
+wait real\s+\d+m[\d.]+s 600
+send echo T-read64k; time dd if=/r of=/dev/null bs=65536\r
+wait real\s+\d+m[\d.]+s 600
+send echo T-copy1k; time cp /r /r2\r
+wait real\s+\d+m[\d.]+s 600
+send sync; echo T-ls; time ls -lR /bin /etc > /dev/null\r
+wait real\s+\d+m[\d.]+s 600
+send sha256sum /r /r2 /z; echo SUMS-DONE\r
+wait SUMS-DONE 600
+send rm /z; sync; echo END-DONE\r
+wait END-DONE 120
+stop

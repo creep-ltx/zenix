@@ -72,6 +72,9 @@ int  zenixfs_mount_ex(struct zenixfs **out, struct zenixfs_dev *dev, uint32_t ca
 int  zenixfs_is_readonly(struct zenixfs *fs);
 struct zenixfs_mount_opts { uint32_t cache_blocks, bm_pages, flags, skip_commits; };
 int  zenixfs_mount_opts(struct zenixfs **out, struct zenixfs_dev *dev, const struct zenixfs_mount_opts *o);
+/* optional, after the mount: a read of n neighbouring blocks in one request (0 or -1); zenixfs_read then reads runs of
+ * whole blocks straight into the caller's buffer (docs/d42-faster-ide.md) */
+void zenixfs_set_readn(struct zenixfs *fs, int (*readn)(void *ctx, uint32_t blk, uint32_t n, void *buf));
 int  zenixfs_unmount(struct zenixfs *fs);                    /* commits */
 int  zenixfs_sync(struct zenixfs *fs);                       /* commit everything now */
 void zenixfs_set_time(struct zenixfs *fs, uint64_t now);

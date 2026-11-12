@@ -12,11 +12,12 @@ struct zmem {
     uint8_t *img;
     int record;
     struct zlog *log; size_t nlog, caplog;
-    unsigned reads, writes, flushes;
+    unsigned reads, writes, flushes, readns;
 };
 struct zmem *zmem_new(uint32_t bshift, uint32_t nblocks, int record);
 struct zmem *zmem_clone(const struct zmem *src);          /* copy of the image, no log */
 void zmem_free(struct zmem *m);
+int zmem_readn(void *ctx, uint32_t blk, uint32_t n, void *buf);   /* for zenixfs_set_readn */
 void zmem_apply(struct zmem *m, const struct zlog *e);    /* apply one logged write to the image */
 
 struct zfile { struct zenixfs_dev dev; int fd; };

@@ -64,11 +64,16 @@
 # alone, the stop at the end and before ZINE), audio 526 -> 584 and bss + 1 (audio_hold: the four channels stopped, the
 # bell silent while held, with interrupts masked), ipc 3,937 -> 3,959 ("audio" a reserved port name); after the review:
 # drv 2,600, audio 612; budgets drv 2,500 -> 2,650, audio 560 -> 620, ipc 3,950 -> 4,000, bss unchanged.
+# 2026-11-12 (docs/d42-faster-ide.md, the faster IDE): ide 3,328 -> 3,404, budget 3,400 -> 3,450 (move.l sector
+# reads with their check at boot, the clock read only after 16 status looks; FLUSH CACHE now goes through ide_cmd,
+# -150), fsd.zx in embed 27,472 -> about 28,000 (ext2's read-ahead: bfill, sequential reads, whole blocks written
+# without reading them first); kernel.bin 190,012 -> 190,684, TOTAL 190,500 -> 190,700 (the floppy's ROOM 800 kept:
+# 804 left).
 start     4300   8200
 main      5950   1100
 serial    6100   6500
 mem       3600    240
-ide       3400    560
+ide       3450    560
 emmc      4900    640
 floppy    4500    160
 input      550     32
@@ -97,5 +102,5 @@ cache     1800     32
 gcon      3600     16
 mmu       5700    160
 embed    47500      0
-TOTAL   190500
+TOTAL   190700
 ROOM       800

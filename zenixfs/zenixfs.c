@@ -68,6 +68,8 @@ struct zenixfs {
     int in_reserve, failed, txn_dirty, readonly;
     u8 *sc_r, *sc_z, *sc_c, *sc_b, *sc_sel;   /* scratch blocks for read, truncate, commit, and the bitmap selector copy: allocated once at mount
                                          * (the Zenix malloc cannot give small blocks back, a server must not allocate while running) */
+    u32 sc_r_blk;                /* the data block sc_r holds as it is on the disk (0: none): small reads of one block ask once */
+    int (*readn)(void *ctx, uint32_t blk, uint32_t n, void *buf);   /* several neighbouring blocks in one request, or NULL */
     struct zenixfs_stats st;
 };
 
@@ -173,6 +175,7 @@ static void cb_drop(struct zenixfs *fs, u32 blk)
 
 static int dev_write(struct zenixfs *fs, u32 blk, const void *buf)
 {
+    if (blk == fs->sc_r_blk) fs->sc_r_blk = 0;
     if (fs->readonly) return -1;                            /* a read-only mount never reaches the device */
     fs->st.writes++;
     return fs->dev->write(fs->dev->ctx, blk, buf);
@@ -237,6 +240,7 @@ static u32 alloc_block(struct zenixfs *fs, int data, int *err)
             u32 blk = base + bit;
             bit_set(pg->data, bit); pg->dirty = 1;
             fs->free_blocks--; fs->txn_dirty = 1;
+            if (blk == fs->sc_r_blk) fs->sc_r_blk = 0;           /* new contents to come: the copy in sc_r is old */
             if (data) fs->data_hint = blk + 1; else fs->meta_hint = blk + 1;
             return blk;
         }
@@ -1143,9 +1147,15 @@ static int f_map_clear_from(struct zenixfs *fs, u32 ino, u32 lb)
 static int data_read_blk(struct zenixfs *fs, u32 phys, u8 *buf)
 {
     struct cb *c = cb_find(fs, phys);
+    if (buf == fs->sc_r) {
+        if (!c && phys == fs->sc_r_blk) { fs->st.cache_hits++; return 0; }
+        fs->sc_r_blk = 0;                            /* sc_r gets other contents (a cached block's, or a failed read's) */
+    }
     if (c) { memcpy(buf, c->data, fs->B); fs->st.cache_hits++; return 0; }
     fs->st.reads++;
-    return fs->dev->read(fs->dev->ctx, phys, buf) < 0 ? ZENIXFS_EIO : 0;
+    if (fs->dev->read(fs->dev->ctx, phys, buf) < 0) return ZENIXFS_EIO;
+    if (buf == fs->sc_r) fs->sc_r_blk = phys;
+    return 0;
 }
 static int inline_load(struct zenixfs *fs, u32 ino, u8 *buf, int *len)
 {
@@ -1160,6 +1170,8 @@ static int inline_store(struct zenixfs *fs, u32 ino, const u8 *buf, int len)
     if (len == 0) { int e = t_delete(fs, key); return e == ZENIXFS_ENOENT ? 0 : e; }
     return t_insert(fs, key, buf, len, 1);
 }
+
+void zenixfs_set_readn(struct zenixfs *fs, int (*readn)(void *ctx, uint32_t blk, uint32_t n, void *buf)) { fs->readn = readn; }
 
 int zenixfs_read(struct zenixfs *fs, uint32_t ino, uint64_t off, void *vbuf, uint32_t len)
 {
@@ -1180,8 +1192,24 @@ int zenixfs_read(struct zenixfs *fs, uint32_t ino, uint64_t off, void *vbuf, uin
     while (done < len) {
         u64 pos = off + done; u32 lb = (u32)(pos >> fs->bshift), bo = (u32)(pos & (fs->B - 1)), chunk = fs->B - bo;
         if (chunk > len - done) chunk = len - done;
-        u32 phys; e = f_map_get(fs, ino, lb, &phys);
-        if (e) return e;
+        u32 s, p, n, phys = 0;
+        e = ext_floor(fs, ino, lb, &s, &p, &n);
+        if (e && e != ZENIXFS_ENOENT) return e;
+        if (!e && lb < s + n) phys = p + (lb - s);
+        u32 k = (len - done) >> fs->bshift;          /* whole blocks wanted from here (docs/d42-faster-ide.md): neighbours on
+                                                      * the disk go straight into the buffer, up to 64 KB a request */
+        if (phys && !bo && fs->readn && k > 1) {
+            if (k > s + n - lb) k = s + n - lb;
+            if (k > (65536u >> fs->bshift)) k = 65536u >> fs->bshift;
+            u32 j = 0;
+            while (j < k && !cb_find(fs, phys + j)) j++; /* a cached block may be newer than the disk: the run ends there */
+            if (j > 1 && phys >= fs->dstart && phys + j <= fs->nblocks && phys + j > phys) {
+                fs->st.reads++;
+                if (fs->readn(fs->dev->ctx, phys, j, buf + done) < 0) return ZENIXFS_EIO;
+                done += j << fs->bshift;
+                continue;
+            }
+        }
         if (!phys) memset(buf + done, 0, chunk);
         else {
             e = data_read_blk(fs, phys, blk);
@@ -1849,6 +1877,7 @@ static int rebuild_tree(struct zenixfs *fs, const u32 *bad, u32 nbad, struct zen
     u32 cap = 256, n = 0; int e = 0;
     struct lfent *lf = ZENIXFS_MALLOC(sizeof(struct lfent) * cap);
     u8 *buf = fs->sc_r;
+    fs->sc_r_blk = 0;                                        /* sc_r is this walk's scratch */
     struct fctx c; memset(&c, 0, sizeof c);
     c.fs = fs;
     if (!lf) return ZENIXFS_EIO;

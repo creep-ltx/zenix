@@ -14,6 +14,15 @@ static int m_read(void *c, uint32_t blk, void *buf)
     memcpy(buf, m->img + ((size_t)blk << m->dev.bshift), (size_t)1 << m->dev.bshift);
     return 0;
 }
+/* several blocks in one call (zenixfs_set_readn): the same reads, counted as one */
+int zmem_readn(void *c, uint32_t blk, uint32_t n, void *buf)
+{
+    struct zmem *m = c;
+    if (blk >= m->dev.nblocks || n > m->dev.nblocks - blk) return -1;
+    m->reads++; m->readns++;
+    memcpy(buf, m->img + ((size_t)blk << m->dev.bshift), (size_t)n << m->dev.bshift);
+    return 0;
+}
 static int m_write(void *c, uint32_t blk, const void *buf)
 {
     struct zmem *m = c;

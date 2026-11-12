@@ -123,11 +123,11 @@ static int cache_setup(void)
     return 0;
 }
 
-/* returns the cache slot holding block blk (loading it), or -1.
+/* returns the cache slot holding block blk (loading it, unless load is 0: the caller fills the whole block), or -1.
  * Fast paths first: the last slot used, then a small hash of block
  * numbers; only a miss scans the whole cache for a victim. */
 
-static int bfind(u32 blk)
+static int bget(u32 blk, int load)
 {
     int victim = 0;
     u32 oldest = 0xFFFFFFFF;
@@ -160,14 +160,16 @@ static int bfind(u32 blk)
     }
     buf[victim].blk = 0xFFFFFFFF;
     buf[victim].stamp = 0;
-    if (fs_blk_read(part_lba + blk * sectors_per_block, sectors_per_block,
-                    buf[victim].data))
+    if (load && fs_blk_read(part_lba + blk * sectors_per_block, sectors_per_block,
+                            buf[victim].data))
         return -1;
     buf[victim].blk = blk;
     buf[victim].stamp = stamp;
     hashslot[blk & 63] = (u8)victim;
     return last_slot = victim;
 }
+
+#define bfind(blk) bget(blk, 1)
 
 /* pointer to the cached block: valid only until the next bfind/bread/bwrite */
 static const u8 *bptr(u32 blk)
@@ -190,7 +192,7 @@ static int bwrite_copy(u32 blk, u32 off, const void *src, u32 len)
 {
     if (ext2_readonly)
         return EROFS_;
-    int i = bfind(blk);
+    int i = bget(blk, off || len < bsize);      /* a whole block is not read first */
     if (i < 0)
         return -EIO;
     memcpy(buf[i].data + off, src, len);
@@ -417,7 +419,7 @@ static u32 ind(u32 blk, u32 idx)
     return le32(v);
 }
 
-u32 ext2_bmap(const struct inode *in, u32 n)
+__attribute__((noinline)) u32 ext2_bmap(const struct inode *in, u32 n)
 {
     u32 per = bsize / 4;
     if (!has_block_map(in))
@@ -434,6 +436,45 @@ u32 ext2_bmap(const struct inode *in, u32 n)
     return ind(ind(ind(in->block[14], n / (per * per)), (n / per) % per), n % per);
 }
 
+/* Sequential reading (docs/d42-faster-ide.md): block lb of a file is blk, most likely not cached; it and the blocks
+ * after it that are its neighbours on the disk and not cached either - at most a quarter of the cache - go into as many
+ * neighbouring slots, the ones whose newest use is the oldest, with one disk request. (A block is never in two slots:
+ * writes update one.) */
+static __attribute__((noinline)) void bfill(const struct inode *in, u32 lb, u32 blk)
+{
+    u32 i, j, k, w = 0, wmax = 0xFFFFFFFF;
+    for (k = 1; k < nbuf / 4 && blk + k < total_blocks && ext2_bmap(in, lb + k) == blk + k; k++)
+        ;                               /* (past the file's end: unmapped, 0) */
+    for (i = 0; i < nbuf; i++)
+        if (buf[i].blk - blk < k)
+            k = buf[i].blk - blk;       /* a cached one ends the run (blk itself: k 0) */
+    if (k < 2)
+        return;                         /* one block: bfind's own miss */
+    for (i = 0; i + k <= nbuf; i++) {
+        u32 m = 0;
+        for (j = i; j < i + k; j++)
+            if (buf[j].stamp > m)
+                m = buf[j].stamp;
+        if (m < wmax)
+            wmax = m, w = i;
+    }
+    for (j = w; j < w + k; j++)
+        buf[j].blk = 0xFFFFFFFF, buf[j].stamp = 0;
+    if (fs_blk_read(part_lba + blk * sectors_per_block, k * sectors_per_block, buf[w].data))
+        return;                         /* the slots stay empty; bfind reads blk alone and says what failed */
+    stamp++;
+    for (j = 0; j < k; j++, w++) {
+        buf[w].blk = blk + j;
+        buf[w].stamp = stamp;
+        hashslot[(blk + j) & 63] = (u8)w;
+    }
+}
+
+/* Reading a file (docs/d42-faster-ide.md): a read that goes on from where the last one ended, or starts the file, loads
+ * a block that is not cached together with the ones after it (bfill), so neither small reads (cat, cp: 1 KB) nor big
+ * ones ask the disk once per block. */
+static u32 ra_ino, ra_next;             /* the last read's inode and where it ended */
+
 int ext2_read(const struct inode *in, u32 off, void *dst, u32 n)
 {
     u8 *d = dst;
@@ -441,14 +482,17 @@ int ext2_read(const struct inode *in, u32 off, void *dst, u32 n)
         return 0;
     if (n > in->size - off)
         n = in->size - off;
+    int seq = off == 0 || (in->ino == ra_ino && off == ra_next);
     u32 done = 0;
     while (done < n) {
-        u32 pos = off + done;
+        u32 pos = off + done, lb = pos / bsize;
         u32 chunk = bsize - pos % bsize;
         if (chunk > n - done)
             chunk = n - done;
-        u32 blk = ext2_bmap(in, pos / bsize);
+        u32 blk = ext2_bmap(in, lb);
         if (blk) {
+            if (seq && blk < total_blocks && buf[hashslot[blk & 63]].blk != blk)
+                bfill(in, lb, blk);             /* not at its hash slot: most likely not cached */
             if (bread_copy(blk, pos % bsize, d + done, chunk))
                 return EIO_;
         } else {
@@ -456,6 +500,8 @@ int ext2_read(const struct inode *in, u32 off, void *dst, u32 n)
         }
         done += chunk;
     }
+    ra_ino = in->ino;
+    ra_next = off + n;
     return (int)n;
 }
 
