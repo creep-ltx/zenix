@@ -541,6 +541,14 @@ $(BUILD)/dpyd-%.no: display/server/%.c display/server/dpyd.h display/server/amif
 $(BUILD)/displayd.uelf: $(DPYDOBJS) $(BUILD)/screenfile.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(DPYDOBJS) $(BUILD)/screenfile.no $(BUILD)/libz.uo $(LIBGCC) -o $@
 STACK_displayd := 8192
+# the demo floppies' displayd (audit 2026-11-12 block 6, 2.3): the same files with -DNO_RTG, without fb.c and the card's
+# branches (their bootblock writes no card record, D43 3), put on them as /sbin/displayd; every other image the full one
+DPYDNOBJS := $(patsubst %,$(BUILD)/dpydn-%.no,displayd win draw font amifont)
+$(BUILD)/dpydn-%.no: display/server/%.c display/server/dpyd.h display/server/amifont.h display/server/fb.h kernel/hwinfo.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -DNO_RTG -DDIW_V=$(DIWV) $(if $(filter displayd win amifont,$*),-Os) -c $< -o $@
+$(BUILD)/displayd-nortg.uelf: $(DPYDNOBJS) $(BUILD)/screenfile.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(DPYDNOBJS) $(BUILD)/screenfile.no $(BUILD)/libz.uo $(LIBGCC) -o $@
+STACK_displayd-nortg := 8192
 $(BUILD)/libdisplay.no: display/lib/libdisplay.c display/display.h display/proto.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
 # the desktop's screen file's reader (display/screenfile.h): displayd's (zdesk reads a user's with its conf.c)
@@ -1186,11 +1194,11 @@ box: $(BUILD)/box.zx
 # (zenix-demo.adf, 880 KB) and the HD one (zenix-demo-hd.adf, 1.76 MB: also what the DD one has no room for). Each
 # is refused when it does not fit, saying by how much; every build says the space left. The commands in the box are
 # its links (BOXAPPS); DEMOAPPS the separate programs. ----
-DEMOAPPS := sh login init mount zdesk term ahiru sumi ctop telnet rz sntp displayd dlogin netd drv-a2065 drv-genet drv-ne2000
+DEMOAPPS := sh login init mount zdesk term ahiru sumi ctop telnet rz sntp displayd-nortg dlogin netd drv-a2065 drv-genet drv-ne2000
 DEMOAPPS_HD := $(DEMOAPPS) wget ssh maki markdown zine drv-plipbox fdisk mkfs_ext2 fsck_ext2 mkfs_zenixfs fsck_zenixfs \
                dd sync zfsd fatd ffsd pfs3d
 DEMODEPS := $(BUILD)/demoboot.bin $(BUILD)/demoload.zx $(BUILD)/kernel.bin $(BUILD)/box.zx $(USERZX) $(SBINZX) $(NETDRVZX) \
-            $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(BUILD)/zine.blob $(BUILD)/sp060 $(BUILD)/sp040 $(shell find rootfs tools/demo -type f) \
+            $(BUILD)/displayd-nortg.zx $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(BUILD)/zine.blob $(BUILD)/sp060 $(BUILD)/sp040 $(shell find rootfs tools/demo -type f) \
             tools/mkroot.sh tools/mkdemo.sh tools/mkdemo.py tools/mkman.py
 $(BUILD)/zenix-demo.adf: $(DEMODEPS)
 	tools/mkdemo.sh $(BUILD) dd $@ "$(filter-out $(BOXAPPS),$(DEMOAPPS))" "$(BOXAPPS)"
