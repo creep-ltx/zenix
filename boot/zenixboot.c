@@ -117,6 +117,21 @@ static void *DOSBase, *GfxBase;
 #define WaitTOF()           zb_os(GfxBase, -270, 0, 0, 0, 0, 0, 0)
 #define WaitBlit()          zb_os(GfxBase, -228, 0, 0, 0, 0, 0, 0)
 
+/* intuition.library and Picasso96API.library (DESIGN D43: RTG; offsets from the NDK's and Picasso96's interface
+ * files, names and numbers only) */
+static void *IntuitionBase, *P96Base;
+#define OpenWindowTagList(nw, t) ((u8 *)zb_os(IntuitionBase, -606, 0, 0, 0, 0, (long)(nw), (long)(t)))
+#define SetPointer(w, p, h, wd)  zb_os(IntuitionBase, -270, (long)(h), (long)(wd), 0, 0, (long)(w), (long)(p))
+#define p96GetBitMapAttr(b, a)   ((u32)zb_os(P96Base, -42, (long)(a), 0, 0, 0, (long)(b), 0))
+#define p96LockBitMap(b, ri, n)  zb_os(P96Base, -48, (long)(n), 0, 0, 0, (long)(b), (long)(ri))
+#define P96BMA_WIDTH 0
+#define P96BMA_HEIGHT 1
+#define P96BMA_BYTESPERROW 4
+#define P96BMA_BYTESPERPIXEL 5
+#define P96BMA_RGBFORMAT 7
+#define P96BMA_ISP96 8
+#define WA_Dummy (0x80000000u + 99)
+
 /* the stage colours of boot/handoff.S and kernel/diag.h */
 #define DIAG_BLUE 0x00F
 #define DIAG_CYAN 0x0FF
@@ -775,10 +790,109 @@ static int kernel_ok(long fh, long ksize, u8 *hdr)
            nrel <= ((u32)ksize - reloff) / 4 && st0 < image;
 }
 
+/* ---- DESIGN D43 (docs/d43-rtg.md 3): the front screen's RTG picture handed to Zenix ---- */
+struct hwfb_rec {                       /* kernel/hwinfo.h struct hwfb, at hwinfo + 408 */
+    u32 magic, base;
+    u16 width, height;
+    u32 bpr;
+    u8 format, bpp;
+    u16 flags;
+    u32 hvs, dl_rtg, dl_chip;
+};
+#define HWFB_MAGIC 0x5A464231u
+#define HWFB_HVS   1
+static u32 le32r(u32 a) { return __builtin_bswap32(*(volatile u32 *)a); }      /* the Pi's registers: little-endian */
+/* Picasso96's RGBFormat -> its bytes a pixel, 0 for one the display server cannot draw (CLUT, planar, YUV) */
+static int rtg_bpp(u32 f) { return f == 2 || f == 3 ? 3 : f >= 6 && f <= 9 ? 4 : f == 4 || f == 5 || (f >= 10 && f <= 13) ? 2 : 0; }
+/* the front screen, if an RTG one, into the record (take: also locked, its pointer blanked, the Pi's display list
+ * register named); said either way. -> the record, or 0 (the desktop stays on the chipset) */
+static void rtg_close(void)             /* back to AmigaOS (CHECK, a refusal): the libraries closed */
+{
+    if (P96Base) CloseLibrary(P96Base);
+    if (IntuitionBase) CloseLibrary(IntuitionBase);
+    P96Base = IntuitionBase = 0;
+}
+static void *rtg_bm;                    /* the screen's bitmap rtg_take found, for rtg_lock */
+/* the picture's memory, locked after the window, the pointer and the Pi's switch (Picasso96 switches no screen while
+ * a bitmap is locked); never unlocked: AmigaOS ends here. -> 0, or -1 (the desktop stays on the chipset) */
+static int rtg_lock(struct hwfb_rec *r)
+{
+    struct { u32 mem; u16 bpr, pad; u32 fmt; } ri = { 0, 0, 0, 0 };
+    if (!p96LockBitMap(rtg_bm, &ri, sizeof ri) || !ri.mem) {
+        say("zenixboot: RTG: its picture memory could not be locked: the desktop stays on the chipset\n", 0, 0, 0);
+        r->magic = 0;
+        return -1;
+    }
+    r->base = ri.mem;
+    return 0;
+}
+static struct hwfb_rec *rtg_take(struct hwfb_rec *r, const u8 *hw, int take)
+{
+    static const char *const no = "zenixboot: RTG: %s: the desktop stays on the chipset\n";
+    IntuitionBase = OpenLibrary("intuition.library", 37);
+    P96Base = OpenLibrary("Picasso96API.library", 2);
+    if (!IntuitionBase || !P96Base) {
+        say(no, (long)"no Picasso96 (Picasso96API.library)", 0, 0);
+        rtg_close();
+        return 0;
+    }
+    Forbid();
+    u8 *scr = *(u8 **)((u8 *)IntuitionBase + 60);       /* IntuitionBase->FirstScreen: the front one */
+    void *bm = scr ? *(void **)(scr + 84 + 4) : 0;      /* its RastPort's BitMap */
+    zb_os(SysBase, -138, 0, 0, 0, 0, 0, 0);             /* Permit */
+    if (!bm || !p96GetBitMapAttr(bm, P96BMA_ISP96)) {
+        say(no, (long)"the front screen is not an RTG screen", 0, 0);
+        rtg_close();
+        return 0;
+    }
+    u32 w = p96GetBitMapAttr(bm, P96BMA_WIDTH), h = p96GetBitMapAttr(bm, P96BMA_HEIGHT),
+        bpr = p96GetBitMapAttr(bm, P96BMA_BYTESPERROW), bpp = p96GetBitMapAttr(bm, P96BMA_BYTESPERPIXEL),
+        f = p96GetBitMapAttr(bm, P96BMA_RGBFORMAT);
+    if (!rtg_bpp(f) || rtg_bpp(f) != (int)bpp || w < 320 || h < 200 || w > 4096 || h > 4096 || bpr < w * bpp) {
+        say("zenixboot: RTG: the front screen is %ldx%ld in Picasso96's format %ld", (long)w, (long)h, (long)f);
+        say(no + 16, (long)(f == 1 ? ", a palette (CLUT) screen: its palette needs the card's driver; choose a 16- or "
+                         "32-bit mode" : ", not a hi- or true-colour format the desktop draws"), 0, 0);
+        rtg_close();
+        return 0;
+    }
+    const u32 *hi = (const u32 *)hw;    /* the hardware table stage0 filled: flags at +4, soc_base at +8 */
+    say("zenixboot: RTG: the front screen, %ldx%ld, format %ld", (long)w, (long)h, (long)f);
+    say(", %ld bytes a pixel, %ld a row%s\n", (long)bpp, (long)bpr,
+        (long)((hi[1] & 1) && hi[2] ? ", the Pi's HDMI switched with the consoles" : ""));
+    if (!take) {
+        rtg_close();
+        return 0;
+    }
+    /* a backdrop window, active, with an empty pointer: the card's own pointer (the Pi's HVS sprite) empty */
+    u16 *ptr = (u16 *)AllocMem(16, MEMF_CHIP | MEMF_CLEAR);
+    u32 tags[] = { WA_Dummy + 0x0D, (u32)scr, WA_Dummy + 0x01, 0, WA_Dummy + 0x02, 0, WA_Dummy + 0x03, w,
+                   WA_Dummy + 0x04, h, WA_Dummy + 0x22, 1, WA_Dummy + 0x25, 1, WA_Dummy + 0x26, 1,
+                   WA_Dummy + 0x29, 1, WA_Dummy + 0x24, 1, 0 };     /* CustomScreen, Left, Top, Width, Height,
+                                                                     * Backdrop, Borderless, Activate, SimpleRefresh,
+                                                                     * NoCareRefresh */
+    u8 *win = ptr ? OpenWindowTagList(0, tags) : 0;
+    if (win) {
+        SetPointer(win, ptr, 1, 16);
+        WaitTOF();
+        WaitTOF();
+    }
+    memset(r, 0, sizeof *r);
+    rtg_bm = bm;                        /* locked last (rtg_lock): a lock stops Picasso96's screen switching */
+    r->width = (u16)w;
+    r->height = (u16)h;
+    r->bpr = bpr;
+    r->format = (u8)f;
+    r->bpp = (u8)bpp;
+    if ((hi[1] & 1) && hi[2])           /* HW_DT (Emu68): SCALER_DISPLIST1, the Pi's bus 0x7E400024 */
+        r->hvs = hi[2] + 0x400024;
+    r->magic = HWFB_MAGIC;
+    return r;
+}
+
 int zb_main(void)
 {
-    static const char tmpl[] = "KERNEL,RAM/K,CHECK/S,PREVIOUS/S,UNSIGNED_OK/S,DCACHE/K,MMU/K";
-    long args[7] = { 0, 0, 0, 0, 0, 0, 0 };
+    static const char tmpl[] = "KERNEL,RAM/K,CHECK/S,PREVIOUS/S,UNSIGNED_OK/S,DCACHE/K,MMU/K,RTG/S";
+    long args[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
     long rda, kfh = 0, rfh = 0, ksize = 0, rsize = 0;
     u8 *table = 0, *buf = 0, hdr[32];
     u32 k512, r512, total = 0, home;
@@ -938,6 +1052,8 @@ int zb_main(void)
     }
     if (check) {
         display_back();
+        if (args[7])
+            rtg_take((struct hwfb_rec *)(table + 0x100 + 408), table + 0x100, 0);
         say("zenixboot: CHECK: everything is loaded and checked; Zenix would run at 0x%lx (%ld bytes there).\n"
             "zenixboot: CHECK: not started; back to AmigaOS.\n", (long)home, (long)mem, 0);
         rc = 0;
@@ -956,9 +1072,23 @@ int zb_main(void)
     /* Now nothing can fail any more. Show no screen (an RTG driver gives the monitor back to the chipset on a NULL
      * view; not verified), 68040/68060 data cache off (with copyback flushed by exec) as after a reset, no other
      * task, no blit in progress; then zb_go switches AmigaOS off and jumps (boot/zenixboot-start.S). */
-    LoadView(0);
-    WaitTOF();
-    WaitTOF();
+    struct hwfb_rec *fb = args[7] ? rtg_take((struct hwfb_rec *)(table + 0x100 + 408), table + 0x100, 1) : 0;
+    u32 dl = fb && fb->hvs ? le32r(fb->hvs) : 0;    /* the Pi's HDMI: the card's display list, shown now */
+    if (!fb || fb->hvs) {               /* a card that is not the Pi's keeps its picture: nothing in Zenix can switch it */
+        LoadView(0);
+        WaitTOF();
+        WaitTOF();
+    }
+    if (fb && fb->hvs) {                /* the chipset's list now (the C790's picture): the two Zenix switches between */
+        fb->dl_rtg = dl;
+        fb->dl_chip = le32r(fb->hvs);
+        if (fb->dl_rtg != fb->dl_chip)
+            fb->flags |= HWFB_HVS;
+        else
+            fb->hvs = fb->dl_rtg = fb->dl_chip = 0;    /* no other list was shown: the card's picture stays on */
+    }
+    if (fb)
+        rtg_lock(fb);
     if (EXEC_W(296) & 0x88) CacheControl(0, CACRF_EnableD);
     Forbid();
     WaitBlit();

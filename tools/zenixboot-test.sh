@@ -19,7 +19,7 @@
 #                writes after an allocation never lands in a log slot (D15 step 0)
 #   errors       A1200 3.1, a Startup-Sequence that runs zenixboot five times: a missing kernel, two bad RAM disks
 #                (each an error, back to AmigaOS), CHECK (loads, checks, returns), then RAM=ramdisk (Zenix with its
-#                root in RAM)
+#                root in RAM); the last two with RTG (DESIGN D43), which finds no Picasso96 there, says so and goes on
 #   dcache       A1200 3.1 with a 68060 and 64 MB of 32-bit fast RAM (DESIGN D37): zenixboot DCACHE=maybe is refused,
 #                then DCACHE=WT boots with the data cache write-through (the root in RAM)
 #   dcache-off   the same with DCACHE=OFF: the data cache stays off, and says why
@@ -44,8 +44,8 @@ FailAt 21
 SYS:zenixboot nosuchkernel
 SYS:zenixboot RAM=S/Startup-Sequence
 SYS:zenixboot RAM=zenixboot
-SYS:zenixboot CHECK
-SYS:zenixboot RAM=ramdisk
+SYS:zenixboot CHECK RTG
+SYS:zenixboot RAM=ramdisk RTG
 EOF
 python3 tools/mkffs.py "$OUT/errors-ffs.img" 16632K ZenixBoot "$OUT/errors-ss=S/Startup-Sequence" \
     "$B/zenixboot=zenixboot" "$B/kernel.bin=zenix" "$B/root-ram.img=ramdisk" >/dev/null || { echo "FAIL mkffs"; exit 1; }
@@ -140,6 +140,8 @@ for s in $SETUPS; do
         check "$s: a RAM disk that is too small is refused" "$(has $s 'S/Startup-Sequence is too small to be a RAM-disk image')"
         check "$s: a RAM disk that is not ext2 is refused after loading (the screen comes back)" "$(has $s 'zenixboot is not an ext2 filesystem image')"
         check "$s: CHECK loads and checks everything and returns" "$(has $s 'CHECK: everything is loaded and checked')"
+        check "$s: RTG without Picasso96 says so (twice: CHECK and the boot), the desktop stays on the chipset" \
+            "$([ "$(grep -ac 'zenixboot: RTG: no Picasso96 (Picasso96API.library): the desktop stays on the chipset' "$OUT/$s.log")" = 2 ] && echo ok || echo bad)"
         check "$s: then RAM=ramdisk boots Zenix with its root in RAM" \
             "$(grep -aq 'and the RAM disk ramdisk' "$OUT/$s.log" && grep -aq '^ram0  .* mounted' "$OUT/$s.log" && echo ok || echo bad)"
         check "$s: a shell prompt" "$(has $s '^zbok$')" ;;

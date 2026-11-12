@@ -49,6 +49,8 @@
                              * modes": a preferences program's Test, Use and Cancel) */
 #define DPYM_HIRES      0   /* 640 x 256 (PAL), 640 x 200 (NTSC) */
 #define DPYM_LACE       1   /* hires interlaced: 640 x 512, 640 x 400 */
+#define DPYM_RTG        2   /* (D43) a graphics card's screen, the size AmigaOS gave it (zenixboot RTG): only answered;
+                             * asked for hires or interlace there, the answer is still DPYM_RTG and nothing changes */
 #define DPYM_ASK        0xFF
 #define DPY_FONT_INFO   16  /* a[0] a font (0 the 8 x 8, DPYF_UI the desktop's), a[1] struct dpyfont * (the client's
                              * memory) -> 0, its metrics and widths written there; -EINVAL another number. The

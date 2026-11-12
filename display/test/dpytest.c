@@ -24,11 +24,19 @@
  *   stat [LABEL]       the server's counters since the last stat (DPY_STAT), then from 0: "dpytest: stat LABEL blits
  *                      B pixels P glyphs G draws D paints N copies C (0)"
  *   mem                chip and fast RAM free, and the memory of displayd and dpytest (procinfo)
+ *   peek X Y           (with -fb) the pretend card's pixel at X, Y: "dpytest: peek X Y HEX", its bytes in memory order
+ *   mouse DX DY        the mouse moved DX, DY counts (CON_INPUT's CONI_MOUSE, root's), no button
  *   quit               the end (DPY_BYE)
+ * -fb WxHxB (root, before the connection; DESIGN D43, docs/d43-rtg.md 10): a pretend graphics card of W x H pixels of
+ * B bytes (2: R5G6B5, 3: R8G8B8, 4: A8R8G8B8) in fast RAM, its record written into the boot's hardware table as
+ * zenixboot RTG writes one, so the display server it starts draws there (it allocates the card itself, so the card
+ * lives as long as it draws, and clears the record when it ends).
  * EV_EXPOSE is answered by drawing the window again (its fill and name); every event is kept for "events". */
 #include "libz.h"
 #include "../display.h"
+#include "../../kernel/hwinfo.h"
 typedef unsigned short u16;
+typedef unsigned char u8;
 
 #define NW 8
 static struct { char name[16]; int id, pen, w, h, hx, hy, hw, hh, pens; } ws[NW];
@@ -63,6 +71,47 @@ static void paint(int i, int x, int y, int w, int h)
     dpy_clip(ws[i].id, 0, 0, 0, 0);
     dpy_flush();
 }
+/* D43: the pretend card (-fb): the record written here, the card itself allocated by the display server it starts
+ * (so the card lives exactly as long as the server draws on it); its address read back from the record */
+static struct hwfb *fbrec;
+static void fb_end(void)
+{
+    if (fbrec && !fbrec->base)
+        fbrec->magic = 0;               /* never taken: the server clears a record it took when it ends */
+    fbrec = 0;
+}
+static int fb_make(const char *spec)
+{
+    char *e;
+    u32 w = (u32)strtol(spec, &e, 10), h = *e == 'x' ? (u32)strtol(e + 1, &e, 10) : 0,
+        b = *e == 'x' ? (u32)strtol(e + 1, &e, 10) : 0;
+    struct hwinfo *hw = (struct hwinfo *)HWINFO_ADDR;
+    if (*e || w < 320 || w > 2048 || h < 200 || h > 2048 || b < 2 || b > 4) {
+        dprintf(2, "dpytest: -fb %s: WxHxB, 320-2048 x 200-2048 x 2, 3 or 4 bytes\n", spec);
+        return -1;
+    }
+    if (sys_getuid() != 0 || hw->magic != HWINFO_MAGIC) {
+        dprintf(2, "dpytest: -fb: root's, on a machine whose boot left its hardware table\n");
+        return -1;
+    }
+    if (sys_port_find(DPY_PORTNAME) >= 0) {
+        dprintf(2, "dpytest: -fb: a display server runs already\n");
+        return -1;
+    }
+    fbrec = &hw->fb;
+    fbrec->magic = 0;
+    fbrec->base = 0;                    /* the server allocates the card and writes its address here */
+    fbrec->width = (u16)w;
+    fbrec->height = (u16)h;
+    fbrec->bpr = w * b;
+    fbrec->bpp = (u8)b;
+    fbrec->format = b == 2 ? 10 : b == 3 ? 2 : 6;  /* Picasso96's R5G6B5, R8G8B8, A8R8G8B8 */
+    fbrec->flags = HWFB_TEST;
+    fbrec->hvs = fbrec->dl_rtg = fbrec->dl_chip = 0;
+    fbrec->magic = HWFB_MAGIC;
+    return 0;
+}
+
 static void events(void)
 {
     struct dpyev e;
@@ -157,7 +206,26 @@ static void command(char *line)
             f.flags, f.name[0] ? f.name : "-", f.adv['A'], f.adv['D'], f.adv['W'], f.adv['.'], f.adv[' ']);
         return;
     }
-    if (!strcmp(w[0], "quit")) { dpy_close(); say("dpytest: quit\n"); sys_exit(0); }
+    if (!strcmp(w[0], "quit")) { dpy_close(); fb_end(); say("dpytest: quit\n"); sys_exit(0); }
+    if (!strcmp(w[0], "peek") && n >= 3) {
+        u32 x = (u32)atoi(w[1]), y = (u32)atoi(w[2]);
+        if (!fbrec || !fbrec->base || x >= fbrec->width || y >= fbrec->height) {
+            say("dpytest: peek: no card, or outside it\n");
+            return;
+        }
+        const u8 *p = (const u8 *)fbrec->base + y * fbrec->bpr + x * fbrec->bpp;
+        char hx[9];
+        for (u32 k = 0; k < fbrec->bpp; k++)
+            snprintf(hx + 2 * k, 3, "%02X", p[k]);
+        say("dpytest: peek %u %u %s\n", x, y, hx);
+        return;
+    }
+    if (!strcmp(w[0], "mouse") && n >= 3) {
+        u8 r[3] = { (u8)atoi(w[1]), (u8)atoi(w[2]), 0 };
+        say("dpytest: mouse %d\n", sys_coninput(0, CONI_MOUSE, r, 3));
+        sys_sleep(3);
+        return;
+    }
     if (i < 0) { say("dpytest: no window %s\n", n > 1 ? w[1] : ""); return; }
     int id = ws[i].id;
     if (!strcmp(w[0], "text") && n >= 5) {
@@ -237,15 +305,26 @@ static void command(char *line)
 int main(int argc, char **argv)
 {
     /* -f FILE: the commands from FILE, read as it grows (the shell stays free for the test's other commands) */
-    int in = 0, file = argc > 2 && !strcmp(argv[1], "-f");
-    if (file && (in = sys_open(argv[2], O_RDONLY)) < 0) {
-        dprintf(2, "dpytest: %s: %s\n", argv[2], zwhy("cannot open"));
+    int a = 1;
+    if (argc > a + 1 && !strcmp(argv[a], "-fb")) {
+        if (fb_make(argv[a + 1]) < 0)
+            return 2;
+        a += 2;
+    }
+    int in = 0, file = argc > a + 1 && !strcmp(argv[a], "-f");
+    if (file && (in = sys_open(argv[a + 1], O_RDONLY)) < 0) {
+        dprintf(2, "dpytest: %s: %s\n", argv[a + 1], zwhy("cannot open"));
+        fb_end();
         return 1;
     }
     int r = dpy_open("dpytest");
     say("dpytest: open %d screen %ux%u depth %u\n", r, dpy_w, dpy_h, dpy_depth);
-    if (r < 0)
+    if (fbrec)
+        say("dpytest: card %ux%ux%u at 0x%x\n", fbrec->width, fbrec->height, fbrec->bpp, fbrec->base);
+    if (r < 0) {
+        fb_end();
         return 1;
+    }
     char line[128];
     u32 len = 0;
     for (;;) {
@@ -258,7 +337,7 @@ int main(int argc, char **argv)
         if (file || (p[0].revents & POLLIN)) {
             char c[64];
             int k = sys_read(in, c, sizeof c);
-            if (k < 0 || (k == 0 && !file)) { dpy_close(); return 0; }
+            if (k < 0 || (k == 0 && !file)) { dpy_close(); fb_end(); return 0; }
             for (int j = 0; j < k; j++) {
                 if (c[j] == '\n' || c[j] == '\r') {
                     line[len] = 0;

@@ -38,7 +38,7 @@ _start:
     move.l  #KLOG_AREA_SIZE,%d0
     jsr     -204(%a6)               /* AllocAbs (never freed: the OS dies) */
 
-    /* the bootinfo + hwinfo table: 1 KB of cleared chip RAM (bootinfo 120 bytes, hwinfo 408 at +0x100), moved to
+    /* the bootinfo + hwinfo table: 1 KB of cleared chip RAM (bootinfo 120 bytes, hwinfo 440 at +0x100), moved to
      * 0x1000 by the copier */
     move.l  #0x400,%d0
     move.l  #0x10002,%d1            /* MEMF_CHIP | MEMF_CLEAR */

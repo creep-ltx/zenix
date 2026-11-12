@@ -66,7 +66,24 @@ struct hwinfo {
                                  * there was none (or a dry run); the driver and the boot log say it */
     unsigned int reserved[3];
     struct hwboard board[HW_MAXBOARDS];
+    /* (DESIGN D43, 2026-11-12) an RTG screen zenixboot RTG took over from AmigaOS's Picasso96 (docs/d43-rtg.md 3):
+     * written by zenixboot after stage0, never by the kernel; read by the display server */
+    struct hwfb {
+        unsigned int magic;         /* HWFB_MAGIC; anything else: no framebuffer */
+        unsigned int base;          /* the first pixel's address (the card's memory, in no memory list) */
+        unsigned short width, height;
+        unsigned int bpr;           /* bytes a row */
+        unsigned char format;       /* Picasso96's RGBFormat number (RGBFB_*) */
+        unsigned char bpp;          /* bytes a pixel: 2, 3 or 4 */
+        unsigned short flags;       /* HWFB_* */
+        unsigned int hvs;           /* the Pi's SCALER_DISPLIST1 as the 68k sees it, 0 none (HWFB_HVS) */
+        unsigned int dl_rtg, dl_chip;   /* its value showing the card's picture, and the chipset's (the C790's) */
+    } fb;                           /* 32 bytes */
 };
+#define HWFB_MAGIC      0x5A464231      /* "ZFB1" */
+#define HWFB_HVS        1               /* hvs, dl_rtg and dl_chip are valid: the display server flips the HDMI */
+#define HWFB_TEST       2               /* a pretend card in fast RAM (dpytest -fb, the tests) */
+#define HWFB_OFF        408             /* fb's offset in the table (HWINFO_FIRST: it follows the first size) */
 /* User-visible since DESIGN D19 step 7 (SYS_drv DRV_HWINFO gives drivers a copy, at most the caller's size): it grows
  * only at the end from here, new fields first from reserved[], then after board[]; its first size is frozen */
 #define HWINFO_FIRST 408

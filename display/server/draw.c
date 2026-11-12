@@ -4,6 +4,9 @@
  * GEV_RELEASE), text by the CPU a byte per plane as the console draws it. Rectangles and regions for the clipping.
  * Every rectangle is clipped to its bitmap here, so no order can write outside the screen or a kept copy. */
 #include "dpyd.h"
+#include "fb.h"
+
+#define FBR(r) (&(struct fbr){ (r).x0, (r).y0, (r).x1, (r).y1 })   /* displayd's rectangle as fb.c's */
 
 #define CUST(o) (*(volatile u16 *)(0xDFF000 + (o)))
 #define DMACONR CUST(0x002)
@@ -126,11 +129,11 @@ int bm_alloc(struct bm *b, int w, int h, int depth)
 {
     b->w = (u16)w;
     b->h = (u16)h;
-    b->bpr = (u16)((w + 15) / 16 * 2);
+    b->bpr = (u16)(depth == CHUNKY ? w : (w + 15) / 16 * 2);
     b->depth = (u16)depth;
-    b->stride = (u32)b->bpr * depth;
+    b->stride = depth == CHUNKY ? (u32)w : (u32)b->bpr * depth;
     u32 n = b->stride * (u32)h;
-    b->p = n ? sys_memalloc_chip(n) : 0;
+    b->p = !n ? 0 : depth == CHUNKY ? sys_memalloc(n) : sys_memalloc_chip(n);   /* D43: the CPU's, in fast RAM */
     if (!b->p)
         return -ENOMEM;
     memset(b->p, 0, n);
@@ -215,6 +218,10 @@ void bm_fill(struct bm *b, const struct rect *rr, int pen)
     if (b == &scr)
         dirty_add(&r);
     npix += (u32)(r.x1 - r.x0) * (u32)(r.y1 - r.y0);
+    if (b->depth == CHUNKY) {
+        fb_fill(&(struct fbmap){ b->p, b->stride }, FBR(r), pen);
+        return;
+    }
     for (int k = 0; k < b->depth; k++) {
         int on = pen >> k & 1;
         if (use_blit)
@@ -230,6 +237,10 @@ void bm_xor(struct bm *b, const struct rect *rr, int pen)
         return;
     if (b == &scr)
         dirty_add(&r);
+    if (b->depth == CHUNKY) {
+        fb_xor(&(struct fbmap){ b->p, b->stride }, FBR(r), pen);
+        return;
+    }
     for (int k = 0; k < b->depth; k++)
         if (pen >> k & 1) {
             if (use_blit)
@@ -364,7 +375,7 @@ static void blit_block1(struct bm *s, int sx, int sy, struct bm *d, const struct
 #ifndef DIW_V
 #define DIW_V 0x2C
 #endif
-#define NDIRTY 4
+#define NDIRTY 16                      /* 4 on the chipset (a wait for the beam each), 16 on a card (D43) */
 int shadowing;                          /* scr is the drawn screen; shown is the one on view */
 static struct bm shown;
 static struct rect dirty[NDIRTY];
@@ -380,7 +391,7 @@ static void unite(struct rect *a, const struct rect *b)
 /* r (clipped to the screen) joins the rectangle that grows least by it; an overlap always joins */
 static void dirty_add(const struct rect *r)
 {
-    if (!shadowing)
+    if (!shadowing && !rtg)
         return;
     int best = -1;
     u32 grow = ~0u;
@@ -392,7 +403,7 @@ static void dirty_add(const struct rect *r)
             g = 0;
         if (g < grow) { grow = g; best = i; }
     }
-    if (best >= 0 && (grow == 0 || ndirty == NDIRTY))
+    if (best >= 0 && (grow == 0 || ndirty == (rtg ? NDIRTY : 4)))
         unite(&dirty[best], r);
     else
         dirty[ndirty++] = *r;
@@ -482,11 +493,42 @@ static int show_torn(int b0, u32 us, int y0, int y1)
     }
     return bad || (early && later);
 }
+/* ---- D43: the screen on a graphics card (docs/d43-rtg.md 4): scr holds the pens, the card gets what changed ---- */
+int rtg;
+struct fbcard card;
+static int ptr_x = -100, ptr_y;         /* the pointer's picture's top left on the card */
+static const u16 *ptr_a, *ptr_b;
+static void dirty_clip(int x0, int y0, int x1, int y1)
+{
+    struct rect r = { (s16)x0, (s16)y0, (s16)x1, (s16)y1 };
+    if (clip_bm(&scr, &r))
+        dirty_add(&r);
+}
+void fb_pointer_image(const u16 *a, const u16 *b) { ptr_a = a; ptr_b = b; }
+void fb_pointer(int x, int y)
+{
+    dirty_clip(ptr_x, ptr_y, ptr_x + FB_PTRW, ptr_y + FB_PTRW);    /* where it was: the pens again */
+    ptr_x = x;
+    ptr_y = y;
+    dirty_clip(x, y, x + FB_PTRW, y + FB_PTRW);
+}
+void fb_all(void) { dirty_clip(0, 0, scr.w, scr.h); }
+void fb_show(void)
+{
+    if (!rtg || !ptr_a)
+        return;
+    for (int i = 0; i < ndirty; i++)
+        fb_put(&card, &(struct fbmap){ scr.p, scr.stride }, FBR(dirty[i]), ptr_x, ptr_y, ptr_a, ptr_b);
+    ndirty = 0;
+}
+
 /* the drawn screen from now on: a copy of the one on view (1 if so; 0 no chip RAM, or the blitter is not ours) */
 int shadow_begin(void)
 {
     if (shadowing)
         return 1;
+    if (rtg)                            /* D43: a card's screen is always drawn off the card and shown by fb_show */
+        return shadowing = 1;
     if (!use_blit || !scr.p)
         return 0;
     u8 *p = sys_memalloc_chip(scr.stride * scr.h);
@@ -508,6 +550,10 @@ void shadow_show(void)
 {
     if (!shadowing)
         return;
+    if (rtg) {
+        fb_show();
+        return;
+    }
     if (ndirty > 1) {                   /* one show for all when their box is not much more (a wait for the beam each) */
         struct rect u = dirty[0];
         u32 sum = area(&dirty[0]);
@@ -562,6 +608,10 @@ void shadow_end(void)
     if (!shadowing)
         return;
     shadow_show();
+    if (rtg) {
+        shadowing = 0;
+        return;
+    }
     blit_idle();
     u8 *p = scr.p;
     scr.p = shown.p;
@@ -585,6 +635,17 @@ void bm_copy(struct bm *s, int sx, int sy, struct bm *d, const struct rect *dr)
         ncopies++;
         dirty_add(&r);
     }
+    if (d->depth == CHUNKY) {           /* D43: from a chunky bitmap, or from a client's planar image */
+        if (s->depth == CHUNKY)
+            fb_copy(&(struct fbmap){ s->p, s->stride }, sx, sy, &(struct fbmap){ d->p, d->stride },
+                    FBR(r));
+        else
+            fb_planar(s->p, s->stride, s->bpr, s->depth, 0, sx, sy, &(struct fbmap){ d->p, d->stride },
+                      FBR(r));
+        return;
+    }
+    if (s->depth == CHUNKY)
+        return;                         /* (never asked: nothing planar is made from a card's screen) */
     int depth = s->depth < d->depth ? s->depth : d->depth;
     int same = s == d, after = same && (r.y0 > sy || (r.y0 == sy && r.x0 > sx));
     int sh = (r.x0 & 15) - (sx & 15);
@@ -622,6 +683,11 @@ void bm_image(const struct bm *img, const u8 *mask, int sx, int sy, struct bm *d
         return;
     if (d == &scr)
         dirty_add(&r);
+    if (d->depth == CHUNKY) {
+        fb_planar(img->p, img->stride, img->bpr, img->depth, mask, sx, sy, &(struct fbmap){ d->p, d->stride },
+                  FBR(r));
+        return;
+    }
     blit_idle();
     for (int y = r.y0; y < r.y1; y++) {
         int iy = sy + y - r.y0;
@@ -656,6 +722,11 @@ void bm_text(struct bm *b, int x, int y, const u8 *glyph, int fg, int bg, int at
         blit_idle();
     nglyphs++;
     npix += (u32)(c.x1 - c.x0) * (u32)(c.y1 - c.y0);
+    if (b->depth == CHUNKY) {
+        fb_glyph(&(struct fbmap){ b->p, b->stride }, x, y, glyph, fg, bg,
+                 (attr & TA_BOLD ? FBA_BOLD : 0) | (attr & TA_UNDER ? FBA_UNDER : 0), FBR(c));
+        return;
+    }
     int sh = x & 7, bx = x >> 3;
     if (!sh && c.x0 == x && c.x1 == x + 8) {    /* a whole cell on an 8-pixel column (a terminal's): a byte a plane */
         u8 m1[4], m2[4];
@@ -714,6 +785,10 @@ void bm_mask(struct bm *b, int bx0, int y0, int rows, const u8 *mask, int ms, in
     if (use_blit)
         blit_idle();
     npix += (u32)(c.x1 - c.x0) * (u32)(c.y1 - c.y0);
+    if (b->depth == CHUNKY) {
+        fb_mask(&(struct fbmap){ b->p, b->stride }, bx0, y0, mask, ms, FBR(c), fg, bg);
+        return;
+    }
     u8 m1[8], m2[8];
     for (int k = 0; k < b->depth && k < 8; k++) {
         int f = fg >> k & 1, bk = bg >> k & 1;

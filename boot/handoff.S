@@ -28,8 +28,8 @@
  *   +120 u32 update bundle address, +124 its size, +128 flags (DESIGN D15: zenixboot's; 0 from the bootblock, whose
  *        table is cleared memory)
  *
- * hwinfo (kernel/hwinfo.h, 408 bytes) follows at +0x100 (0x1100 for the kernel): the Pi hardware addresses, filled
- * in by stage0. Together they take 0x1000-0x1297; the kernel keeps 0-0x1FFF out of its memory pools.
+ * hwinfo (kernel/hwinfo.h, 440 bytes) follows at +0x100 (0x1100 for the kernel): the Pi hardware addresses, filled
+ * in by stage0, then (DESIGN D43) zenixboot RTG's screen record at +408. Together they take 0x1000-0x12B7; the kernel keeps 0-0x1FFF out of its memory pools.
  *
  * While AmigaOS is alive, 0x1000-0x13FF belongs to exec (its chip-RAM free list starts above it, so it can neither
  * be allocated nor assumed free): the table is built in a 1 KB block from AllocMem (a3) and copied to 0x1000 by

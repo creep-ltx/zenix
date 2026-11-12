@@ -4,7 +4,7 @@ NAME
     dpytest - test the display server
 
 SYNOPSIS
-    dpytest [-f FILE]
+    dpytest [-fb WxHxB] [-f FILE]
 
 DESCRIPTION
     A test client of displayd and libdisplay (DESIGN D38 steps 3-4), run
@@ -43,9 +43,23 @@ DESCRIPTION
                            (waitt), shows late for it; then counted
                            from 0 again
         events             the events received so far, a line each
+        peek X Y           (with -fb) the pretend card's pixel at X, Y,
+                           its bytes in hex as they lie in memory
+        mouse DX DY        the mouse moved DX, DY counts (CON_INPUT,
+                           root's), no button
         quit               the end
 
     EV_EXPOSE is answered by drawing the window again.
+
+    -fb WxHxB (root's; DESIGN D43, run by tools/rtg-test.sh): before it
+    connects, a pretend graphics card of W x H pixels of B bytes (2:
+    R5G6B5, 3: R8G8B8, 4: A8R8G8B8) is recorded in the boot's hardware
+    table, as zenixboot RTG records a real one, so the display server it
+    starts draws the desktop there. The server allocates the card in fast
+    RAM itself (it lives as long as the server draws on it) and clears
+    the record when it ends. Refused while a display server runs. With
+    memory protection on (zenixboot MMU=ON) dpytest may not write the
+    table and is ended.
 
 NOTES
     The times are those of the machine it runs on; in an emulator they are

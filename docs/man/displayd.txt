@@ -78,6 +78,20 @@ DESCRIPTION
     click raises and focuses a window, its title bar drags its outline and
     its close gadget asks the program to close it.
 
+    On a graphics card (DESIGN D43, docs/d43-rtg.md): when Zenix was
+    started with "zenixboot RTG" from an AmigaOS whose front screen was
+    an RTG screen of 16, 24 or 32 bits, the desktop is drawn on that
+    screen instead, at its size (1280 x 960 on the owner's PiStorm), in
+    the same 16 colours; it says "displayd: RTG screen WxH, format F,
+    ..." when it starts. Everything is drawn by the CPU into the pens of
+    every pixel in fast RAM (a byte a pixel: 1.2 MB at 1280 x 960) and
+    what changed is converted into the card's pixels once a pass; the
+    pointer is drawn by the server. Kept copies of covered windows are in
+    fast RAM then, 2 MB at most. The chipset's screen shows one colour.
+    On a PiStorm, whose one HDMI shows either picture, Amiga+F1..F10
+    switches it between the desktop and the text consoles. The screen's
+    mode cannot be changed there (DPY_MODE answers DPYM_RTG).
+
     It ends when its last client has gone, and the console is text again.
 
 OPTIONS
@@ -104,4 +118,9 @@ NOTES
     visible part is at most 24 rectangles (more: the change is painted
     whole and the programs asked to draw). A program's events go only
     into its own ring (the port it names must be its own). The protocol
-    is display/proto.h.
+    is display/proto.h. On a graphics card: only the screen AmigaOS left
+    (its size and format: no mode of its own, no palette screens); the
+    pointer moves in steps of the chipset's screen scaled to the card's
+    (4 pixels at 1280 x 960); the chips' drag is the chipset's only;
+    the card is never switched off or back except on a PiStorm; never
+    run on a real card yet (docs/d43-rtg.md section 11).

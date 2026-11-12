@@ -5,7 +5,7 @@ NAME
 
 SYNOPSIS
     zenixboot [KERNEL] [RAM=FILE] [CHECK] [PREVIOUS] [UNSIGNED_OK]
-              [DCACHE=OFF|WT|CB] [MMU=ON|OFF]
+              [DCACHE=OFF|WT|CB] [MMU=ON|OFF] [RTG]
 
 DESCRIPTION
     zenixboot is an AmigaOS program, not a Zenix one. It boots Zenix on an
@@ -197,6 +197,19 @@ ARGUMENTS
                 refused, but the manuals call the instructions it tries
                 undefined there. The left mouse button held at boot turns
                 it off too
+    RTG         the desktop on a graphics card (DESIGN D43): the front
+                screen, if it is a Picasso96 screen of 16, 24 or 32 bits
+                (the Workbench on an RTG card or the PiStorm's VideoCore),
+                is handed to Zenix: its memory, size and pixel format go
+                into the boot's hardware table, its pointer is blanked,
+                and the desktop (displayd(8)) is drawn there. On a Pi it
+                also notes the HVS's display list for the card and for
+                the chipset (after AmigaOS shows no view), so Zenix
+                switches the one HDMI with the consoles; on another card
+                the card keeps its picture. No Picasso96, another kind of
+                front screen, or a palette (CLUT) screen: it says why and
+                Zenix starts as without RTG. With CHECK it only says what
+                it found
 
 EXAMPLES
     SYS:zenixboot
@@ -209,6 +222,9 @@ EXAMPLES
         A line for S:BootMenu.conf (bootmenu(8)).
     Zenix (protected) = run SYS:zenixboot MMU=ON
         Memory protection, on a CPU with an MMU.
+    zenixboot CHECK RTG
+        From the Workbench's Shell: what the RTG screen is, and whether
+        the desktop could use it, without leaving AmigaOS.
 
 EXIT STATUS
     0 after CHECK (or when started from Workbench, which it does not
@@ -255,7 +271,10 @@ NOTES
     tools/sysupdate-test.sh); not yet
     run on a real Amiga. Not verified:
     whether an RTG card gives the monitor back to the chipset when no
-    screen is shown.
+    screen is shown. RTG: only its refusals are tested (no Picasso96 in
+    the tests: the errors setup); the hand-over itself was read from
+    Picasso96's and VideoCore.card's interfaces, never run
+    (docs/d43-rtg.md section 11 is its first trial on the PiStorm).
 
 SEE ALSO
     zup(8), bootmenu(8), docs/how-it-works.md, docs/pi-first-boot.md,

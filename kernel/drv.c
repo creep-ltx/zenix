@@ -23,7 +23,8 @@
 
 _Static_assert(sizeof(struct udrvattach) == UDRVATTACH_FIRST, "udrvattach's first size is frozen");
 _Static_assert(sizeof(struct udrvxfer) == UDRVXFER_FIRST, "udrvxfer's first size is frozen");
-_Static_assert(sizeof(struct hwinfo) == HWINFO_FIRST, "the hardware table's first size is frozen");
+_Static_assert(__builtin_offsetof(struct hwinfo, fb) == HWINFO_FIRST && HWFB_OFF == HWINFO_FIRST &&
+               sizeof(struct hwinfo) == HWINFO_FIRST + 32, "the hardware table's first size is frozen; it grows at its end");
 
 #define NCLAIM 4
 #define DRV_OWNER(i) (0x80000100u + (u32)(i))  /* a DMA region's owner: its claim, never a pid (as SEG_OWNER) */
@@ -277,8 +278,8 @@ long drv_sys(u32 opw, u32 a, u32 b)
             return -ENODEV;
         if (n < HWINFO_FIRST)
             return -EINVAL;
-        if (n > sizeof *h)
-            n = sizeof *h;
+        if (n > HWINFO_FIRST)
+            n = HWINFO_FIRST;           /* the drivers' part (D43's fb after it is the display server's) */
         if (!user_ok_wr(current, a, n))
             return -EFAULT;
         memcpy((void *)a, h, n);

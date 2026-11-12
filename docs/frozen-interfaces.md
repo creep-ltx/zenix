@@ -248,6 +248,12 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   4: on; `tools/kopts.py`); the boot line's start `mmu: memory protection on:` and the fault line's
   `memory protection:` (programs and tests read them: `crash write`, `tools/mmu-test.sh`); exit status 139 for a
   protection fault, as for every fault. No system call, message, struct or file format changes.
+- **D43 (RTG, branch `rtg`, 2026-11-12):** the hardware table grows at its end: `struct hwfb` (32 bytes) at offset 408
+  (`HWFB_OFF`, after `board[]`): magic `HWFB_MAGIC` "ZFB1", base, width, height (u16), bytes a row, Picasso96's
+  `RGBFormat` number (u8), bytes a pixel (u8), flags (u16: `HWFB_HVS` 1, `HWFB_TEST` 2), the Pi's register address and
+  its two values (`hvs`, `dl_rtg`, `dl_chip`); written by zenixboot after stage0, never by the kernel; `DRV_HWINFO` still
+  copies at most the first 408 bytes. zenixboot's switch `RTG`. The display protocol's `DPYM_RTG` 2 (`DPY_MODE`'s
+  answer on a card's screen, which no request changes). No system call, message or error number changes.
 - **D22 (zpkg, 2026-10-28):** `UPD_F_TRIAL` 2 in the bootinfo and `uupdate` flags; the manifest line `takes OTHER`;
   zup's journal line `live 1 NAME` and the live-only operations `S`, `M`, `X`; `/var/cache/zpkg/live/` and
   `/var/lib/zpkg/lock` (a pid and a newline, linked whole from `lock.PID`); zpkg's `/etc/zpkg.conf` (the words

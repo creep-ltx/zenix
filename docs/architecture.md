@@ -221,6 +221,13 @@ test against the chip model); what it found goes into `genet_stop` (the next res
 `kmain` logs `pi: genet: ...` when the DMA was running. A caller that may still go back to AmigaOS (`zenixboot
 CHECK`) puts `HWINFO_DRYRUN` in the magic word first, and stage0 then writes no hardware (DESIGN D19 14, step 9).
 
+After `board[]` (offset 408, `HWFB_OFF`) comes **`struct hwfb`** (DESIGN D43): an RTG screen `zenixboot RTG` took over
+from AmigaOS's Picasso96 (the front screen's memory, size, bytes a row, `RGBFormat`, bytes a pixel), and on a Pi the
+HVS's display-list register (`SCALER_DISPLIST1`, the peripheral base + 0x400024) with its value showing the card's
+picture and the one AmigaOS showed after `LoadView(NULL)` (the chipset's, through the C790's capture on the owner's
+machine). zenixboot writes it after stage0 has cleared the table; stage0 and the kernel never write it, and
+`DRV_HWINFO` gives drivers only the first 408 bytes. The display server reads it (below).
+
 ### Random numbers (`kernel/random.c`, DESIGN D19 9.3)
 
 The kernel's entropy pool, as Linux since 5.17: samples are accumulated with BLAKE2s (RFC 7693) and output comes from
@@ -1547,6 +1554,20 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   about 2 KB of code and 3 KB of data): the connection (its own port `dpy.PID` with a 1 KB ring), windows, a 2 KB queue of orders sent as one
   message, `dpy_next` for events (or the program's own `poll` on `dpy_port()`). Verified in FS-UAE by
   `tools/dpy-test.sh` (`dpytest`, docs/man/dpytest.txt; screenshots compared pixel by pixel).
+  **On a graphics card** (DESIGN D43, `display/server/fb.c`): when the hardware table holds a `struct hwfb` (section 3,
+  "Pi hardware table") that passes its checks (a 16-, 24- or 32-bit Picasso96 format, 320 x 200 to 4096 x 4096, the
+  row's bytes), read after the grab, the screen is the card's: `scr` is a bitmap of one byte a pixel (the pen, depth
+  `CHUNKY`) in fast RAM, every drawing order goes to it through the CPU (fill, invert, copy, glyphs, the desktop font's
+  masks, the clients' planar images), its changed rectangles (`dirty_add`, up to 16) are converted at the end of each
+  pass of the main loop into the card's pixels through a table of the 16 pens (`fb_put`; the card is only written,
+  never read), with the pointer (sprite 0's arrow) drawn over them by the server at the kernel's pointer scaled from the
+  chipset's screen to the card's. Kept copies are chunky in fast RAM, 2 MB at most; a whole window's drag is drawn off
+  the card by nature (`shadow_begin` costs nothing); the chips' drag is the chipset's only. The chipset's Copper list
+  shows colour 0 alone (no planes, the sprite blank). Clients see the card's size and depth 4; `DPY_MODE` answers
+  `DPYM_RTG` 2 and changes nothing. With `HWFB_HVS` the server writes `dl_chip` into the HVS's register on `GEV_RELEASE`
+  and at its end, `dl_rtg` on `GEV_ACQUIRE` (the Pi's HDMI follows the consoles). Verified in FS-UAE by
+  `tools/rtg-test.sh` (a pretend card, `dpytest -fb`, its pixels read back) and on the PC by `tools/rtg-host-test.sh`;
+  never on a real card (docs/d43-rtg.md 11).
 - **The window manager and the terminal** (DESIGN D38 steps 5-6): `zdesk` (`display/zdesk/`, docs/man/zdesk.txt)
   is an ordinary program, the display server's window manager (`DPY_WM_HELLO`): it gives the server its theme's
   frame style and palette, places and shows new windows, answers clicks on frames (drags run in the server: an

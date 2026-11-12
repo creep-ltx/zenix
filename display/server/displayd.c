@@ -12,6 +12,8 @@
  * reach a client only through SYS_post, which the kernel checks against the client's memory at every write. */
 #include "dpyd.h"
 #include "../screenfile.h"
+#include "fb.h"
+#include "../../kernel/hwinfo.h"
 
 int aga;
 int wm_cl = -1;
@@ -206,6 +208,13 @@ static void default_style(void)
 static int pf2_pen = -1;                /* a lifted window's stand-in for pen 0 (D38 "Dragging with the chips") */
 static void set_palette(void)
 {
+    if (rtg) {                          /* D43: the card's pens, all shown again; the chipset's colour 0 */
+        static const u16 ptrcol[3] = { 0x000, 0xFFF, 0x888 };  /* the pointer's: as sprite 0's colours 17-19 */
+        copl[0][cop_col + 1] = style.palette[0] & 0xFFF;
+        fb_pens(&card, style.palette, 16, ptrcol);
+        fb_all();
+        return;
+    }
     for (int f = 0; f < 2; f++) {
         for (int i = 0; i < (1 << scr.depth); i++)
             copl[f][cop_col + 2 * i + 1] = style.palette[i] & 0xFFF;
@@ -385,6 +394,66 @@ static int mode_alloc(struct bm *b, int want, int depth)
     return 0;
 }
 
+/* ---- D43: a graphics card's screen (docs/d43-rtg.md 3-5): the one zenixboot RTG took over from AmigaOS ---- */
+static struct hwfb *test_card;          /* a test's pretend card's record: cleared when we end (the card is ours) */
+static u32 hvs_reg, hvs_on, hvs_off;    /* the Pi's SCALER_DISPLIST1 and its two values (HWFB_HVS), 0: none */
+static void hvs_show(int on)            /* the HDMI shows the card's picture (1) or the chipset's (0) */
+{
+    if (hvs_reg)
+        *(volatile u32 *)hvs_reg = __builtin_bswap32(on ? hvs_on : hvs_off);  /* the Pi's registers: little-endian */
+}
+/* the kernel's pointer (the chipset's screen) onto the card's */
+static void fb_scale(int *x, int *y)
+{
+    *x = (int)((u32)*x * card.w / (u32)base_w);
+    *y = (int)((u32)*y * card.h / (u32)base_h);
+}
+/* the record in the boot's hardware table (read as a system process, after the grab: D41 7), checked; 1: the screen
+ * is the card's from now on (scr the pens' bitmap in fast RAM) */
+static int card_take(void)
+{
+    const struct hwinfo *h = (const struct hwinfo *)HWINFO_ADDR;
+    if (h->magic != HWINFO_MAGIC || h->fb.magic != HWFB_MAGIC)
+        return 0;
+    struct hwfb *f = (struct hwfb *)&h->fb;
+    if ((f->flags & HWFB_TEST) && !f->base && f->bpp && f->width <= 4096 && f->height <= 4096 &&
+        (f->base = (u32)sys_memalloc(f->bpr * f->height)) != 0) {
+        memset((void *)f->base, 0x5A, f->bpr * f->height);     /* a test's pretend card (dpytest -fb): ours, so it
+                                         * lives exactly as long as we draw on it; a pixel never drawn shows */
+        test_card = f;
+    }
+    if (!fb_format_ok(f->format, f->bpp) || f->width < 320 || f->height < 200 || f->width > 4096 ||
+        f->height > 4096 || f->bpr < (u32)f->width * f->bpp || f->bpr > 65536 || !f->base ||
+        f->base + f->bpr * f->height < f->base) {
+        dprintf(2, "displayd: the boot's RTG screen (%ux%u, format %u, %u bytes a pixel, %u a row) is not one I can "
+                "draw on: the chipset's screen\n", f->width, f->height, f->format, f->bpp, f->bpr);
+        return 0;
+    }
+    if (bm_alloc(&scr, f->width, f->height, CHUNKY) < 0) {
+        dprintf(2, "displayd: no fast RAM for the RTG screen's pens (%u KB): the chipset's screen\n",
+                ((u32)f->width * f->height) >> 10);
+        return 0;
+    }
+    scr.kept = 0;                       /* the screen is not a kept copy */
+    card.base = (u8 *)f->base;
+    card.bpr = f->bpr;
+    card.w = f->width;
+    card.h = f->height;
+    card.format = f->format;
+    card.bpp = f->bpp;
+    if ((f->flags & HWFB_HVS) && f->hvs) {
+        hvs_reg = f->hvs;
+        hvs_on = f->dl_rtg;
+        hvs_off = f->dl_chip;
+    }
+    rtg = 1;
+    chip_budget = 2u << 20;             /* the kept copies are fast RAM now, a byte a pixel (D43 4) */
+    dprintf(1, "displayd: RTG screen %ux%u, format %u, %u bytes a pixel, at 0x%x, %u bytes a row%s%s\n", card.w,
+            card.h, card.format, card.bpp, (u32)card.base, card.bpr, hvs_reg ? ", the Pi's HDMI switched" : "",
+            f->flags & HWFB_TEST ? " (a test's pretend card)" : "");
+    return 1;
+}
+
 static int screen_up(int con)
 {
     char dev[12] = "/dev/tty";
@@ -433,6 +502,36 @@ static int screen_up(int con)
     base_w = g.width;
     base_h = g.height;
     frame_l = base_h > 200 ? 312 : 262;
+    if (card_take()) {                  /* D43: the desktop on the card; the chipset shows colour 0, the sprite blank */
+        static u16 pa[16], pb[16];
+        for (int y = 0; y < 16; y++) {
+            pa[y] = spr[2 + 2 * y];
+            pb[y] = spr[3 + 2 * y];
+            spr[2 + 2 * y] = spr[3 + 2 * y] = 0;
+        }
+        fb_pointer_image(pa, pb);
+        mode_file();                    /* (its font line: the mode line is the chipset's) */
+        chip_used = 0;
+        grabbed = 1;
+        font_init(topaz);
+        if (font_name[0])
+            font_ui_load(font_name, font_size);
+        u16 *c = copl[0];
+        *c++ = 0x100; *c++ = 0x0200;    /* BPLCON0: no planes, colour 0 alone */
+        cop_col = (int)(c - copl[0]);
+        *c++ = 0x180; *c++ = 0;
+        for (int i = 0; i < 8; i++) {
+            u32 a = i ? (u32)nul : (u32)spr;
+            *c++ = (u16)(0x120 + 4 * i); *c++ = (u16)(a >> 16);
+            *c++ = (u16)(0x122 + 4 * i); *c++ = (u16)a;
+        }
+        *c++ = 0xFFFF; *c++ = 0xFFFE;
+        set_palette();
+        ptx = card.w / 2;
+        pty = card.h / 2;
+        fb_pointer(ptx, pty);
+        return 0;
+    }
     lace = mode_file() == DPYM_LACE;
     if (lace && mode_alloc(&scr, 1, depth) < 0)
         lace = 0;
@@ -697,9 +796,14 @@ static void pgrab_event(u16 old, u16 now, u16 qual, int moved)
 static void pointer(const struct ugevent *e)
 {
     u16 old = btns, now = e->qual & (GQ_LBUTTON | GQ_RBUTTON | GQ_MBUTTON);
-    int moved = e->x != ptx || e->y << lace != pty;
-    ptx = e->x;
-    pty = e->y << lace;                 /* the kernel's pointer is in frame lines: two lines a frame line in interlace */
+    int x = e->x, y = e->y << lace;     /* the kernel's pointer is in frame lines: two lines a frame line in interlace */
+    if (rtg)
+        fb_scale(&x, &y);
+    int moved = x != ptx || y != pty;
+    ptx = x;
+    pty = y;
+    if (moved && rtg)
+        fb_pointer(ptx, pty);
     btns = now;
     if (pgrab_w >= 0 && (wins[pgrab_w].id != pgrab_id || !(wins[pgrab_w].state & WST_SHOWN)))
         pgrab_w = -1;
@@ -749,12 +853,18 @@ static void kernel_events(void)
                 shadow_end();           /* (a drag goes on drawing on the screen itself) */
                 blit_idle();
                 use_blit = 0;
+                hvs_show(0);            /* D43: the Pi's HDMI shows the chipset's picture (the text console) */
                 sys_congack(gfd, (u16)e->x);
                 break;
             case GEV_ACQUIRE:           /* every key counts as up; the screen was never touched */
-                use_blit = 1;
+                use_blit = !rtg;        /* (the blitter reaches no card) */
                 ptx = e->x;
                 pty = e->y << lace;
+                if (rtg) {
+                    fb_scale(&ptx, &pty);
+                    fb_pointer(ptx, pty);
+                }
+                hvs_show(1);
                 break;
             case GEV_KEY:
                 key(e);
@@ -870,7 +980,7 @@ static int hello(struct umsg *m)
     }
     h->width = scr.w;
     h->height = scr.h;
-    h->depth = scr.depth;
+    h->depth = rtg ? 4 : scr.depth;    /* D43: a card's screen has the same 16 pens */
     h->id = (u16)(cl + 1);
     return DPY_VERSION;
 }
@@ -1033,8 +1143,8 @@ static int req(struct umsg *m)
         if (n && peer(m, PEER_WR, a[0], n * 2) < 0)
             return -EFAULT;
         for (u32 i = 0; i < n; i++)
-            ((u16 *)a[0])[i] = i < (1u << scr.depth) ? style.palette[i] : 0;
-        return scr.depth;
+            ((u16 *)a[0])[i] = rtg || i < (1u << scr.depth) ? style.palette[i] : 0;
+        return rtg ? 4 : scr.depth;
     }
     case DPY_BYE:
         drop(cl);
@@ -1070,6 +1180,8 @@ static int req(struct umsg *m)
         return 0;
     }
     case DPY_MODE:                      /* any client of the desktop's session (a preferences program) */
+        if (rtg)                        /* D43: a card's screen has the mode AmigaOS gave it; nothing changes */
+            return a[0] == DPYM_ASK || a[0] <= DPYM_RTG ? DPYM_RTG : -EINVAL;
         if (a[0] == DPYM_ASK)
             return lace;
         if (a[0] > DPYM_LACE)
@@ -1288,12 +1400,17 @@ int main(int argc, char **argv)
             if (cls[i].used && cls[i].dead)
                 drop(i);
         }
+        if (rtg && !(shadowing && expose_wait))
+            fb_show();                  /* D43: what changed this pass onto the card */
         if (has_clients())
             had = 1;
         else if (had && !persist)
             break;
     }
     blit_idle();
+    hvs_show(0);
+    if (test_card)
+        test_card->magic = 0;           /* its memory goes with us: no later server may take it */
     if (gfd >= 0)
         sys_close(gfd);                 /* the console is text again */
     return 0;
