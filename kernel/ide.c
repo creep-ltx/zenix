@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
 #include "hw.h"
+#include "diskproto.h"
 
 /* IDE on the Gayle (A600/A1200) and on the A4000: a 16-bit data port, byte-wide task-file registers at
  * base + 2 + (reg << 2) (reg: 1 error/feature, 2 nsect, 3-5 lba, 6 dev, 7 status/cmd). Same layout on both machines;
@@ -269,6 +270,67 @@ static int gayle_id(void)
     return id;
 }
 
+/* IDENTIFY's model name (words 27-46: big-endian byte pairs), its trailing blanks cut */
+static void id_model(char *model)
+{
+    for (int i = 0; i < 20; i++) {
+        model[i * 2] = (char)(id[27 + i] >> 8);
+        model[i * 2 + 1] = (char)(id[27 + i] & 0xFF);
+    }
+    model[40] = 0;
+    for (int i = 39; i >= 0 && (model[i] == ' ' || model[i] == 0); i--)
+        model[i] = 0;
+}
+
+/* DESIGN D44 (docs/d44-cd.md): an ATAPI CD drive on the Gayle port - the slave beside an ATA drive, or the master
+ * when no ATA drive answered. cd_sel is its device register value (0xF0 slave, 0xE0 master), 0: none. */
+static u8 cd_sel;
+
+/* Is a CD drive at SEL? IDENTIFY DEVICE makes a packet device abort it and show its signature (14h EBh in the cylinder
+ * registers); a status that is neither busy nor answering 50 ms after the command is no drive (an absent slave reads 0,
+ * or the master's status); busy is given 10 s (a drive spinning up). An ATA drive (DRQ) is left as it is: only the master
+ * is ever used for ATA. Then IDENTIFY PACKET DEVICE: a CD-ROM (type 5) taking 12-byte packets. The master is selected again at the end. */
+static void cd_probe(u8 sel)
+{
+    u8 s;
+    IDE_REG(6) = sel;
+    ide_settle();
+    u32 t0 = hr_time();
+    while (((s = IDE_REG(7)) & ST_BSY) || s == 0xFF)                    /* busy (from power-on): up to 10 s */
+        if (s == 0xFF || (s & ST_DRDY) || (u32)(hr_time() - t0) > ms_ticks(T_START_MS))
+            goto out;                                                   /* no bus, a floating one, or never ready */
+    IDE_REG(7) = 0xEC;
+    ide_settle();
+    t0 = hr_time();
+    while (((s = IDE_REG(7)) & ST_BSY) || !(s & (ST_ERR | ST_DRQ)))
+        if ((u32)(hr_time() - t0) > ms_ticks(s & ST_BSY ? T_START_MS : 50))
+            goto out;
+    if (s & ST_DRQ) {                               /* an ATA drive (or a CF card answering for the slave): its data
+                                                     * read out, so no command is left half done */
+        for (int i = 0; i < 256 && (IDE_REG(7) & ST_DRQ); i++)
+            (void)IDE_DATA;
+        goto out;
+    }
+    if (IDE_REG(4) != 0x14 || IDE_REG(5) != 0xEB)
+        goto out;
+    IDE_REG(7) = 0xA1;
+    ide_settle();
+    if (ide_wait(ST_BSY | ST_DRQ, ST_DRQ, T_BUSY_MS, "IDENTIFY data"))
+        goto out;
+    for (int i = 0; i < 256; i++)
+        id[i] = swab(IDE_DATA);
+    ide_settle();
+    char model[41];
+    id_model(model);
+    if ((id[0] & 0xDF03) == 0x8500)                 /* ATAPI, a CD-ROM, 12-byte packets */
+        cd_sel = sel;
+    kprintf("ide: ATAPI %s %s: %s\n", sel == 0xF0 ? "slave" : "master", cd_sel ? "CD drive" : "not a CD drive: not used", model);
+out:
+    IDE_REG(6) = 0xE0;
+    ide_settle();
+    ide_ack();
+}
+
 static u32 stray_irqs;
 static int gayle_found;                 /* the Gayle ID read $D: an A600/A1200, which has the PC Card slot (D36) */
 int ide_gayle(void) { return gayle_found; }
@@ -314,7 +376,10 @@ int ide_init(void)
         port_name = "A1200/A600";
     }
     if (ide_identify()) {
-        kprintf("ide: no drive found on the %s port\n", port_name);
+        if (gayle_found)
+            cd_probe(0xE0);                         /* D44: a CD drive alone on the port */
+        if (!cd_sel)
+            kprintf("ide: no drive found on the %s port\n", port_name);
         return -1;
     }
     IDE_CTL = 0x02;                                 /* nIEN on the port that has the drive (polling only) */
@@ -330,13 +395,7 @@ int ide_init(void)
     ide_ack();
 
     char model[41];
-    for (int i = 0; i < 20; i++) {  /* ATA strings: big-endian byte pairs */
-        model[i * 2] = (char)(id[27 + i] >> 8);
-        model[i * 2 + 1] = (char)(id[27 + i] & 0xFF);
-    }
-    model[40] = 0;
-    for (int i = 39; i >= 0 && (model[i] == ' ' || model[i] == 0); i--)
-        model[i] = 0;
+    id_model(model);
     /* a backstop, not a proof: the data must be an ATA drive's - word 0 bit 15 clear (or 0x848A, CompactFlash's
      * signature), and the checksum right when word 255 has its signature A5 (ATA-5 on; FS-UAE gives none) */
     if (((id[0] & 0x8000) && id[0] != 0x848A) || ((id[255] & 0xFF) == 0xA5 && sum)) {
@@ -366,6 +425,8 @@ int ide_init(void)
     }
     kprintf("ide: %s port %p: %s - %u sectors (%uMB), %s reads\n", port_name, ide_base, model, nsectors,
             nsectors / 2048, ide_long ? "long" : "word");
+    if (gayle_found)
+        cd_probe(0xF0);                             /* D44: a CD drive as the slave */
     return 0;
 }
 
@@ -450,3 +511,108 @@ int ide_flush(void)
 {
     return ide_cmd(0, 0, 0, 0xE7);
 }
+
+#pragma GCC push_options
+#pragma GCC optimize("Os")
+/* DESIGN D44: one packet command to the CD drive (SYS_atapi; struct uatapi in diskproto.h), data from the drive only.
+ * The packet is sent with a byte count limit of 0xFFFE. Then the phases are told by the interrupt reason register: data
+ * in (DRQ, IO 1, CoD 0) moves the count the drive put in the cylinder registers, kept from byte SKIP for LEN bytes (whole
+ * sectors inside that window with the long moves, as ide_cmd), the rest read and dropped; the status phase (no DRQ, IO 1,
+ * CoD 1) ends the command - or 50 ms in a row with neither busy nor DRQ, for a drive that does not set the reason. A
+ * drive that stops answering or sends nonsense gets DEVICE RESET (08h) before the error goes back. Anything else
+ * is waited past: FS-UAE shows neither busy nor DRQ for a moment after the packet before it has taken it. Levels 1-2
+ * masked only around 512 bytes at a time; every wait timed. A CHECK CONDITION (ERR) is the caller's to read (the error
+ * register in q->err), not said on the log. The master selected again at the end. */
+int ide_atapi(struct uatapi *q)
+{
+    int rc = -EIO;
+    u32 pos = 0, t0, t, idle = 0;
+    u16 sv;
+    u8 s;
+    q->err = 0;
+    if (!cd_sel)
+        return -ENODEV;
+    if ((q->len | q->skip) & 1)                     /* (the buffer may be odd: a 68020 moves words anywhere) */
+        return -EINVAL;
+    IDE_REG(6) = cd_sel;                            /* (every command before this one has ended: polling) */
+    ide_settle();
+    if (ide_wait(ST_BSY | ST_DRQ | ST_ERR, 0, T_BUSY_MS, "the drive before a command"))
+        goto reset;
+    sv = irq_save2();
+    IDE_REG(1) = 0;                                 /* PIO, no overlap */
+    IDE_REG(4) = 0xFE;
+    IDE_REG(5) = 0xFF;
+    IDE_REG(7) = 0xA0;                              /* PACKET */
+    ide_settle();
+    irq_restore(sv);
+    if (ide_wait(ST_BSY | ST_DRQ, ST_DRQ, T_BUSY_MS, "the drive to take data"))
+        goto err;
+    for (int i = 0; i < 6; i++)
+        IDE_DATA = ((const u16 *)q->cdb)[i];
+    ide_settle();
+    for (t0 = hr_time();;) {
+        s = IDE_REG(7);
+        u8 ir = IDE_REG(2) & 3;
+        t = hr_time() - t0;
+        if (!(s & ST_BSY)) {
+            if (s & ST_ERR)
+                goto err;
+            if (!(s & ST_DRQ)) {
+                if (!idle)
+                    idle = hr_time() | 1;
+                if (ir == 3 || (u32)(hr_time() - idle) > ms_ticks(50))
+                    break;
+            } else
+                idle = 0;
+            if ((s & ST_DRQ) && ir == 2) {
+                u32 n = ((u32)IDE_REG(4) | (u32)IDE_REG(5) << 8) + 1 >> 1;      /* words in this phase */
+                if (!n || pos > 0x4000000)          /* nothing, or more than any request: a drive gone wrong */
+                    goto reset;
+                while (n) {
+                    u32 k = n < 256 ? n : 256;
+                    u16 *p = (u16 *)((u8 *)q->buf + pos - q->skip);
+                    sv = irq_save2();
+                    if (k == 256 && pos >= q->skip && pos - q->skip + 512 <= q->len)
+                        sec_xfer(p, 0);
+                    else
+                        for (u32 i = 0; i < k; i++, p++) {
+                            u16 w = IDE_DATA;
+                            if (pos + 2 * i >= q->skip && pos + 2 * i - q->skip < q->len)
+                                *p = w;
+                        }
+                    irq_restore(sv);
+                    n -= k;
+                    pos += 2 * k;
+                }
+                ide_settle();
+                t0 = hr_time();
+                idle = 0;
+                continue;
+            }
+        }
+        if (s & ST_BSY)
+            idle = 0;
+        if (t > ms_ticks(T_BUSY_MS)) {
+            kprintf("ide: no answer while waiting for %s (status %x after %u ms)\n", "data from the drive", s, T_BUSY_MS);
+            goto reset;
+        }
+    }
+    rc = (int)pos;
+    goto out;
+err:
+    q->err = IDE_REG(1);
+    goto out;
+reset:                                              /* a drive that stopped answering, or went wrong: DEVICE RESET, so the
+                                                     * next command does not wait out the same state (it then reports a
+                                                     * UNIT ATTENTION: diskd counts the disc as changed) */
+    IDE_REG(7) = 0x08;
+    ide_settle();
+out:
+    sv = irq_save2();
+    IDE_REG(6) = 0xE0;
+    ide_settle();
+    ide_ack();
+    irq_restore(sv);
+    return rc;
+}
+#pragma GCC pop_options

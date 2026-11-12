@@ -12,7 +12,8 @@ DESCRIPTION
     output as GNU dd does (dd ... > file keeps it off the file). SOURCE and
     DEST are files, or devices of the disk server: a name without a slash that
     the disk server knows (df0 the first floppy drive, ide0 the whole disk,
-    ide0p1 its first partition, ram0 the boot RAM disk; see fdisk list).
+    ide0p1 its first partition, ram0 the boot RAM disk, cd0 the CD drive,
+    read only; see fdisk list).
     On a device the block size must be a multiple of 512, and a device that
     is mounted cannot be opened. count limits the blocks copied, skip starts
     that many blocks into SOURCE, seek that many blocks into DEST (DEST is

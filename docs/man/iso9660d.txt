@@ -1,0 +1,37 @@
+ISO9660D(8)		Zenix manual
+
+NAME
+    iso9660d - the read-only server of an ISO 9660 mount (a CD-ROM)
+
+SYNOPSIS
+    /sbin/iso9660d device [-id start,size] [-o options]
+
+DESCRIPTION
+    Not a command: mount -t iso9660 (or mount of a device holding an ISO
+    9660 volume, such as the CD drive cd0) registers it as the service
+    fs.DEVICE and the kernel starts it at the mount's first use (DESIGN
+    D44, docs/d44-cd.md). It reads ISO 9660 volumes: Rock Ridge's Unix
+    names, modes and symbolic links when the disc has them, else Joliet's
+    long names, else the plain ISO names. It only reads: it has no code
+    that writes, and -o rw is refused. Everything a user sets is mount's:
+    see mount(8) for the options and the limits. It comes with the
+    disktools package.
+
+    Its lines in dmesg start with iso9660d: a volume it refuses and why (no
+    disc, not ISO 9660, logical blocks other than 2048 bytes, over 4 GB, a
+    damaged root) and a bad option.
+
+    A damaged disc answers errors, never a crash: a record or an extent
+    that does not fit the volume answers an I/O error where it is met; a
+    listing goes on past a damaged directory block and answers an I/O error
+    at its end. After the disc was changed or taken out every request
+    answers "stale file handle".
+
+NOTES
+    Files in several extents or interleaved are listed but answer "not
+    supported". Only the first session of a multi-session disc is read.
+    Rock Ridge's owners and times are not read. A server restarted after a
+    crash reads on with the same inode numbers: nothing goes stale.
+
+SEE ALSO
+    mount(8), umount(8), diskd(8), pfs3d(8)

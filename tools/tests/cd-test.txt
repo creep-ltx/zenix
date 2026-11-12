@@ -1,0 +1,63 @@
+wait zenix:/# 90
+sleep 1
+send dmesg | grep -i atapi\r
+sleep 2
+send mkdir /mnt\r
+sleep 2
+send dd if=cd0 of=/tmp/odd.bin bs=512 skip=65 count=3 ; sha256sum /tmp/odd.bin\r
+sleep 4
+send dd if=cd0 of=/tmp/whole.iso bs=65536 ; sha256sum /tmp/whole.iso ; rm /tmp/whole.iso /tmp/odd.bin\r
+sleep 40
+send mount cd0 /mnt\r
+sleep 5
+send mount\r
+sleep 3
+send ls -l /mnt\r
+sleep 4
+send cat /mnt/hello.txt\r
+sleep 2
+send cat '/mnt/r\xc3\xa4ksm\xc3\xb6rg\xc3\xa5s.txt'\r
+sleep 2
+send sha256sum /mnt/Mapp/big.bin /mnt/ls.bin /mnt/Mapp/small.bin\r
+sleep 15
+send readlink /mnt/Mapp/up /mnt/abs\r
+sleep 2
+send cat /mnt/Mapp/up\r
+sleep 2
+send cat /mnt/a/b/c/d/e/f/g/h/i/j/deep.txt\r
+sleep 3
+send ls /mnt/Lista | wc -l\r
+sleep 10
+send ls /mnt/Mapp/../Lista/f077.txt\r
+sleep 3
+send /mnt/ls.bin /mnt/Mapp ; echo run-from-cd=$?\r
+sleep 8
+send echo x > /mnt/refused.txt\r
+sleep 2
+send mkdir /mnt/refused\r
+sleep 2
+send rm /mnt/hello.txt\r
+sleep 2
+send df /mnt\r
+sleep 3
+send kill -9 $(pgrep iso9660d)\r
+sleep 3
+send cat /mnt/Mapp/inner.txt ; echo after-the-kill=$?\r
+sleep 4
+send dd if=cd0 of=/tmp/x bs=512 count=1 ; echo raw-while-mounted=$?\r
+sleep 3
+send umount /mnt\r
+sleep 3
+send mount -o rw cd0 /mnt\r
+sleep 3
+send mount -t ext2 cd0 /mnt\r
+sleep 3
+send mount -o norock cd0 /mnt ; ls /mnt ; ls -l /mnt/Mapp/up ; cat '/mnt/r\xc3\xa4ksm\xc3\xb6rg\xc3\xa5s.txt' ; echo joliet-name=$? ; umount /mnt\r
+sleep 8
+send mount -t iso9660 -o norock,nojoliet,uid=5,dmode=750 cd0 /mnt\r
+sleep 5
+send ls -l /mnt ; ls -ld /mnt/MAPP ; cat /mnt/hello.txt ; echo plain-cat=$? ; umount /mnt\r
+sleep 8
+send echo cd-test-done\r
+sleep 1
+wait cd-test-done 20

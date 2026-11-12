@@ -16,13 +16,15 @@ DESCRIPTION
     With a device and a directory, puts the device's filesystem on the
     directory. The directory must exist; what was in it is hidden until the
     unmount. Devices are the names the disk server gives: ide0p1, ide0p2
-    ..., df0, df1 (see fdisk). Filesystems can be mounted inside each other
-    (/mnt, then /mnt/sub).
+    ..., df0, df1, cd0 (see fdisk). Filesystems can be mounted inside each
+    other (/mnt, then /mnt/sub).
 
-    The type is ext2, zenixfs, fat, ffs or pfs3. Without -t it is read from
-    the partition's type in the partition table (fdisk add ... ext2|zenixfs;
-    a PC partition of a FAT type counts as fat, an RDB partition of type
-    DOS\0 .. DOS\7 as ffs, PFS\1 .. PFS\3 or PDS\1 .. PDS\3 as pfs3). A
+    The type is ext2, zenixfs, fat, ffs, pfs3 or iso9660. Without -t it is
+    read from the partition's type in the partition table (fdisk add ...
+    ext2|zenixfs; a PC partition of a FAT type counts as fat, an RDB
+    partition of type DOS\0 .. DOS\7 as ffs, PFS\1 .. PFS\3 or PDS\1 ..
+    PDS\3 as pfs3), else a device with an ISO 9660 volume (CD001 at its
+    byte 32769: a CD, or an image written to a partition) is iso9660. A
     volume without a partition table needs -t fat, -t ffs or -t pfs3.
 
     The filesystem's server is a service (DESIGN D11): mount reads the
@@ -130,6 +132,18 @@ DESCRIPTION
     options uid=, gid=, fmode=, dmode= (and blocksize= to force a block
     size) work as for FFS.
 
+    ISO 9660 (DESIGN D44): a CD in the CD drive, cd0 (mount cd0 /mnt),
+    or an ISO image on any device. Only ever read: -o rw and any other
+    type on cd0 are refused, every change answers "read-only file
+    system". Rock Ridge discs show their Unix names, modes (without
+    set-id) and symbolic links; else a disc's Joliet names (long, any
+    letters); else the plain ISO names (;1 cut), found in any case.
+    Options: uid=, gid= (the owner of everything, default root),
+    fmode=, dmode= (octal; the modes without Rock Ridge, default 555),
+    norock (ignore Rock Ridge), nojoliet (ignore Joliet). With no disc
+    mount says "no disc in cd0". A disc taken out or changed while
+    mounted answers "stale file handle": umount, then mount the new one.
+
     NFS (DESIGN D23): mount -t nfs nas:/volume1/zenix /nas puts a
     directory that a NAS or a Linux PC exports on dir (NFSv3 over TCP;
     -t nfs may be left out when the source has the form host:/export).
@@ -166,7 +180,8 @@ DESCRIPTION
 
     mount -a mounts everything listed in /etc/fstab; init runs it at boot.
     Each line is "device dir type options" (fields separated by spaces or
-    tabs): type is ext2, zenixfs, fat, ffs, pfs3, nfs (device host:/export)
+    tabs): type is ext2, zenixfs, fat, ffs, pfs3, iso9660, nfs (device
+    host:/export)
     or auto
     (read from the partition type);
     options is defaults, or a comma list in which "noauto" leaves the line
@@ -242,8 +257,15 @@ NOTES
     file handle" until it is closed. A name over 63 bytes of UTF-8 is listed
     as its start, ~ and a number, which opens it. A PFS3 mount needs
     /sbin/pfs3d on the root (the disktools package).
+    ISO 9660: read-only; volumes up to 4 GB; the first session of a
+    multi-session disc; files in several extents or interleaved are listed
+    but answer "not supported"; Rock Ridge's owners and times are not read
+    (the options' owner, the record's date); a name over 63 bytes of UTF-8
+    is listed as its start, ~ and a number, which opens it; no audio CDs.
+    An ISO 9660 mount needs /sbin/iso9660d on the root (the disktools
+    package).
     Only types with a server can be mounted (ext2, zenixfs, fat, ffs, pfs3,
-    nfs). A
+    iso9660, nfs). A
     ZenixFS mount needs /sbin/zfsd on the root: without it the server does not
     start ("cannot start /sbin/zfsd" in dmesg).
     NFS writes: a write returns once the NAS holds the bytes; they are
@@ -279,6 +301,6 @@ NOTES
     writes past it (the frozen-interface rule, CLAUDE.md).
 
 SEE ALSO
-    umount(8), nfscd(8), fatd(8), ffsd(8), pfs3d(8), fdisk(1), df(1),
-    dmesg(1),
+    umount(8), nfscd(8), fatd(8), ffsd(8), pfs3d(8), iso9660d(8), fdisk(1),
+    df(1), dmesg(1),
     mkfs.ext2(1), mkfs.zenixfs(1), boot(8)

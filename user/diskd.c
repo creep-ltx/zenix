@@ -29,7 +29,8 @@ typedef unsigned char u8;
 #define MAXDEV 20
 static struct diskinfo dev[MAXDEV];
 static u8 used[MAXDEV];                 /* the slot holds a device */
-static u8 phys[MAXDEV];                 /* which medium: 0 the disk, 1 the RAM disk, 2+N floppy dfN */
+static u8 phys[MAXDEV];                 /* which medium: 0 the disk, 1 the RAM disk, 2+N floppy dfN, PH_CD the CD drive */
+#define PH_CD 6
 static u8 order[MAXDEV];                /* DISK_LIST order: slots in the order the last scan found them */
 static int norder;
 static int fd_probe = 1;                /* floppy drives looked at: bit 0 = df0; df1-3 only when a name asks for them (probing an absent drive takes a third of a second) */
@@ -40,6 +41,50 @@ static u32 ram_sectors;
 
 static void save(void);
 static int alive(u32 pid);
+static void put32(u8 *p, u32 v) { p[0] = (u8)(v >> 24); p[1] = (u8)(v >> 16); p[2] = (u8)(v >> 8); p[3] = (u8)v; }
+static u32 get32(const u8 *p) { return (u32)p[0] << 24 | (u32)p[1] << 16 | (u32)p[2] << 8 | p[3]; }
+
+/* ---- the CD drive (DESIGN D44, docs/d44-cd.md): cd0, read-only, its 2048-byte blocks served as 512-byte sectors.
+ * The kernel only sends packets (SYS_atapi); what they mean is here. A unit attention (a disc put in or taken out, a
+ * reset) raises cd_gen; a mount made before it answers -ESTALE from then on (it was of another disc). ---- */
+static int cd_there = 1;                /* until the kernel says it has no CD drive */
+static u32 cd_sectors, cd_gen;          /* the disc's size in 512-byte sectors (0: no disc); the disc's generation */
+static u32 sgen[MAXDEV];                /* a slot of the CD drive: the generation it was mounted on */
+static struct uatapi aq;
+/* one packet: OP, a block number (REQUEST SENSE: its allocation length << 8), a count of blocks; the drive's bytes
+ * from SKIP, LEN of them into BUF -> the bytes it sent, or -errno (-EIO: the sense key is aq.err >> 4) */
+static int cd_pkt(u8 op, u32 lba, u32 n, void *buf, u32 len, u32 skip)
+{
+    memset(&aq, 0, sizeof aq);
+    aq.cdb[0] = op;
+    put32(aq.cdb + 2, lba);
+    aq.cdb[7] = (u8)(n >> 8); aq.cdb[8] = (u8)n;
+    aq.buf = buf; aq.len = len; aq.skip = skip;
+    int r = sys_atapi(&aq);
+    if (r == -ENODEV) cd_there = 0;
+    return r;
+}
+/* the disc in the drive: cd_sectors from READ CAPACITY, 0 without one. A UNIT ATTENTION or no medium (ASC 3Ah) raises
+ * cd_gen (a mount was of a disc gone), nothing else does. A drive becoming ready (ASC 04h ASCQ 01h: a disc just put in)
+ * is waited for, up to 10 s; one that wants START UNIT (04h 02h) gets it */
+static void cd_look(void)
+{
+    static u8 b[20];
+    cd_sectors = 0;
+    for (int i = 0; i < 100 && cd_there; i++) {
+        int r = cd_pkt(0x00, 0, 0, 0, 0, 0);                    /* TEST UNIT READY */
+        if (r >= 0) {
+            if (cd_pkt(0x25, 0, 0, b, 8, 0) == 8 && get32(b) < 0x3FFFFFFF) cd_sectors = (get32(b) + 1) * 4;
+            break;
+        }
+        if (aq.err >> 4 == 6) { cd_gen++; continue; }          /* UNIT ATTENTION */
+        if (aq.err >> 4 != 2 || cd_pkt(0x03, 18 << 8, 0, b, 18, 0) < 14) break;
+        if (b[12] == 0x3A) { cd_gen++; break; }                 /* NOT READY, no medium */
+        if (b[12] != 4 || b[13] > 2) break;
+        if (b[13] == 2) cd_pkt(0x1B, 1 << 8, 0, 0, 0, 0);      /* START STOP UNIT: start */
+        sys_sleep(10);                                          /* NOT READY, becoming ready */
+    }
+}
 
 /* the scan's result before it is merged into the slots */
 static struct diskinfo cand[MAXDEV];
@@ -131,6 +176,7 @@ static int add_mbr(int *count)
  * slot when a change before it in the table renames it (ide0p2 becomes ide0p1) */
 static int same(int s, int c)
 {
+    if (phys[s] == PH_CD) return cphys[c] == PH_CD;     /* one slot for the drive, whatever disc is in it */
     return phys[s] == cphys[c] && dev[s].start == cand[c].start && dev[s].sectors == cand[c].sectors &&
            (!strcmp(dev[s].name, cand[c].name) || (!strncmp(dev[s].name, "ide0p", 5) && !strncmp(cand[c].name, "ide0p", 5)));
 }
@@ -142,6 +188,13 @@ static void scan(void)
     ncand = 0; dropped = 0;
     if (disk_sectors) add("ide0", "", 0, disk_sectors, 0, 0);
     if (ram_sectors) add("ram0", "", 0, ram_sectors, 0, 0);
+    if (cd_there) {
+        cd_look();
+        if (cd_there) {
+            add("cd0", "", 0, cd_sectors, 0, 0);
+            cphys[ncand - 1] = PH_CD; cand[ncand - 1].caps = DISKCAP_RO; cand[ncand - 1].maxsect = 128;
+        }
+    }
     int count = 0;
     if (disk_sectors && !add_rdb(0, disk_sectors, &count)) add_mbr(&count);
     for (int f = 0; f < 4; f++) {                         /* floppy drives with a disk in them: df0 ... df3 */
@@ -207,8 +260,6 @@ static u32 rec_sum(int n)
     for (int i = 0; i < n; i++) s = (s << 1 | s >> 31) + rec[i];
     return s;
 }
-static void put32(u8 *p, u32 v) { p[0] = (u8)(v >> 24); p[1] = (u8)(v >> 16); p[2] = (u8)(v >> 8); p[3] = (u8)v; }
-static u32 get32(const u8 *p) { return (u32)p[0] << 24 | (u32)p[1] << 16 | (u32)p[2] << 8 | p[3]; }
 static void save(void)
 {
     u8 *p = rec + 2;
@@ -232,13 +283,13 @@ static int restore(void)
         const u8 *p = rec + 2;
         for (int s = 0; s < MAXDEV; s++, p += REC_SLOT) {
             if (p[0] == 0xFF) continue;
-            u32 st = get32(p + 1), sz = get32(p + 5), lim = p[0] == 0 ? disk_sectors : p[0] == 1 ? ram_sectors : 3520;
-            if (p[0] > 5 || p[16] || !p[9] || st + sz < st || st + sz > lim) return -1;
+            u32 st = get32(p + 1), sz = get32(p + 5), lim = p[0] == 0 ? disk_sectors : p[0] == 1 ? ram_sectors : p[0] == PH_CD ? ~0u : 3520;
+            if (p[0] > PH_CD || p[16] || !p[9] || st + sz < st || st + sz > lim) return -1;
             if (!pass) continue;
             used[s] = 1; phys[s] = p[0]; memset(&dev[s], 0, sizeof dev[s]);
             dev[s].start = st; dev[s].sectors = sz; strcpy(dev[s].name, (const char *)p + 9);
             dev[s].mounted = alive(get32(p + 17)) ? get32(p + 17) : 0;
-            fdrive[s] = p[0] >= 2 ? p[0] - 2 : -1;
+            fdrive[s] = p[0] >= 2 && p[0] < PH_CD ? p[0] - 2 : -1;
         }
     }
     fd_probe = rec[0];
@@ -301,6 +352,7 @@ static int handle(struct umsg *m)
             fd_probe |= 1 << (nm[2] - '0');
             scan();                                                  /* a disk may have been put in since */
         }
+        if (!strcmp(nm, "cd0") && cd_there) scan();                 /* a disc may have been put in or changed */
         int h = find(nm);
         if (h < 0) return -ENODEV;
         if (m->a[1] & (DISK_MOUNT | DISK_RAW)) {
@@ -309,7 +361,7 @@ static int handle(struct umsg *m)
              * request was in service when a diskd died, and it asks again) */
             if ((m->a[1] & DISK_MOUNT) && dev[h].mounted == (u32)m->from) return h;
             if (blocked(h, 0, dev[h].sectors, 0)) return -EBUSY;
-            if (m->a[1] & DISK_MOUNT) { dev[h].mounted = (u32)m->from; save(); }
+            if (m->a[1] & DISK_MOUNT) { dev[h].mounted = (u32)m->from; sgen[h] = cd_gen; save(); }
         }
         return h;
     }
@@ -319,7 +371,20 @@ static int handle(struct umsg *m)
     case DISK_READ: case DISK_WRITE: {
         u32 h = m->a[0], lba = m->a[1], n = m->a[2];
         if (h >= MAXDEV || !used[h]) return -EBADF;
+        if (phys[h] == PH_CD && dev[h].mounted == (u32)m->from && sgen[h] != cd_gen) return -ESTALE;  /* mounted on another disc */
         if (n == 0 || lba + n < lba || lba + n > dev[h].sectors) return -EINVAL;
+        if (phys[h] == PH_CD) {                                     /* D44: 2048-byte blocks, the sectors asked kept */
+            if (m->type == DISK_WRITE) return -EROFS;
+            if (n > 128) return -EINVAL;                            /* maxsect */
+            for (int t = 0; t < 2; t++) {
+                if (t && dev[h].mounted == (u32)m->from) return -ESTALE;
+                u32 nb = ((lba & 3) + n + 3) >> 2;
+                if (cd_pkt(0x28, lba >> 2, nb, (void *)m->a[3], n * 512, (lba & 3) * 512) == (int)nb * 2048) return 0;
+                if (aq.err >> 4 != 6) break;
+                cd_gen++;                                           /* UNIT ATTENTION: the disc may have changed */
+            }
+            return -EIO;
+        }
         if (m->type == DISK_WRITE && blocked((int)h, lba, n, (u32)m->from)) return -EBUSY;
         if (phys[h] == 1) {                                         /* the RAM disk: plain memory */
             if (m->type == DISK_READ) memcpy((void *)m->a[3], ram_base + lba * 512, n * 512);
@@ -369,7 +434,8 @@ int main(void)
     if (sys_blk_ram(ram) == 0 && ram[1]) { ram_base = (u8 *)ram[0]; ram_sectors = ram[1] / 512; }
     int any_fd = 0;
     if (sys_fd_info(0) & 1) any_fd = 1;
-    if (!disk_sectors && !ram_sectors && !any_fd) { say("diskd: no disk\n"); return 1; }
+    cd_look();                                                      /* D44: is there a CD drive, a disc in it */
+    if (!disk_sectors && !ram_sectors && !any_fd && !cd_there) { say("diskd: no disk\n"); return 1; }
     if (disk_sectors) {                 /* can the drive make writes durable? (ATA FLUSH CACHE, SCSI SYNCHRONIZE CACHE) */
         int f = sys_blk_flush();
         disk_caps = f == 0 ? DISKCAP_FLUSH : 0;

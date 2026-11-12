@@ -71,6 +71,7 @@ spot-checked against the code that day.
 | [fatd](man/fatd.txt) | not a command: a FAT mount's server (`/sbin/fatd`, DESIGN D30), started by the kernel for `mount -t fat`; its manual is mount's |
 | [ffsd](man/ffsd.txt) | not a command: an OFS or FFS mount's server (`/sbin/ffsd`, DESIGN D31), started by the kernel for `mount -t ffs`; its manual is mount's |
 | [pfs3d](man/pfs3d.txt) | not a command: a PFS3 mount's server, read-only (`/sbin/pfs3d`, DESIGN D32), started by the kernel for `mount -t pfs3`; its manual is mount's |
+| [iso9660d](man/iso9660d.txt) | not a command: an ISO 9660 mount's server (a CD-ROM), read-only (`/sbin/iso9660d`, DESIGN D44), started by the kernel for `mount -t iso9660`; its manual is mount's |
 | [mount](man/mount.txt), [umount](man/umount.txt) | mounting more than the root filesystem (its server is a service: the kernel's fsd, zfsd, or nfscd for a NAS's folder over NFS, DESIGN D23)|
 
 ## The network

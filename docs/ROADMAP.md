@@ -163,7 +163,8 @@ zpkg-new kept out of a user's list (done 2026-11-05: --all shows them, man zpkg)
    be measured against a floppy's track reads); optional memory protection on CPUs with an MMU (built in FS-UAE 2026-11-12 on branch mmu: docs/d41-memory-protection.md,
    off by default, `zenixboot MMU=ON`; not yet on a real 68030/040/060, the 1260's first run is its section 18); USB, RTG (built in FS-UAE 2026-11-12 on branch rtg against a pretend card: docs/d43-rtg.md, `zenixboot RTG`, the desktop on the screen Picasso96 left; never on a real card, the PiStorm's first run is its section 11), faster IDE (done in FS-UAE 2026-11-12 on branch ide: docs/d42-faster-ide.md, long moves, read-ahead and
    whole-block runs in the filesystems; not yet on the 1260, its section 6 says what to measure),
-   CD. Audit.
+   CD (built in FS-UAE 2026-11-12 on branch cd: docs/d44-cd.md, an ATAPI drive on the IDE port as `cd0`,
+   `/sbin/iso9660d` with Rock Ridge and Joliet; never with a real drive, its section 9 says what to check). Audit.
 7. **Zenix builds itself, and fun:** assembler, C compiler, `make`, debugger, Lua; games and demos on Zenix. A full
    audit of the whole system, then release 1.0 with the owner's yes.
 

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
+#include "diskproto.h"
 #include "mmu.h"
 #include "fsproto.h"
 #include "version.h"
@@ -412,6 +413,11 @@ void syscall_c(u32 *rb)
         break;
     case SYS_blk_size:
         r = current->priv ? (s32)blk_sectors() : -EPERM;
+        break;
+    case SYS_atapi:                     /* D44: the disk server only; the buffer is a client's, as blk_read's */
+        r = -EPERM;
+        if (current->priv && UOKW(a1, UATAPI_FIRST))
+            r = ide_atapi((struct uatapi *)a1);
         break;
     case SYS_ttymode:
         tty_setmode(tty_of(current), (int)a1, current->pid);

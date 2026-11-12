@@ -106,6 +106,14 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
   a command and after the last data word is two CIA reads (E-clock synchronised, so at least 1.4 us on any CPU).
   Verified in FS-UAE (the matrix: Gayle ID 0xD, the fast data window, the A4000 and A3000 setups); the timings of real
   drives, the latch storm and a CHS-only drive are not modelled there.
+  **An ATAPI CD drive** (DESIGN D44, docs/d44-cd.md) on the Gayle port is looked for at boot: as the slave after an ATA
+  master is set up, or as the master when no ATA drive answered. IDENTIFY DEVICE makes a packet device abort with its
+  signature (14h EBh); a unit neither busy nor answering 50 ms after it is none; IDENTIFY PACKET DEVICE must say a
+  CD-ROM with 12-byte packets (the boot line `ide: ATAPI slave CD drive: MODEL`). `SYS_atapi` (98, the disk server
+  only) sends one packet (`struct uatapi`, `kernel/diskproto.h`) and moves the data in, keeping bytes `[skip, skip +
+  len)` of the transfer (whole 512-byte pieces with the long moves); the phases follow the interrupt reason register
+  (a drive without it ends after 50 ms in a row without busy or DRQ); ERR's error register goes back to the caller unsaid;
+  a drive that stops answering gets DEVICE RESET. Every CD command selects the master again before it returns.
 - Clock: the 100 Hz tick is CIA-A timer A. `hr_time()` (and `SYS_hrtime`) is **CIA-B timers A and B chained**
   (timer B counts timer A's underflows): a free-running 32-bit E-clock counter (709379 Hz PAL, 715909 NTSC, wraps
   after about 1.7 hours) read from hardware alone, so it is never early or late with respect to the tick
@@ -775,7 +783,7 @@ it does not jump back when the 32-bit tick count wraps after 497 days; audit 202
 display's colours: D14 note section 11), environment (`envset
 envget`), identity (`getuid getgid geteuid setuid setgid groups umask`, section 14), messages (`port_create port_find call
 recv reply replyrecv peer post`), mounts (`mount umount mountinfo`), the kernel log and input (`klog input`), and privileged
-ones, refused (-EPERM) to all but privileged processes, i.e. the disk server (`blk_read blk_write blk_flush blk_size blk_ram fd_info fd_rw`).
+ones, refused (-EPERM) to all but privileged processes, i.e. the disk server (`blk_read blk_write blk_flush blk_size blk_ram fd_info fd_rw atapi`).
 
 **Every user pointer is validated** against the process's own span and its `memalloc` regions. A bad
 pointer makes the call return -EFAULT; the process lives. Since D13 there are two checks: `user_ok_wr` (its own memory
@@ -983,7 +991,7 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
 ### diskd - the disk server (`user/diskd.c`, port `disk`)
 Owns the hardware through privileged raw-sector syscalls (`blk_read/blk_write/blk_size/blk_ram`, only for
 processes flagged `priv`). Reads the Amiga **RDB** partition table (`RDSK`/`PART` blocks, DosEnvec geometry) and
-serves named devices: `ide0` (the whole disk - IDE or the Pi SD card), `ide0p1`, `ide0p2`... (the partitions of an RDB, else of a PC MBR: type 0x83 = ext2, type 0x76 = an RDB inside, others listed and never mounted), and `ram0` for the boot RAM disk. Handles are
+serves named devices: `ide0` (the whole disk - IDE or the Pi SD card), `ide0p1`, `ide0p2`... (the partitions of an RDB, else of a PC MBR: type 0x83 = ext2, type 0x76 = an RDB inside, others listed and never mounted), `ram0` for the boot RAM disk, and `cd0` for an ATAPI CD drive (D44: always listed when the kernel found one, with the disc's size or 0 sectors; read-only, `DISKCAP_RO`, writes `-EROFS`; 512-byte sectors over the disc's 2048-byte blocks, any run read exactly through `SYS_atapi`'s kept window; an open looks at the disc again, waiting up to 10 s for a drive becoming ready; a UNIT ATTENTION or no medium raises a generation, and the server that mounted it before answers `-ESTALE`; at most 128 sectors a request). Handles are
 confined to their partition (LBAs are partition-relative). RDB partitions are placed by their own DosEnvec geometry
 (`user/rdb.h`). A handle is a device's slot, kept across rescans (same sectors, same medium), so a mounted server's handle
 never moves. Devices that share sectors overlap (the whole disk and its partitions, a 0x76 container and the RDB inside,
@@ -1097,6 +1105,16 @@ at nice -10 (a file service, D11 6.4). One file, one process per mount, the prot
 for soft links as zfsd does. Only reads: it sends the disk server nothing but `DISK_READ`. A small cache of reserved blocks, one
 data block, a table of open files by anode with where the last read was in the chain; `user/amigatext.h` (names, dates, soft link
 text) is shared with ffsd. The rules and the format are in `docs/d32-pfs3.md`.
+
+### iso9660d - an ISO 9660 mount's server (`user/iso9660d.c`, port `fs.DEVICE`, DESIGN D44)
+`mount -t iso9660 DEV DIR` (or any device whose descriptor at block 16 says CD001: `cd0`, an image on a partition)
+registers `fs.DEV` -> `/sbin/iso9660d DEV -id START,SIZE [-o OPTIONS]` at nice -10 (a file service, D11 6.4). One file,
+one process per mount, the protocol of `kernel/fsproto.h`; it answers `FS_LINKED` for Rock Ridge's symbolic links. Only
+reads: nothing but `DISK_READ` reaches the disc. Rock Ridge (`NM PX SL CE CL PL RE`) when the root's `.` carries `SP`,
+else Joliet, else plain ISO names (found in any case, `;1` cut). An inode number is half the byte position of the
+object's directory record (a directory's: its `.` record), so it needs no table and survives a restart. A cache of 6
+directory blocks and a window of 8 file blocks for small reads; whole blocks straight into the caller's buffer. The
+rules, the format and the damage checks are in `docs/d44-cd.md`.
 
 ### nfscd - an NFS mount's server (`user/nfscd.c` + `net/nfs/`, port `fs.nfs0` .. `fs.nfs7`, DESIGN D23)
 `mount -t nfs HOST:/EXPORT DIR` registers `fs.nfsN` -> `/sbin/nfscd nfsN HOST:/EXPORT [CODES]` at nice -10 (a file

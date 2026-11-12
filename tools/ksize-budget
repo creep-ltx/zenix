@@ -69,11 +69,16 @@
 # -150), fsd.zx in embed 27,472 -> about 28,000 (ext2's read-ahead: bfill, sequential reads, whole blocks written
 # without reading them first); kernel.bin 190,012 -> 190,684, TOTAL 190,500 -> 190,700 (the floppy's ROOM 800 kept:
 # 804 left).
+# 2026-11-12 (DESIGN D44, docs/d44-cd.md, the CD drive): ide 3,404 -> 4,671, budget 3,450 -> 4,700 (the ATAPI drive found
+# at boot, as the slave or alone as the master; SYS_atapi's packet command with its kept window, DEVICE RESET after a
+# drive stops answering), syscall 10,050 -> 10,108 (SYS_atapi), diskd.zx in embed 8,064 -> 8,876 (cd0: the packets'
+# meaning, the disc's size and changes, 2048-byte blocks served as sectors); kernel.bin 190,684 -> 193,072, TOTAL
+# 190,700 -> 193,100; the mount tests' RAM disk 692 -> 689 KB for it (Makefile): 1,488 bytes of its margin left.
 start     4300   8200
 main      5950   1100
 serial    6100   6500
 mem       3600    240
-ide       3450    560
+ide       4700    560
 emmc      4900    640
 floppy    4500    160
 input      550     32
@@ -102,5 +107,5 @@ cache     1800     32
 gcon      3600     16
 mmu       5700    160
 embed    47500      0
-TOTAL   190700
+TOTAL   193100
 ROOM       800

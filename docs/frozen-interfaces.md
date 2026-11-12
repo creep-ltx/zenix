@@ -254,6 +254,15 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   its two values (`hvs`, `dl_rtg`, `dl_chip`); written by zenixboot after stage0, never by the kernel; `DRV_HWINFO` still
   copies at most the first 408 bytes. zenixboot's switch `RTG`. The display protocol's `DPYM_RTG` 2 (`DPY_MODE`'s
   answer on a card's screen, which no request changes). No system call, message or error number changes.
+- **D44 (CD-ROMs, branch `cd`, 2026-11-12):** `SYS_atapi` 98 (the disk server only, else -EPERM): `struct uatapi`
+  (`kernel/diskproto.h`, first size `UATAPI_FIRST` 28: the 12-byte packet, buffer, `len`, `skip`, `err` back), data from
+  the drive only, bytes `[skip, skip + len)` of the transfer kept (`len` and `skip` even, else -EINVAL; the buffer anywhere), the answer the bytes the
+  drive sent or -ENODEV (no CD drive), -EIO (`err` the ATA error register, 0 when a wait ran out or the drive sent nonsense: then it was given DEVICE RESET); `struct diskinfo`'s
+  caps bit `DISKCAP_RO` 8 and the device name `cd0` (its sectors 512 bytes, `DISK_WRITE` -EROFS, more than 128 sectors -EINVAL, the
+  mounting server's reads -ESTALE after the disc changed); diskd's saved table's medium number 6 (the CD drive); `/etc/fstab`'s and mount's type
+  `iso9660` and its options (`uid=`, `gid=`, `fmode=`, `dmode=`, `norock`, `nojoliet`, `ro`; `rw` refused); `fsinfo.type`
+  `iso9660`; the program text `/sbin/iso9660d DEV -id START,SIZE [-o OPTIONS]`; its inode numbers (half the record's byte
+  position on the volume). No message type or error number is new.
 - **D22 (zpkg, 2026-10-28):** `UPD_F_TRIAL` 2 in the bootinfo and `uupdate` flags; the manifest line `takes OTHER`;
   zup's journal line `live 1 NAME` and the live-only operations `S`, `M`, `X`; `/var/cache/zpkg/live/` and
   `/var/lib/zpkg/lock` (a pid and a newline, linked whole from `lock.PID`); zpkg's `/etc/zpkg.conf` (the words

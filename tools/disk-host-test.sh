@@ -6,7 +6,10 @@
 #     a table it cannot keep exactly (a bad checksum) is not written at all;
 #   - C4: handles stay with their partition across a rescan that changes the table; a device overlapping a
 #     mounted one cannot be opened raw or mounted, nor written; a dead server's mount is released;
-#   - C6: a disk whose flush does not work has no flush capability and DISK_FLUSH says so.
+#   - C6: a disk whose flush does not work has no flush capability and DISK_FLUSH says so;
+#   - D44: the CD drive (a model of the ATAPI drive): cd0 read-only, its 2048-byte blocks served as sectors (any sector,
+#     any count: the bytes of the image), a disc changed under a mount answers -ESTALE until it is mounted again, a
+#     drive becoming ready waited for, no disc, a restart keeps the CD's claim, no drive: no cd0.
 cd "$(dirname "$0")/.." || exit 1
 T=$(mktemp -d /tmp/zdisk.XXXXXX)
 trap 'rm -rf $T' EXIT
@@ -133,6 +136,66 @@ grep -q "^list -> ide0p1 " $T/d.out && grep -q "^open ide0 plain 7 -> -13$" $T/d
     && grep -q "^write 2 0 7 -> -13$" $T/d.out && grep -q "^flush 1 -> -13$" $T/d.out && grep -q "^rescan -> -13$" $T/d.out && grep -q "^unmount 1 5 -> -13$" $T/d.out \
     && check "diskd: a user may list devices, but not open, read, write, flush, rescan or unmount (-13)" ok || { check "diskd refuses users" bad; cat $T/d.out; }
 grep -q "^read 0 0 -> 0$" $T/d.out && check "diskd: root still reads" ok || { check "diskd: root still reads" bad; cat $T/d.out; }
+
+# ---- D44: the CD drive ----
+python3 tools/mkrdb-hdtb.py make $T/d.hdf
+python3 -c "import random; open('$T/cd.iso','wb').write(random.Random(44).randbytes(2048 * 300))"
+cat > $T/cd.txt <<EOF2
+list
+open cd0 mount 5
+readx 1 65 3 $T/x1
+readx 1 0 128 $T/x2
+readx 1 1197 3 $T/x3
+readx 1 1198 3 $T/x4
+readx 1 0 129 $T/x5
+write 1 0 5
+open cd0 raw 7
+cd change
+read 1 64 5
+read 1 64 5
+read 1 64
+unmount 1 5
+open cd0 plain 7
+read 1 64
+cd becoming 3
+open cd0 mount 6
+read 1 64 6
+cd eject
+rescan
+list
+cd insert
+read 1 64 6
+unmount 1 6
+open cd0 mount 6
+read 1 64 6
+restart
+open cd0 raw 7
+open cd0 mount 6
+read 1 64 6
+EOF2
+HOSTCD=$T/cd.iso HOSTDISK=$T/d.hdf $T/diskd < $T/cd.txt > $T/cd.out 2>&1
+cwant() { grep -q -- "$2" $T/cd.out && check "cd0: $1" ok || { check "cd0: $1" bad; cat $T/cd.out; }; }
+after() { grep -A"$2" -- "^$1" $T/cd.out | grep -q -- "$3"; }
+part() { dd if=$T/cd.iso bs=512 skip=$1 count=$2 status=none | cmp -s - $3; }
+cwant "listed with the disc's size in sectors, read-only (caps 8)" "list -> cd0 h1 start 0 sectors 1200 type 00000000 mounted 0 caps 8"
+part 65 3 $T/x1 && check "cd0: sectors 65-67 (inside two 2048-byte blocks) are the image's" ok || check "cd0: sectors 65-67" bad
+part 0 128 $T/x2 && check "cd0: 128 sectors at once" ok || check "cd0: 128 sectors at once" bad
+part 1197 3 $T/x3 && check "cd0: the last sectors" ok || check "cd0: the last sectors" bad
+cwant "past the end refused" "readx 1 1198 3 .* -> -22"
+cwant "more than 128 sectors at once refused" "readx 1 0 129 .* -> -22"
+cwant "a write refused: read-only" "write 1 0 5 -> -30"
+cwant "no raw open while mounted" "open cd0 raw 7 -> -16"
+[ "$(grep -A2 '^cd change' $T/cd.out | grep -c -- '-> -116')" = 2 ] && check "cd0: a disc changed under the mount: -ESTALE for its server, and stays so" ok || { check "cd0: changed disc" bad; cat $T/cd.out; }
+after "cd change" 3 "^read 1 64 -> 0" && check "cd0: ... another reader reads the new disc" ok || check "cd0: another reader after a change" bad
+after "unmount 1 5" 2 "^read 1 64 -> 0" && check "cd0: unmounted, the new disc reads" ok || check "cd0: after the change" bad
+after "cd becoming 3" 2 "^read 1 64 6 -> 0" && check "cd0: a drive becoming ready is waited for at the open" ok || check "cd0: becoming ready" bad
+cwant "no disc: listed with 0 sectors" "list -> cd0 h1 start 0 sectors 0 "
+after "cd insert" 1 "^read 1 64 6 -> -116" && check "cd0: a disc put in under a mount: -ESTALE" ok || check "cd0: disc put in under a mount" bad
+after "unmount 1 6" 2 "^read 1 64 6 -> 0" && check "cd0: ... it reads after a new mount" ok || check "cd0: disc put in, new mount" bad
+after restart 3 "^open cd0 raw 7 -> -16" && after restart 3 "^open cd0 mount 6 -> 1" && after restart 3 "^read 1 64 6 -> 0" \
+    && check "cd0: a restarted diskd keeps the CD's claim, and the mount reads on" ok || { check "cd0: restart" bad; cat $T/cd.out; }
+printf 'list\n' | HOSTDISK=$T/d.hdf $T/diskd > $T/nocd.out 2>&1
+grep -q "cd0" $T/nocd.out && check "no CD drive: no cd0" bad || check "no CD drive: no cd0" ok
 
 echo "disk-host-test: $pass passed, $fail failed"
 [ $fail = 0 ]

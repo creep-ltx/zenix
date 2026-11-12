@@ -20,8 +20,13 @@ DESCRIPTION
     disk, else a PC table (MBR) - and serves named devices: ide0 (the whole
     disk, whatever the hardware), ide0p1, ide0p2 ... (partitions, numbered in
     the order found), ram0 (the RAM disk loaded by the bootblock, when
-    there is one) and df0-df3 (floppy drives, 1760 sectors; df0 is looked
-    for at start, df1-df3 on first use; no partitions). Access through a
+    there is one), df0-df3 (floppy drives, 1760 sectors; df0 is looked
+    for at start, df1-df3 on first use; no partitions) and cd0 (an ATAPI
+    CD drive on the IDE port, DESIGN D44: listed whenever the kernel found
+    one, with the disc's size in 512-byte sectors, 0 with no disc; read
+    only, a write answers -EROFS; an open looks at the disc again and
+    waits up to 10 s for a drive spinning up; once the disc is changed or
+    taken out, the mount made before answers -ESTALE). Access through a
     partition is limited to that partition.
     A handle is the device's slot. A slot keeps its device across rescans
     (the same sectors of the same medium; a partition renumbered by a change
