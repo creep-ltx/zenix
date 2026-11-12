@@ -21,6 +21,9 @@ typedef int8_t s8;
  * would hold nothing */
 #define KINIT __attribute__((section(".zinit.text"), optimize("Os")))
 #define KHWCD __attribute__((section(".zhwcd.text"), noinline, cold, optimize("Os", "no-function-cse")))
+/* D45 section 13: memory protection's runtime code (kernel/mmu.c only), kept only while protection is on; reached only
+ * through the table mmu_ops */
+#define KMMU __attribute__((section(".zhwmmu.text")))
 
 /* bootinfo v3, written by the bootblock at 0x1000 */
 #define MEMF_CHIP 2u
