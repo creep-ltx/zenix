@@ -10,21 +10,32 @@ typedef unsigned char u8;
  * it drew; `termtest rawkeys` raw key codes through CON_INPUT against the keyboard test's bytes (tools/kbd-test.sh);
  * `termtest text` text through CON_INPUT, `termtest readline` and `termtest readraw N` the same through the serial
  * line, printed alike for the script to compare; `termtest grab FILE` the shown display through CON_LINE (pens and
- * palette, "ZGRB"); `termtest depth N` CON_COLOURS. In `termtest colours` the key g grabs to /tmp/grab.zg. */
+ * palette, "ZGRB"); `termtest depth N` CON_COLOURS. In `termtest colours` the key g grabs to /tmp/grab.zg.
+ * D28 22 (tools/prefs-test.sh con): `termtest mode N` CON_MODE; `termtest winch` says the console's size, again at each
+ * SIGWINCH, until q. */
 #define ESC "\033"
 static void at(int r, int c, const char *s) { dprintf(1, ESC "[%d;%dH%s", r, c, s); }
 
 static int grab(const char *path);
 
-/* wait for q in raw mode, the cursor hidden or not; g grabs the display (D24, tools/colour-test.sh) */
+static void winch(int sig)              /* `termtest winch`: the size (in a handler: only system calls and dprintf) */
+{
+    int ti = sys_ttyinfo();
+    dprintf(1, "termtest: %s %d x %d\r\n", sig ? "winch" : "size", ti >> 16, ti & 0xFFFF);
+}
+
+/* wait for q in raw mode, the cursor hidden or not; g grabs the display (D24, tools/colour-test.sh) and says
+ * "termtest: grabbed" when the file is written (the script waits for it). Without show the keys are read one at a
+ * time, so what is typed after the q stays for the shell (2026-11-11: a slow grab let q and the next command arrive
+ * in one read, and the command was lost with it). */
 static void keys(int show)
 {
     sys_ttymode(TTY_RAW);
     for (;;) {
         char b[8];
-        int n = sys_read(0, b, sizeof b);
+        int n = sys_read(0, b, show ? sizeof b : 1);
         if (n <= 0 || b[0] == 'q') break;
-        if (b[0] == 'g') { grab("/tmp/grab.zg"); continue; }
+        if (b[0] == 'g') { if (!grab("/tmp/grab.zg")) dprintf(1, "termtest: grabbed\r\n"); continue; }
         if (show) {
             dprintf(1, "key:");
             for (int i = 0; i < n; i++) dprintf(1, " %02x", (unsigned char)b[i]);
@@ -774,6 +785,13 @@ int main(int argc, char **argv)
     if (argc > 1 && !strcmp(argv[1], "readline")) return readline();
     if (argc > 2 && !strcmp(argv[1], "readraw")) return readraw(atoi(argv[2]));
     if (argc > 2 && !strcmp(argv[1], "grab")) return grab(argv[2]);
+    if (argc > 2 && !strcmp(argv[1], "mode")) { int r = sys_console(CON_MODE, atoi(argv[2])); dprintf(1, "mode %d\n", r); return r < 0; }
+    if (argc > 1 && !strcmp(argv[1], "winch")) {
+        signal(SIGWINCH, winch);
+        winch(0);
+        keys(0);
+        return 0;
+    }
     if (argc > 2 && !strcmp(argv[1], "depth")) { int r = sys_console(CON_COLOURS, atoi(argv[2])); dprintf(1, "colours %d\n", r); return r < 0; }
     if (argc > 1 && !strcmp(argv[1], "pcfont")) return pcfont(argc > 2 ? argv[2] : 0);
     if (argc == 3 && !strcmp(argv[1], "rules")) {          /* the rules of another console (root): D20's tests */
@@ -786,7 +804,7 @@ int main(int argc, char **argv)
     if (argc > 1 && !strcmp(argv[1], "columns")) { columns(); return 0; }
     if (argc > 1 && !strcmp(argv[1], "colours")) { colours(); return 0; }
     if (argc > 1 && !strcmp(argv[1], "scroll")) { scroll(); return 0; }
-    if (argc > 1) { dprintf(2, "usage: termtest [columns|colours|scroll|pcfont [FILE]|rules TTY|conops|rawkeys|text|readline|readraw N|grab FILE|depth N|screen TTY TEXT SECS [TYPE]]\n"); return 2; }
+    if (argc > 1) { dprintf(2, "usage: termtest [columns|colours|scroll|pcfont [FILE]|rules TTY|conops|rawkeys|text|readline|readraw N|grab FILE|depth N|mode N|winch|screen TTY TEXT SECS [TYPE]]\n"); return 2; }
     int sz = sys_ttyinfo();
     dprintf(1, ESC "[2J" ESC "[H");
     dprintf(1, ESC "[7m Zenix terminal test " ESC "[0m  size %dx%d\n", sz & 0xFFFF, sz >> 16);

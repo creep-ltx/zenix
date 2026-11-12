@@ -27,6 +27,7 @@ Claim a number here **before** using it (system calls, message types, port names
 | 89 `console`'s `CON_INPUT` kind `CONI_MOUSE` 2 (DESIGN D38 step 5: mouse records dx, dy, buttons for the desktop's tests, root only as CON_INPUT) | branch desk, 2026-11-04 |
 | 93 `zine`'s `struct uzine_info` field `machine` (`UZINE_INFO_MACHINE` 32; `UZI_EMU68` 1: the CPU the desktop names) | branch desk, 2026-11-04 |
 | 89 `console`'s op 10 `CON_MOUSE` (DESIGN D38: the grab's descriptor; a2 THRESHOLD 0..127 \| MULTIPLIER 1..8 << 8, the mouse's acceleration a frame; -EINVAL otherwise) | branch desk, 2026-11-04 |
+| 89 `console`'s op 11 `CON_MODE` (DESIGN D28 22: the console's mode, every console's, no descriptor; a2 `CONM_HIRES` 0, `CONM_LACE` 1, `CONM_ASK` 0xFF asks; root to set) | branch pubprep, 2026-11-12 |
 | **next free: 98** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
 Message types claimed so far: `NET_*` 1-19 on port `net` (`kernel/netproto.h`, DESIGN D19 step 3: the `SOCK_*` op

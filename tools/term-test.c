@@ -148,6 +148,8 @@ void beep(u32 hz, u32 ms) { (void)hz; (void)ms; bells++; }
 static char injected[64];
 static int injected_to;
 void tty_inject(int tty, const char *s) { injected_to = tty; strncat(injected, s, sizeof injected - strlen(injected) - 1); }
+static int winches;                     /* D28 22: SIGWINCH to the consoles (term_regrid) */
+void tty_winch_consoles(void) { winches++; }
 
 /* DESIGN D20: the fonts (an id each, so a drawn cell says in whose glyphs), the shown font and palette, the caller */
 static struct gfont fontpool[64];
@@ -1036,7 +1038,7 @@ int main(void)
         me.uid = 1000;
         EXPECT_TRUE(term_conop(OP(CON_READ, 1), (u32)(unsigned long)r, 0) == -EPERM && term_conop(OP(CON_INPUT, 9), 0, 0) == -EPERM &&
                     term_conop(OP(CON_LINE, 1), 0, 0) == -EPERM, "not root: -EPERM, before the descriptor's checks");
-        EXPECT_TRUE(term_conop(OP(11, 1), 0, 0) == -EINVAL, "op 11: -EINVAL (8 to 10 are D38's)");
+        EXPECT_TRUE(term_conop(OP(11, 1), 0, 0) == -EINVAL, "op 11 with a descriptor: -EINVAL (8 to 10 are D38's; 11, CON_MODE, takes none: syscall.c)");
         EXPECT_TRUE(term_conop(OP(CON_GRAB, 1), 0, 0) == -EPERM, "CON_GRAB, not root: -EPERM");
     }
 
@@ -1045,6 +1047,41 @@ int main(void)
     term_release(50);
     reset();
     d28();
+
+    /* ---- DESIGN D28 22: a new number of rows (CON_MODE), as gfx.c's screen() calls it ---- */
+    me.uid = 0;
+    reset();
+    for (int y = 0; y < 32; y++) { char b[16]; snprintf(b, sizeof b, "%sr%d", y ? "\r\n" : "", y); out(b); }
+    out("\033[5;20r\0337\033[30;3H");
+    term_write(2, "\033c\033[Htwo", 8);
+    kmalloc_fail = 1;
+    EXPECT_TRUE(term_regrid(64) == -ENOMEM && T()->n == 32 * COLS && !T()->ng && !wsp[2]->ng,
+                "no memory for the new grids: -ENOMEM, nothing changed, nothing kept");
+    kmalloc_fail = 0;
+    int w0 = winches;
+    EXPECT_TRUE(term_regrid(64) == 0, "the grids for 64 rows taken");
+    trows = 64;
+    term_regrid(0);
+    term_redraw();
+    EXPECT_TRUE(T()->n == 64 * COLS && !strcmp(row(0), "r0") && !strcmp(row(31), "r31") && !row(32)[0] && !row(63)[0] &&
+                T()->cy == 29 && T()->cx == 2 && T()->top == 0 && T()->bot == 63 && winches == w0 + 1 && screen_is_grid(),
+                "32 -> 64 rows: the text from the top, the cursor kept, the region the whole screen, SIGWINCH, drawn");
+    EXPECT_TRUE(!strncmp((const char *)wsp[2]->ch + wsp[2]->rx[0], "two", 3) && wsp[2]->n == 64 * COLS, "... another console's text too");
+    out("\033[64;1Hbottom\n\nend");
+    EXPECT_TRUE(!strcmp(row(61), "bottom") && !strcmp(row(63), "end") && !strcmp(row(0), "r2") && screen_is_grid(),
+                "... 64 rows scroll (the drawing notes' ring of 64)");
+    out("\033[60;1H");
+    int hn0 = T()->hn;
+    EXPECT_TRUE(term_regrid(32) == 0, "the grids for 32 rows taken");
+    trows = 32;
+    term_regrid(0);
+    term_redraw();
+    (void)hn0;
+    EXPECT_TRUE(T()->n == 32 * COLS && T()->cy == 31 && !strncmp((const char *)T()->hist[(T()->hhead + HLINES - 1) % HLINES], "r29 ", 4) &&
+                !strcmp(row(0), "r30") && screen_is_grid(),
+                "64 -> 32 with the cursor at row 60: the 28 rows above that do not fit into the scrollback, its row the last");
+    reset(); out("x\033[32;1Hy\n");
+    EXPECT_TRUE(!strcmp(row(0), "") && !strcmp(row(30), "y") && screen_is_grid(), "... and the console goes on at 32 rows");
 
     if (bad) { printf("term-test: %d FAILED\n", bad); return 1; }
     printf("term-test: all passed\n");

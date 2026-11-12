@@ -633,7 +633,8 @@ for n in fam:
         if e[5] in seen: continue
         seen.add(e[5])
         if e[5].startswith("/usr/man/"): pages.append(e)
-        elif e[0] != "d" or not e[5].startswith("/usr"): utils.append(e)   # a family's own directories (ZINE's /lib/zine)
+        elif e[0] != "d" or e[5] not in ("/usr", "/usr/man"): utils.append(e)   # a family's own directories (ZINE's
+        # /lib/zine, the desktop's /usr/share/fonts/amiga: 2026-11-11, the fonts' folders made "the old install" fail)
 write("p0", "utils", v0, utils, deps=[("base", v0)])
 write("p0", "man", v0, pages)
 for n in fam:

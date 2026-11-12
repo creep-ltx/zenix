@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* conprefs: the text console's preferences (DESIGN D28 section 22, docs/man/conprefs.txt): its colours (2, 4, 8, 16
- * or the machine's choice) and its Unicode font (/usr/share/consolefonts/NAME.zcf, auto or none), on a text screen,
+ * or the machine's choice), its Unicode font (/usr/share/consolefonts/NAME.zcf, auto or none) and its mode (hires, or
+ * interlaced with twice the rows; shown when the kernel has CON_MODE), on a text screen,
  * with AmigaOS's four buttons:
  *   Test    applied now (SYS_console CON_COLOURS, CON_UFONT); the screen stays, so Cancel can still go back
  *   Use     applied until the next boot; nothing saved (the session's choice is /var/run/console, which init removes
@@ -18,7 +19,9 @@
 static char fonts[NF][24] = { "auto", "none" };
 static int nfonts = 2;
 static const int colours[5] = { 0, 2, 4, 8, 16 };     /* 0: auto */
-struct choice { int col, font; };       /* indices */
+static const char *const modes[2] = { "hires", "hires-lace" };
+static int nrows = 2;                   /* the settings shown: 3 when the kernel has CON_MODE */
+struct choice { int col, font, mode; }; /* indices (mode: CONM_HIRES or CONM_LACE) */
 static struct choice was, now, sel;
 static char run_was[128];               /* /var/run/console at the start ("": none) */
 static int row;
@@ -139,8 +142,24 @@ static int set_font(int i)
     free(p);
     return r < 0 ? -1 : 0;
 }
+static int set_mode(int m)
+{
+    int r = sys_console(CON_MODE, m);
+    if (r == -EBUSY)
+        snprintf(msg, sizeof msg, "The desktop has the screen: the mode not changed");
+    else if (r == -ENOMEM)
+        snprintf(msg, sizeof msg, "Not enough memory for %s", modes[m]);
+    else if (r < 0)
+        snprintf(msg, sizeof msg, "The mode: %s", zstrerror(r) ? zstrerror(r) : "refused");
+    return r < 0 ? -1 : 0;
+}
 static int apply(const struct choice *c)
 {
+    if (c->mode != now.mode) {          /* first: the colours' screen is then made for the new mode once */
+        if (set_mode(c->mode) < 0)
+            return -1;
+        now.mode = c->mode;
+    }
     if (c->col != now.col) {
         if (set_colours(c->col) < 0)
             return -1;
@@ -153,25 +172,26 @@ static int apply(const struct choice *c)
     }
     return 0;
 }
-static void lines(const struct choice *c, char *col, char *font)
+static void lines(const struct choice *c, char *col, char *font, char *mode)
 {
     if (colours[c->col])
         snprintf(col, 24, "colours %d", colours[c->col]);
     else
         strcpy(col, "colours auto");
     snprintf(font, 40, "font %s", fonts[c->font]);
+    snprintf(mode, 24, "mode %s", modes[c->mode]);
 }
 static int write_run(const struct choice *c)
 {
-    char col[24], font[40], t[80];
-    lines(c, col, font);
-    snprintf(t, sizeof t, "%s\n%s\n", col, font);
+    char col[24], font[40], mode[24], t[100];
+    lines(c, col, font, mode);
+    snprintf(t, sizeof t, "%s\n%s\n%s%s", col, font, nrows > 2 ? mode : "", nrows > 2 ? "\n" : "");
     sys_mkdir("/var/run");
     return cfg_write(RUNFILE, t);
 }
 
 /* ---- the screen ---- */
-static const char *const label[2] = { "Colours", "Unicode font" };
+static const char *const label[3] = { "Colours", "Unicode font", "Screen mode" };
 static const char *const button[4] = { "Test", "Use", "Save", "Cancel" };
 static void value(int i, char *b)
 {
@@ -180,31 +200,34 @@ static void value(int i, char *b)
             snprintf(b, 32, "%d", colours[sel.col]);
         else
             snprintf(b, 32, "auto (%d)", auto_colours());
-    } else
+    } else if (i == 1)
         snprintf(b, 32, "%s", fonts[sel.font]);
+    else
+        snprintf(b, 32, "%s", sel.mode ? "hires-lace (twice the rows)" : "hires");
 }
 static void draw(void)
 {
     oputs("\033[H\033[2J\033[1m Console preferences\033[m");
     if (sys_getuid())
         oputs("   (root's: sudo conprefs to change)");
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < nrows; i++) {
         char v[32];
         value(i, v);
-        oprintf("\033[%d;4H%-15s%s< %-24s >\033[m", 4 + 2 * i, label[i], i == row ? "\033[7m" : "", v);
+        oprintf("\033[%d;4H%-15s%s< %-27s >\033[m", 4 + 2 * i, label[i], i == row ? "\033[7m" : "", v);
     }
-    oputs("\033[9;4H");
+    oputs("\033[11;4H");
     for (int i = 0; i < 4; i++)
         oprintf("[ %s ]  ", button[i]);
-    oputs("\033[11;4HUp/Down: a setting   Left/Right: change it   T, U, S, C: the buttons   Esc: Cancel");
-    oprintf("\033[13;4H%s\033[K", msg);
+    oputs("\033[13;4HUp/Down: a setting   Left/Right: change it   T, U, S, C: the buttons   Esc: Cancel");
+    oprintf("\033[15;4H%s\033[K", msg);
     oflush();
 }
 static void report(const char *what)
 {
-    char col[24], font[40];
-    lines(&sel, col, font);
-    dprintf(2, "conprefs: %s: %s, %s%s%s\n", what, col, font, msg[0] ? ": " : "", msg);
+    char col[24], font[40], mode[24];
+    lines(&sel, col, font, mode);
+    dprintf(2, "conprefs: %s: %s, %s%s%s%s%s\n", what, col, font, nrows > 2 ? ", " : "", nrows > 2 ? mode : "",
+            msg[0] ? ": " : "", msg);
 }
 /* a button -> 1: the program ends */
 static int press(int b)
@@ -234,11 +257,11 @@ static int press(int b)
     }
     int r = 0;
     if (b == 2) {
-        static const char *const keys[2] = { "colours", "font" };
-        char col[24], font[40];
-        lines(&sel, col, font);
-        const char *ls[2] = { col, font };
-        if ((r = cfg_set("/etc/console", keys, ls, 2)) == 0)
+        static const char *const keys[3] = { "colours", "font", "mode" };
+        char col[24], font[40], mode[24];
+        lines(&sel, col, font, mode);
+        const char *ls[3] = { col, font, mode };
+        if ((r = cfg_set("/etc/console", keys, ls, nrows)) == 0)
             sys_unlink(RUNFILE);        /* the saved settings are the session's now */
         else
             snprintf(msg, sizeof msg, "Not saved: %s", zstrerror(r) ? zstrerror(r) : "cannot write /etc/console");
@@ -256,8 +279,10 @@ static void cycle(int d)
     msg[0] = 0;
     if (row == 0)
         sel.col = (sel.col + d + 5) % 5;
-    else
+    else if (row == 1)
         sel.font = (sel.font + d + nfonts) % nfonts;
+    else
+        sel.mode ^= 1;
 }
 static int getkey(int ms)               /* a byte, or -1 after ms */
 {
@@ -293,11 +318,16 @@ int main(int argc, char **argv)
         strcpy(v, "auto");
     was.font = font_index(v);
     free(b);
+    int m = sys_console(CON_MODE, CONM_ASK);            /* a kernel without CON_MODE: -EINVAL, no mode line */
+    if (m >= 0) {
+        nrows = 3;
+        was.mode = m == CONM_LACE;
+    }
     now = sel = was;
     if (quiet) {
-        char col[24], font[40];
-        lines(&was, col, font);
-        oprintf("conprefs: %s, %s\n", col, font);
+        char col[24], font[40], mode[24];
+        lines(&was, col, font, mode);
+        oprintf("conprefs: %s, %s%s%s\n", col, font, nrows > 2 ? ", " : "", nrows > 2 ? mode : "");
         oflush();
         return 0;
     }
@@ -315,7 +345,7 @@ int main(int argc, char **argv)
             }
             int c3 = c2 == '[' || c2 == 'O' ? getkey(150) : -1;
             if (c3 == 'A' || c3 == 'B')
-                row ^= 1;
+                row = (row + (c3 == 'B' ? 1 : nrows - 1)) % nrows;
             else if (c3 == 'C')
                 cycle(1);
             else if (c3 == 'D')

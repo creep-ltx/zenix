@@ -4,10 +4,15 @@
 
 usage: mkdemo.py BOOTBLOCK.bin STAGE2.zx KERNEL.bin ROOT.img OUT.adf [dd|hd]
 
-The kernel (padded with zeros to a multiple of 512) and the RAM disk's image are packed as one zlib stream (deflate
-at level 9, Python's zlib) behind the bootblock, the stage 2 and the table sector. Every build prints the parts and
+The kernel (padded with zeros to a multiple of 512) and the RAM disk's image are packed as one zlib stream behind the
+bootblock, the stage 2 and the table sector. The packer is libdeflate at its level 12 (its slow, thorough search:
+about 6% smaller than zlib's level 9 on the DD disk, 2026-11-11, 882,779 -> 829,9xx bytes; the same zlib format, so
+the stage 2's unpacker is unchanged). Without libdeflate (a build requirement, docs/README.md) Python's zlib at
+level 9 is used and the build says so: the DD disk may then not fit. Every build prints the parts and
 the space left; an image that does not fit is refused, saying by how much (nothing is written then).
 """
+import ctypes
+import ctypes.util
 import struct
 import sys
 import zlib
@@ -28,6 +33,28 @@ def carry_sum(data: bytes) -> int:
 
 def pad(b: bytes, n: int = SECTOR) -> bytes:
     return b + bytes(-len(b) % n)
+
+
+def pack(data: bytes) -> bytes:
+    """data as a zlib stream: libdeflate's level 12 when the library is there, else zlib's level 9 (said)"""
+    name = ctypes.util.find_library("deflate")
+    if name:
+        lib = ctypes.CDLL(name)
+        lib.libdeflate_alloc_compressor.restype = ctypes.c_void_p
+        lib.libdeflate_alloc_compressor.argtypes = [ctypes.c_int]
+        lib.libdeflate_zlib_compress.restype = ctypes.c_size_t
+        lib.libdeflate_zlib_compress.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t,
+                                                 ctypes.c_char_p, ctypes.c_size_t]
+        lib.libdeflate_free_compressor.argtypes = [ctypes.c_void_p]
+        c = lib.libdeflate_alloc_compressor(12)
+        if c:
+            out = ctypes.create_string_buffer(len(data) + len(data) // 8 + 4096)
+            n = lib.libdeflate_zlib_compress(c, data, len(data), out, len(out))
+            lib.libdeflate_free_compressor(c)
+            if n and zlib.decompress(out.raw[:n]) == data:
+                return out.raw[:n]
+    print("mkdemo.py: libdeflate not found (or failed): packed with zlib's level 9, about 6% larger", file=sys.stderr)
+    return zlib.compress(data, 9)
 
 
 def main() -> None:
@@ -63,7 +90,7 @@ def main() -> None:
     kpad = pad(kernel)
     kmem = struct.unpack(">I", kernel[12:16])[0]
     plain = kpad + image
-    stream = zlib.compress(plain, 9)
+    stream = pack(plain)
     table_off = 1024 + len(s2)
     stream_off = table_off + SECTOR
     used = stream_off + len(pad(stream))

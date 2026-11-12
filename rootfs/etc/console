@@ -11,3 +11,6 @@ font auto
 # text; login graphical: dlogin's login screen there, into the desktop
 # (man dlogin; when the desktop cannot start, the text login).
 login text
+# mode hires (auto, or no line): 80 x 32 (NTSC 25); hires-lace: interlaced,
+# 80 x 64 (NTSC 50), twice the chip RAM; it flickers without a flicker fixer.
+mode auto

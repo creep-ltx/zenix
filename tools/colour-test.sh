@@ -55,7 +55,7 @@ send termtest colours\r
 sleep 5
 shot colours
 send g
-sleep 8
+wait termtest: grabbed 120
 send q
 sleep 2
 send sync\r

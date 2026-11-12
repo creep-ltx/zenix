@@ -72,7 +72,7 @@ DAEMONS
     /etc/daemons ships with every line commented out: nothing runs until
     root removes a #.
 
-THE CONSOLE'S COLOURS AND FONT
+THE CONSOLE'S COLOURS, MODE AND FONT
     /etc/console holds the text console's settings, one per line (# starts
     a comment):
 
@@ -94,6 +94,17 @@ THE CONSOLE'S COLOURS AND FONT
     16 on an OCS or ECS Amiga gives 8; without the chip RAM for the new
     screen the console stays as it was and init says so. The kernel says
     the new depth in its log (dmesg): "display: AGA chips, 2 bitplanes ...".
+
+    mode hires  the console's mode: 80 x 32 (NTSC 80 x 25); also "auto",
+                no line or no /etc/console.
+    mode hires-lace
+                interlaced: 80 x 64 (NTSC 80 x 50), twice the screen's
+                chip RAM; it flickers on a TV or a 15 kHz monitor, steady
+                through a flicker fixer or scandoubler. Applied after the
+                colours. Without the memory, or on a kernel without the
+                mode switch, init says so ("init: /etc/console: mode
+                hires-lace: ..., staying hires") and the console stays
+                hires.
 
     font auto   the console's Unicode font (the default; also with no line
                 or no /etc/console): /usr/share/consolefonts/zenix-8x8.zcf,

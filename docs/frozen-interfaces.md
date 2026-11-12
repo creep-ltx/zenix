@@ -141,6 +141,12 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   end), zdesk's `SIGHUP` (its theme read again); `/var/run/console`
   (the console's session settings: `/etc/console`'s `colours` and `font` lines, removed by init at boot);
   `deskprefs [-v]`, `conprefs [-q]` (its line `conprefs: colours N|auto, font NAME`).
+- **D28 22, the console's mode (branch pubprep, 2026-11-12):** `SYS_console` op 11 `CON_MODE` (no descriptor; a2
+  `CONM_HIRES` 0, `CONM_LACE` 1, `CONM_ASK` 0xFF; answers the mode shown; -EPERM a non-root set, -EBUSY a display
+  server has the screen, -ENOMEM, -EINVAL); a console's size follows it (32 or 64 rows PAL, 25 or 50 NTSC, SIGWINCH
+  to each console's foreground); `/etc/console`'s `mode hires|hires-lace|auto`, written by conprefs' Save and Use
+  (`/var/run/console`); `conprefs -q`'s line grows at its end: `, mode hires|hires-lace` (when the kernel has
+  `CON_MODE`). `CON_GRAB`'s width and height stay the frame's (640 x 256 or 200) in either mode.
 - **D25 revision 3 (the demo floppy, branch demo, 2026-11-05):** `/etc/dlogin`'s `autologin NAME SESSION` (SESSION a
   label of its `session` lines; never root; once while `/tmp/.dlogin-autologin` does not exist); `login -s PROGRAM`'s
   PROGRAM may carry arguments split at spaces (at most 7 words in 127 bytes). Not frozen: the demo disk's layout and

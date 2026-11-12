@@ -159,6 +159,13 @@ static int fg_signal(struct tty *t, int sig)
     return sent;
 }
 
+void tty_winch_consoles(void)
+{
+    for (int i = 1; i <= NCONS; i++)
+        if (tt[i])
+            fg_signal(tt[i], SIGWINCH);
+}
+
 static u32 o_used(const struct tty *t) { return (u32)((t->ohead - t->otail + OSZ) % OSZ); }
 static u32 o_room(const struct tty *t) { return OSZ - 1 - o_used(t); }
 static void o_put(struct tty *t, u8 c)

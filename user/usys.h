@@ -246,6 +246,10 @@ static inline int sys_console(int op, int v) { return sys3(89, (u32)op, (u32)v, 
 #define CONR_8BIT 128           /* DESIGN D28: 8-bit mode with Topaz (no UTF-8; the keys Latin-1) */
 /* DESIGN D28 7: the console's Unicode font (ZCF1) for every console: root, no descriptor; a null pointer drops it */
 #define CON_UFONT 4
+#define CON_MODE 11             /* D28 22: sys_console's value CONM_HIRES, CONM_LACE (root), CONM_ASK -> the mode shown */
+#define CONM_HIRES 0
+#define CONM_LACE 1
+#define CONM_ASK 0xFF
 static inline int sys_conufont(const void *zcf, u32 n) { return sys3(89, CON_UFONT, (u32)zcf, n); }
 static inline int sys_confont(int fd, const void *psf, u32 n) { return sys3(89, CON_FONT | (u32)(fd + 1) << 8, (u32)psf, n); }
 static inline int sys_conrules(int fd, u32 bits, u32 mask) { return sys3(89, CON_RULES | (u32)(fd + 1) << 8, bits, mask); }

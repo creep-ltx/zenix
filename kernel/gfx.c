@@ -66,18 +66,22 @@
 #define DENISEID REG16(0xDFF07C)        /* Lisa (AGA) reads 0xF8 in the low byte; OCS has no such register */
 #define COP_WAIT_LINE 0x20              /* the Copper waits for this line before it moves the plane pointers */
 #define STRIDE  80                      /* bytes per plane per line */
-#define NRING_MAX (2 * TROWS_MAX)       /* the ring's rows at most: the screen's and as many spare */
 
-int trows = TROWS_MAX;                  /* text rows on this display: 32 (PAL) or 25 (NTSC) */
+int trows = TROWS_MAX / 2;              /* text rows on this display: 32 (PAL) or 25 (NTSC), twice that interlaced */
 int gfx_depth;                          /* bitplanes: 1 to 4 (0: no display) */
 static int dlines = 256;                /* display lines: 8 * trows */
+static int vlines = 256;                /* the beam's lines of the picture: 256 PAL, 200 NTSC (dlines halved in lace) */
+static int lace;                        /* D28 22, CON_MODE: interlaced (two fields, two Copper lists) */
+static int lastl = 312;                 /* the line only a long field has: 312 PAL, 262 NTSC */
 static u32 lstride;                     /* bytes per display line: 80 per plane */
 static u32 rstride;                     /* bytes per text row: 8 lines */
 static int aga;
 static u8 *tbuf;                        /* chip RAM: nring rows */
 static int nring;                       /* the ring's rows: trows + spare (gfx_init) */
-static volatile u16 *cop;
-static int cop_col, cop_ptr, cop_ptr2;  /* where the colours and the two sets of plane pointers are (words) */
+static volatile u16 *cop;               /* the Copper lists: the long field's (the only one without lace), the short's
+                                         * COP_WORDS further on */
+static int cop_col, cop_ptr, cop_ptr2, cop_end; /* where the colours, the two sets of plane pointers and the field's
+                                                 * end are (words, the same in both lists) */
 static int base;                        /* the ring's row to show as display row 0 (the vertical blank applies it) */
 static int dbase;                       /* D28 21: the ring's row drawn as display row 0 (ahead of base inside a flush) */
 static volatile int hw_base = -1;       /* what the Copper list shows (-1: not known yet) */
@@ -344,7 +348,7 @@ static void set_rows(int b)             /* the ring's row b is display row 0 of 
     dbase = b;
     top = tbuf;
     u32 a = (u32)b * rstride, end = (u32)nring * rstride;
-    for (int r = 0; r < TROWS_MAX; r++, a += rstride) {
+    for (int r = 0; r < trows; r++, a += rstride) {
         if (a >= end)
             a -= end;
         rowoff[r] = a;
@@ -529,22 +533,49 @@ void gfx_move_rows(int dst, int src, int n)
  * wraps (after the picture when it does not wrap on the screen), the second pointers at its row 0. A line from 256
  * on is waited for in two steps: line 255's end, then the line's low 8 bits (the Copper compares 8 bits of the line).
  * Written at vertical blank, or with the interrupts off (a panic). */
+#define COP_WORDS 120                   /* a field's list at most (build_cop checks it) */
 static void cop_point(int b)
 {
-    const u8 *p = tbuf + (u32)b * rstride;
     int s = (nring - b) * 8;            /* the display line where the ring wraps */
     if (s > dlines)
         s = dlines;
-    u32 l = (u32)(DIW_V + s);
-    for (int k = 0; k < gfx_depth; k++, p += STRIDE) {
-        cop[cop_ptr + 4 * k + 1] = (u16)((u32)p >> 16);
-        cop[cop_ptr + 4 * k + 3] = (u16)(u32)p;
-        const u8 *q = tbuf + (u32)k * STRIDE;
-        cop[cop_ptr2 + 4 * k + 1] = (u16)((u32)q >> 16);
-        cop[cop_ptr2 + 4 * k + 3] = (u16)(u32)q;
+    u32 l = (u32)(DIW_V + (s >> lace));         /* (interlaced: each field shows every other line) */
+    if (lace && l >= (u32)lastl)
+        l = (u32)lastl - 1;             /* a short field never reaches lastl (DIWV 0x38: 312); past the picture anyway */
+    for (int f = 0; f <= lace; f++) {           /* D28 22: the short field's planes start a line further in */
+        volatile u16 *c = cop + f * COP_WORDS;
+        const u8 *p = tbuf + (u32)b * rstride + (u32)f * lstride, *q = tbuf + (u32)f * lstride;
+        for (int k = 0; k < gfx_depth; k++, p += STRIDE, q += STRIDE) {
+            c[cop_ptr + 4 * k + 1] = (u16)((u32)p >> 16);
+            c[cop_ptr + 4 * k + 3] = (u16)(u32)p;
+            c[cop_ptr2 + 4 * k + 1] = (u16)((u32)q >> 16);
+            c[cop_ptr2 + 4 * k + 3] = (u16)(u32)q;
+        }
+        c[cop_ptr2 - 4] = l >= 256 ? 0xFFDF : (u16)(l << 8 | 1);
+        c[cop_ptr2 - 2] = (u16)((l & 0xFF) << 8 | 1);
+        if (lace)                       /* the wait for lastl: past line 255 already, or first to it */
+            c[cop_end + 4] = l >= 256 ? (u16)((lastl & 0xFF) << 8 | 1) : 0xFFDF;
     }
-    cop[cop_ptr2 - 4] = l >= 256 ? 0xFFDF : (u16)(l << 8 | 1);
-    cop[cop_ptr2 - 2] = (u16)((l & 0xFF) << 8 | 1);
+}
+
+/* interlaced: the lists l (both fields', end at word e) name a for the next field, and b at lastl (the kernel's own:
+ * l and l + COP_WORDS; a display server's c for both while it has the screen, or the new lists at a switch, so the
+ * Copper never follows lists that are given back or not shown) */
+static void cop_next(volatile u16 *l, int e, u32 a, u32 b)
+{
+    for (int f = 0; f < 2; f++, l += COP_WORDS) {
+        l[e + 1] = (u16)(a >> 16);
+        l[e + 3] = (u16)a;
+        l[e + 9] = (u16)(b >> 16);
+        l[e + 11] = (u16)b;
+    }
+}
+
+/* colour i in the lists (both fields') */
+static void set_colour(int i, u16 v)
+{
+    cop[cop_col + 2 * i + 1] = v;
+    cop[COP_WORDS + cop_col + 2 * i + 1] = v;
 }
 
 /* vertical-blank interrupt: apply a scroll. The Copper moves the pointers after its WAIT for line COP_WAIT_LINE, so
@@ -566,7 +597,7 @@ void gfx_vblank(void)
         if (pal_dirty) {
             pal_dirty = 0;
             for (int i = 0; i < (1 << gfx_depth); i++)
-                cop[cop_col + 2 * i + 1] = colour_of(i, gfx_depth);
+                set_colour(i, colour_of(i, gfx_depth));
         }
     }
     gcon_vblank();                      /* D38: the pointer's new place, before sprite DMA reads it */
@@ -686,13 +717,16 @@ static int pick_depth(void)
     return chip2m ? 3 : 1;
 }
 
-/* the Copper list for `depth` planes into l (COP_BYTES of chip RAM); the indices of its colours and the two sets of
- * pointers (cop_point fills them and the WAITs before the second) */
-#define COP_BYTES 200
-static void build_cop(volatile u16 *l, int depth, int *col, int *ptr, int *ptr2)
+/* the Copper lists for `depth` planes, interlaced or not (lc), into l (2 x COP_WORDS of chip RAM); the indices of
+ * the colours, the two sets of pointers (cop_point fills them and the WAITs before the second) and the field's end.
+ * Interlaced (D28 22, the same scheme as displayd's, docs/d38-desktop.md "Interlace on the chips"): each field's
+ * list skips the other field's lines (the modulos one line more) and ends naming the long field's list for the next
+ * field; only a long field reaches line lastl, and there names the short field's instead. */
+#define DIWSTOP_V ((((DIW_V + vlines) & 0xFF) << 8) | 0xC1)    /* the stop line's bit 8 is implied (not bit 7) */
+static void build_cop(volatile u16 *l, int depth, int lc, int *col, int *ptr, int *ptr2, int *end)
 {
     int f3 = aga && depth > 1;          /* more than one plane on AGA: always at FMODE 3 */
-    u16 mod = (u16)((u32)STRIDE * (u32)depth - STRIDE + (f3 ? F3_MODADJ : 0));
+    u16 mod = (u16)((u32)STRIDE * (u32)depth * (u32)(lc + 1) - STRIDE + (f3 ? F3_MODADJ : 0));
     volatile u16 *c = l;
 #define MOVE(r, v) (*c++ = (u16)(r), *c++ = (u16)(v))
     if (aga) {                          /* written every frame: a previous program's values survive a warm reset */
@@ -701,8 +735,8 @@ static void build_cop(volatile u16 *l, int depth, int *col, int *ptr, int *ptr2)
         MOVE(0x10C, 0x0011);            /* BPLCON4: no BPLAM colour-index XOR, sprite palettes as after reset */
     }
     MOVE(0x08E, (DIW_V << 8) | 0x81);           /* DIWSTRT, DIWSTOP: every frame, so a display server's (D38) */
-    MOVE(0x090, (((DIW_V + dlines) & 0xFF) << 8) | 0xC1);       /* window never outlives it */
-    MOVE(0x100, 0x8200 | (depth << 12));        /* BPLCON0: hires, N planes, colour burst */
+    MOVE(0x090, DIWSTOP_V);                     /* window never outlives it */
+    MOVE(0x100, 0x8200 | (depth << 12) | (lc << 2));    /* BPLCON0: hires, N planes, colour burst, LACE */
     MOVE(0x102, f3 ? F3_BPLCON1 : 0);
     MOVE(0x104, 0);
     MOVE(0x108, mod);
@@ -724,10 +758,23 @@ static void build_cop(volatile u16 *l, int depth, int *col, int *ptr, int *ptr2)
     *ptr2 = (int)(c - l);
     for (int k = 0; k < depth; k++)
         MOVE(0x0E0 + 4 * k, 0), MOVE(0x0E2 + 4 * k, 0);
+    *end = (int)(c - l);
+    if (lc) {                           /* the next field's list: the long one, or at lastl the short one */
+        MOVE(0x080, (u32)l >> 16);
+        MOVE(0x082, (u32)l);
+        *c++ = 0xFFDF;                  /* (cop_point: lastl's low bits when the wrap waited past 255) */
+        *c++ = 0xFFFE;
+        *c++ = (u16)((lastl & 0xFF) << 8 | 1);
+        *c++ = 0xFFFE;
+        MOVE(0x080, (u32)(l + COP_WORDS) >> 16);
+        MOVE(0x082, (u32)(l + COP_WORDS));
+    }
     *c++ = 0xFFFF;
     *c++ = 0xFFFE;
-    if ((u32)(c - l) * 2 > COP_BYTES)
-        panic("gfx: the Copper list is longer than COP_BYTES");
+    if (c - l > COP_WORDS)
+        panic("gfx: the Copper list is longer than COP_WORDS");
+    if (lc)                             /* the short field's list: the same words (cop_point sets its pointers) */
+        memcpy((void *)(l + COP_WORDS), (const void *)l, 2 * COP_WORDS);
 #undef MOVE
 }
 
@@ -782,8 +829,8 @@ void gfx_show(const struct gfont *f, int cga, int eight)
 
 static void say_depth(void)
 {
-    kprintf("display: %s chips, %d bitplane%s%s\n", aga ? "AGA" : "OCS/ECS", gfx_depth, gfx_depth > 1 ? "s" : "",
-            aga && gfx_depth > 1 ? " at 64-bit fetch (FMODE 3)" : "");
+    kprintf("display: %s chips, %d bitplane%s%s%s\n", aga ? "AGA" : "OCS/ECS", gfx_depth, gfx_depth > 1 ? "s" : "",
+            aga && gfx_depth > 1 ? " at 64-bit fetch (FMODE 3)" : "", lace ? ", interlaced" : "");
 }
 
 int gfx_init(void)
@@ -791,11 +838,12 @@ int gfx_init(void)
     int fl = frame_lines();
     if (fl && fl < 280) {               /* NTSC: 200 lines */
         trows = 25;
-        dlines = 200;
+        dlines = vlines = 200;
+        lastl = 262;
     }
     kprintf("display: beam's last line %d: %s, %d text rows\n", fl, trows == 25 ? "NTSC" : "PAL", trows);
     aga = lisa();
-    cop = mem_alloc(COP_BYTES, MEM_CHIP, 0);
+    cop = mem_alloc(4 * COP_WORDS, MEM_CHIP, 0);
     if (!cop)
         return -1;
     int d = pick_depth();
@@ -809,7 +857,7 @@ int gfx_init(void)
     if (!tbuf)
         return -1;
     say_depth();
-    build_cop(cop, gfx_depth, &cop_col, &cop_ptr, &cop_ptr2);
+    build_cop(cop, gfx_depth, 0, &cop_col, &cop_ptr, &cop_ptr2, &cop_end);
     rstride = 8 * lstride;
     set_base(0);
     cop_point(0);
@@ -818,7 +866,7 @@ int gfx_init(void)
 
     BPLCON0 = 0x0200;                   /* no planes until the Copper sets them */
     DIWSTRT = (u16)((DIW_V << 8) | 0x81);
-    DIWSTOP = (u16)((((DIW_V + dlines) & 0xFF) << 8) | 0xC1);   /* the stop line's bit 8 is implied (not bit 7) */
+    DIWSTOP = (u16)DIWSTOP_V;
     COP1LCH = (u16)((u32)cop >> 16);
     COP1LCL = (u16)(u32)cop;
     COPJMP1 = 0;
@@ -834,57 +882,64 @@ int gfx_init(void)
 u32 gfx_zine(u16 *diw)
 {
     diw[0] = (u16)((DIW_V << 8) | 0x81);
-    diw[1] = (u16)((((DIW_V + dlines) & 0xFF) << 8) | 0xC1);
+    diw[1] = (u16)DIWSTOP_V;
     return (u32)cop;
 }
 
-/* /etc/console's setting (init, SYS_console; D14 section 11): show `colours` (2, 4, 8, 16) from now on. The new
- * buffer and Copper list come first (no memory: -ENOMEM, the display stays as it is); the switch is one register
- * write with interrupts masked, which the Copper takes at the next vertical blank; one frame later (a timeout of
- * 100 ms: the beam may not move) the old ones are freed and the console shown is drawn again from its grid. Returns
- * the colours shown now. 16 on OCS/ECS (no 64-bit fetch, never 4 planes at the 16-bit one) gives 8. */
-int gfx_set_colours(int colours)
+/* /etc/console's settings (init, SYS_console; D14 section 11, D28 22): show d planes (1-4), interlaced or not (lc)
+ * from now on. The new buffer and Copper lists come first, then (a new number of rows) the consoles' new grids (no
+ * memory for any: -ENOMEM, the display stays as it is); the switch is one register write with interrupts masked,
+ * which the Copper takes at the next vertical blank; the consoles' text moves into the new grids at once (nothing
+ * draws between: no kprintf). One frame later (a timeout of 100 ms: the beam may not move) the old ones are freed and
+ * the console shown is drawn again. -> 0 or -errno */
+static int screen(int d, int lc)
 {
-    int d = colours == 2 ? 1 : colours == 4 ? 2 : colours == 8 ? 3 : colours == 16 ? 4 : 0;
-    if (!d)
-        return colours ? -EINVAL : 1 << gfx_depth;
     if (!up)
         return -ENODEV;
     if (held)
         return -EBUSY;                  /* D38: a display server has the screen; its Copper list stays */
-    if (d == 4 && !aga)
-        d = 3;
-    if (d == gfx_depth)
-        return 1 << d;
-    u32 ls = (u32)STRIDE * (u32)d;
-    volatile u16 *nc = mem_alloc(COP_BYTES, MEM_CHIP, 0);
-    u8 *nb = mem_alloc(ring_bytes(ls), MEM_CHIP, 0);
-    if (!nc || !nb) {
+    if (d == gfx_depth && lc == lace)
+        return 0;
+    int rows = (vlines >> 3) << lc, nr = rows + (fast ? rows : rows / 2);
+    u32 ls = (u32)STRIDE * (u32)d, rb = (u32)nr * 8 * ls;
+    blit_wait();                        /* first: its timeout's kprintf draws (nothing may draw between the grids' steps) */
+    volatile u16 *nc = mem_alloc(4 * COP_WORDS, MEM_CHIP, 0);
+    u8 *nb = mem_alloc(rb, MEM_CHIP, 0);
+    if (!nc || !nb || (rows != trows && term_regrid(rows) < 0)) {
         mem_free((void *)nc);
         mem_free(nb);
         return -ENOMEM;
     }
-    int col, ptr, ptr2;
-    build_cop(nc, d, &col, &ptr, &ptr2);
-    memset(nb, 0, ring_bytes(ls));
-    blit_wait();
+    int col, ptr, ptr2, end;
+    build_cop(nc, d, lc, &col, &ptr, &ptr2, &end);
+    memset(nb, 0, rb);
     volatile u16 *oc = cop;
     u8 *ob = tbuf;
     u16 s = irq_save();
+    if (lace)                           /* the old lists name the new one for the next field, not themselves */
+        cop_next(oc, cop_end, (u32)nc, (u32)nc);
     tbuf = nb;
     cop = nc;
     gfx_depth = d;
+    lace = lc;
     lstride = ls;
     cop_col = col;
     cop_ptr = ptr;
     cop_ptr2 = ptr2;
+    cop_end = end;
     rstride = 8 * ls;
+    nring = nr;
+    int moved = rows != trows;
+    trows = rows;
+    dlines = rows * 8;
     set_base(0);
     cop_point(0);
     hw_base = 0;
     COP1LCH = (u16)((u32)nc >> 16);
     COP1LCL = (u16)(u32)nc;
     irq_restore(s);
+    if (moved)
+        term_regrid(0);                 /* the text into the new grids, before anything draws (interrupts only queue) */
     dgen++;
     u32 t0 = hr_time(), n = 0;          /* a vertical blank: the beam's line number goes down once */
     int last = (int)((VPOSL >> 8) & 0x1FF);
@@ -898,7 +953,31 @@ int gfx_set_colours(int colours)
     mem_free(ob);
     say_depth();
     term_redraw();
-    return 1 << d;
+    return 0;
+}
+
+/* CON_COLOURS: 2, 4, 8, 16 (0 asks) -> the colours shown now. 16 on OCS/ECS (no 64-bit fetch, never 4 planes at the
+ * 16-bit one) gives 8. */
+int gfx_set_colours(int colours)
+{
+    int d = colours == 2 ? 1 : colours == 4 ? 2 : colours == 8 ? 3 : colours == 16 ? 4 : 0;
+    if (!d)
+        return colours ? -EINVAL : 1 << gfx_depth;
+    if (d == 4 && !aga)
+        d = 3;
+    int r = screen(d, lace);
+    return r ? r : 1 << d;
+}
+
+/* CON_MODE (D28 22): CONM_HIRES or CONM_LACE (CONM_ASK asks) -> the mode shown now */
+int gfx_set_mode(int m)
+{
+    if (m == CONM_ASK)
+        return lace;
+    if (m != CONM_HIRES && m != CONM_LACE)
+        return -EINVAL;
+    int r = screen(gfx_depth, m);
+    return r ? r : m;
 }
 
 int gfx_up(void) { return up && !held; }
@@ -910,6 +989,8 @@ void gfx_blit_cpu(int on) { blit_wait(); blit_cpu = on; }
 static void reclaim(void)
 {
     held = 0;
+    if (lace)
+        cop_next(cop, cop_end, (u32)cop, (u32)(cop + COP_WORDS));
     COP1LCH = (u16)((u32)cop >> 16);
     COP1LCL = (u16)(u32)cop;
     COPJMP1 = 0;
@@ -918,7 +999,7 @@ static void reclaim(void)
     for (int i = 0; i < 8; i++)
         SPRCTL(i) = 0;
     DIWSTRT = (u16)((DIW_V << 8) | 0x81);
-    DIWSTOP = (u16)((((DIW_V + dlines) & 0xFF) << 8) | 0xC1);
+    DIWSTOP = (u16)DIWSTOP_V;
     hw_base = -1;
     pal_dirty = 1;
 }
@@ -926,7 +1007,7 @@ void gfx_reclaim(void) { if (up && held) reclaim(); }
 int gfx_diwv(void) { return DIW_V; }
 int gfx_aga(void) { return aga; }
 void gfx_topaz(u8 *dst) { memcpy(dst, glyphs, sizeof glyphs); }
-void gfx_geom(u16 *w, u16 *h) { *w = 8 * STRIDE; *h = (u16)dlines; }
+void gfx_geom(u16 *w, u16 *h) { *w = 8 * STRIDE; *h = (u16)vlines; }   /* (CON_GRAB: the frame's lines) */
 
 /* DESIGN D38 step 2 (gcon.c): show a display server's Copper list (cop), or the kernel's again (0). The kernel's own
  * blit ends first (the server may use the blitter from here); the Copper takes the new list at the next vertical
@@ -942,6 +1023,8 @@ void gfx_hand(u32 c)
     u16 s = irq_save();
     if (c) {
         held = 1;
+        if (lace)                       /* the kernel's lists would name themselves again at the field's end */
+            cop_next(cop, cop_end, c, c);
         COP1LCH = (u16)(c >> 16);
         COP1LCL = (u16)c;
         DMACON = DMAF_SETCLR | DMAF_SPREN;
@@ -993,7 +1076,7 @@ void gfx_panic(void)
     sfont = 0;                          /* Topaz (D20 4.2: a panic is always readable); no table work here */
     set_base(dbase);                    /* a fault inside set_rows may have left rowoff half done */
     cop_point(dbase);
-    cop[cop_col + 1] = 0x800;
+    set_colour(0, 0x800);
     for (int i = 1; i < (1 << gfx_depth); i++)
-        cop[cop_col + 2 * i + 1] = 0xFFF;
+        set_colour(i, 0xFFF);
 }

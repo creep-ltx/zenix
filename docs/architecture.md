@@ -1631,7 +1631,13 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   `init` at its start (man/init.txt), switches the display with `SYS_console` (`CON_COLOURS`, root only): the new
   buffer and Copper list are allocated first (no chip RAM: -ENOMEM, nothing changes), the new list is pointed at with
   interrupts masked, the Copper takes it at the next vertical blank, a frame later (100 ms timeout) the old ones are
-  freed and the console shown is drawn again from its grid; the log says the new depth. At FMODE 3 the fetch window
+  freed and the console shown is drawn again from its grid; the log says the new depth. **The mode** (D28 22,
+  2026-11-12): `/etc/console`'s `mode hires|hires-lace|auto` (init, after the colours) and conprefs switch with
+  `CON_MODE` (op 11, no descriptor, root; `CONM_HIRES` 0, `CONM_LACE` 1, `CONM_ASK` 0xFF): the same switch (one
+  routine for depth and mode), interlaced with two Copper lists that keep the fields right by themselves (the line-312
+  wait, as displayd's), 64 rows (50 NTSC, `TROWS_MAX` 64); every used console's grids are allocated for the new rows
+  before (-ENOMEM: nothing changes), its text moved into them from the top (rows above the cursor that do not fit
+  into the scrollback), its scroll region the whole screen, its foreground told by `SIGWINCH`. At FMODE 3 the fetch window
   is `DDFSTRT` `$38`, `DDFSTOP` `$C0`, `BPLCON1` 0 at every depth (one plane at the old fetch uses `$3C`/`$D4`): found
   by the screenshot test of `termtest columns` (all 80 columns, the edges exactly where one plane puts them, nothing
   repeated; knowledge base `amiga/zenix-colour-console.md`), not yet seen on the A1200.
