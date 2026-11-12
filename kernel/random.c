@@ -336,7 +336,7 @@ void rnd_tick(void)
 
 /* at boot, after mem_init: the clocks, the boot information, a sparse hash of chip RAM (a cold start leaves it random;
  * credited 0) and the RNG200 if stage0 found one */
-void rnd_init(const struct bootinfo *bi)
+KINIT void rnd_init(const struct bootinfo *bi)
 {
     b2s_init(&pool, 32, 0, 0);
     u32 t[4] = { hr_time(), ticks, wclock.base + wclock.secs, VPOSL };

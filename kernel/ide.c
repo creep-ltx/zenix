@@ -148,7 +148,7 @@ static int ide_cmd(u32 lba, u32 n, u16 *p, u8 cmd);
 #pragma GCC optimize("Os")
 /* I2/I3: is a drive answering on this port? With an empty bus nothing may wait long, nothing is written but the
  * cylinder-low register. 0 = a drive, ready for a command. */
-static int ide_present(void)
+KINIT static int ide_present(void)
 {
     u8 s = IDE_REG(7);
     if (s == 0xFF)                  /* nothing drives the bus (no drive, or Emu68's disable_scsi) */
@@ -195,7 +195,7 @@ static int ide_present(void)
 static u16 id[256];                     /* IDENTIFY's data (and sector 0 before it, dropped) */
 
 /* IDENTIFY DEVICE to the master: 0 when its data is waiting */
-static int ide_ident_cmd(void)
+KINIT static int ide_ident_cmd(void)
 {
     IDE_REG(6) = 0xE0;              /* master, LBA mode */
     ide_settle();
@@ -206,7 +206,7 @@ static int ide_ident_cmd(void)
     return ide_wait(ST_BSY | ST_DRQ, ST_DRQ, T_BUSY_MS, "IDENTIFY data");
 }
 
-static int ide_identify(void)
+KINIT static int ide_identify(void)
 {
     if (ide_present())
         return -1;
@@ -245,7 +245,7 @@ void ide_zine(void)
 /* Does the area at "a" (512-byte aligned) mirror the custom chips? Seen without writing there: the real INTENA is changed (an
  * audio channel's enable bit, with the CPU's interrupts masked - kmain runs at level 7 until the boot is done - and
  * put back), and a mirror shows the same INTENAR at offset $1C, both times. */
-static int custom_mirror(u32 a)
+KINIT static int custom_mirror(u32 a)
 {
     volatile u16 *m = (volatile u16 *)(a + 0x1C);
     u16 was = INTENAR & 0x0400, same = 1;
@@ -258,7 +258,7 @@ static int custom_mirror(u32 a)
 }
 
 /* The Gayle ID (hand-off note I1; not in the public Gayle spec): -1 if the area is a mirror of the custom chips */
-static int gayle_id(void)
+KINIT static int gayle_id(void)
 {
     if (custom_mirror(GAYLE_ID))
         return -1;
@@ -271,7 +271,7 @@ static int gayle_id(void)
 }
 
 /* IDENTIFY's model name (words 27-46: big-endian byte pairs), its trailing blanks cut */
-static void id_model(char *model)
+KINIT static void id_model(char *model)
 {
     for (int i = 0; i < 20; i++) {
         model[i * 2] = (char)(id[27 + i] >> 8);
@@ -290,7 +290,7 @@ static u8 cd_sel;
  * registers); a status that is neither busy nor answering 50 ms after the command is no drive (an absent slave reads 0,
  * or the master's status); busy is given 10 s (a drive spinning up). An ATA drive (DRQ) is left as it is: only the master
  * is ever used for ATA. Then IDENTIFY PACKET DEVICE: a CD-ROM (type 5) taking 12-byte packets. The master is selected again at the end. */
-static void cd_probe(u8 sel)
+KINIT static void cd_probe(u8 sel)
 {
     u8 s;
     IDE_REG(6) = sel;
@@ -353,7 +353,7 @@ void ide_stray_irq(void)
         kprintf("ide: stray IDE interrupt cleared (latch %p)\n", ide_irq_latch);
 }
 
-int ide_init(void)
+KINIT int ide_init(void)
 {
     u8 ramsey = RAMSEY_VERSION;
     if (ramsey == 0x0D || ramsey == 0x0F) {         /* A3000/A4000: the A4000 port, if anything */
@@ -523,15 +523,12 @@ int ide_flush(void)
  * is waited past: FS-UAE shows neither busy nor DRQ for a moment after the packet before it has taken it. Levels 1-2
  * masked only around 512 bytes at a time; every wait timed. A CHECK CONDITION (ERR) is the caller's to read (the error
  * register in q->err), not said on the log. The master selected again at the end. */
-int ide_atapi(struct uatapi *q)
+KHWCD static int atapi_run(struct uatapi *q)
 {
     int rc = -EIO;
     u32 pos = 0, t0, t, idle = 0;
     u16 sv;
     u8 s;
-    q->err = 0;
-    if (!cd_sel)
-        return -ENODEV;
     if ((q->len | q->skip) & 1)                     /* (the buffer may be odd: a 68020 moves words anywhere) */
         return -EINVAL;
     IDE_REG(6) = cd_sel;                            /* (every command before this one has ended: polling) */
@@ -616,3 +613,13 @@ out:
     return rc;
 }
 #pragma GCC pop_options
+/* DESIGN D45: the resident entry. cd_sel is set only by cd_probe at boot: without a drive atapi_run (in the span
+ * .zhwcd) is never called, and its memory is given back when the boot ends */
+int ide_atapi(struct uatapi *q)
+{
+    q->err = 0;
+    if (!cd_sel)
+        return -ENODEV;
+    return atapi_run(q);
+}
+int ide_cd_present(void) { return cd_sel != 0; }

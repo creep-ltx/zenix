@@ -259,7 +259,7 @@ void stack_fail(struct proc *p, int which)
     p->killed = 2;                      /* 2: exit code 139, as for a fault */
 }
 
-KCOLD void proc_init(void)         /* the boot: once, size first */
+KINIT void proc_init(void)         /* the boot: once, size first */
 {
     memset(procs, 0, sizeof procs);
     procs[0].state = P_READY;           /* pid 0: idle, runs on the boot stack */

@@ -86,10 +86,14 @@ The proposals, each with what it saves (none built here):
    end of the image and handed to the memory pool at the end of kmain, that is about 15 KB more free RAM on the stock
    A1200. No floppy bytes. Needs: a linker-script section, `mem` taking a range after `mem_init`, and care that nothing
    after the boot calls into it (ZINE's way back, `gfx_init`). A deep core change: a design note and two reviews.
+   **Built 2026-11-12 (DESIGN D45, branch bootmem):** 25,296 bytes given back (the boot's code, stage0 and `boot.zx`),
+   measured by `tools/bootmem-test.sh`; kernel.bin +604 bytes.
 2. **Code kept only when its hardware is there (RAM).** With the same mechanism, the parts used only when found:
    `ide_atapi` and `SYS_atapi`'s body (about 0.8 KB) when no CD drive answered; D41's flips, lends, fault decoding and
    switch (about 4.3 KB, the reviewer's measure) when protection is off - i.e. on every machine but a 68030/040/060
    with `MMU=ON`. About 5 KB more on a stock A1200. Same cost and risk as 1, one step further.
+   **The CD part built with D45** (752 bytes given back without a drive); **the MMU part left as a follow-up**
+   (d45 section 4: its 17 call sites test `mmu_on` inside the callee, so the gate must move first).
 3. **displayd without RTG on the demo floppy (floppy and RAM).** The floppy's bootblock never writes a card record
    (D43 section 3), so its desktop can never take a card: build displayd twice from the same files (`-DNO_RTG` leaving
    out fb.c, the chunky branches and the card's start) and put the small one on the DD floppy: 3,584 bytes of the

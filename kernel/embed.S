@@ -9,6 +9,8 @@ fsd_blob:
     .incbin "fsd.zx"
 fsd_blob_end:
     .balign 4
+    .section .zinit.rodata,"a"         /* DESIGN D45: run once (pid 1's copy is made at boot), then given back */
+    .balign 4
 boot_blob:
 #ifdef KERNEL_ZFSD
     .incbin "bootz.zx"               /* boot with the choices for a damaged ZenixFS root (DESIGN D34) */
@@ -16,6 +18,7 @@ boot_blob:
     .incbin "boot.zx"
 #endif
 boot_blob_end:
+    .section .rodata
     .balign 4
 diskd_blob:
     .incbin "diskd.zx"

@@ -26,7 +26,7 @@ u8 cache_dmode;                         /* CACHE_D_*: what the data cache does n
 #define CM_INH 2u                       /* 040: inhibited, serialized; 060: inhibited, precise */
 #define CACR_DE 0x80000000u             /* 040 DE, 060 EDC */
 
-static void mark(unsigned *map, u32 lo, u32 hi)  /* the 16 MB units [lo, hi) touches */
+KINIT static void mark(unsigned *map, u32 lo, u32 hi)  /* the 16 MB units [lo, hi) touches */
 {
     for (u32 u = lo >> 24; hi > lo && u <= (hi - 1) >> 24; u++)
         map[u >> 5] |= 1u << (u & 31);
@@ -34,7 +34,7 @@ static void mark(unsigned *map, u32 lo, u32 hi)  /* the 16 MB units [lo, hi) tou
 
 /* section 3's block over the fast RAM (cache_plan's answer), from the 16 MB units with fast RAM and with configured
  * boards that are not RAM (io[]: those units, which D41 reads too); the caller has checked the hardware table */
-int cache_block(const struct bootinfo *bi, int is060, unsigned *base, unsigned *mask, unsigned *io)
+KINIT int cache_block(const struct bootinfo *bi, int is060, unsigned *base, unsigned *mask, unsigned *io)
 {
     const struct hwinfo *hw = (const struct hwinfo *)HWINFO_ADDR;
     unsigned fast[8] = { 0 }, bad;
@@ -57,7 +57,7 @@ static void off(const char *why, int is040plus)
     kprintf("cache: instruction cache on, data cache off: %s\n", why);
 }
 
-void cache_setup(const struct bootinfo *bi)
+KINIT void cache_setup(const struct bootinfo *bi)
 {
     static const char *const why[] = { 0, "no fast RAM above 16 MB", "a board in fast RAM's block",
                                        "68040, a board above 16 MB" };

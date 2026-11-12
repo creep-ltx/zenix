@@ -138,6 +138,8 @@ def main():
     img[16:20] = struct.pack(">I", len(table) // 4 if delta else len(relocs))
     img[20:24] = struct.pack(">I", reloc_off)
     img[24:28] = struct.pack(">I", stack)
+    if delta and "stage0_blob" not in syms:   # the kernel: its loaders call stage0 through +28 (0 = none, silently)
+        sys.exit(f"{elf}: no stage0_blob (dropped by the link? DESIGN D45: section .zinit.stage0)")
     img[28:32] = struct.pack(">I", syms.get("stage0_blob", 0))
     open(out, "wb").write(bytes(img) + table)
     print(f"{out}: image {image_size}B, {len(relocs)} relocs{f' ({len(table)} bytes, by distance)' if delta else ''}, mem {mem_size}B")

@@ -116,7 +116,9 @@ diag_halt:
     bra.s   1b
 2:  move.w  #0xF00,0x180(%a0)
     bra.s   1b
-6:  lea     kstack_top,%sp
+6:
+enter_kmain:                        /* (tools/check-init.py: the one call into the boot's span from outside it) */
+    lea     kstack_top,%sp
     pea     0x1000                  /* bootinfo */
     jsr     kmain
 5:  bra.s   5b
@@ -125,11 +127,13 @@ diag_halt:
 
 /* stage0 (boot/stage0.c): position-independent code the bootblock calls while AmigaOS is alive,
  * found through the ZEXE header (+28, patched by tools/mkzexe.py). */
-    .section .text.stage0
+    .section .zinit.stage0,"ax"      /* DESIGN D45: given back with the boot's span */
     .balign 4
     .globl  stage0_blob
 stage0_blob:
     .incbin "stage0.bin"             /* found through -I$(BUILD) (Makefile) */
+stage0_blob_end:                    /* (tools/check-init.py: stage0's own code, run before the kernel) */
+    .globl  stage0_blob_end
     .balign 4
     .text
 

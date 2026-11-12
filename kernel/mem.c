@@ -42,7 +42,7 @@ static struct mblk *next_of(struct range *r, struct mblk *b)
     return n < r->hi ? (struct mblk *)n : 0;
 }
 
-KCOLD static void add_range(u32 lo, u32 hi, int chip)
+KINIT static void add_range(u32 lo, u32 hi, int chip)
 {
     lo = (lo + 15) & ~15u;
     hi &= ~15u;
@@ -58,7 +58,7 @@ KCOLD static void add_range(u32 lo, u32 hi, int chip)
 }
 
 /* Add [lo,hi) minus the excluded spans */
-KCOLD static void add_minus(u32 lo, u32 hi, int chip, const u32 ex[][2], int nex)
+KINIT static void add_minus(u32 lo, u32 hi, int chip, const u32 ex[][2], int nex)
 {
     for (int i = 0; i < nex; i++) {
         u32 a = ex[i][0], b = ex[i][1];
@@ -82,7 +82,7 @@ static void *upd_blk;
 
 static int inside(u32 a, u32 b, u32 lo, u32 hi) { return a < hi && lo < b; }
 
-__attribute__((cold, noinline, optimize("Os"))) static void upd_reserve(const struct bootinfo *bi, const u32 ex[][2], int nex)
+KINIT static void upd_reserve(const struct bootinfo *bi, const u32 ex[][2], int nex)
 {
     u32 a = bi->upd_pa, n = bi->upd_size, lo = a - HDR, hi = (a + n + 15) & ~15u;
     const char *why = 0;
@@ -157,7 +157,15 @@ __attribute__((cold, optimize("Os"))) void upd_release(void)
     upd_flags &= UPD_F_TRIAL;           /* D22 4.3: zpkg asks after boot gave the bundle back */
 }
 
-KCOLD void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem)
+/* DESIGN D45 (docs/d45-boot-memory.md): the spans link/kernel.ld puts at the end of the kernel's image - the boot's
+ * code and data, and the CD drive's code - reserved here, before mmu_setup builds its tables over the ranges, each as
+ * a range of its own holding one block in use by the kernel (its header in the span's first 32 bytes, as upd_reserve
+ * makes the bundle a block), appended after the real memory's ranges; mem_boot_release gives them back. Chip or fast as
+ * the region that holds the kernel. A span not reserved (no range slot) stays resident: its pointer stays 0. */
+extern char __zinit_start[], __zinit_end[], __zhwcd_start[], __zhwcd_end[];
+static struct mblk *span_blk[2];        /* [0] the boot's, [1] the CD drive's; 0: not reserved (or given back) */
+
+KINIT void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem)
 {
     /* low chip RAM (vectors, bootinfo, bootblock scratch) and the kernel */
     /* ... and the kernel log's area at the top of chip RAM (audit A12; 0 when the log could not be kept there) */
@@ -173,6 +181,22 @@ KCOLD void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem)
             add_minus(r->lower, r->upper, (r->attrs & MEMF_CHIP) != 0, ex, nex);
     }
     upd_reserve(bi, ex, nex);
+    for (int k = 0; k < 2; k++) {
+        u32 lo = ((u32)(k ? __zhwcd_start : __zinit_start) + 15) & ~15u, hi = (u32)(k ? __zhwcd_end : __zinit_end) & ~15u;
+        int chip = -1, n = nranges;
+        for (int i = 0; i < bi->nregions && i < 8; i++)
+            if ((bi->r[i].attrs & (MEMF_CHIP | MEMF_FAST)) && bi->r[i].lower <= lo && hi <= bi->r[i].upper)
+                chip = (bi->r[i].attrs & MEMF_CHIP) != 0;
+        if (chip >= 0)
+            add_range(lo, hi, chip);    /* (adds nothing if it is too small or the table is full) */
+        if (nranges == n) {
+            kprintf("mem: span %d at %p stays the kernel's\n", k, lo);
+            continue;
+        }
+        span_blk[k] = (struct mblk *)lo;
+        span_blk[k]->size |= 1;
+        freeb[chip] -= hi - lo;
+    }
 }
 
 /* A header that is not ours, or a size that does not lead to the next block inside the range, means something
@@ -393,3 +417,24 @@ void mem_totals(u32 *chip, u32 *fast)
 
 void *kmalloc(u32 n) { return mem_alloc(n, 0, 0); }
 void kfree(void *p) { mem_free(p); }
+
+/* DESIGN D45: called once, by the idle loop when kmain has handed over to it (nothing has been scheduled yet; no
+ * interrupt allocates). The block is filled with ILLEGAL first and the caches pushed and the instruction cache (and
+ * Emu68's translations) dropped, so a path into it the build's check missed stops at once with the kernel's exception
+ * line, never runs stale code; then it is an ordinary free (D41: its pages invalid for every program, as they were). */
+KCOLD void mem_boot_release(void)
+{
+    for (int k = 0; k < 2; k++) {
+        struct mblk *b = span_blk[k];
+        if (!b || (k && ide_cd_present()))
+            continue;
+        span_blk[k] = 0;
+        u32 n = SZ(b), chip = range_of((u32)b)->chip, f0 = freeb[chip];
+        for (u32 *p = (u32 *)(b + 1), *e = (u32 *)((u32)b + n); p < e; p++)
+            *p = 0x4AFC4AFCu;
+        cache_flush_code();
+        mem_free(b + 1);
+        kprintf("mem: %u bytes of %s given back (%s RAM free %u -> %u)\n", n, k ? "CD drive code" : "boot code",
+                chip ? "chip" : "fast", f0, freeb[chip]);
+    }
+}
