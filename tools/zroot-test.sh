@@ -16,7 +16,7 @@ rm -f $BD/zenix-zroot.hdf $OUT/data.img
 mke2fs -q -t ext2 -E revision=0 -b 1024 -F $OUT/data.img 2M || { echo "mke2fs failed"; exit 1; }
 printf '# test fstab\nide0p2  /data  auto  defaults\n' > $OUT/fstab
 make -s BUILD=$BD $BD/zenix-zroot.hdf >/dev/null 2>&1    # makes the plain one (also builds the programs); then ours replaces it
-FSTAB_FILE=$OUT/fstab MOUNTDIRS=data EXTRA="$OUT/data.img:ext2:data" tools/mkroot-zenixfs.sh $BD/zenix-zroot.hdf $BD "$(make -s BUILD=$BD -f Makefile --eval 'pa:;@echo $(UAPPS) $(SBINAPPS)' pa 2>/dev/null)" 8 >/dev/null || { echo "zroot disk build failed"; exit 1; }
+FSTAB_FILE=$OUT/fstab MOUNTDIRS=data EXTRA="$OUT/data.img:ext2:data" tools/mkroot-zenixfs.sh $BD/zenix-zroot.hdf $BD "$(make -s BUILD=$BD -f Makefile --eval 'pa:;@echo $(UAPPS) $(SBINAPPS)' pa 2>/dev/null)" 12 >/dev/null || { echo "zroot disk build failed"; exit 1; }
 SER=${ZENIX_SERIAL:-/tmp/zenixfs-serial}
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
