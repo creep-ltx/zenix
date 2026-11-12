@@ -671,6 +671,8 @@ zb_putch:
     CF  zs_OpenScreen, c_OpenScreen, 1, %a0
     CF  zs_CloseScreen, c_CloseScreen, 1, %a0
     CF  zs_ScreenToFront, c_ScreenToFront, 1, %a0
+    CF  zs_ScreenToBack, c_ScreenToBack, 1, %a0
+    CF  zs_FreeCprList, c_FreeCprList, 1, %a0
     CF  zs_GetMsg, c_GetMsg, 1, %a0
     CF  zs_Open, c_Open, 2, %d1, %d2
     CF  zs_Close, c_Close, 1, %d1
@@ -767,9 +769,39 @@ zs_AllocBitMap:
     CF  zs_AudioAbortIO, zb_audio_abort, 1, %a1
     CF  zs_ConBeginIO, zb_con_beginio, 1, %a1
     CF  zs_ConAbortIO, zb_con_abort, 1, %a1
-    CF  zs_ConRawKey, zb_con_rawkey, 0
     CF  zs_ViewAddress, c_ViewAddress, 0
-    CF  zs_InpBeginIO, zb_inp_beginio, 1, %a1
+    /* the input for programs (binput.c, 16.17) */
+    CFS zs_InpBeginIO, zb_inp_beginio, 1, %a1
+    CFS zs_ZiBeginIO, zi_beginio, 1, %a1
+    CF  zs_ZiAbortIO, zi_abort, 1, %a1
+    CF  zs_RawKeyConvert, c_RawKeyConvert, 3, %a0, %a1, %d1
+    CF  zs_PeekQualifier, c_PeekQualifier, 0
+    CF  zs_MapANSI, c_MapANSI, 4, %a0, %d0, %a1, %d1
+    .globl  zs_RetA0
+zs_RetA0:                               /* console.device's CDInputHandler: the events passed on */
+    move.l  %a0,%d0
+    rts
+    /* gadtools.library and keymap.library (bgad.c, 16.17) */
+    CF  zs_CreateGadgetA, c_CreateGadgetA, 4, %d0, %a0, %a1, %a2
+    CF  zs_FreeGadgets, c_FreeGadgets, 1, %a0
+    CF  zs_CreateMenusA, c_CreateMenusA, 2, %a0, %a1
+    CF  zs_FreeMenus, c_FreeMenus, 1, %a0
+    CF  zs_GT_GetIMsg, c_GT_GetIMsg, 1, %a0
+    CFS zs_GT_ReplyIMsg, c_GT_ReplyIMsg, 1, %a1
+    CF  zs_CreateContext, c_CreateContext, 1, %a0
+    CF  zs_GetVisualInfoA, c_GetVisualInfoA, 1, %a0
+    CF  zs_FreeVisualInfo, c_FreeVisualInfo, 1, %a0
+    CF  zs_AskKeyMapDefault, c_AskKeyMapDefault, 0
+    .globl  zs_RetA1, zs_Ret0, zs_Ret1
+zs_RetA1:                               /* GT_FilterIMsg, GT_PostFilterIMsg: the message itself */
+    move.l  %a1,%d0
+    rts
+zs_Ret0:
+    moveq   #0,%d0
+    rts
+zs_Ret1:
+    moveq   #1,%d0
+    rts
 /* ObtainSemaphore, ReleaseSemaphore and ObtainSemaphoreShared keep every register (the autodocs) */
 .macro CFALL name, fn, r1
     .globl  \name
@@ -840,6 +872,9 @@ zs_ReleaseSemaphore:
     CF  zs_FindSemaphore, c_FindSemaphore, 1, %a1
     CF  zs_GetVPModeID, c_GetVPModeID, 1, %a0
     CF  zs_ModeNotAvailable, c_ModeNotAvailable, 1, %d0
+    CF  zs_FindDisplayInfo, c_FindDisplayInfo, 1, %d0
+    CF  zs_NextDisplayInfo, c_NextDisplayInfo, 1, %d0
+    CF  zs_GetDisplayInfoData, c_GetDisplayInfoData, 5, %a0, %a1, %d0, %d1, %d2
     CF  zs_BltClear, c_BltClear, 3, %a1, %d0, %d1
     CF  zs_GetSprite, c_GetSprite, 2, %a0, %d0
     CF  zs_FreeSprite, c_FreeSprite, 1, %d0

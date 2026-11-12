@@ -160,10 +160,11 @@ static u32 load_sp(const char *path, u32 cpu, zu32 *size)
 }
 
 /* ZINE's own libraries by their number in the block's lib (kernel/zine.h): the four, then those of d29 16.12 */
-#define NLIBS 12
+#define NLIBS 14
 static const char *const libs[NLIBS] = { "exec.library", "graphics.library", "dos.library", "intuition.library",
     "utility.library", "mathffp.library", "mathtrans.library", "mathieeedoubbas.library",
-    "mathieeedoubtrans.library", "mathieeesingbas.library", "mathieeesingtrans.library", "diskfont.library" };
+    "mathieeedoubtrans.library", "mathieeesingbas.library", "mathieeesingtrans.library", "diskfont.library",
+    "keymap.library", "gadtools.library" };
 const char *zl_name40(const char *lib, unsigned offset);    /* user/zine/lvo40.c: the NDK 3.2's names */
 
 static const char *vecname(u32 v)

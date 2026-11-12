@@ -793,8 +793,9 @@ void zb_audio_abort(u8 *io)
 
 /* ---- console.device (devices/console.h and conunit.h, NDK 3.2; the RKRM Devices manual, d29 16.14): a unit bound
  * to a window as old programs open it (The Juggler) for text and keys. ZINE draws no console text: CMD_WRITE's text
- * goes into the program's output (zine shows it), the control sequences left out; ZINE has no keyboard for programs,
- * so a CMD_READ stays in progress until AbortIO. io_Unit is a ConUnit of ZINE's (its window and an 8 x 8 grid, as a
+ * goes into the program's output (zine shows it), the control sequences left out. A CMD_READ gets the keys typed
+ * (binput.c gives them as characters, 16.17): at once when some wait in the unit's buffer, else when the next come;
+ * at least one, at most io_Length. io_Unit is a ConUnit of ZINE's (its window and an 8 x 8 grid, as a
  * program may read cu_XMax and cu_YMax); CONU_LIBRARY (-1) gives only io_Device, for RawKeyConvert. IOStdReq:
  * io_Unit 24, io_Command 28, io_Flags 30, io_Error 31, io_Actual 32, io_Length 36, io_Data 40. ConUnit: cu_Window 34,
  * cu_XMax 42, cu_YMax 44, cu_XRSize 46, cu_YRSize 48, cu_TabStops 98 (80 words), cu_FgPen 259, cu_TxHeight 282,
@@ -802,8 +803,41 @@ void zb_audio_abort(u8 *io)
 #define CON_UNITS 4
 #define CU_SIZE 512                     /* more than struct ConUnit's 296 bytes */
 u32 zb_con_base;
-static u8 *con_read[CON_UNITS];         /* a CMD_READ in progress per unit (until AbortIO) */
-static u8 con_said;
+static u8 *con_read[CON_UNITS];         /* a CMD_READ in progress (until keys come or AbortIO) */
+static u8 cbuf[64], cin, cout;          /* the characters typed and not yet read */
+
+/* one read filled from the buffer and replied; 0 when the buffer is empty */
+static int con_fill(u8 *io)
+{
+    if (cin == cout)
+        return 0;
+    u8 *d = *(u8 **)(io + 40);
+    u32 len = *(u32 *)(io + 36), n = 0;
+    while (n < len && cin != cout) {
+        d[n++] = cbuf[cout];
+        cout = (u8)((cout + 1) & 63);
+    }
+    *(u32 *)(io + 32) = n;
+    return 1;
+}
+
+/* from binput.c at the vertical blank: characters typed; the reads in progress get them, first come first */
+void zb_con_input(const u8 *s, u32 n)
+{
+    for (u32 i = 0; i < n; i++) {
+        u8 k = (u8)((cin + 1) & 63);
+        if (k == cout)
+            break;                      /* nobody reads: the oldest kept, the rest of the line dropped */
+        cbuf[cin] = s[i];
+        cin = k;
+    }
+    for (int i = 0; i < CON_UNITS; i++)
+        if (con_read[i] && con_fill(con_read[i])) {
+            u8 *io = con_read[i];
+            con_read[i] = 0;
+            zb_io_done(io);
+        }
+}
 
 void zb_con_init(u32 base) { zb_con_base = base; }
 
@@ -845,6 +879,7 @@ u32 zb_con_open(u8 *io, u32 unit, u32 flags)
     *(u16 *)(cu + 284) = 8;
     *(u16 *)(cu + 286) = 6;
     *(u8 **)(io + 24) = cu;
+    zi_con_units(1);
     return 0;
 }
 
@@ -858,9 +893,12 @@ static int con_slot(const u8 *io)
 
 void zb_con_abort(u8 *io)
 {
-    int i = con_slot(io);
-    if (io && i >= 0) {
+    u16 s = zt_dis();
+    int i = io ? con_slot(io) : -1;
+    if (i >= 0)
         con_read[i] = 0;
+    zt_en(s);
+    if (i >= 0) {
         *(u32 *)(io + 32) = 0;
         io[31] = (u8)IOERR_ABORTED;
         zb_io_done(io);
@@ -871,8 +909,10 @@ void zb_con_close(u8 *io)
 {
     zb_con_abort(io);
     u8 *cu = *(u8 **)(io + 24);
-    if (cu)
+    if (cu) {
         zx_FreeMem((u32)cu, CU_SIZE);
+        zi_con_units(-1);
+    }
     *(u32 *)(io + 24) = 0;
 }
 
@@ -921,16 +961,19 @@ void zb_con_beginio(u8 *io)
         *(u32 *)(io + 32) = s ? n : 0;
         break;
     }
-    case CMD_READ: {                    /* no keys for programs: in progress until AbortIO */
-        int i = con_slot(0);
+    case CMD_READ: {                    /* the keys typed (16.17): at once, or in progress until they come */
+        if (!*(u32 *)(io + 24) || !*(u32 *)(io + 36) || !*(u8 **)(io + 40))
+            break;                      /* the library unit, or nowhere to put them: done with no bytes */
+        u16 s = zt_dis();
+        int i = con_fill(io) ? -1 : con_slot(0);
         if (i >= 0) {
             con_read[i] = io;
             io[30] &= (u8)~1;           /* not quick */
-            if (!con_said++)
-                say("ZINE: console.device's CMD_READ waits for keys, which ZINE does not give programs", "", "\n");
-            return;
         }
-        break;                          /* more than four at once: done with no bytes */
+        zt_en(s);
+        if (i >= 0)
+            return;
+        break;                          /* filled, or more than four at once: done (with no bytes) */
     }
     case CMD_CLEAR:
     case CMD_RESET:
@@ -949,10 +992,7 @@ void zb_con_beginio(u8 *io)
     zb_io_done(io);
 }
 
-/* input.device (devices/input.h, NDK 3.2; 16.14): opened by programs that add an input handler to see the keys and
- * the mouse first (TBL's demo system). ZINE gives programs no input events, so a handler is taken and never called;
- * every command (IND_ADDHANDLER 9, IND_REMHANDLER 10, IND_WRITEEVENT 11, the thresholds and the mouse port's ones)
- * is done at once. */
+/* input.device (devices/input.h, NDK 3.2; 16.14): its commands are binput.c's (16.17) */
 u32 zb_inp_base;
 void zb_inp_init(u32 base) { zb_inp_base = base; }
 u32 zb_inp_open(u8 *io)
@@ -964,13 +1004,3 @@ u32 zb_inp_open(u8 *io)
     io[31] = 0;
     return 0;
 }
-void zb_inp_beginio(u8 *io)
-{
-    io[8] = 5;
-    io[31] = 0;
-    *(u32 *)(io + 32) = 0;
-    zb_io_done(io);
-}
-
-/* RawKeyConvert (-48): ZINE gives programs no keys, so no characters (0) */
-u32 zb_con_rawkey(void) { return 0; }

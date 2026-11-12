@@ -80,8 +80,8 @@ struct zine_blk {
     s32 code;                           /* the return code (ZH_RETURN, ZH_EXIT) */
     u32 vec, pc, addr;                  /* ZH_CRASH: vector, PC, access address; ZH_ALERT: code in addr */
     u32 lib, lvo;                       /* ZH_UNSUP: the library (0 exec, 1 graphics, 2 dos, 3 intuition, 4 utility,
-                                         * 5-10 the math ones, 11 diskfont, as user/zine.c names them; 99
-                                         * another), offset */
+                                         * 5-10 the math ones, 11 diskfont, 12 keymap, 13 gadtools, as user/zine.c
+                                         * names them; 99 another), offset */
     u32 secs;                           /* the session's length */
     u32 need;                           /* -ENOMEM before the hand-over: the bytes this block would need */
     u32 chip_free, fast_free, fast_largest;   /* what the program was given */

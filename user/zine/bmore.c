@@ -1049,10 +1049,13 @@ extern const struct zb_mlib zb_mlibs[6];
 u32 zb_xlib[ZB_NXLIB];                  /* the bases, by number - 4 (kernel/zine.h ZINE_LIB_ numbers) */
 static const char *const xname[ZB_NXLIB] = { "utility.library", "mathffp.library", "mathtrans.library",
     "mathieeedoubbas.library", "mathieeedoubtrans.library", "mathieeesingbas.library", "mathieeesingtrans.library",
-    "diskfont.library" };
+    "diskfont.library", "keymap.library", "gadtools.library" };
 extern const u16 *const zb_df_lvo;      /* bfont.c (16.13) */
 extern void (*const *const zb_df_fn)(void);
 extern const u16 zb_df_n;
+extern const u16 *const zb_gt_lvo, *const zb_km_lvo;   /* bgad.c (16.17) */
+extern void (*const *const zb_gt_fn)(void), (*const *const zb_km_fn)(void);
+extern const u16 zb_gt_n, zb_km_n;
 
 static u32 xlib(u32 (*take)(u32), const char *name, u16 slots, const u16 *lvo, void (*const *fn)(void), u16 n)
 {
@@ -1076,6 +1079,8 @@ void zb_more_init(u32 (*take)(u32))
     for (int i = 0; i < 6; i++)
         zb_xlib[1 + i] = xlib(take, xname[1 + i], zb_mlibs[i].slots, zb_mlibs[i].lvo, zb_mlibs[i].fn, zb_mlibs[i].n);
     zb_xlib[7] = xlib(take, xname[7], 22, zb_df_lvo, zb_df_fn, zb_df_n);     /* diskfont_lib.fd: 18 + 4 */
+    zb_xlib[8] = xlib(take, xname[8], 8, zb_km_lvo, zb_km_fn, zb_km_n);       /* keymap_lib.fd: up to -48 */
+    zb_xlib[9] = xlib(take, xname[9], 29, zb_gt_lvo, zb_gt_fn, zb_gt_n);      /* gadtools_lib.fd: up to -174 */
     extern u8 zm_fpu;                   /* bfpu.S: the math libraries' arithmetic on the FPU (16.13) */
     zm_fpu = (Z.attn & 0x70) != 0;      /* AFF_68881, AFF_68882, AFF_FPU40 */
     extern u32 zb_tracing;

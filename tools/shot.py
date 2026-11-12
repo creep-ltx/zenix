@@ -7,7 +7,8 @@ port with a script (tools/serial-tap.py format) and save screenshots.
 usage: shot.py config.fs-uae script.txt out_prefix [t1 t2 ...]
  -> out_prefix-<t>.png for each time t (seconds after start), and out_prefix-<name>.png for each `shot <name>` line
  of the script (serial-tap.py: taken when the script gets there, so it waits for what the screen shows, not for a
- time); with shot lines the run ends when the script does (or at SHOT_LIMIT).
+ time); with shot lines the run ends when the script does (or at SHOT_LIMIT). `shot key-NAME` (or key-shift+NAME,
+ ctrl, alt, logo; key-NAME:MS holds it MS ms) presses that key on the emulated Amiga keyboard instead (wtype's names).
 ZENIX_SERIAL=/tmp/name: a private serial port (the config is always copied and filled in by fsuae_conf.py, as run-test.sh does).
 RESET_AT=s[,s...]: press Ctrl + Left Amiga + Right Amiga (a warm reset) at those times (tools/diag-test.sh).
 SHOT_LIMIT=s: end the run (and its cage and FS-UAE) at most s seconds after the emulator started (default: the last
@@ -103,7 +104,19 @@ try:
                 if name == "END":
                     ended = True
                     break
-                cage.screenshot(f"{prefix}-{name}.png")
+                if name.startswith("key-"):        # `shot key-[MOD+]KEY[:MS]`: a key pressed (held MS ms)
+                    spec, _, hold = name[4:].partition(":")
+                    mods, _, k = spec.rpartition("+")
+                    names = {"shift": "Shift_L", "ctrl": "Control_L", "alt": "Alt_L", "logo": "Super_L"}
+                    cmd = ["wtype"]
+                    for m in filter(None, mods.split("+")):
+                        cmd += ["-P", names[m], "-s", "150"]
+                    cmd += ["-P", k, "-s", hold, "-p", k] if hold else ["-k", k]
+                    for m in filter(None, mods.split("+")):
+                        cmd += ["-s", "150", "-p", names[m]]
+                    subprocess.run(cmd, env=cage._env(), check=False)
+                else:
+                    cage.screenshot(f"{prefix}-{name}.png")
                 open(f"{req}.{name}", "w").close()
             time.sleep(0.2)
 finally:

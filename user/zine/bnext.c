@@ -49,6 +49,109 @@ u32 c_ModeNotAvailable(u32 id)
     return mon == 0 || mon == 0x00011000u || mon == 0x00021000u ? 0 : 2;
 }
 
+/* the display database (graphics/displayinfo.h, NDK 3.2; 16.17): FindDisplayInfo(id d0) (-726) a handle for a
+ * native PAL or NTSC mode (0 for another, as ModeNotAvailable says), NextDisplayInfo(id d0) (-732) the native modes
+ * of the machine's video standard in turn (lores, hires, super-hires, each also laced; INVALID_ID at the end),
+ * GetDisplayInfoData(handle a0, buf a1, size d0, tagID d1, id d2) (-756) the record as AmigaOS fills it for these
+ * chips: DTAG_DISP (properties, ticks per pixel, the colours' bits), DTAG_DIMS (depth, sizes, the nominal
+ * rectangle), DTAG_MNTR (rows and colour clocks of a frame: 312/313 x 227 PAL, 262/263 x 227 NTSC), DTAG_NAME ("PAL:
+ * LowRes" ...). The bytes given (at most size), 0 for another tag. Elude's 14bit sound driver asks DTAG_MNTR of the
+ * front screen's mode. */
+static u32 dhandle[8];
+static u32 dnext;
+u32 c_FindDisplayInfo(u32 id)
+{
+    if (c_ModeNotAvailable(id))
+        return 0;
+    dhandle[dnext & 7] = id;
+    return (u32)&dhandle[dnext++ & 7];
+}
+
+u32 c_NextDisplayInfo(u32 last)
+{
+    static const u16 keys[] = { 0x0000, 0x0004, 0x8000, 0x8004, 0x8020, 0x8024 };
+    u32 mon = Z.pal ? 0x00021000u : 0x00011000u;
+    u32 i = 0;
+    if (last != ~0u)
+        while (i < 6 && (mon | keys[i]) != last)
+            i++;
+    i = last == ~0u ? 0 : i + 1;
+    return i < 6 ? mon | keys[i] : ~0u;
+}
+
+u32 c_GetDisplayInfoData(const u32 *h, u8 *buf, u32 size, u32 tag, u32 id)
+{
+    if (h && c_TypeOfMem((u32)h))
+        id = *h;
+    if (!buf || !c_TypeOfMem((u32)buf) || !size || c_ModeNotAvailable(id))
+        return 0;
+    u8 d[96];
+    zmemset(d, 0, sizeof d);
+    u32 len;
+    int pal = (id & 0xFFFF1000u) == 0x00021000u || ((id & 0xFFFF1000u) == 0 && Z.pal);
+    int lace = (id & 4) != 0, hi = (id & 0x8000) != 0, shi = (id & 0x8020) == 0x8020;
+    u16 w = (u16)(shi ? 1280 : hi ? 640 : 320), h2 = (u16)((pal ? 256 : 200) << lace);
+    switch (tag) {
+    case 0x80000000u:                   /* DTAG_DISP: dis_SIZEOF 56 */
+        len = 56;
+        *(u32 *)(d + 18) = (u32)(lace | (id & 0x0800 ? 8 : 0) | (id & 0x0080 ? 0x1000 : 0) | (id & 0x0400 ? 2 : 0) |
+                                 (pal ? 0x20 : 0) | 0x40 | 0x200 | 0x800 | (Z.aga ? 0x00010000u | 0x2000 : 0) |
+                                 (Z.ecs ? 0x10 : 0) | 0x00100000u);
+        *(u16 *)(d + 22) = (u16)(shi ? 11 : hi ? 22 : 44);     /* dis_Resolution: ticks per pixel x, y */
+        *(u16 *)(d + 24) = (u16)(lace ? 22 : 44);
+        *(u16 *)(d + 26) = (u16)(shi ? 35 : hi ? 70 : 140);    /* dis_PixelSpeed, ns */
+        *(u16 *)(d + 28) = 8;           /* dis_NumStdSprites */
+        *(u16 *)(d + 30) = Z.aga ? 0xFFFF : 4096;                /* dis_PaletteRange */
+        *(u16 *)(d + 32) = 44, *(u16 *)(d + 34) = 44;           /* dis_SpriteResolution */
+        d[40] = d[41] = d[42] = (u8)(Z.aga ? 8 : 4);            /* RedBits, GreenBits, BlueBits */
+        break;
+    case 0x80001000u:                   /* DTAG_DIMS: dim_SIZEOF 88 */
+        len = 88;
+        *(u16 *)(d + 16) = (u16)(Z.aga ? 8 : hi ? 4 : 6);       /* dim_MaxDepth */
+        *(u16 *)(d + 18) = 16, *(u16 *)(d + 20) = 1;
+        *(u16 *)(d + 22) = 16368, *(u16 *)(d + 24) = 16384;
+        for (int r = 0; r < 5; r++) {   /* Nominal, MaxOScan, VideoOScan, TxtOScan, StdOScan: 0,0 - w-1,h-1 */
+            *(s16 *)(d + 26 + 8 * r + 4) = (s16)(w - 1);
+            *(s16 *)(d + 26 + 8 * r + 6) = (s16)(h2 - 1);
+        }
+        break;
+    case 0x80002000u:                   /* DTAG_MNTR: mtr_SIZEOF 96 */
+        len = 96;
+        *(u16 *)(d + 20) = 129, *(u16 *)(d + 22) = (u16)(pal ? 44 : 44);    /* mtr_ViewPosition */
+        *(u16 *)(d + 24) = 22, *(u16 *)(d + 26) = 22;           /* mtr_ViewResolution */
+        *(u16 *)(d + 36) = (u16)(pal ? 312 : 262);              /* mtr_TotalRows */
+        *(u16 *)(d + 38) = 227;         /* mtr_TotalColorClocks */
+        *(u16 *)(d + 40) = (u16)(pal ? 29 : 21);                /* mtr_MinRow */
+        *(u16 *)(d + 76) = 129, *(u16 *)(d + 78) = 44;          /* mtr_DefaultViewPosition */
+        *(u32 *)(d + 80) = id;          /* mtr_PreferredModeID */
+        break;
+    case 0x80003000u: {                 /* DTAG_NAME: nif_SIZEOF 16 + 32 + 8 */
+        len = 56;
+        const char *a = pal ? "PAL:" : "NTSC:", *b = shi ? "SuperHighRes" : hi ? "HighRes" : "LowRes";
+        u32 k = 16;
+        while (*a)
+            d[k++] = (u8)*a++;
+        while (*b)
+            d[k++] = (u8)*b++;
+        if (lace)
+            for (const char *c = " Laced"; *c; c++)
+                d[k++] = (u8)*c;
+        break;
+    }
+    default:
+        return 0;
+    }
+    *(u32 *)d = tag;                    /* the QueryHeader: StructID, DisplayID, SkipID (TAG_SKIP), Length (8 bytes) */
+    *(u32 *)(d + 4) = id;
+    *(u32 *)(d + 8) = 3;
+    *(u32 *)(d + 12) = (len - 16 + 7) / 8;
+    u32 n = size < len ? size : len;
+    if (!c_TypeOfMem((u32)buf + n - 1))
+        return 0;
+    zmemcpy(buf, d, n);
+    return n;
+}
+
 /* BltClear(memBlock a1, bytecount d0, flags d1) (-300): bytes cleared; flags bit 1: d0 is rows << 16 | bytes a row.
  * Done by the processor after the blitter is idle (the autodoc's "wait" bit 0 is then always kept). Only the
  * program's own memory is cleared. */
@@ -167,8 +270,8 @@ u32 c_QueryOverscan(u32 id, s16 *r, s32 type)
 /* WBenchToFront (-342), WBenchToBack (-336): FALSE, there is no Workbench screen (as when it is closed) */
 u32 c_WBenchTo(void) { return 0; }
 
-/* ActivateWindow(win a0) (-450): ZINE's windows take no input of their own: nothing to do */
-void c_ActivateWindow(u8 *w) { (void)w; }
+/* ActivateWindow(win a0) (-450): the window gets the keys and the mouse (binput.c, 16.17) */
+void c_ActivateWindow(u8 *w) { if (w) zi_activate(w); }
 
 /* DisplayAlert(alertNumber d0, string a0, height d1) (-90): the alert's text in the program's output (each part: a
  * 16-bit x, an 8-bit y, the text, a continuation byte), answered as if the right mouse button was pressed: FALSE, as

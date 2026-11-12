@@ -507,3 +507,48 @@ so the driver runs dry and stops between buffers. That is the emulated CPU's spe
 cycle-exact set-up; `accuracy = 0` with `uae_cpu_speed = max` in a copy of the harness changed nothing measurable),
 not the task switching. A real 68060 at 50 MHz is several times faster; it has not been tried (the Apollo 1260 has
 not run ZINE's 68060 package yet either).
+
+## Round 7 (2026-11-12, branch zine7, d29 16.17)
+
+Targeted reruns only (the same harness in a folder of its own; traced runs with the trace blob; keys pressed on the
+emulated keyboard where a demo waits for one). The full 500 rerun is still to do.
+
+**Input, gadtools and the screens:**
+- **The Juggler** (68020): shows its text, starts its HAM movie when a key is pressed (console.device's read) and
+  ends at Esc with return code 0. The movie needed intuition's View's Copper lists (d29 16.17: it double-buffers by
+  keeping two lists RemakeDisplay made and switching `View.LOFCprList` and `RasInfo->BitMap` each frame; showing the
+  RasInfo's BitMap showed the frame being decoded) and `FreeCprList` at its end.
+- **J** (Ephidrena, 68060): was black to the limit; its vertical-blank code signals the main task only while
+  IntuitionBase's `FirstScreen` is its screen. ZINE keeps the screens' order now: part 1 ends by itself after 253 s
+  emulated (return code 0). The demo's other parts (`EXECUTE_ME` runs part2 and fades) are not part of the harness.
+- **deeppan** (Efreet, 68060): opens its window through gadtools and runs to the limit (a 640 x 256 screen, drawing
+  each frame; black at 300 s in FS-UAE, its own slow rendering on the emulated 68060). Before: a crash through base 0.
+
+**Round 5's unsettled ones, rechecked (traced):**
+- **Lola** (68020): after AllocAbs and its unpacking it waits in `STOP` at `$6080` for a flag its own interrupt code
+  sets; ZINE's level 3 vector is still in place (the trace's samples come from it), so its handler was never
+  installed where the CPU looks. Not settled.
+- **total triple trouble** (68020) and **The Fall** (68030): make no call after the first ones (The Fall's last is
+  `Supervisor`) and run their own interrupts; nothing of ZINE's runs (no trace samples). Black late is their own.
+- **Fetish** (Ozone, 68060): loops on `OldOpenLibrary("CrM.library")` (Crunch-Mania's decruncher library, not in
+  its folder). Not ZINE's; it runs with the library in its LIBS:.
+- **Gift** (Potion, 68060): needs AHI (an `ahi.device` mode requester and a mixing player); without it says
+  "Couldn't open ahi.device" and its cleanup calls offset -66 through a base of 0. An AHI is a project of its own;
+  ZINE keeps answering `IOERR_OPENFAIL`.
+
+**The crashes after minutes (traced):** most are **calls through a library base of 0**: `jsr -N(a6)` with a6 = 0
+jumps to `$FFFFFFxx`, the CPU wraps to 0 and runs the vector table as code until an illegal instruction (`$0A`,
+`$66`, `$82`, `$D2`, "instruction 0000 0000") or into exec's jump table below ExecBase (then read as a call of exec's
+offset -912). The trace's R line (USP and the stacked return address) names the call. **My Kingdom** part 1 runs its
+exit routine twice: the first closes graphics and clears its GfxBase, the second calls LoadView through it (its own
+code; the return address on the stack is that call). **Cebit 90** and **scifi** stop at exec -912 the same way (a
+jump to 0), **Cubic Meditation** (68030) jumps into free memory (line F at a `ZMEM` header). No ZINE cause found in
+these; the rest of round 5's list (Psychedelic, the 40k intro, Leisner, SoftWired, 1000%, Piramida) not traced
+this round.
+
+**Spot checks (this branch's final code):** on the 68020 Interparallactic, Paul the Kinder Penguin, Way Too Rude and
+Griffin end by themselves as in the rerun (205, 208, 286, 252 s emulated); on the 68060 Soliloquy plays to its end
+(3,375 s), Dust, Shake Off The Dust and Cobalt run to the limit, Dust's sound process says "Started!" and
+"Finished!". On the way, keeping IntuitionBase's `FirstScreen` made Elude's 14bit driver ask graphics'
+`GetDisplayInfoData` for the front screen's monitor (it found no screen before and skipped it): the display
+database's calls came with this round (d29 16.17).
