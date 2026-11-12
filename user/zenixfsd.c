@@ -440,7 +440,7 @@ static int try_mount(const char *name, int restart, int share)
     for (unsigned bs = 10; bs <= 12; bs++) {
         if (chiponly) o.cache_blocks = (96u << 10) >> bs;       /* (the library's floor is 32) */
         zdisk_dev(&zdev, bs);
-        if (zenixfs_mount_opts(&fs, &zdev, &o) == 0) { strncpy(devname, name, sizeof devname - 1); return 0; }
+        if (zenixfs_mount_opts(&fs, &zdev, &o) == 0) { zenixfs_set_readn(fs, zdisk_readn); strncpy(devname, name, sizeof devname - 1); return 0; }
         fs = 0;
     }
     zdisk_close();

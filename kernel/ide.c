@@ -84,6 +84,27 @@ static void ide_settle(void)
     (void)CIAA(CIA_CRA);
 }
 
+/* One sector (512 bytes) between the data port and memory. The drive's DA0-DA2 are on A2-A4 (Gayle spec p.8), so A1
+ * selects nothing: a long access, which the bus splits into two word cycles (first word at A1=0, first in memory),
+ * reaches the data register twice. On the Gayle port, once ide_init has seen IDENTIFY read the same both ways
+ * (ide_long), 128 move.l in rounds of 16: half the bus requests and an eighth of the loop of a word loop; the
+ * CPU's other accesses go to the buffer (fast RAM when the caller's is). Otherwise 256 move.w. */
+static int ide_long;
+static __attribute__((noinline)) void sec_xfer(u16 *p, int write)
+{
+    volatile u16 *port = (volatile u16 *)ide_data;
+    u32 n = 255;
+    if (write)                          /* writes stay word by word: the boot check can only prove reads */
+        __asm__ volatile("1:\tmove.w (%0)+,(%2)\n\tdbra %1,1b" : "+a"(p), "+d"(n) : "a"(port) : "memory", "cc");
+    else if (!ide_long)
+        __asm__ volatile("1:\tmove.w (%2),(%0)+\n\tdbra %1,1b" : "+a"(p), "+d"(n) : "a"(port) : "memory", "cc");
+    else {
+        n = 7;
+        __asm__ volatile("1:\n\t.rept 16\n\tmove.l (%2),(%0)+\n\t.endr\n\tdbra %1,1b"
+                         : "+a"(p), "+d"(n) : "a"(port) : "memory", "cc");
+    }
+}
+
 static u32 ms_ticks(u32 ms)
 {
     return ms * (eclock_hz / 1000);
@@ -94,7 +115,7 @@ static u32 ms_ticks(u32 ms)
  * 0, or -1 with what it waited for on the log. */
 static int ide_wait(u8 mask, u8 want, u32 ms, const char *what)
 {
-    u32 t0 = hr_time(), lim = ms_ticks(ms);
+    u32 t0 = 0, lim = 0, n = 0;
     u8 s;
     for (;;) {
         s = IDE_REG(7);
@@ -104,7 +125,14 @@ static int ide_wait(u8 mask, u8 want, u32 ms, const char *what)
             if ((s & mask & ~ST_ERR) == want)
                 return 0;
         }
-        if ((u32)(hr_time() - t0) > lim) {
+        if (++n & 15)
+            continue;                   /* the clock (7 CIA reads, about 10 us) at every 16th look, not every look: the
+                                         * drive is seen ready within a status read, and the time-out is still the
+                                         * clock's; a sector already waiting costs one status read */
+        if (!lim) {
+            t0 = hr_time();
+            lim = ms_ticks(ms);
+        } else if ((u32)(hr_time() - t0) > lim) {
             kprintf("ide: no answer while waiting for %s (status %x after %u ms)\n", what, s, ms);
             return -1;
         }
@@ -113,7 +141,7 @@ static int ide_wait(u8 mask, u8 want, u32 ms, const char *what)
     return -1;
 }
 
-static int ide_cmd(u32 lba, u32 n, u16 *p, int write);
+static int ide_cmd(u32 lba, u32 n, u16 *p, u8 cmd);
 /* From here to ide_init: finding the drive at boot, -Os (audit block 2); the commands and their waits stay -O2 */
 #pragma GCC push_options
 #pragma GCC optimize("Os")
@@ -165,6 +193,18 @@ static int ide_present(void)
 
 static u16 id[256];                     /* IDENTIFY's data (and sector 0 before it, dropped) */
 
+/* IDENTIFY DEVICE to the master: 0 when its data is waiting */
+static int ide_ident_cmd(void)
+{
+    IDE_REG(6) = 0xE0;              /* master, LBA mode */
+    ide_settle();
+    if (ide_wait(ST_BSY | ST_DRDY | ST_ERR, ST_DRDY, T_BUSY_MS, "the drive before IDENTIFY"))
+        return -1;
+    IDE_REG(7) = 0xEC;
+    ide_settle();
+    return ide_wait(ST_BSY | ST_DRQ, ST_DRQ, T_BUSY_MS, "IDENTIFY data");
+}
+
 static int ide_identify(void)
 {
     if (ide_present())
@@ -176,14 +216,8 @@ static int ide_identify(void)
      * (tools/update-test.sh zfsroot). A one-sector READ starts its buffer at 0 again; on a real drive it is one sector
      * more at boot. Its result does not matter: IDENTIFY decides (its ERR, from a CHS-only drive, say, is not counted
      * in the wait below; writing IDENTIFY clears it). */
-    (void)ide_cmd(0, 1, id, 0);
-    IDE_REG(6) = 0xE0;              /* master, LBA mode */
-    ide_settle();
-    if (ide_wait(ST_BSY | ST_DRDY | ST_ERR, ST_DRDY, T_BUSY_MS, "the drive before IDENTIFY"))
-        return -1;
-    IDE_REG(7) = 0xEC;              /* IDENTIFY DEVICE */
-    ide_settle();
-    return ide_wait(ST_BSY | ST_DRQ, ST_DRQ, T_BUSY_MS, "IDENTIFY data");
+    (void)ide_cmd(0, 1, id, 0x20);
+    return ide_ident_cmd();
 }
 
 /* Gayle's IDE interrupt is a level-2 source shared with the CIA tick. Zenix polls, so it must never fire: nIEN in the
@@ -285,9 +319,11 @@ int ide_init(void)
     }
     IDE_CTL = 0x02;                                 /* nIEN on the port that has the drive (polling only) */
     u8 sum = 0;                     /* of the 512 bytes: ATA's checksum in word 255 makes it 0 */
+    u32 h = 0;                      /* a hash of the words in order, for the long reads' check below */
     for (int i = 0; i < 256; i++) {
         u16 w = IDE_DATA;
         sum = (u8)(sum + w + (w >> 8));
+        h = h * 31 + w;
         id[i] = swab(w);
     }
     ide_settle();
@@ -312,19 +348,37 @@ int ide_init(void)
         return -1;
     }
     nsectors = ((u32)id[61] << 16) | id[60];
-    kprintf("ide: %s port %p: %s - %u sectors (%uMB)\n", port_name, ide_base, model, nsectors, nsectors / 2048);
+    /* Long reads (sec_xfer) only where they give the same data: on the Gayle port IDENTIFY once more, read with
+     * move.l into id[] (its words are used above already), must hash as the word-wise read did (IDENTIFY's data is
+     * never all one value, as a blank sector could be). Whatever the long reads left of the sector is read out word by
+     * word, so the drive ends the command; any failure keeps words. The drive found above stays found either way. */
+    if (gayle_found && !ide_ident_cmd()) {
+        ide_long = 1;
+        sec_xfer(id, 0);
+        ide_settle();
+        for (int i = 0; i < 256 && (IDE_REG(7) & ST_DRQ); i++)
+            (void)IDE_DATA;
+        u32 h2 = 0;
+        for (int i = 0; i < 256; i++)
+            h2 = h2 * 31 + id[i];
+        ide_long = h2 == h;
+        ide_ack();
+    }
+    kprintf("ide: %s port %p: %s - %u sectors (%uMB), %s reads\n", port_name, ide_base, model, nsectors,
+            nsectors / 2048, ide_long ? "long" : "word");
     return 0;
 }
 
 #pragma GCC pop_options
 
-/* One READ SECTORS / WRITE SECTORS command for n sectors (1..256), one DRQ per sector. The waits run with interrupts
+/* One READ SECTORS (0x20) / WRITE SECTORS (0x30) command for n sectors (1..256), one DRQ per sector, or FLUSH CACHE
+ * (0xE7, n 0: up to 30 s, as any wait). The waits run with interrupts
  * on: the drive cannot interrupt (nIEN, and Gayle's IDE enable is off), and a wait of seconds with level 2 masked
  * would make the keyboard time out after 143 ms and drop keys (hand-off note K5). Levels 1-2 are masked only around
  * each sector's 256 data words and the acknowledge. The serial receive interrupt (level 5) is never masked. */
-static int ide_cmd(u32 lba, u32 n, u16 *p, int write)
+static int ide_cmd(u32 lba, u32 n, u16 *p, u8 cmd)
 {
-    int rc = -1;
+    int rc = -1, write = cmd != 0x20;
     if (ide_wait(ST_BSY, 0, T_BUSY_MS, "the drive before a command"))
         goto out;
     {
@@ -334,7 +388,7 @@ static int ide_cmd(u32 lba, u32 n, u16 *p, int write)
         IDE_REG(3) = lba & 0xFF;
         IDE_REG(4) = (lba >> 8) & 0xFF;
         IDE_REG(5) = (lba >> 16) & 0xFF;
-        IDE_REG(7) = write ? 0x30 : 0x20;
+        IDE_REG(7) = cmd;
         ide_settle();
         irq_restore(sv);
     }
@@ -344,16 +398,12 @@ static int ide_cmd(u32 lba, u32 n, u16 *p, int write)
             goto out;
         }
         u16 sv = irq_save2();
-        if (write)
-            for (int i = 0; i < 256; i++)
-                IDE_DATA = *p++;
-        else
-            for (int i = 0; i < 256; i++)
-                *p++ = IDE_DATA;
+        sec_xfer(p, write);
+        p += 256;
         ide_settle();
         irq_restore(sv);
     }
-    if (write && ide_wait(ST_BSY, 0, T_BUSY_MS, "the end of a write"))   /* some drives report early (I5) */
+    if (write && ide_wait(ST_BSY, 0, T_BUSY_MS, "the end of a write or FLUSH CACHE"))  /* some drives report early (I5) */
         goto out;
     rc = 0;
 out:
@@ -370,7 +420,7 @@ static int ide_rw(u32 lba, u32 count, void *buf, int write)
     u16 *p = buf;
     while (count) {
         u32 n = count > max_sectors ? max_sectors : count;
-        if (ide_cmd(lba, n, p, write))
+        if (ide_cmd(lba, n, p, write ? 0x30 : 0x20))
             return -1;
         lba += n;
         count -= n;
@@ -398,18 +448,5 @@ int ide_write(u32 lba, u32 count, const void *buf)
  * interrupts on (K5). */
 int ide_flush(void)
 {
-    int rc = -1;
-    if (ide_wait(ST_BSY, 0, T_BUSY_MS, "the drive before FLUSH CACHE"))
-        goto out;
-    IDE_REG(6) = 0xE0;
-    IDE_REG(7) = 0xE7;
-    ide_settle();
-    rc = ide_wait(ST_BSY, 0, T_BUSY_MS, "FLUSH CACHE");
-out:
-    {
-        u16 sv = irq_save2();
-        ide_ack();
-        irq_restore(sv);
-    }
-    return rc;
+    return ide_cmd(0, 0, 0, 0xE7);
 }

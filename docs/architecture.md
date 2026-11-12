@@ -96,7 +96,13 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
   through Gayle's fast window (`0xDA2000`, "16 bit" timing; the registers stay in the "8 bit" `0xDA0000` window,
   Gayle spec p.7-8); on the Gayle port up to 256 sectors per READ/WRITE SECTORS command, one DRQ per sector (the
   A4000 port keeps one sector per command: FS-UAE's A4000 IDE stayed busy for good now and then after a READ SECTORS
-  of 2, cause not found). ATA's 400 ns settle after
+  of 2, cause not found). **A sector is read as 128 `move.l`** in rounds of 16 (docs/d42-faster-ide.md): the drive's
+  DA0-DA2 are on A2-A4 (Gayle spec p.8), so a long access's two word cycles both reach the data register; `ide_init`
+  reads IDENTIFY a second time with them and keeps them only if the words hash the same as the word-wise read that
+  found the drive (the boot line says "long reads" or "word reads"; the A4000 port always words). Writes stay
+  `move.w`. A wait reads the status once
+  before it reads the clock (`hr_time`, seven CIA reads), so a sector already waiting costs one register read; FLUSH
+  CACHE goes through the same command path. ATA's 400 ns settle after
   a command and after the last data word is two CIA reads (E-clock synchronised, so at least 1.4 us on any CPU).
   Verified in FS-UAE (the matrix: Gayle ID 0xD, the fast data window, the A4000 and A3000 setups); the timings of real
   drives, the latch storm and a CHS-only drive are not modelled there.
@@ -1048,7 +1054,9 @@ ZenixFS server over one with it (section 13, the version record).
 
 ### zfsd - the ZenixFS server (`user/zenixfsd.c` + `zenixfs/zenixfs.c`, port `fs` or `fs.DEVICE`)
 The same library that the host tests run (`zenixfs/`, compiled with `-DZENIXFS_FREESTANDING`; `user/zenixfs_env.h`), over the
-disk server (`user/zenixfs_disk.c`: filesystem blocks of 1-4 KB as 2-8 sector calls plus `DISK_FLUSH`). Same protocol and the same
+disk server (`user/zenixfs_disk.c`: filesystem blocks of 1-4 KB as 2-8 sector calls plus `DISK_FLUSH`; a read of two
+or more whole blocks of one extent goes straight into the caller's buffer as one call of up to 64 KB, ending before a
+block the library's cache holds, and the read scratch remembers its data block: DESIGN D42). Same protocol and the same
 permission rules as the ext2 server. Changes commit three seconds after the first one, at `FS_SYNC` and at `FS_QUIT`.
 It takes the same `-root -id` arguments as fsd and prints as `zfsd` (the root's) or as its port name (a mount's); the
 port word may be left out (`zfsd DEVICE -id ID`: the port is `fs.DEVICE`), which is how `mount` registers it, because
@@ -1285,6 +1293,10 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   with 8, hence the floor); without the program loads 65 and 85. The extra reads are programs read again that 48
   blocks still held. Before, each block was a separate `malloc`, whose growing chunks held 84 KB for 48 KB of
   blocks; fsd on the 2 MB A1200 without fast RAM went from 148 KB to 87 KB.
+  **Read-ahead** (DESIGN D42): a read that starts a file or goes on where the last read of that file ended, meeting
+  a block that is not cached, reads it and the following blocks that are its neighbours on the disk (not cached, at
+  most a quarter of the cache) with one request into neighbouring slots, the ones least recently used; a whole block
+  written is not read first.
 - **ext2: what is mounted** (`ext2_mount_as`, kernel/ext2.c). Refused: revision above 1, blocks above 4 KB, a
   superblock or group table that does not add up (sizes, inode count, every group's bitmaps and inode table inside
   its group), and every INCOMPAT feature except `filetype` - extents, 64bit, flex_bg, meta_bg, needs_recovery,

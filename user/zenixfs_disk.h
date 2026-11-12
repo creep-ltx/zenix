@@ -12,3 +12,5 @@ int zdisk_can_flush(void);       /* 0: the disk cannot flush its write cache (DI
 unsigned zdisk_dostype(void);
 /* fill dev for filesystem blocks of 1 << bshift bytes (bshift 10..12) */
 void zdisk_dev(struct zenixfs_dev *dev, unsigned bshift);
+/* n neighbouring blocks in one disk request, for zenixfs_set_readn: 0 or -1 */
+int zdisk_readn(void *ctx, uint32_t blk, uint32_t n, void *buf);

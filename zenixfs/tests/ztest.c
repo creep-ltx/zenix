@@ -84,6 +84,7 @@ static int test_basic(void)
     struct zenixfs *fs;
     CHECK(zenixfs_mkfs(&m->dev, "test", 0, 1000) == 0);
     CHECK(zenixfs_mount(&fs, &m->dev, 64) == 0);
+    zenixfs_set_readn(fs, zmem_readn);      /* d42: whole blocks straight in (here: the big file still in the cache, unsynced) */
     CHECK(zenixfs_charset(fs) == ZENIXFS_CHARSET_LATIN1);
     CHECK(zenixfs_set_charset(fs, ZENIXFS_CHARSET_UTF8) == 0);
     zenixfs_set_time(fs, 2000);
@@ -112,15 +113,37 @@ static int test_basic(void)
     CHECK(zenixfs_fsck(fs, logmsg, NULL) == 0);
     CHECK(zenixfs_unmount(fs) == 0);
     CHECK(zenixfs_mount(&fs, &m->dev, 64) == 0);
+    zenixfs_set_readn(fs, zmem_readn);
     CHECK(zenixfs_charset(fs) == ZENIXFS_CHARSET_UTF8);
     CHECK(zenixfs_lookup(fs, ZENIXFS_ROOT_INO, "big", 3, &f2) == 0);
     memset(back, 0, 300000);
     CHECK(zenixfs_read(fs, f2, 0, back, 300000) == 300000 && !memcmp(back, data, 300000));
     CHECK(zenixfs_lookup(fs, ZENIXFS_ROOT_INO, "etc", 3, &d) == 0 && zenixfs_lookup(fs, d, "passwd", 6, &f) == 0);
     CHECK(zenixfs_read(fs, f, 0, buf, 64) == 11);
+    {   /* d42 review: the read scratch's remembered block must be forgotten when a cached block passes through it */
+        uint32_t g; uint8_t one[4096], b2[16];
+        memset(one, 0x5A, sizeof one);
+        CHECK(zenixfs_read(fs, f2, 0, b2, 16) == 16 && !memcmp(b2, data, 16));             /* block 0 of big, from the disk */
+        CHECK(zenixfs_create(fs, ZENIXFS_ROOT_INO, "dirty", 5, 0644, 0, 0, &g) == 0);
+        CHECK(zenixfs_write(fs, g, 0, one, sizeof one) == (int)sizeof one);                 /* a new block, in the cache */
+        CHECK(zenixfs_read(fs, g, 0, b2, 16) == 16 && b2[0] == 0x5A);
+        CHECK(zenixfs_read(fs, f2, 0, b2, 16) == 16 && !memcmp(b2, data, 16));              /* big's block 0 again */
+        CHECK(zenixfs_unlink(fs, ZENIXFS_ROOT_INO, "dirty", 5) == 0);
+    }
     /* sparse + truncate */
     CHECK(zenixfs_write(fs, f2, 1000000, "Z", 1) == 1);
     CHECK(zenixfs_read(fs, f2, 500000, back, 10) == 10 && back[0] == 0);
+    {   /* d42: one read over the data, the hole and the last byte, at an odd offset and at a block's start */
+        uint8_t *all = malloc(1000001);
+        unsigned r0 = m->readns;
+        CHECK(zenixfs_read(fs, f2, 0, all, 1000001) == 1000001 && !memcmp(all, data, 300000) && all[1000000] == 'Z');
+        int z = 1; for (int i = 300000; i < 1000000; i++) if (all[i]) z = 0;
+        CHECK(z);
+        CHECK(zenixfs_read(fs, f2, 1001, all, 250000) == 250000 && !memcmp(all, data + 1001, 250000));
+        CHECK(zenixfs_read(fs, f2, 8192, all, 200000) == 200000 && !memcmp(all, data + 8192, 200000));
+        CHECK(m->readns > r0);
+        free(all);
+    }
     CHECK(zenixfs_truncate(fs, f2, 5000) == 0);
     CHECK(zenixfs_read(fs, f2, 0, back, 5000) == 5000 && !memcmp(back, data, 5000));
     CHECK(zenixfs_truncate(fs, f2, 9000) == 0);
@@ -324,6 +347,7 @@ static int test_random(void)
         struct zenixfs *fs;
         CHECK(zenixfs_mkfs(&m->dev, NULL, 0, 5) == 0);
         CHECK(zenixfs_mount(&fs, &m->dev, 40) == 0);
+        zenixfs_set_readn(fs, zmem_readn);                  /* reads of whole neighbouring blocks in one request (d42) */
         model_reset();
         int ops = 3000;
         for (int i = 0; i < ops; i++) {
@@ -334,9 +358,11 @@ static int test_random(void)
                 CHECK(zenixfs_fsck(fs, logmsg, NULL) == 0);
             }
             if (i % 700 == 699) { CHECK(zenixfs_unmount(fs) == 0); CHECK(zenixfs_mount(&fs, &m->dev, 40) == 0); CHECK(!compare_to_model(fs, "after remount")); }
+            if (i % 700 == 350) zenixfs_set_readn(fs, zmem_readn);     /* the half after each remount without it, block by block */
         }
         struct zenixfs_stats st; zenixfs_get_stats(fs, &st);
-        printf("  random bshift %d: %d ops, %u commits, %u writes, %u flushes\n", bs, ops, st.commits, st.writes, st.flushes);
+        printf("  random bshift %d: %d ops, %u commits, %u writes, %u flushes, %u multi-block reads\n", bs, ops, st.commits, st.writes, st.flushes, m->readns);
+        if (bs == 10) CHECK(m->readns > 0);
         CHECK(zenixfs_unmount(fs) == 0);
         zmem_free(m);
     }

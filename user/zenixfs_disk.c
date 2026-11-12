@@ -38,15 +38,16 @@ unsigned zdisk_sectors(void) { return nsect; }
 int zdisk_can_flush(void) { return (caps & (DISKCAP_FLUSH | DISKCAP_RAM)) != 0; }
 unsigned zdisk_dostype(void) { return dtype; }
 
-static int zd_rw(uint32_t op, uint32_t blk, void *buf)
+static int zd_rw(uint32_t op, uint32_t blk, uint32_t n, void *buf)
 {
     struct umsg m;
     unsigned spb = 1u << (shift_ - 9);
-    m.type = op; m.a[0] = (u32)handle; m.a[1] = blk * spb; m.a[2] = spb; m.a[3] = (u32)buf;
+    m.type = op; m.a[0] = (u32)handle; m.a[1] = blk * spb; m.a[2] = n * spb; m.a[3] = (u32)buf;
     return disk_call(dport, &m) < 0 ? -1 : 0;
 }
-static int zd_read(void *ctx, uint32_t blk, void *buf) { (void)ctx; return zd_rw(DISK_READ, blk, buf); }
-static int zd_write(void *ctx, uint32_t blk, const void *buf) { (void)ctx; return zd_rw(DISK_WRITE, blk, (void *)buf); }
+static int zd_read(void *ctx, uint32_t blk, void *buf) { (void)ctx; return zd_rw(DISK_READ, blk, 1, buf); }
+static int zd_write(void *ctx, uint32_t blk, const void *buf) { (void)ctx; return zd_rw(DISK_WRITE, blk, 1, (void *)buf); }
+int zdisk_readn(void *ctx, uint32_t blk, uint32_t n, void *buf) { (void)ctx; return zd_rw(DISK_READ, blk, n, buf); }
 static int zd_flush(void *ctx)
 {
     struct umsg m;

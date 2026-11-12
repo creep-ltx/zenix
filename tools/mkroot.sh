@@ -3,7 +3,8 @@
 # Build the ext2 root disk: rootfs/ plus the programs from build/*.zx as /bin/<name> (zup, zfsd, netd and wasabid
 # as /sbin/<name>), and the licence notices of the code from other projects in /usr/share/licenses.
 # usage: mkroot.sh out.hdf builddir "prog prog ..." [SIZE] [INODES]
-# optional environment: ROOTFS=zenixfs  the same tree on a ZenixFS image (SIZE as 96M; INODES unused; DESIGN D34);
+# optional environment: ROOTFS=zenixfs  the same tree on a ZenixFS image (SIZE as 96M; INODES unused; DESIGN D34;
+#                       ZFS_BSHIFT=12 its blocks 4 KB whatever the size, as on a big card: tools/ide-speed-test.sh);
 #                       FSTAB_FILE=file  installed as /etc/fstab;  MOUNTDIRS="dir dir"  created in the root (mount points)
 set -e
 OUT="$1"; B="$2"; PROGS="$3"; SIZE="${4:-8M}"; INODES="${5:-512}"
@@ -181,7 +182,7 @@ if [ "$ROOTFS" = zenixfs ]; then                # the same tree and modes on Zen
     chmod 4755 "$T/bin/su" "$T/bin/sudo" "$T/bin/passwd"
     [ ! -f "$T/bin/zine" ] || chmod 4755 "$T/bin/zine"
     chmod 644 "$T/etc/passwd" "$T/etc/group" "$T/etc/svctab" "$T/etc/daemons"
-    "$Z" mkfs "$TMPOUT" "${SIZE%M}" -l zenix-root >/dev/null
+    "$Z" mkfs "$TMPOUT" "${SIZE%M}" -l zenix-root ${ZFS_BSHIFT:+-b $ZFS_BSHIFT} >/dev/null
     "$Z" put "$TMPOUT" -r "$T" /
     "$Z" chown "$TMPOUT" 1000 100 /home/user
     "$Z" chown "$TMPOUT" 1001 100 /home/guest
