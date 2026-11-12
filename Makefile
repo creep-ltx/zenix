@@ -80,8 +80,8 @@ USERZX := $(UAPPS:%=$(BUILD)/%.zx)
 # servers that live on the disk as files (DESIGN D19 step 1), installed as /sbin/NAME on every full root image and in
 # the base package: the ZenixFS server, which mount registers as a file service (D11 6.4), and the network server.
 # Not commands: no page; wasabid (D24), the remote control daemon root starts, has docs/man/wasabid.txt; nfscd (D23),
-# the server of an NFS mount, is described in docs/man/mount.txt, as are fatd (D30), the server of a FAT mount, ffsd (D31), of an OFS or FFS mount, and pfs3d (D32), of a PFS3 mount.
-SBINAPPS := zfsd netd wasabid nfscd fatd ffsd pfs3d displayd dlogin sndd
+# the server of an NFS mount, is described in docs/man/mount.txt, as are fatd (D30), the server of a FAT mount, ffsd (D31), of an OFS or FFS mount, and pfs3d (D32), of a PFS3 mount, and iso9660d (D44), of an ISO 9660 mount (a CD).
+SBINAPPS := zfsd netd wasabid nfscd fatd ffsd pfs3d iso9660d displayd dlogin sndd
 SBINZX := $(SBINAPPS:%=$(BUILD)/%.zx)
 # the network's drivers (DESIGN D19 steps 7-8): user processes netd starts as /sbin/net/NAME IFACE [ARGS], from
 # net/drv/NAME.c, built as drv-NAME. NETDRVS are shipped (/sbin/net on every full root image and in the base package);
@@ -244,8 +244,9 @@ RAMDISK_K := 640
 # console's ring of rows: 1.3 KB of kernel). Its free blocks are the room the mount tests write into (about 13 blocks:
 # mount points and files in / and /tmp; tools/mounttest.sh refuses to run below 16): by 2026-11-06 only 1 was left,
 # and LEAN=1 (tools/mkroot.sh: no /etc/zdesk, a one-block /lost+found) gave 25 back (26 free). 692 since DESIGN D41
-# (2026-11-12, memory protection: about 7 KB of kernel, kernel/mmu.c and its hooks).
-RAMDISK_MOUNT_K := 692
+# (2026-11-12, memory protection: about 7 KB of kernel, kernel/mmu.c and its hooks). 689 since DESIGN D44 (2026-11-12,
+# the CD drive: about 2.4 KB of kernel, ATAPI in kernel/ide.c and cd0 in the built-in diskd).
+RAMDISK_MOUNT_K := 689
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/ksize-check.sh tools/ksize-budget
@@ -527,6 +528,10 @@ STACK_ffsd := 8192
 $(BUILD)/pfs3d.uo: user/pfs3d.c user/amigatext.h user/volid.h user/diskcall.h kernel/fsperm.h kernel/fsproto.h kernel/diskproto.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
 STACK_pfs3d := 8192
+# iso9660d (DESIGN D44, docs/d44-cd.md): the server of an ISO 9660 mount (a CD), read-only, /sbin/iso9660d. Cold code: -Os
+$(BUILD)/iso9660d.uo: user/iso9660d.c user/volid.h user/diskcall.h kernel/fsperm.h kernel/fsproto.h kernel/diskproto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+STACK_iso9660d := 8192
 # ---- Zenix Desktop (DESIGN D38, docs/d38-desktop.md): the display server /sbin/displayd (display/server/: the
 # protocol, the input and the font reader cold, -Os; the drawing and the fonts -O2: the golden path, input to screen), the client
 # library display/lib/libdisplay.c linked into each client (static, D38 5), the test client dpytest ----
