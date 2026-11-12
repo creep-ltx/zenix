@@ -9,9 +9,10 @@
  * mount [-t TYPE] [-o OPTIONS] DEVICE DIR  serve DEVICE with the filesystem server for TYPE (a service, fs.DEVICE) and put it on DIR
  * mount -t nfs [-o OPTIONS] HOST:/EXPORT DIR   an NFS export (DESIGN D23): the service fs.nfsN, served by /sbin/nfscd
  * mount -a                   mount everything listed in /etc/fstab (init does this at boot)
- * TYPE is ext2, zenixfs, fat, ffs, pfs3, iso9660 or nfs; without -t it is read from the partition's type in the RDB or MBR (a
- * HOST:/EXPORT is nfs; a device with CD001 at its byte 32769 - a CD, DESIGN D44 - iso9660).
- * /etc/fstab: one line per mount, "DEVICE DIR TYPE OPTIONS", TYPE = ext2, zenixfs, fat, ffs, pfs3, iso9660 or auto (from the partition type), OPTIONS =
+ * TYPE is ext2, zenixfs, fat, exfat, ffs, pfs3, iso9660 or nfs; without -t it is read from the partition's type in the RDB or
+ * MBR (a HOST:/EXPORT is nfs; a device whose boot sector says EXFAT - DESIGN D47 - exfat; one with CD001 at its byte
+ * 32769 - a CD, DESIGN D44 - iso9660).
+ * /etc/fstab: one line per mount, "DEVICE DIR TYPE OPTIONS", TYPE = ext2, zenixfs, fat, exfat, ffs, pfs3, iso9660 or auto (from the partition type), OPTIONS =
  * "defaults" or a comma list; "noauto" leaves the line out of mount -a. Lines starting with # and blank lines are ignored.
  * An ext2 volume not marked clean (a power cut while it was written, DESIGN D17) is checked first by mount -a
  * (fsck.ext2 -y, as Linux's fsck pass at boot); a plain mount only warns. */
@@ -57,16 +58,18 @@ static int pfs3_part(u32 dt)
 {
     return ((dt & 0xFFFFFF00u) == 0x50465300u || (dt & 0xFFFFFF00u) == 0x50445300u) && (dt & 0xFF) >= 1 && (dt & 0xFF) <= 3;
 }
-/* an ISO 9660 volume on DEV (D44): CD001 in the descriptor at its block 16 (byte 32768) */
-static int iso_dev(const char *dev)
+/* does DEV's sector LBA have the N bytes MAGIC at byte AT? An ISO 9660 volume (D44): CD001 in the descriptor at its
+ * block 16 (sector 64, byte 1); exFAT (D47): "EXFAT   " in its boot sector (sector 0, byte 3; on a partition of MBR
+ * type 07, which NTFS shares, or on a whole stick) */
+static int dev_has(const char *dev, u32 lba, u32 at, const char *magic, u32 n)
 {
     static unsigned char sec[512];
     struct umsg m;
     int dp = sys_port_find("disk");
     m.type = DISK_OPEN; m.a[0] = (u32)dev; m.a[1] = 0;
     int h = sys_call(dp, &m);
-    m.type = DISK_READ; m.a[0] = (u32)h; m.a[1] = 64; m.a[2] = 1; m.a[3] = (u32)sec;
-    return h >= 0 && sys_call(dp, &m) == 0 && !memcmp(sec + 1, "CD001", 5);
+    m.type = DISK_READ; m.a[0] = (u32)h; m.a[1] = lba; m.a[2] = 1; m.a[3] = (u32)sec;
+    return h >= 0 && sys_call(dp, &m) == 0 && !memcmp(sec + at, magic, n);
 }
 /* is the word W among the comma-separated OPTS? */
 static int opt_has(const char *opts, const char *w)
@@ -88,19 +91,21 @@ static int mount_one(const char *dev, const char *dir, const char *type, const c
     if (disk_info(dev, &di) < 0) { dprintf(1, "mount: no such device: %s\n", dev); return 1; }
     if (di.mounted) { dprintf(1, "mount: %s is already in use\n", dev); return 1; }
     if (!type) {
-        type = di.dostype == DT_EXT2 ? "ext2" : di.dostype == DT_ZENIXFS ? "zenixfs" : fat_part(di.dostype) ? "fat" : ffs_part(di.dostype) ? "ffs" : pfs3_part(di.dostype) ? "pfs3" : iso_dev(dev) ? "iso9660" : 0;
+        type = di.dostype == DT_EXT2 ? "ext2" : di.dostype == DT_ZENIXFS ? "zenixfs" : fat_part(di.dostype) ? "fat" : ffs_part(di.dostype) ? "ffs" : pfs3_part(di.dostype) ? "pfs3" :
+               dev_has(dev, 0, 3, "EXFAT   ", 8) ? "exfat" : dev_has(dev, 64, 1, "CD001", 5) ? "iso9660" : 0;
         if (!type) {
             if ((di.caps & DISKCAP_RO) && !di.sectors) dprintf(1, "mount: no disc in %s\n", dev);
-            else dprintf(1, "mount: cannot tell the type of %s; use -t ext2, -t zenixfs, -t fat, -t ffs, -t pfs3 or -t iso9660\n", dev);
+            else dprintf(1, "mount: cannot tell the type of %s; use -t ext2, -t zenixfs, -t fat, -t ffs, -t pfs3, -t iso9660 or -t exfat\n", dev);
             return 1;
         }
     }
     int z = !strcmp(type, "zenixfs"), a = !strcmp(type, "ffs"), p3 = !strcmp(type, "pfs3"), iso = !strcmp(type, "iso9660");
-    int f = a || p3 || iso || !strcmp(type, "fat");                 /* f: a server with options */
-    if (opts && !f && !fsck) { dprintf(1, "mount: -o is for FAT, FFS, PFS3, ISO 9660 and NFS mounts only\n"); return 1; }
-    if (!z && !f && strcmp(type, "ext2")) { dprintf(1, "mount: unknown type %s (ext2, zenixfs, fat, ffs, pfs3, iso9660 or nfs)\n", type); return 1; }
-    if ((p3 || iso) && opt_has(opts, "rw")) { dprintf(1, "mount: %s volumes are read-only on Zenix: -o rw is refused\n", p3 ? "PFS3" : "ISO 9660"); return 1; }
-    if ((di.caps & DISKCAP_RO) && !iso) { dprintf(1, "mount: %s is read-only: only -t iso9660 for it\n", dev); return 1; }
+    int ex = !strcmp(type, "exfat");
+    int f = a || p3 || iso || ex || !strcmp(type, "fat");           /* f: a server with options */
+    if (opts && !f && !fsck) { dprintf(1, "mount: -o is for FAT, exFAT, FFS, PFS3, ISO 9660 and NFS mounts only\n"); return 1; }
+    if (!z && !f && strcmp(type, "ext2")) { dprintf(1, "mount: unknown type %s (ext2, zenixfs, fat, exfat, ffs, pfs3, iso9660 or nfs)\n", type); return 1; }
+    if ((p3 || iso || ex) && opt_has(opts, "rw")) { dprintf(1, "mount: %s volumes are read-only on Zenix: -o rw is refused\n", p3 ? "PFS3" : iso ? "ISO 9660" : "exFAT"); return 1; }
+    if ((di.caps & DISKCAP_RO) && !iso && !ex) { dprintf(1, "mount: %s is read-only: only -t iso9660 or -t exfat for it\n", dev); return 1; }
     strcpy(pname, "fs."); strncpy(pname + 3, dev, 12); pname[15] = 0;
     for (u32 i = 0; sys_mountinfo(i, &mi) == 0; i++)
         if (!strcmp(mi.port, pname)) { dprintf(1, "mount: %s is already mounted on %s\n", dev, mi.path); return 1; }
@@ -118,8 +123,8 @@ static int mount_one(const char *dev, const char *dir, const char *type, const c
      * port word (zfsd names it fs.DEVICE itself): the path and the volume id leave no room for it in SVC_TEXT */
     /* FAT (D30): the file /sbin/fatd, the id's place only (a volume serial is not read here), the options as they are:
      * fatd checks them */
-    /* FFS (D31), PFS3 (D32), ISO 9660 (D44): /sbin/ffsd, /sbin/pfs3d, /sbin/iso9660d, the same way */
-    strcpy(prog, z ? "/sbin/zfsd " : a ? "/sbin/ffsd " : p3 ? "/sbin/pfs3d " : iso ? "/sbin/iso9660d " : f ? "/sbin/fatd " : "@fsd ");
+    /* FFS (D31), PFS3 (D32), ISO 9660 (D44), exFAT (D47): /sbin/ffsd, /sbin/pfs3d, /sbin/iso9660d, /sbin/exfatd, the same way */
+    strcpy(prog, z ? "/sbin/zfsd " : a ? "/sbin/ffsd " : p3 ? "/sbin/pfs3d " : iso ? "/sbin/iso9660d " : ex ? "/sbin/exfatd " : f ? "/sbin/fatd " : "@fsd ");
     strcat(prog, dev);
     if (!z && !f) { strcat(prog, " "); strcat(prog, pname); }
     if (f) id[17] = 0;
@@ -303,7 +308,7 @@ int main(int argc, char **argv)
     if (all) return mount_all();
     if (argc == 1) { list(); return 0; }
     if (!dev || !dir) {
-        dprintf(1, "usage: mount [-t ext2|zenixfs|fat|ffs|pfs3|iso9660] [-o OPTIONS] DEVICE DIR     mount -t nfs [-o OPTIONS] HOST:/EXPORT DIR\n"
+        dprintf(1, "usage: mount [-t ext2|zenixfs|fat|exfat|ffs|pfs3|iso9660] [-o OPTIONS] DEVICE DIR     mount -t nfs [-o OPTIONS] HOST:/EXPORT DIR\n"
                "       mount -a     mount (list)\n");
         return 2;
     }

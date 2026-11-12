@@ -263,6 +263,10 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `iso9660` and its options (`uid=`, `gid=`, `fmode=`, `dmode=`, `norock`, `nojoliet`, `ro`; `rw` refused); `fsinfo.type`
   `iso9660`; the program text `/sbin/iso9660d DEV -id START,SIZE [-o OPTIONS]`; its inode numbers (half the record's byte
   position on the volume). No message type or error number is new.
+- **D47 (exFAT, branch exfat, 2026-11-13):** `/etc/fstab`'s and mount's type `exfat` and its options (`uid=`, `gid=`,
+  `fmode=`, `dmode=`, `ro`; `rw` refused); `fsinfo.type` `exfat`; the program text `/sbin/exfatd DEV -id START,SIZE
+  [-o OPTIONS]`; the answer for a file of 4 GB or more (size 4294967295, `EFBIG` at open, as pfs3d's). No message type,
+  struct or error number is new.
 - **D22 (zpkg, 2026-10-28):** `UPD_F_TRIAL` 2 in the bootinfo and `uupdate` flags; the manifest line `takes OTHER`;
   zup's journal line `live 1 NAME` and the live-only operations `S`, `M`, `X`; `/var/cache/zpkg/live/` and
   `/var/lib/zpkg/lock` (a pid and a newline, linked whole from `lock.PID`); zpkg's `/etc/zpkg.conf` (the words

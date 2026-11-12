@@ -352,7 +352,7 @@ timeout on every wait, and each can be the last one of a session. A checklist fi
    fat -o ro usb0p1 /mnt/usb`; `md5sum` of files compared with the PC's; `time cat big > /dev/null` (an Emu68 figure,
    labelled so); the stick pulled while a `cat` runs (an error, nothing hangs, usbd and diskd live); plugged in again
    and mounted again.
-4. **The exFAT stick:** plugged in: `usb0` and `usb0p1` (type 0x07) listed, not mounted (the next item).
+4. **The exFAT stick:** plugged in: `usb0` and `usb0p1` (type 0x07) listed; mounted and read with D47 (its section 9).
 5. **Recovery:** usbd killed under a `cat` (the read fails within 5 s, `lsusb --hold`'s restart, the stick back); a
    ZINE demo started and left (the stick back, the mount stale); reboot to AmigaOS: Poseidon finds the stick again
    (its driver resets the controller Zenix left halted).
@@ -413,12 +413,14 @@ Open: none for U1 and U3. For U4 (writes): which stick may be written to in a te
    rule; stage0's table and halt; `/sbin/usbd`, `lsusb`. Real run: section 6.2 steps 0-2.
 2. **U3:** mass storage read-only and diskd's `usb0`. Real run: steps 3-5. (U1 and U3 are built together on branch
    `usb`, 2026-11-12, as the main session asked.)
-3. **exFAT** (section 10), read-only.
+3. **exFAT** (section 10), read-only: built as D47 (docs/d47-exfat.md, branch `exfat`, 2026-11-13).
 4. **U4:** writes (WRITE (10), SYNCHRONIZE CACHE, diskd's `DISK_WRITE` and `DISK_FLUSH` for `usb0`). Then the daemon
    line on by default on the PiStorm's images.
 5. Later, when wanted: hubs, keyboards and mice (revision 1's design, a51ea90), UAS, an Amiga USB card.
 
 ## 10. Next: exFAT
+
+(Built as D47, docs/d47-exfat.md, 2026-11-13: what follows is the reasoning that led there.)
 
 The partner's stick is exFAT, so a stick is of little use to them until Zenix reads exFAT. **A separate item, not
 built here.** What is known (*read*): Microsoft published the exFAT specification openly in 2019 (learn.microsoft.com,

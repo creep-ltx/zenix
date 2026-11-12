@@ -44,15 +44,15 @@ FILES
                   (shipped with a # before it)
 
 NOTES
-    Not done yet: writing to a stick, exFAT (the next item), hubs,
-    keyboards and mice, USB 3, more than one stick, card readers'
-    other slots. A request reads at most 64 KB; a stick that does not
-    answer a read in 5 s is dropped. The kernel stops the controller
-    when usbd ends, and before a ZINE program runs (a mount of the
-    stick is stale afterwards); five ends within 60 s (five ZINE
-    programs, say) make the service manager give it up until the next
-    boot. Not yet run on a real PiStorm: docs/d46-usb.md section 6.2
-    is its first run.
+    Not done yet: writing to a stick, hubs, keyboards and mice, USB 3,
+    more than one stick, card readers' other slots. An exFAT stick is
+    read by exfatd(8) (mount usb0p1 /mnt). A request reads at most 64
+    KB; a stick that does not answer a read in 5 s is dropped. The
+    kernel stops the controller when usbd ends, and before a ZINE
+    program runs (a mount of the stick is stale afterwards); five ends
+    within 60 s (five ZINE programs, say) make the service manager give
+    it up until the next boot. Not yet run on a real PiStorm:
+    docs/d46-usb.md section 6.2 is its first run.
 
 SEE ALSO
     lsusb(1), diskd(8), mount(8), init(8), docs/d46-usb.md

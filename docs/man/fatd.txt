@@ -22,5 +22,9 @@ DESCRIPTION
     loops or leaves the volume answers an I/O error when it is opened;
     opening it with truncation still works, and so does removing it.
 
+NOTES
+    Its long names (UTF-16 to UTF-8 and the case folding) are the same
+    code as exfatd's, the server of exFAT sticks (user/utf16name.h).
+
 SEE ALSO
-    mount(8), umount(8)
+    mount(8), umount(8), exfatd(8)

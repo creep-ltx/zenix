@@ -34,6 +34,7 @@ int hostdisk_use(const char *path, u32 start, u32 sectors)
 }
 
 unsigned long hostdisk_reads;                   /* sectors read so far */
+unsigned long hostdisk_calls;                   /* DISK_READ requests so far (D47: a contiguous read is one request) */
 static void say_writes(void) { fprintf(stderr, "hostdisk-writes %lu\nhostdisk-reads %lu\n", hostdisk_writes, hostdisk_reads); }
 static void lazy_open(void)
 {
@@ -75,6 +76,7 @@ int sys_call(int port, struct umsg *m)
         u32 *w = (u32 *)m->a[3];
         if (m->type == DISK_READ) {
             hostdisk_reads += n;
+            hostdisk_calls++;
             if (pread(fd, (void *)m->a[3], (size_t)n * 512, off) != (ssize_t)n * 512) return -1;
             if (be) for (u32 i = 0; i < n * 128; i++) w[i] = __builtin_bswap32(w[i]);
             return 0;

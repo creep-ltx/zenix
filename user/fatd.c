@@ -11,6 +11,7 @@ typedef unsigned short u16;
 #include "../kernel/fsperm.h"
 #include "diskcall.h"
 #include "volid.h"
+#include "utf16name.h"
 
 /* fatd DEVICE -id START,SIZE [-o OPTIONS]: the FAT filesystem server (FAT12, FAT16, FAT32, long names), a file service
  * started by mount(8) as fs.DEVICE. The decisions and why: docs/d30-fat.md. In short:
@@ -466,69 +467,18 @@ static const u16 cp437[128] = {
     0x3B1,0xDF,0x393,0x3C0,0x3A3,0x3C3,0xB5,0x3C4,0x3A6,0x398,0x3A9,0x3B4,0x221E,0x3C6,0x3B5,0x2229,
     0x2261,0xB1,0x2265,0x2264,0x2320,0x2321,0xF7,0x2248,0xB0,0x2219,0xB7,0x221A,0x207F,0xB2,0x25A0,0xA0 };
 
-static u32 fold(u32 c)
-{
-    if (c < 0x80) return c >= 'a' && c <= 'z' ? c - 32 : c;
-    if (c < 0x100) return c >= 0xE0 && c != 0xF7 && c != 0xFF ? c - 32 : c == 0xFF ? 0x178 : c;
-    if (c < 0x180) {
-        if (c <= 0x137 || (c >= 0x14A && c <= 0x177)) return c & 1 && c != 0x131 ? c - 1 : c;
-        if ((c >= 0x139 && c <= 0x148) || (c >= 0x179 && c <= 0x17E)) return c & 1 ? c : c - 1;
-        return c;
-    }
-    if (c >= 0x3B1 && c <= 0x3C9 && c != 0x3C2) return c - 32;
-    if (c >= 0x430 && c <= 0x44F) return c - 32;
-    if (c >= 0x450 && c <= 0x45F) return c - 80;
-    return c;
-}
-
+static u32 fold(u32 c) { return u16_fold(c); }
 /* NAME (LEN bytes of UTF-8) into q. 0, -EILSEQ, -ENAMETOOLONG */
 static int name_in(const char *name, u32 len)
 {
-    u32 n = 0;
-    const u8 *p = (const u8 *)name, *e = p + len;
-    while (p < e) {
-        u32 c = *p++, more = c < 0x80 ? 0 : c >= 0xC2 && c < 0xE0 ? 1 : c >= 0xE0 && c < 0xF0 ? 2 : c >= 0xF0 && c < 0xF5 ? 3 : 9;
-        if (more == 9 || more > (u32)(e - p)) return -EILSEQ;
-        if (more) c &= 0x3Fu >> more;
-        for (u32 i = 0; i < more; i++) {
-            if ((*p & 0xC0) != 0x80) return -EILSEQ;
-            c = c << 6 | (*p++ & 0x3F);
-        }
-        if ((more == 2 && (c < 0x800 || (c >= 0xD800 && c < 0xE000))) || (more == 3 && (c < 0x10000 || c > 0x10FFFF))) return -EILSEQ;
-        if (n + (c >= 0x10000) >= 255) return -ENAMETOOLONG;
-        if (c >= 0x10000) {
-            c -= 0x10000;
-            q[n++] = (u16)(0xD800 + (c >> 10));
-            c = 0xDC00 + (c & 0x3FF);
-        }
-        q[n++] = (u16)c;
-    }
-    q_len = n;
+    int n = u16_from_utf8(name, len, q, 255);
+    if (n < 0) return n;
+    q_len = (u32)n;
     return 0;
 }
 /* LEN units of UCS-2/UTF-16 as UTF-8 in OUT (CAP bytes with the NUL). The length, or -1: not a good name (a control
  * character, '/', a broken surrogate pair) or too long */
-static int name_out(const u16 *u, u32 len, char *out, u32 cap)
-{
-    u32 k = 0;
-    for (u32 i = 0; i < len; i++) {
-        u32 c = u[i];
-        if (c < 0x20 || c == '/' || (c >= 0xDC00 && c < 0xE000)) return -1;
-        if (c >= 0xD800 && c < 0xDC00) {
-            if (i + 1 >= len || u[i + 1] < 0xDC00 || u[i + 1] >= 0xE000) return -1;
-            c = 0x10000 + ((c - 0xD800) << 10) + (u[++i] - 0xDC00);
-        }
-        u32 need = c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4;
-        if (k + need >= cap) return -1;
-        if (need == 1) out[k++] = (char)c;
-        else {
-            out[k++] = (char)(need == 2 ? 0xC0 | c >> 6 : need == 3 ? 0xE0 | c >> 12 : 0xF0 | c >> 18);
-            for (u32 s = (need - 1) * 6; s; s -= 6) out[k++] = (char)(0x80 | ((c >> (s - 6)) & 0x3F));
-        }
-    }
-    out[k] = 0;
-    return (int)k;
-}
+static int name_out(const u16 *u, u32 len, char *out, u32 cap) { return u16_to_utf8(u, len, out, cap, 0); }
 /* the 8.3 name of a short entry as UCS-2 (at most 12 units); LOW: with its lower-case bits */
 static u32 short_units(const u8 *e, u16 *out, int low)
 {

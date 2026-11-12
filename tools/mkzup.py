@@ -251,7 +251,7 @@ LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz"), ("too
 # (the text-UI library's notice once a package: sumi's is "tui" since it shipped first, the others' "PROG-tui"; two
 # packages may not own one file, zpkg 4.3)
 # files beside a family's programs, from the build directory (DESIGN D29: ZINE's blob, the small AmigaOS zine loads)
-FAMILY_SBIN = {"disktools": ["fatd", "ffsd", "pfs3d", "iso9660d"], "desktop": ["displayd", "dlogin"], "sound": ["sndd"], "usb": ["usbd"]}     # DESIGN D30, D31, D32, D44: mount's servers for a FAT volume, an OFS or FFS volume, a PFS3 volume, an ISO 9660 volume
+FAMILY_SBIN = {"disktools": ["fatd", "ffsd", "pfs3d", "iso9660d", "exfatd"], "desktop": ["displayd", "dlogin"], "sound": ["sndd"], "usb": ["usbd"]}     # DESIGN D30, D31, D32, D44: mount's servers for a FAT volume, an OFS or FFS volume, a PFS3 volume, an ISO 9660 volume, D47: an exFAT volume
 # (DESIGN D35: the two AmigaOS programs of a boot partition, what zinstall puts there)
 # a family's own configuration files, from rootfs/ (kind "c": zup keeps a copy the owner changed, as for base's)
 FAMILY_CONFIG = {"desktop": ["etc/dlogin", "etc/zdesk/keys", "etc/zdesk/menu", "etc/zdesk/icons", "etc/zdesk/mouse", "etc/zdesk/screen",

@@ -10,6 +10,8 @@
  *   ls PATH                 every entry (FS_READDIR)
  *   sync | quit             FS_SYNC | FS_QUIT
  *   writes                  the sectors written to the image so far (hostdisk_writes)
+ *   lsat DIR COOKIE         one FS_READDIR of DIR at COOKIE (a place a program's lseek could give)
+ *   reads                   the read requests and the sectors read so far (FAT-family servers: DESIGN D47's speed check)
  *   cut N                   a power cut: only N more sectors reach the image, every later write fails
  *   as UID GID              later requests come from this user
  *   raw on|off              later requests come as a user's own SYS_call (no UMSG_KERNEL), not from the kernel
@@ -30,14 +32,15 @@
  * commit), umount (FS_QUIT and what fatd does at it), statfs; a + in a path is a space.
  * With -DFFSD instead the OFS/FFS server (user/ffsd.c, tools/ffs-host-test.py): the same commands as FAT's.
  * With -DPFS3D the PFS3 server (user/pfs3d.c, tools/pfs3-host-test.py): the same, and it can only read.
- * With -DISO9660D the ISO 9660 server (user/iso9660d.c, tools/iso9660-host-test.py): as PFS3's (DESIGN D44). */
+ * With -DISO9660D the ISO 9660 server (user/iso9660d.c, tools/iso9660-host-test.py): as PFS3's (DESIGN D44).
+ * With -DEXFATD the exFAT server (user/exfatd.c, tools/exfat-host-test.py): as PFS3's (DESIGN D47). */
 #ifdef ZFSD                                               /* -DZFSD: the ZenixFS server (user/zenixfsd.c) instead */
 #include "zhost.h"
 struct udirent { u32 ino; u32 type; char name[64]; };    /* usys.h's (zhost.h has none; ext2.h is not included) */
 struct ustat { u32 ino, mode, size, mtime; u32 uid, gid, links; };
 static inline long sys3(u32 nr, u32 a, u32 b, u32 c) { (void)nr; (void)a; (void)b; (void)c; return 0; }   /* main only */
 #define main fsd_main
-#if defined(FATD) || defined(FFSD) || defined(PFS3D) || defined(ISO9660D)
+#if defined(FATD) || defined(FFSD) || defined(PFS3D) || defined(ISO9660D) || defined(EXFATD)
 #undef main
 #define S_IFDIR 0040000
 #define S_IFREG 0100000
@@ -50,6 +53,9 @@ static inline long sys3(u32 nr, u32 a, u32 b, u32 c) { (void)nr; (void)a; (void)
 #elif defined(ISO9660D)                                   /* -DZFSD -DISO9660D: the ISO 9660 server (user/iso9660d.c) */
 #include "../../user/iso9660d.c"
 #define ROOT_INO (root_ext << 10)
+#elif defined(EXFATD)                                     /* -DZFSD -DEXFATD: the exFAT server (user/exfatd.c, D47) */
+#include "../../user/exfatd.c"
+#define ROOT_INO ROOT
 #else                                                     /* -DZFSD -DFFSD: the OFS/FFS server (user/ffsd.c) */
 #include "../../user/ffsd.c"
 #define ROOT_INO root_blk
@@ -106,7 +112,7 @@ static u32 flags_of(const char *s)
     return f | (r && w ? O_RDWR : w ? O_WRONLY : O_RDONLY);
 }
 
-#if defined(PFS3D) || defined(ISO9660D)
+#if defined(PFS3D) || defined(ISO9660D) || defined(EXFATD)
 /* tree DIR: every name under DIR, one line each: kind, mode, size, links, mtime, crc32 of all its data read in pieces,
  * the path, the listed inode and -> a soft link's text. A line "! CODE PATH" for any error. The judge of a real volume */
 static u32 crc_of(u32 c, const u8 *p, u32 n)
@@ -192,7 +198,7 @@ int main(void)
         struct ustat st;
         if (!strcmp(cmd, "mount")) {
 #ifdef ZFSD
-#if defined(FATD) || defined(FFSD) || defined(PFS3D) || defined(ISO9660D)
+#if defined(FATD) || defined(FFSD) || defined(PFS3D) || defined(ISO9660D) || defined(EXFATD)
             if (a && options(a)) { printf("mount -> bad option\n"); continue; }
             r = try_mount("hd0", 0);
             printf("mount -> %d%s\n", r, readonly ? " readonly" : "");
@@ -213,7 +219,7 @@ int main(void)
         if (!strcmp(cmd, "links")) { links = a && !strcmp(a, "on"); printf("links -> %u\n", links); continue; }
         static char pa[FS_PATHMAX], pb[FS_PATHMAX];      /* the kernel's buffers: a server may write TEXT there */
         char *a0 = a, *b0 = b;
-#if defined(FATD) || defined(FFSD) || defined(PFS3D) || defined(ISO9660D)
+#if defined(FATD) || defined(FFSD) || defined(PFS3D) || defined(ISO9660D) || defined(EXFATD)
         for (char *t = a; t && *t; t++) if (*t == '+') *t = ' ';  /* a name with spaces in a command line */
         if (b && strcmp(cmd, "write")) for (char *t = b; *t; t++) if (*t == '+') *t = ' ';
 #endif
@@ -237,7 +243,7 @@ int main(void)
         } else if (!strcmp(cmd, "read")) {
             u32 n = (u32)atoi(c);
             if (n > sizeof big - 1) n = sizeof big - 1;
-            r = req(FS_READ, num(a), (u32)atoi(b), (u32)big, n);
+            r = req(FS_READ, num(a), (u32)strtoul(b, 0, 10), (u32)big, n);   /* (an offset past 2 GB: D47) */
             if (r > 0) { big[r] = 0; printf("read -> %d %s\n", r, r <= 200 ? big : "(long)"); continue; }
         } else if (!strcmp(cmd, "fstat") || !strcmp(cmd, "stat") || !strcmp(cmd, "lstat")) {
             r = !strcmp(cmd, "fstat") ? req(FS_FSTAT, num(a), (u32)&st, 0, 0)
@@ -275,10 +281,10 @@ int main(void)
         else if (!strcmp(cmd, "quit")) r = req(FS_QUIT, 0, 0, 0, 0);
 #ifdef ZFSD
         else if (!strcmp(cmd, "dirty")) { printf("dirty -> %d\n", dirty); continue; }   /* changes not yet committed */
-#if defined(FATD) || defined(FFSD) || defined(PFS3D) || defined(ISO9660D)
+#if defined(FATD) || defined(FFSD) || defined(PFS3D) || defined(ISO9660D) || defined(EXFATD)
         else if (!strcmp(cmd, "commit")) r = sync_all();        /* the timer's commit */
         else if (!strcmp(cmd, "umount")) { r = req(FS_QUIT, 0, 0, 0, 0); if (!r) r = go_clean(); }
-#if defined(PFS3D) || defined(ISO9660D)
+#if defined(PFS3D) || defined(ISO9660D) || defined(EXFATD)
         else if (!strcmp(cmd, "tree")) {
             if (b0) { tree_left = (u32)atoi(b0); tree_bytes = c ? (u32)atoi(c) << 20 : 0xFFFFFFFFu; }
             tree(a0 && *a0 ? a0 : "/");
@@ -301,18 +307,42 @@ int main(void)
             continue;
         }
 #endif
-        else if (!strcmp(cmd, "dump")) {                  /* dump INO HOSTFILE: the file through FS_READ, in odd pieces */
+        else if (!strcmp(cmd, "dump") || !strcmp(cmd, "dumpp")) {   /* dump INO HOSTFILE: the file through FS_READ, in odd
+                                                                     * pieces; dumpp PATH HOSTFILE: opened by path first */
+            u32 ino = 0;
+            if (cmd[4]) {
+                struct ustat ps;
+                int pi = req(FS_OPEN, (u32)a, CWD, O_RDONLY, (u32)&ps);
+                if (pi < 0) { printf("dumpp -> %d\n", pi); continue; }
+                ino = (u32)pi;
+            } else ino = num(a);
             FILE *out = fopen(b0, "wb");
             u32 off = 0;
             static const u32 piece[] = { 4096, 100, 777, 65536, 1, 512 };
             for (u32 i = 0; out; i++) {
-                r = req(FS_READ, num(a), off, (u32)big, piece[i % 6]);
+                r = req(FS_READ, ino, off, (u32)big, piece[i % 6]);
                 if (r <= 0) break;
                 fwrite(big, 1, (size_t)r, out);
                 off += (u32)r;
             }
             if (out) fclose(out);
-            printf("dump -> %d %u\n", r, off);
+            if (cmd[4]) req(FS_CLOSE, ino, 0, 0, 0);
+            printf("%s -> %d %u\n", cmd, r, off);
+            continue;
+        }
+        else if (!strcmp(cmd, "lsat")) {                  /* lsat DIR COOKIE: one FS_READDIR at a cookie a program could seek to */
+            struct ustat ds;
+            struct udirent e;
+            u32 cookie = (u32)strtoul(b0 ? b0 : "0", 0, 10), nc = 0;
+            int ino = req(FS_OPEN, (u32)a, CWD, O_RDONLY, (u32)&ds);
+            r = ino < 0 ? ino : req(FS_READDIR, (u32)ino, cookie, (u32)&e, (u32)&nc);
+            if (ino >= 0) req(FS_CLOSE, (u32)ino, 0, 0, 0);
+            printf("lsat -> %d %s\n", r, r > 0 ? e.name : "");
+            continue;
+        }
+        else if (!strcmp(cmd, "reads")) {                 /* the disk server's reads so far: requests and sectors (D47) */
+            extern unsigned long hostdisk_reads, hostdisk_calls;
+            printf("reads -> %lu %lu\n", hostdisk_calls, hostdisk_reads);
             continue;
         }
         else if (!strcmp(cmd, "statfs")) {

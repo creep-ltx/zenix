@@ -1,0 +1,40 @@
+EXFATD(8)		Zenix manual
+
+NAME
+    exfatd - the read-only server of an exFAT mount (a USB stick)
+
+SYNOPSIS
+    /sbin/exfatd device [-id start,size] [-o options]
+
+DESCRIPTION
+    Not a command: mount -t exfat (or mount of a device whose boot sector
+    says EXFAT, such as a stick's usb0p1) registers it as the service
+    fs.DEVICE and the kernel starts it at the mount's first use (DESIGN
+    D47, docs/d47-exfat.md). It reads exFAT volumes: contiguous and
+    FAT-chained files and directories, long names as UTF-8. It only
+    reads: it has no code that writes, and -o rw is refused. Everything a
+    user sets is mount's: see mount(8) for the options and the limits. It
+    comes with the disktools package.
+
+    Its lines in dmesg start with exfatd: a volume it refuses and why (not
+    exFAT, a boot region whose checksum or numbers are wrong, no
+    allocation bitmap, an entry exFAT 1.00 does not know in the root), a
+    main boot region replaced by its backup, a volume marked dirty (read
+    as it is), and a bad option.
+
+    A damaged volume answers errors, never a crash: an entry set whose
+    checksum is wrong is never used, a chain or a number that does not
+    fit answers an I/O error where it is met, and a listing goes on past
+    the damage and answers an I/O error at its end. A stick pulled out
+    while mounted answers "stale file handle".
+
+NOTES
+    A file of 4 GB or more is listed with the size 4294967295 and cannot
+    be opened ("file too large"): Zenix's file sizes are 32-bit. The
+    volume's up-case table is not read: case is folded for Latin, Greek
+    and Cyrillic letters only. A file open when the server was restarted
+    answers "stale file handle" until it is closed. It takes about 53 KB
+    of memory a mount, whatever the volume's size.
+
+SEE ALSO
+    mount(8), umount(8), diskd(8), fatd(8), iso9660d(8)

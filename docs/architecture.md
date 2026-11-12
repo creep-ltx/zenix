@@ -1161,6 +1161,17 @@ object's directory record (a directory's: its `.` record), so it needs no table 
 directory blocks and a window of 8 file blocks for small reads; whole blocks straight into the caller's buffer. The
 rules, the format and the damage checks are in `docs/d44-cd.md`.
 
+### exfatd - an exFAT mount's server (`user/exfatd.c`, port `fs.DEVICE`, DESIGN D47)
+`mount -t exfat DEV DIR` (or any device whose boot sector says `EXFAT   `: a partition of MBR type 07, a stick without
+a table) registers `fs.DEV` -> `/sbin/exfatd DEV -id START,SIZE [-o OPTIONS]` at nice -10 (a file service, D11 6.4). One
+file, one process per mount, the protocol of `kernel/fsproto.h`; exFAT has no links. Only reads: nothing but `DISK_READ`
+reaches the disk. The boot region (or its backup) and every entry set's checksum are checked before use; nothing of the
+FAT or the bitmap is loaded whole: a cache of 16 FAT and directory sectors and a window of 16 file sectors, whole
+sectors straight into the caller's buffer in runs of contiguous clusters (a 64 KB read of a contiguous file is one
+request). Names through `user/utf16name.h`, shared with fatd. Inode numbers and the table of open objects as fatd's; a
+file of 4 GB or more is listed with its size capped and answers `EFBIG`. The rules and the format are in
+`docs/d47-exfat.md`.
+
 ### nfscd - an NFS mount's server (`user/nfscd.c` + `net/nfs/`, port `fs.nfs0` .. `fs.nfs7`, DESIGN D23)
 `mount -t nfs HOST:/EXPORT DIR` registers `fs.nfsN` -> `/sbin/nfscd nfsN HOST:/EXPORT [CODES]` at nice -10 (a file
 service, D11 6.4; the options as one word of codes: `s` soft, `tN` timeo, `rN` retrans, `o` read-only, `y` sync, `aN`

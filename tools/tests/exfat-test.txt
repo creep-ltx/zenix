@@ -1,0 +1,53 @@
+wait zenix:/# 90
+sleep 1
+send mkdir /mnt\r
+sleep 2
+send fdisk list\r
+sleep 3
+send mount ide0p1 /mnt\r
+sleep 5
+send mount\r
+sleep 3
+send ls -l /mnt\r
+sleep 4
+send cat /mnt/hello.txt\r
+sleep 2
+send cat /mnt/HELLO.TXT > /dev/null ; echo any-case=$?\r
+sleep 2
+send cat '/mnt/R\xc3\x84KSM\xc3\x96RG\xc3\x85S.txt'\r
+sleep 2
+send sha256sum /mnt/Mapp/big.bin /mnt/Mapp/frag.bin /mnt/Mapp/small.bin /mnt/Mapp/vdl.bin /mnt/ls.bin\r
+sleep 20
+send ls /mnt\r
+sleep 3
+send cat '/mnt/A long file name with spaces, longer than sixty-three bytes in all.txt'\r
+sleep 3
+send cat /mnt/a/b/c/d/e/f/deep.txt\r
+sleep 3
+send echo count=$(ls /mnt/Lista | wc -l)\r
+sleep 10
+send echo x > /mnt/refused.txt\r
+sleep 2
+send mkdir /mnt/refused\r
+sleep 2
+send rm /mnt/hello.txt\r
+sleep 2
+send df /mnt\r
+sleep 3
+send kill -9 $(pgrep exfatd)\r
+sleep 3
+send cat /mnt/Mapp/small.bin > /dev/null ; echo after-the-kill=$?\r
+sleep 4
+send umount /mnt\r
+sleep 3
+send mount -o rw ide0p1 /mnt\r
+sleep 3
+send mount -t exfat -o uid=5,fmode=755 ide0p1 /mnt\r
+sleep 5
+send ls -l /mnt/ls.bin ; /mnt/ls.bin /mnt/Mapp ; echo run-from-exfat=$?\r
+sleep 8
+send umount /mnt\r
+sleep 3
+send echo exfat-test-done\r
+sleep 1
+wait exfat-test-done 20
