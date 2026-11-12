@@ -15,6 +15,12 @@ typedef int8_t s8;
  * messages, the task switch, the system call entry, the disk's reads) keep -O2: the list is docs/architecture.md
  * section 13, "Optimisation" (audit block 2, the kernel's shrink) */
 #define KCOLD __attribute__((optimize("Os")))
+/* DESIGN D45 (docs/d45-boot-memory.md): code that runs only during the boot (KINIT, kmain and what only it calls) or only
+ * with a CD drive (KHWCD); its span is given back to the pool when the idle loop starts. tools/check-init.py fails the
+ * build if anything that runs later can reach it. noinline: else gcc may copy it into a resident caller and the span
+ * would hold nothing */
+#define KINIT __attribute__((section(".zinit.text"), optimize("Os")))
+#define KHWCD __attribute__((section(".zhwcd.text"), noinline, cold, optimize("Os", "no-function-cse")))
 
 /* bootinfo v3, written by the bootblock at 0x1000 */
 #define MEMF_CHIP 2u
@@ -145,6 +151,8 @@ void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem);
  * a block in use, given back by SYS_update RELEASE; SYS_update itself is in syscall.c */
 extern u32 upd_pa, upd_size, upd_flags;
 void upd_release(void);
+void mem_boot_release(void);            /* D45: the boot's span (and the CD's, without a drive) to the pool, once */
+int ide_cd_present(void);               /* ide.c: a CD drive answered at boot (D44) */
 #define UPD_INFO      1                 /* struct uupdate (usys.h; at most the size given) */
 #define UPD_RELEASE   2                 /* root: the bundle's memory back to the pool */
 #define UPD_NOTE      3                 /* root: kind (UPDNOTE_*), version -> the update note */

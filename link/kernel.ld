@@ -7,11 +7,32 @@ SECTIONS
     . = 0;
     .text : {
         KEEP(*(.text.start))
-        KEEP(*(.text.stage0))
         *(.text*)
     }
     .rodata : { *(.rodata*) }
     .data : { *(.data*) }
+    /* DESIGN D45 (docs/d45-boot-memory.md): the spans given back to the pool after the boot. Each starts with 32 bytes
+     * for the pool's block header; tools/check-init.py checks that nothing outside reaches into them. The boot's: its
+     * code, stage0 (called on the loaded file under AmigaOS, found by the ZEXE header's +28), then the embedded boot
+     * program as data. The CD's (`.zhwcd`): kept only when a CD drive answered at boot. */
+    .zinit ALIGN(16) : {
+        __zinit_start = .;
+        . += 32;
+        *(.zinit.text*)
+        KEEP(*(.zinit.stage0))
+    }
+    .zinitd : {
+        *(.zinit.rodata*)
+        . = ALIGN(16);
+        __zinit_end = .;
+    }
+    .zhwcd ALIGN(16) : {
+        __zhwcd_start = .;
+        . += 32;
+        *(.zhwcd.text*)
+        . = ALIGN(16);
+        __zhwcd_end = .;
+    }
     . = ALIGN(4);
     __bss_start = .;
     .bss : { *(.bss*) *(COMMON) }
