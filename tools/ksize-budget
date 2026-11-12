@@ -67,7 +67,7 @@
 start     4300   8200
 main      5950   1100
 serial    6100   6500
-mem       2900    240
+mem       3600    240
 ide       3400    560
 emmc      4900    640
 floppy    4500    160
@@ -76,7 +76,7 @@ audio      620     32
 a3000     2400    100
 blk        460     16
 rtc       1550      4
-proc      9300  21500
+proc      9400  21500
 syscall  10150      0
 vfs      11450   1600
 tty       5900    100
@@ -84,7 +84,7 @@ gfx       8900   2450
 term     14500    256
 confont   3100     32
 kbd       4300    180
-ipc       4000   2150
+ipc       4150   2150
 svc       5600   1420
 seg       1250    256
 event      700      0
@@ -93,8 +93,9 @@ random    3800    280
 sock      4700   1060
 drv       2650    640
 zine      1600     16
-cache     1700     32
+cache     1800     32
 gcon      3600     16
+mmu       5700    160
 embed    47500      0
-TOTAL   183600
+TOTAL   190500
 ROOM       800

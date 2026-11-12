@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
+#include "mmu.h"
 #include "hw.h"
 
 /* DESIGN D38 section 3.4, step 2: a console in graphics mode, handed to a display server (displayd), as Linux gives a
@@ -218,6 +219,7 @@ long gcon_grab(int con, u32 a2)
     }
     g->file = f;
     g->pid = current->pid;
+    mmu_sysmark(current);               /* D41 7: a display server drives the chips and chip RAM itself */
     g->con = (u8)con;
     g->target = (u8)con;
     g->cop = u->cop;

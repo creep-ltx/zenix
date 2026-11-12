@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
+#include "mmu.h"
 #include "fsproto.h"
 #include "version.h"
 
@@ -575,7 +576,8 @@ void syscall_c(u32 *rb)
             break;                      /* a2: MEMA_CHIP chip RAM (D38); its other bits are ignored, as all of a2 was */
         for (int i = 0; i < NREG; i++)
             if (!current->reg[i].base) {
-                void *m = mem_alloc(a1, a2 & MEMA_CHIP ? MEM_CHIP : 0, (u32)current->pid);
+                void *m = mem_alloc(a1, (a2 & MEMA_CHIP ? MEM_CHIP : 0) | (mmu_is_sys(current) ? 0 : MEM_USER),
+                                    (u32)current->pid);         /* D41: whole pages for a protected process */
                 if (m) {
                     current->reg[i].base = (u32)m;
                     current->reg[i].size = a1;

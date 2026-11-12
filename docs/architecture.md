@@ -28,10 +28,20 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
 ## 2. Hardware assumptions
 
 - CPU: 68020 or better. `start.S` checks `AttnFlags` before any C runs; a 68000 gets a message on the serial port
-  and the screen orange over red (a stop at stage 5, section 3). No MMU is required or used. No FPU is required
+  and the screen orange over red (a stop at stage 5, section 3). No MMU is required; one is used only for memory protection (below). No FPU is required
   (`-msoft-float`).
 - Memory: **chip** RAM (reachable by the custom chips: display, audio, disk DMA) and **fast** RAM are separate
   pools. Fast is preferred; chip is used when asked for (`MEM_CHIP`) or when there is nothing else.
+- Memory protection (`kernel/mmu.c`, DESIGN D41, docs/d41-memory-protection.md), off by default: with zenixboot
+  `MMU=ON` (bootinfo `kopts` `KOPT_MMU_ON` 4; `KOPT_MMU_OFF` 8 wins; the kernel file's default after its `ZKOPTDEF`
+  marker, `tools/kopts.py`; the left mouse button held turns it off) on a 68030/040/060 whose MMU passes the boot's
+  probe (a test page mapped onto another and one left invalid, read with `MOVES` as user data, every trap caught),
+  `mmu_setup` (after `cache_setup`) builds one identity-mapped tree over the memory pools (4 KB pages; root, pointer
+  and page tables of 128/128/64 entries on all three CPUs; U and M preset), sets the kernel's windows for supervisor
+  accesses only (040/060: `DTT0` the first 16 MB inhibited, `DTT1` D37's fast block, `ITT0` everything; 030: `TT0`
+  for function codes 4-7; `SRP` = `URP`) and turns translation on. A page's cache mode is its window's. The log says
+  `mmu: memory protection on: 68060, 4 KB pages, N KB of tables` or why it is off. On every 68030 boot a translation
+  the loader left on (Enforcer, FASTROM) is switched off first. Processes: section 6; memory: section 5.
 - Caches (`kernel/cache.c`, DESIGN D37, docs/d37-data-cache.md): instruction cache on. **The data cache is on only
   on a real 68040/68060 with fast RAM above the first 16 MB**: with the MMU off, `DTT0` makes the first 16 MB (chip
   RAM, every chip and I/O of the classic Amiga, Zorro II) inhibited and serialized/precise, `DTT1` the smallest
@@ -545,6 +555,12 @@ Nothing can be moved once handed out (no MMU, no paging), so fragmentation is th
   each at most `MEMALLOC_MAX` = 64 MB; its second argument `MEMA_CHIP` asks for chip RAM, DESIGN D38: the display
   server's screen; other bits are ignored, as all of it was). **Every memory call answers 0 (NULL) on failure, never -1.** `mem_alloc`
   refuses 0 and sizes above `MEM_ALLOC_MAX` before rounding, so no size near 4 GB can wrap into a tiny block.
+- **With memory protection on** (D41): a process's own blocks (`MEM_USER`: its image block, a ZEX2 program's code
+  copy, `SYS_memalloc` regions; not for a process that is a system one from its start, a service's server) are whole
+  4 KB pages, their data starting on a page and their header the last 16 bytes of the page below (a free block is cut
+  three ways). Every page wholly inside a freed block is made invalid in the tree (`free_blk`), and a block made for
+  the process flipped in is valid at once. `mem_owner_of` names a fault's owner. The headers are unchanged (ZINE's
+  blob walks them). Off, nothing of this happens.
 - Every walk over the blocks (`alloc_in`, `mem_free`, `mem_free_owner`) checks each header: the magic value, a size of
   at least one header, a multiple of 16 and inside the range. A header that fails means something overwrote the heap:
   the kernel prints its address on the serial port and stops (`panic`) instead of looping on garbage.
@@ -695,6 +711,21 @@ pattern (section 6).
 - **Shared code** (DESIGN D13, section 4): a ZEX2 program's processes run one copy of its code (a segment); each has
   its own data part, and `a5` set in its first register frame (`TRAP #0` and the interrupt handlers keep every user
   register; the kernel is not built with `-msep-data` and keeps `a5` by the C calling rules; `switch_to` saves it).
+- **Memory protection** (D41, off by default; docs/d41-memory-protection.md). A *protected* process (every program a
+  user runs) sees in user mode only its view: its block, its regions, its code read only (what `user_ok_wr`/`rd`
+  allow; root's also the update bundle, read only, for zup), and while it holds a client's request (`ipc_recv` to
+  `ipc_finish`) that client's view too. A *system* process (a per-slot mask: `svc_born`, a reserved port's creator,
+  any passing `SYS_drv` call, `CON_GRAB`, the owner of a port `SYS_mount` mounts; at once when marked mid-run) runs
+  with the windows matching user accesses too, so it sees everything as before. `schedule()` calls `mmu_switch(next)`
+  before `switch_to`: idle and an exiting process nothing; a system process the windows to "every access"; a protected
+  one the windows to "supervisor only", after flipping the old tenant's and its lent clients' pages out and the new
+  one's in (descriptors pushed on a 040/060 with the data cache on, `PFLUSHA`; the serial port's level 5 let in during
+  the flips) when it is not already the tenant. `proc_exit` forgets an exiting process first. **Faults:** a user-mode
+  access fault with protection on prints `[kernel] pid N (name): memory protection: a write to ADDR (WHOSE): killed
+  (SIGSEGV)` (the 030's format $A/$B, the 040's $7, the 060's $4 frame read for the address and the direction; WHOSE:
+  the memory of pid M (name), the kernel's memory, free memory, shared code, its own code (read only), a driver's DMA
+  memory, no memory) before the usual line and exit 139. ZINE: translation off around the session (`mmu_hand`); a
+  software reset: off before `RESET` (`mmu_before_reset`).
 - **No `fork`.** Without an MMU a copy of a process cannot be given the same addresses. The only way to make a
   process is `spawn(path, argv, stdio)`: load a ZEXE, give it the parent's cwd and environment, and pass only file
   descriptors 0-2 (so a pipe's write end can't leak into a reader and prevent end-of-file). At most 256 arguments
@@ -858,8 +889,9 @@ struct umsg { next, from, server, state, result, type, a[4], uid, gid, umask, kf
 sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
 ```
 
-- A message lives in the **sender's memory** and only its address moves. With no MMU the server simply reads and
-  writes the client's buffers in place: a `read()` of 4 KB is a message holding a pointer to the client's buffer
+- A message lives in the **sender's memory** and only its address moves. The server simply reads and writes the
+  client's buffers in place (with memory protection on, D41, a protected server is lent the client's view while it
+  holds the request; system servers see everything): a `read()` of 4 KB is a message holding a pointer to the client's buffer
   and the filesystem server fills it directly. **No copies.**
 - Calls are **synchronous** (send-and-wait-for-reply), like QNX and Minix 3, not asynchronous like AmigaOS
   `PutMsg/GetMsg`. A client in a call (`P_MSG`) is woken only by the reply or by the server dying, never by a

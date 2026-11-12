@@ -51,6 +51,8 @@ static const char version[] __attribute__((used, section(".text.start"))) = "$VE
 #define BI_KOPTS        0x84            /* bootinfo: KOPT_* (D37) */
 #define KOPT_DCACHE_OFF 1u
 #define KOPT_DCACHE_WT  2u
+#define KOPT_MMU_ON     4u              /* DESIGN D41: memory protection on */
+#define KOPT_MMU_OFF    8u
 #define HWINFO_DRYRUN   0x5A485744u     /* kernel/hwinfo.h: "ZHWD" in the hwinfo magic, stage0 writes no hardware */
 #define ZUP_HDR 96
 #define ZUP_TOCE 80
@@ -775,8 +777,8 @@ static int kernel_ok(long fh, long ksize, u8 *hdr)
 
 int zb_main(void)
 {
-    static const char tmpl[] = "KERNEL,RAM/K,CHECK/S,PREVIOUS/S,UNSIGNED_OK/S,DCACHE/K";
-    long args[6] = { 0, 0, 0, 0, 0, 0 };
+    static const char tmpl[] = "KERNEL,RAM/K,CHECK/S,PREVIOUS/S,UNSIGNED_OK/S,DCACHE/K,MMU/K";
+    long args[7] = { 0, 0, 0, 0, 0, 0, 0 };
     long rda, kfh = 0, rfh = 0, ksize = 0, rsize = 0;
     u8 *table = 0, *buf = 0, hdr[32];
     u32 k512, r512, total = 0, home;
@@ -804,6 +806,16 @@ int zb_main(void)
             say("zenixboot: DCACHE=%s: say OFF, WT (write-through) or CB (copyback, the default)\n", args[5], 0, 0);
             goto out;                   /* rc 20; nothing allocated yet */
         }
+    }
+    if (args[6]) {                      /* DESIGN D41: memory protection on or off */
+        const char *d = (const char *)args[6];
+        int on = (d[0] | 32) == 'o' && (d[1] | 32) == 'n' && !d[2];
+        int no = (d[0] | 32) == 'o' && (d[1] | 32) == 'f' && (d[2] | 32) == 'f' && !d[3];
+        if (!on && !no) {
+            say("zenixboot: MMU=%s: say ON or OFF (memory protection; off is the default)\n", args[6], 0, 0);
+            goto out;
+        }
+        kopts |= on ? KOPT_MMU_ON : KOPT_MMU_OFF;
     }
     if (args[4]) {                      /* DESIGN D21 6.4: unsigned bundles only in test builds, and only when asked */
         if (KEY_RELEASE) say("zenixboot: UNSIGNED_OK is for test builds: ignored (unsigned bundles are refused)\n", 0, 0, 0);

@@ -235,8 +235,12 @@ buffers in place. So while a protected tenant holds a request (`MSG_SERVING`, se
 
 - when `ipc_recv` hands a message to a protected tenant, the client's view is flipped in at once (`mmu_lend`);
 - when the request ends (`ipc_finish`: the reply, or `-ECONNRESET`, also when the server faults while holding it),
-  the tenant's set is made again without that client (`mmu_unlend` is a retenant: everything out, then the tenant and
-  the clients it still serves in; so a D13 segment that several of them run is never left out by one flip-out);
+  nothing is done at once: the client's view leaves at the next retenant, which comes before the client runs again
+  (it is flipped out with the rest, then the new tenant and the clients it still serves in, so a D13 segment several
+  of them run is never left out by one flip-out). Until then the server could still reach the client's memory; a
+  server normally answers and waits for its next request in one trap (`replyrecv`), so the window is that trap.
+  Measured: making the set again at every reply cost a whole retenant per message (section 15). A lent client that
+  ends is flipped out at once (`mmu_forget`);
 - when such a server becomes the tenant again, every client whose request it holds is lent again (a scan of the 32
   slots, as `ipc_serving` does).
 
@@ -395,7 +399,8 @@ frozen-interfaces.md and the code; their findings and what was done:
 8. D37's windows when D37 is off: `cache_block` gives them in every case (section 4).
 9. A mount on a port that is not reserved: rule 5 (section 7).
 10. `CON_GRAB`: rule 4 (section 7).
-11. Views that share code: unlend is a whole retenant (section 8).
+11. Views that share code: a client leaves only at a whole retenant (everything out, then in), never by its own
+    flip-out (section 8).
 12. The cost per wake-up and per call, not per slice: section 9; the two later steps named.
 13. The memory cost of the rounding: estimated in section 6, measured in section 15.
 14. Forwarding between protected servers: not supported, written (sections 2, 8).

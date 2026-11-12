@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
 #include "zine.h"
+#include "mmu.h"
 
 /* Memory manager. No MMU, so every byte is physical and nothing can be
  * moved once handed out: fragmentation is the enemy. Rules:
@@ -11,7 +12,9 @@
  *     process gets everything back with mem_free_owner()
  * Each range is a run of contiguous blocks; a 16-byte header gives the
  * size (used flag in bit 0), the size of the block before it, the owner
- * and a magic value that catches overruns and double frees. */
+ * and a magic value that catches overruns and double frees.
+ * With memory protection on (DESIGN D41, kernel/mmu.c), a MEM_USER block (a process's own memory) is whole pages:
+ * its data starts on a page, its header is the last 16 bytes of the page below, so no two owners share a page. */
 
 #define MAGIC   0x5a4d454du         /* "ZMEM" */
 #define HDR     16u
@@ -144,6 +147,8 @@ __attribute__((cold, noinline, optimize("Os"))) static void upd_reserve(const st
 __attribute__((cold, optimize("Os"))) void upd_release(void)
 {
     if (upd_blk) {
+        if (mmu_on)
+            mmu_upd_gone();             /* D41: its pages leave root's views (they were read only for zup) */
         mem_free(upd_blk);
         kprintf("update: the bundle's %u bytes are free again\n", upd_size);
     }
@@ -181,47 +186,64 @@ static void check_blk(const struct range *r, const struct mblk *b)
     }
 }
 
-/* LIMIT (0: none): the block must end at or below it, cut from the low end of a free block (MEM_LOW1G) */
-static void *alloc_in(struct range *r, u32 need, u32 owner, u32 limit)
+/* cut the used block [h, u) out of the free block b: h is b or leaves a free block of at least 2 headers before it, u
+ * is b's end or leaves one of at least 2 headers after it */
+__attribute__((noinline)) static void *carve(struct range *r, struct mblk *b, u32 h, u32 u, u32 owner)
+{
+    u32 e = (u32)b + SZ(b);
+    struct mblk *use = (struct mblk *)h, *nx;
+    if (h > (u32)b) {
+        b->size = h - (u32)b;
+        use->prev = b->size;
+    }
+    use->size = (u - h) | 1;
+    use->owner = owner;
+    use->magic = MAGIC;
+    if (u < e) {
+        struct mblk *t = (struct mblk *)u;
+        t->size = e - u;
+        t->prev = u - h;
+        t->owner = 0;
+        t->magic = MAGIC;
+        if ((nx = next_of(r, t)))
+            nx->prev = e - u;
+    } else if ((nx = next_of(r, use)))
+        nx->prev = u - h;
+    freeb[r->chip] -= u - h;
+    return use + 1;
+}
+
+/* NEED: the block's bytes with its header. LIMIT (0: none): the block must end at or below it, cut from the low end of
+ * a free block (MEM_LOW1G). PG (DESIGN D41, a MEM_USER block with protection on): NEED is the data's bytes, whole
+ * pages, the data starts on a page; its header is the last 16 bytes of the page below, which holds no other such
+ * block's data (that one ends on a page at or below it). Big blocks from the high end, small ones from the low end. */
+__attribute__((noinline)) static void *alloc_in(struct range *r, u32 need, u32 owner, u32 limit, int pg)
 {
     for (struct mblk *b = (struct mblk *)r->lo; b; b = next_of(r, b)) {
         check_blk(r, b);
-        if (limit && (u32)b + need > limit)
+        u32 lo = (u32)b, e = lo + SZ(b), h = lo, u;
+        if (limit && lo + need > limit)
             break;                              /* the blocks only get higher from here */
-        if (USED(b) || SZ(b) < need)
+        if (USED(b) || SZ(b) < need + (pg ? HDR : 0))
             continue;
-        u32 left = SZ(b) - need;
-        struct mblk *use = b, *nx;
-        if (left < 2 * HDR) {                   /* too small to split */
-            freeb[r->chip] -= SZ(b);
-            b->size |= 1;
-            b->owner = owner;
-            return b + 1;
-        }
-        freeb[r->chip] -= need;
-        if (need >= BIG && !limit) {            /* big: cut from the high end */
-            use = (struct mblk *)((u32)b + left);
-            b->size = left;
-            use->size = need | 1;
-            use->prev = left;
-            use->owner = owner;
-            use->magic = MAGIC;
-            nx = next_of(r, use);
-            if (nx)
-                nx->prev = need;
-        } else {                                /* small: from the low end */
-            struct mblk *rest = (struct mblk *)((u32)b + need);
-            rest->size = left;
-            rest->prev = need;
-            rest->owner = 0;
-            rest->magic = MAGIC;
-            b->size = need | 1;
-            b->owner = owner;
-            nx = next_of(r, rest);
-            if (nx)
-                nx->prev = left;
-        }
-        return use + 1;
+        if (pg) {
+            u32 a = need >= BIG ? (e - need) & ~(MMU_PG - 1) : (lo + HDR + MMU_PG - 1) & ~(MMU_PG - 1);
+            if (a - HDR > lo && a - HDR - lo < 2 * HDR)
+                a = need >= BIG ? a - MMU_PG : a + MMU_PG;  /* no room for a free block in front: a page further */
+            if (a < lo + HDR || a + need > e || a + need < a)
+                continue;
+            h = a - HDR;
+            u = a + need;
+        } else if (need >= BIG && !limit) {
+            h = e - need;
+            u = e;
+        } else
+            u = lo + need;
+        if (e - u < 2 * HDR)
+            u = e;                              /* too small to stay free: taken into the block */
+        if (!pg && h - lo < 2 * HDR)
+            h = lo;
+        return carve(r, b, h, u, owner);
     }
     return 0;
 }
@@ -245,9 +267,13 @@ void *mem_alloc(u32 n, u32 flags, u32 owner)
             u32 limit = (flags & MEM_LOW1G) ? 0x40000000u : 0;
             if (limit && ranges[i].lo >= limit)
                 continue;                       /* wholly above 1 GB; one crossing it gives from its low part (A15) */
-            void *p = alloc_in(&ranges[i], need, owner, limit);
-            if (p)
+            int pg = (flags & MEM_USER) && mmu_on;
+            void *p = alloc_in(&ranges[i], pg ? (n + MMU_PG - 1) & ~(MMU_PG - 1) : need, owner, limit, pg);
+            if (p) {
+                if (pg)
+                    mmu_block((u32)p, n, owner);        /* valid at once for the process flipped in (D41 9) */
                 return p;
+            }
         }
     }
     return 0;
@@ -264,6 +290,8 @@ static struct range *range_of(u32 a)
 /* free a block, merge with free neighbours; returns the merged block */
 static struct mblk *free_blk(struct range *r, struct mblk *b)
 {
+    if (mmu_on)
+        mmu_freed((u32)(b + 1), SZ(b) - HDR);   /* D41: its whole pages invalid for every program */
     freeb[r->chip] += SZ(b);
     b->size &= ~1u;
     b->owner = 0;
@@ -326,6 +354,20 @@ u32 mem_free_owner(u32 owner)
         }
     }
     return got;
+}
+
+/* D41: whose block holds a (a fault's line): its owner, *used 0 for a free block; MEM_NOT_POOL outside the pools */
+KCOLD u32 mem_owner_of(u32 a, int *used)
+{
+    struct range *r = range_of(a);
+    if (!r)
+        return MEM_NOT_POOL;
+    for (struct mblk *b = (struct mblk *)r->lo; b; b = next_of(r, b))
+        if (a < (u32)b + SZ(b)) {
+            *used = USED(b) && a >= (u32)(b + 1);
+            return a >= (u32)(b + 1) ? b->owner : 0;
+        }
+    return MEM_NOT_POOL;
 }
 
 void mem_stats(u32 *chip_free, u32 *fast_free)

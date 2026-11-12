@@ -11,7 +11,8 @@ built. Last checked against the code: 2026-10-23.
 ## Machine support
 | Feature | Status | Details |
 |---|---|---|
-| 68020, 68030, 68040, 68060 (soft float, no MMU use) | verified | architecture.md section 2; the emulated machines of the matrix (architecture.md section 13) |
+| 68020, 68030, 68040, 68060 (soft float, no MMU needed) | verified | architecture.md section 2; the emulated machines of the matrix (architecture.md section 13) |
+| Memory protection on a 68030/040/060 with an MMU (DESIGN D41, off by default: zenixboot `MMU=ON`): every program a user runs sees only its own memory, its code read only; a stray read or write ends it with a line naming whose memory it was; the system's servers and drivers see everything as before; identity mapped, 4 KB pages, the MMU probed at boot (EC parts, Emu68: off) | verified in FS-UAE (`tools/mmu-test.sh` on the 68030 and 68060 with FS-UAE's MMU model; the regular suites with protection on, d41 section 15); never on a real 030/040/060 | d41-memory-protection.md, architecture.md sections 2, 5, 6 |
 | 68000 refused with a message (orange over red screen, serial text) | verified (`tools/diag-test.sh`) | start.S |
 | Boot stage colours: the whole screen changes colour at each boot step until the display is up; error stops show the step's colour over red, a panic after that a red bar with its text | verified in FS-UAE (`tools/diag-test.sh`: each stage's colour from a screenshot); verified on the A1200 (2026-10-23) | pi-first-boot.md (the table), architecture.md section 3 |
 | Chip and fast RAM pools, 1 MB chip up to 8 MB+ fast | verified | architecture.md section 5 |

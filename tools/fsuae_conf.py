@@ -51,7 +51,22 @@ def make_fast(text):
     return text
 
 
+def apply_set(text):
+    """ZENIX_FSUAE_SET="key=value;key=value": those keys changed (or added) for this run, so any test runs on another
+    machine without a config of its own (DESIGN D41: the suites on a 68030/68060 with FS-UAE's MMU model)."""
+    for item in (os.environ.get("ZENIX_FSUAE_SET") or "").split(";"):
+        if "=" not in item:
+            continue
+        k, v = (x.strip() for x in item.split("=", 1))
+        line = f"{k} = {v}"
+        text, n = re.subn(rf"^{re.escape(k)} *=.*$", lambda m: line, text, flags=re.M)
+        if not n:
+            text = text.rstrip("\n") + "\n" + line + "\n"
+    return text
+
+
 def resolve(text, serial=None, build=None, states=None, fast=None):
+    text = apply_set(text)
     if fast is None:
         fast = fast_mode()
     if fast:
