@@ -901,6 +901,20 @@ zs_ReleaseSemaphore:
     CF  zs_BltClear, c_BltClear, 3, %a1, %d0, %d1
     CF  zs_GetSprite, c_GetSprite, 2, %a0, %d0
     CF  zs_FreeSprite, c_FreeSprite, 1, %d0
+    .globl  zs_DoPkt                /* dos DoPkt (16.19): its seven registers d1-d7 as an array */
+zs_DoPkt:
+    movem.l %d1-%d7,-(%sp)
+    move.l  %sp,-(%sp)
+    jsr     c_DoPkt
+    addq.l  #4,%sp
+    movem.l (%sp)+,%d1-%d7
+    rts
+    CF  zs_ChangeSprite, c_ChangeSprite, 3, %a0, %a1, %a2
+    CF  zs_MoveSprite, c_MoveSprite, 4, %a0, %a1, %d0, %d1
+    CF  zs_GetExtSpriteA, c_GetExtSpriteA, 2, %a2, %a1
+    CF  zs_AllocSpriteDataA, c_AllocSpriteDataA, 2, %a2, %a1
+    CF  zs_ChangeExtSpriteA, c_ChangeExtSpriteA, 4, %a0, %a1, %a2, %a3
+    CF  zs_FreeSpriteData, c_FreeSpriteData, 1, %a2
     CF  zs_Draw, c_Draw, 3, %a1, %d0, %d1
     CF  zs_PolyDraw, c_PolyDraw, 3, %a1, %d0, %a0
     CF  zs_VideoControl, c_VideoControl, 2, %a0, %a1

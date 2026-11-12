@@ -164,28 +164,282 @@ void c_BltClear(u8 *mem, u32 count, u32 flags)
     zmemset(mem, 0, n);
 }
 
-/* GetSprite(sprite a0, num d0) (-408), FreeSprite(num d0) (-414): hardware sprites 1-7 handed out (0 is the mouse
- * pointer's, as intuition keeps it; ZINE shows no pointer, so a program asking for 0 by number gets it too);
- * ss_num (offset 10) set. -1 when the one asked for (or every one) is taken. */
-static u8 sprites_taken;
-s32 c_GetSprite(u8 *ss, s32 num)
+/* ---- hardware sprites (16.13, 16.19; the RKRM Libraries' sprite chapter and the NDK 3.2's autodocs for what each
+ * call does, graphics/sprite.h for the structures, the AHRM and the AGA documents for the data and SPRxPOS/SPRxCTL):
+ * GetSprite(ss a0, num d0) (-408), FreeSprite(num d0) (-414), ChangeSprite(vp a0, ss a1, data a2) (-420),
+ * MoveSprite(vp a0, ss a1, x d0, y d1) (-426), GetExtSpriteA(es a2, tags a1) (-930), AllocSpriteDataA(bm a2, tags a1)
+ * (-1020), ChangeExtSpriteA(vp a0, old a1, new a2, tags a3) (-1026), FreeSpriteData(es a2) (-1032).
+ * A SimpleSprite: posctldata 0, height 4, x 6, y 8, num 10; an ExtSprite adds es_wordwidth 12 and es_flags 14.
+ * Hardware sprites 1-7 are handed out first (0 is the mouse pointer's, as intuition keeps it; ZINE shows no pointer, so
+ * a program asking for 0 by number gets it too). A sprite's data is shown through zg_spr (the screen's Copper list
+ * points the sprite there each frame, blibs.c zg_spr_show); 16-pixel sprites, and on AGA 32 and 64 (FMODE's sprite
+ * bits, zg_sprfm: all sprites have the width of the widest one taken). ---- */
+u32 zg_spr[8];                          /* each sprite's data, 0: the null sprite */
+u16 zg_sprfm;                           /* FMODE's sprite width bits: 0, 0x4 (32), 0xC (64) */
+static u8 sprites_taken, spr_ext;       /* taken; taken by GetExtSpriteA */
+static u8 spr_ww[8];                    /* the data's width in words (1, 2, 4) */
+static u8 *spr_ss[8];                   /* the ExtSprite shown (its partner moves with it) */
+static u8 spr_att;                      /* bit n: sprite n+1 is n's attached partner */
+static int ss_ok(const u8 *ss) { return ss && !((u32)ss & 1) && c_TypeOfMem((u32)ss) && c_TypeOfMem((u32)ss + 11); }
+static s32 ss_num(const u8 *ss)        /* its sprite number when that is taken, else -1 */
 {
-    if (num < -1 || num > 7)
+    s32 n = ss_ok(ss) ? *(const s16 *)(ss + 10) : -1;
+    return n >= 0 && n <= 7 && (sprites_taken & (1u << n)) ? n : -1;
+}
+static void spr_widths(void)            /* FMODE's sprite bits from the widest sprite taken */
+{
+    u16 fm = 0;
+    for (int i = 0; i < 8; i++)
+        if (sprites_taken & (1u << i))
+            fm = spr_ww[i] == 4 ? 0xC : spr_ww[i] == 2 && fm != 0xC ? 0x4 : fm;
+    if (fm != zg_sprfm) {
+        zg_sprfm = fm;
+        zg_spr_mode();
+    }
+}
+static void spr_set(s32 n, u32 data)
+{
+    zg_spr[n] = data && c_TypeOfMem(data) ? data : 0;
+    zg_spr_show();
+}
+static s32 spr_take(s32 num, int pair, u32 ww)
+{
+    for (int i = 0; i < 8; i++)         /* one width for all (the autodoc: no mode change while others are in use) */
+        if ((sprites_taken & (1u << i)) && spr_ww[i] != ww)
+            return -1;
+    if (num < -1 || num > 7 || (pair && num >= 0 && (num & 1)))
         return -1;
-    s32 lo = num < 0 ? 1 : num, hi = num < 0 ? 7 : num;
-    for (s32 i = lo; i <= hi; i++)
-        if (!(sprites_taken & (1u << i))) {
-            sprites_taken |= (u8)(1u << i);
-            if (ss && c_TypeOfMem((u32)ss))
-                *(s16 *)(ss + 10) = (s16)i;
+    static const u8 order[8] = { 1, 2, 3, 4, 5, 6, 7, 0 }, porder[4] = { 2, 4, 6, 0 };
+    for (int k = 0; k < (num >= 0 ? 1 : pair ? 4 : 8); k++) {
+        s32 i = num >= 0 ? num : pair ? porder[k] : order[k];
+        u32 m = (pair ? 3u : 1u) << i;
+        if (!(sprites_taken & m)) {
+            sprites_taken |= (u8)m;
+            for (s32 j = i; j <= i + pair; j++)
+                spr_ww[j] = (u8)ww, spr_ss[j] = 0;
             return i;
         }
+    }
     return -1;
+}
+s32 c_GetSprite(u8 *ss, s32 num)
+{
+    s32 i = spr_take(num, 0, 1);
+    if (ss_ok(ss))
+        *(s16 *)(ss + 10) = (s16)i;
+    if (i >= 0)
+        spr_widths();
+    return i;
 }
 void c_FreeSprite(s32 num)
 {
-    if (num >= 0 && num <= 7)
-        sprites_taken &= (u8)~(1u << num);
+    if (num < 0 || num > 7 || !(sprites_taken & (1u << num)))
+        return;
+    sprites_taken &= (u8)~(1u << num);
+    spr_ext &= (u8)~(1u << num);
+    spr_att &= (u8)~(1u << num);
+    if (num)
+        spr_att &= (u8)~(1u << (num - 1));
+    spr_ss[num] = 0;
+    spr_set(num, 0);
+    spr_widths();
+}
+/* the position words (the AHRM's SPRxPOS and SPRxCTL: SV7-0 SH8-1; EV7-0, ATT, SV8, EV8, SH0) from x and y in the
+ * ViewPort's resolution (vp 0: the View's), the display window's corner $2C/$81 (a SimpleSprite one pixel to the
+ * left, as the autodoc's BUGS section says AmigaOS puts it); the ATTACHED bit kept */
+static void spr_pos(const u8 *vp, u8 *ss, s32 x, s32 y, int ext, u32 ww, int att)
+{
+    u16 *d = *(u16 **)ss;
+    if (!d || ((u32)d & 1) || !c_TypeOfMem((u32)d) || !c_TypeOfMem((u32)d + 2 * ww + 1))
+        return;
+    if (vp && c_TypeOfMem((u32)vp)) {
+        u16 modes = *(const u16 *)(vp + 32);
+        x = modes & 0x0020 ? x >> 2 : modes & 0x8000 ? x >> 1 : x;     /* superhires, hires */
+        if (modes & 0x0004)
+            y >>= 1;                    /* interlaced */
+        x += *(const s16 *)(vp + 28);
+        y += *(const s16 *)(vp + 30);
+    }
+    s32 v0 = 0x2C + y, h = 0x80 + ext + x, v1 = v0 + *(const u16 *)(ss + 4);
+    if (v0 < 0) v0 = 0;
+    if (v1 < v0) v1 = v0;
+    if (h < 0) h = 0;
+    d[0] = (u16)((v0 & 0xFF) << 8 | (h >> 1 & 0xFF));
+    d[ww] = (u16)((v1 & 0xFF) << 8 | ((d[ww] & 0x80) | (att ? 0x80 : 0)) | (v0 >> 8 & 1) << 2 | (v1 >> 8 & 1) << 1 |
+                  (h & 1));
+}
+void c_MoveSprite(const u8 *vp, u8 *ss, s32 x, s32 y)
+{
+    if (!ss_ok(ss))
+        return;
+    x = (s16)x, y = (s16)y;
+    *(s16 *)(ss + 6) = (s16)x;
+    *(s16 *)(ss + 8) = (s16)y;
+    s32 n = ss_num(ss);
+    int ext = n >= 0 && (spr_ext & (1u << n));
+    u32 ww = n >= 0 ? spr_ww[n] : 1;
+    spr_pos(vp, ss, x, y, ext, ww, 0);
+    u8 *p = n >= 0 && n < 7 && (spr_att & (1u << n)) ? spr_ss[n + 1] : 0;
+    if (ss_ok(p)) {                     /* the attached partner at the same place */
+        *(s16 *)(p + 6) = (s16)x;
+        *(s16 *)(p + 8) = (s16)y;
+        spr_pos(vp, p, x, y, ext, ww, 1);
+    }
+}
+void c_ChangeSprite(const u8 *vp, u8 *ss, u32 data)
+{
+    s32 n = ss_num(ss);
+    if (n < 0)
+        return;
+    *(u32 *)ss = data;
+    spr_set(n, data);
+    c_MoveSprite(vp, ss, *(s16 *)(ss + 6), *(s16 *)(ss + 8));
+}
+#define ZSPR 0x5A535052u                /* "ZSPR": an ExtSprite of AllocSpriteDataA's (its data's block, size after) */
+#define ES_SIZE 28
+static int es_mine(const u8 *es)
+{
+    return ss_ok(es) && c_TypeOfMem((u32)es + ES_SIZE - 1) && *(const u32 *)(es + 24) == ZSPR;
+}
+s32 c_GetExtSpriteA(u8 *es, u32 *tags)
+{
+    s32 num = -1;
+    u8 *two = 0;
+    u32 *t = tags, *ti;
+    for (u32 k = 0; k < 64 && t && (ti = (u32 *)c_NextTagItem(&t)); k++) {
+        if (!c_TypeOfMem((u32)ti))
+            break;
+        if (ti[0] == 0x82000020)        /* GSTAG_SPRITE_NUM */
+            num = (s32)ti[1];
+        if (ti[0] == 0x82000022)        /* GSTAG_ATTACHED: the pair's second ExtSprite */
+            two = (u8 *)ti[1];
+    }
+    if (!ss_ok(es) || !c_TypeOfMem((u32)es + 15) || (two && !ss_ok(two)))
+        return -1;
+    u32 ww = *(u16 *)(es + 12);
+    ww = ww == 2 || ww == 4 ? ww : 1;
+    s32 i = spr_take(num, two != 0, ww);
+    *(s16 *)(es + 10) = (s16)i;
+    if (i < 0)
+        return -1;
+    spr_ext |= (u8)((two ? 3u : 1u) << i);
+    spr_ss[i] = es;
+    spr_set(i, *(u32 *)es);
+    if (two) {
+        *(s16 *)(two + 10) = (s16)(i + 1);
+        spr_ss[i + 1] = two;
+        spr_att |= (u8)(1u << i);
+        u16 *d = *(u16 **)two;
+        if (d && !((u32)d & 1) && c_TypeOfMem((u32)d + 2 * ww + 1))
+            d[ww] |= 0x80;              /* the odd one's ATTACHED bit */
+        spr_set(i + 1, (u32)d);
+    }
+    spr_widths();
+    return i;
+}
+u32 c_ChangeExtSpriteA(const u8 *vp, u8 *old, u8 *es, u32 *tags)
+{
+    (void)tags;
+    s32 n = ss_num(old);
+    if (n < 0 || !ss_ok(es))
+        return 0;
+    *(s16 *)(es + 10) = (s16)n;
+    *(s16 *)(es + 6) = *(s16 *)(old + 6);
+    *(s16 *)(es + 8) = *(s16 *)(old + 8);
+    spr_ss[n] = es;
+    spr_set(n, *(u32 *)es);
+    c_MoveSprite(vp, es, *(s16 *)(es + 6), *(s16 *)(es + 8));
+    return 1;
+}
+/* AllocSpriteDataA: SPRITEA_Width (16; 32 and 64 on AGA only, else 0), _XReplication and _YReplication (0 1:1, 1 and 2
+ * each pixel 2 or 4 times, -1 and -2 every 2nd or 4th), _OutputHeight (the BitMap's rows), _Attached (planes 2 and 3),
+ * _OldDataFormat (the "BitMap" is a simple sprite's rows of two words); the data in chip RAM, aligned to its fetch:
+ * the two control words' fetches, a row's plane A then plane B words, two empty fetches at the end */
+static u32 bm_pix(const u8 *bm, u32 p, s32 x, s32 y)
+{
+    if (p >= bm[ZO_BitMap_Depth] || p >= 8 || x < 0 || y < 0 || (u32)y >= *(const u16 *)(bm + ZO_BitMap_Rows) ||
+        (u32)x >= 8u * *(const u16 *)(bm + ZO_BitMap_BytesPerRow))
+        return 0;
+    const u8 *pl = *(const u8 *const *)(bm + ZO_BitMap_Planes + 4 * p);
+    u32 a = (u32)pl + (u32)y * *(const u16 *)(bm + ZO_BitMap_BytesPerRow) + ((u32)x >> 3);
+    return pl && c_TypeOfMem(a) ? *(const u8 *)a >> (7 - (x & 7)) & 1 : 0;
+}
+u32 c_AllocSpriteDataA(const u8 *bm, u32 *tags)
+{
+    u32 w = 16, h = ~0u, att = 0, old = 0;
+    s32 xr = 0, yr = 0;
+    u32 *t = tags, *ti;
+    for (u32 k = 0; k < 64 && t && (ti = (u32 *)c_NextTagItem(&t)); k++) {
+        if (!c_TypeOfMem((u32)ti))
+            break;
+        switch (ti[0]) {
+        case 0x81000000: w = ti[1]; break;
+        case 0x81000002: xr = (s32)ti[1]; break;
+        case 0x81000004: yr = (s32)ti[1]; break;
+        case 0x81000006: h = ti[1]; break;
+        case 0x81000008: att = ti[1] != 0; break;
+        case 0x8100000A: old = ti[1] != 0; break;
+        }
+    }
+    if (!bm || !c_TypeOfMem((u32)bm) || (old && h == ~0u))
+        return 0;
+    if (h == ~0u)
+        h = *(const u16 *)(bm + ZO_BitMap_Rows);
+    u32 ww = w <= 16 ? 1 : w <= 32 ? 2 : w <= 64 ? 4 : 0;
+    if (!w || !ww || (ww > 1 && !Z.aga) || h > 1024 || xr < -2 || xr > 2 || yr < -2 || yr > 2)
+        return 0;
+    u32 size = 4 * ww * (h + 2) + 8;
+    u8 *es = (u8 *)zx_AllocMem(ES_SIZE, MEMF_PUBLIC | MEMF_CLEAR);
+    u32 raw = es ? zx_AllocMem(size, MEMF_CHIP | MEMF_CLEAR) : 0;
+    if (!raw) {
+        if (es)
+            zx_FreeMem((u32)es, ES_SIZE);
+        return 0;
+    }
+    u16 *d = (u16 *)((raw + 7) & ~7u);
+    *(u16 **)es = d;
+    *(u16 *)(es + 4) = (u16)h;
+    *(s16 *)(es + 10) = -1;
+    *(u16 *)(es + 12) = (u16)ww;
+    *(u32 *)(es + 16) = raw;
+    *(u32 *)(es + 20) = size;
+    *(u32 *)(es + 24) = ZSPR;
+    if (att)
+        d[ww] = 0x80;                   /* the second of a pair: its ATTACHED bit (as V40 sets it) */
+    u16 *row = d + 2 * ww;
+    for (u32 r = 0; r < h; r++, row += 2 * ww) {
+        s32 sy = yr >= 0 ? (s32)(r >> yr) : (s32)(r << -yr);
+        if (old) {                      /* a simple sprite's rows: two words each, 16 pixels */
+            const u16 *o = (const u16 *)bm + 2 * (u32)sy;
+            if (!c_TypeOfMem((u32)o + 3))
+                break;
+            row[0] = o[0], row[ww] = o[1];
+            continue;
+        }
+        for (u32 x = 0; x < w; x++) {
+            s32 sx = xr >= 0 ? (s32)(x >> xr) : (s32)(x << -xr);
+            u16 bit = (u16)(0x8000u >> (x & 15));
+            if (bm_pix(bm, 2 * att, sx, sy))
+                row[x >> 4] |= bit;
+            if (bm_pix(bm, 2 * att + 1, sx, sy))
+                row[ww + (x >> 4)] |= bit;
+        }
+    }
+    return (u32)es;
+}
+void c_FreeSpriteData(u8 *es)
+{
+    if (!es_mine(es))
+        return;
+    s32 n = ss_num(es);
+    if (n >= 0 && zg_spr[n] == *(u32 *)es)
+        spr_set(n, 0);                  /* still shown: the null sprite instead */
+    for (int i = 0; i < 8; i++)
+        if (spr_ss[i] == es)
+            spr_ss[i] = 0;
+    *(u32 *)(es + 24) = 0;
+    zx_FreeMem(*(u32 *)(es + 16), *(u32 *)(es + 20));
+    zx_FreeMem((u32)es, ES_SIZE);
 }
 
 /* lines into a RastPort's BitMap (Draw -246, PolyDraw -336; intuition's DrawBorder): every pixel the FgPen in the

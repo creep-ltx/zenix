@@ -14,6 +14,7 @@
 #define LVO_FindSemaphore -594
 #define LVO_Lock -84
 #define LVO_CompareDates -738
+#define LVO_DoPkt -240
 #define LVO_SetDrMd -354
 #define LVO_RectFill -306
 #define LVO_CopyMem -624
@@ -976,6 +977,46 @@ main:
     beq     fail
     tst.l   12(%a2)             /* dvp_DevNode */
     beq     fail
+    move.l  (%a2),%d1           /* 16.19: DoPkt to that port: ACTION_IS_FILESYSTEM yes, ACTION_DISK_INFO 512-byte */
+    move.l  #1027,%d2           /* blocks; to a port that is not a handler: DOSFALSE, ERROR_ACTION_NOT_KNOWN */
+    jsr     LVO_DoPkt(%a6)
+    moveq   #-1,%d1
+    cmp.l   %d1,%d0
+    bne     fail
+    move.l  (%a2),%d1
+    moveq   #25,%d2
+    lea     infodata(%pc),%a0
+    move.l  %a0,%d3
+    lsr.l   #2,%d3
+    jsr     LVO_DoPkt(%a6)
+    moveq   #-1,%d1
+    cmp.l   %d1,%d0
+    bne     fail
+    lea     infodata(%pc),%a0
+    cmp.l   #512,20(%a0)        /* id_BytesPerBlock */
+    bne     fail
+    lea     infodata(%pc),%a0
+    move.l  %a0,%d1             /* not a port at all */
+    moveq   #25,%d2
+    jsr     LVO_DoPkt(%a6)
+    tst.l   %d0
+    bne     fail
+    jsr     LVO_IoErr(%a6)
+    cmp.l   #209,%d0
+    bne     fail
+    lea     handles(%pc),%a3        /* 16.19: 40 files open at once (ZINE's most was 16; Hexel keeps more) */
+    moveq   #39,%d4
+1:  lea     p_disk(%pc),%a0
+    move.l  %a0,%d1
+    move.l  #1005,%d2               /* MODE_OLDFILE */
+    jsr     LVO_Open(%a6)
+    move.l  %d0,(%a3)+
+    beq     fail
+    dbra    %d4,1b
+    moveq   #39,%d4
+2:  move.l  -(%a3),%d1
+    jsr     LVO_Close(%a6)
+    dbra    %d4,2b
     lea     p_disk(%pc),%a0
     move.l  %a0,%d1
     move.l  %a2,%d2
@@ -1121,9 +1162,12 @@ p_rel:    .asciz "Sub/f.txt"
 p_up:     .asciz "/znext"
 p_none:   .asciz "nosuch.file"
 p_disk:   .asciz "ZDisk:Data/Sub/f.txt"
+    .balign 4
+infodata: .space 36
+handles:  .space 160
 p_t:      .asciz "T:znext"
 p_ramdisk: .asciz "ram disk"
-m_dosl:   .asciz "znext: the DOS list, GetDeviceProc, CompareDates, CopyMem and RectFill answered\n"
+m_dosl:   .asciz "znext: the DOS list, GetDeviceProc, DoPkt, 40 open files, CompareDates, CopyMem and RectFill answered\n"
     .balign 4
 cm_src:   .ascii "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJ"
           .byte 0x5A
