@@ -71,6 +71,7 @@ STOCK[crypto68k-test:fsuae/a1200-020.fs-uae]="measures the crypto's speed on the
 STOCK[svc-test:f]="the service manager's back-off and retry windows (emulated seconds) against the script's pace (the PC's)"
 STOCK[rootcheck-test:h]="cut 4 s of the PC's clock after the last command; in warp mode a write lands first that e2fsck rejects (a deleted inode's dtime 1 with no clock, read as an orphan-list link: fsck.ext2's, fixed 2026-11-04; h passed once in warp mode since)"
 STOCK[jobs-test]="lines typed ahead while sleep 12-16 runs: the typing (the PC's time) must fit inside the sleep (the Amiga's)"
+STOCK[sound-test]="Ctrl-C sent 1.5 s of the PC's clock into a 10 s play: in warp mode the play has ended by then"
 STOCK[zinstall-test:m]="the stock A1200 with 4 MB of fast RAM (the machine Zenix is made for): the lowest free memory held to a floor"
 STOCK[zinstall-test:z]="the same machine with a ZenixFS root: its memory floor"
 STOCK[zinstall-test:b]="2 MB of chip RAM alone (best effort): where memory runs out"
