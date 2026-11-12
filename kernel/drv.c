@@ -10,6 +10,8 @@
  *   - its blocks (DRV_ATTACH, DRV_XFER) carried to "net" as kernel messages that never start a server.
  *   - the parallel port (DESIGN D39): a claim of CIA-A's port B and CIA-B's bits 0-2, the ACK line's interrupt on
  *     while it is held, and the count of its edges (DRV_PARACK);
+ *   - Paula's audio channels (DESIGN D40): a claim for the sound server (port "audio") alone, the bell silent while it
+ *     is held, the channels stopped by the kernel itself at its end and before ZINE;
  * Every op is for a child of the running network server only (not merely root: no sudo session claims a device);
  * the claim's ops for its holder only. Cold code: -Os in its own file. */
 #include "kernel.h"
@@ -73,6 +75,10 @@ static long window(u32 base, u32 *size)
         *size = DRV_PCMCIA_SIZE;
         return 0;
     }
+    if (base == DRV_PAULA) {
+        *size = 0x40;                   /* the four channels' registers: nothing else of a claim uses the window */
+        return 0;
+    }
     if (base == DRV_PARPORT) {
         *size = 1;                      /* not a window: its quiesce steps are checked one by one (par_step_ok) */
         return 0;
@@ -113,6 +119,16 @@ static void par_flag(int on)
     CIAA(CIA_ICR) = on ? 0x90 : 0x10;
 }
 
+/* what a claim's base needs besides its quiesce program, when it stops (held: 1 for ZINE, the claim kept until its
+ * holder dies; 0 at the release): the ACK line's interrupt off (D39); Paula's channels stopped, the bell back (D40) */
+static void stop_base(const struct claim *c, int held)
+{
+    if (c->base == DRV_PARPORT)
+        par_flag(0);
+    else if (c->base == DRV_PAULA)
+        audio_hold(held);
+}
+
 static void quiesce(const struct claim *c)
 {
     for (u32 k = 0; k < c->nq; k++) {
@@ -138,8 +154,7 @@ static void quiesce(const struct claim *c)
 static void release(struct claim *c, const char *why)
 {
     quiesce(c);
-    if (c->base == DRV_PARPORT)
-        par_flag(0);
+    stop_base(c, 0);
     if (c->blk)
         mem_set_owner(c->blk, (u32)c->pid);
     kprintf("drv: claim of %p (pid %d) released (%s): %u quiesce steps run%s\n", c->base, c->pid, why, c->nq,
@@ -148,12 +163,12 @@ static void release(struct claim *c, const char *why)
 }
 
 /* p is dying (proc_exit, before anything of it is freed): its claims end; the network server's end ends every claim
- * (only its children hold any) */
+ * its children hold (all but the sound server's Paula, D40) */
 void drv_exit(struct proc *p)
 {
     int srv = svc_pid("net") == p->pid;
     for (int i = 0; i < NCLAIM; i++)
-        if (claims[i].pid && (claims[i].pid == p->pid || srv))
+        if (claims[i].pid && (claims[i].pid == p->pid || (srv && claims[i].base != DRV_PAULA)))
             release(&claims[i], claims[i].pid == p->pid ? "the driver ended" : "the network server ended");
 }
 
@@ -165,8 +180,7 @@ void drv_zine(void)
     for (int i = 0; i < NCLAIM; i++)
         if (claims[i].pid) {
             quiesce(&claims[i]);
-            if (claims[i].base == DRV_PARPORT)
-                par_flag(0);
+            stop_base(&claims[i], 1);
             struct proc *p = proc_by_pid(claims[i].pid);
             if (p)
                 proc_kill(p);
@@ -243,11 +257,16 @@ static long forward(u32 type, u32 blk, u32 size, u32 first)
 long drv_sys(u32 opw, u32 a, u32 b)
 {
     u32 op = opw & 0xFF;
-    int srv = svc_pid("net");
-    if (!srv)
-        return -ECONNRESET;             /* no network server: an orphaned driver learns it is gone */
-    if (current->ppid != srv)
-        return -EPERM;                  /* only the running network server's children */
+    if (op == DRV_CLAIM && a == DRV_PAULA) {
+        if (svc_pid("audio") != current->pid)
+            return -EPERM;              /* D40: only the sound server the service manager runs */
+    } else {
+        int srv = svc_pid("net");
+        if (!srv)
+            return -ECONNRESET;         /* no network server: an orphaned driver learns it is gone */
+        if (current->ppid != srv)
+            return -EPERM;              /* only the running network server's children */
+    }
     switch (op) {
     case DRV_HWINFO: {
         const struct hwinfo *h = hw();
@@ -281,6 +300,8 @@ long drv_sys(u32 opw, u32 a, u32 b)
         claims[f].pid = current->pid;
         claims[f].base = a;
         claims[f].size = size;
+        if (a == DRV_PAULA)
+            audio_hold(1);              /* D40: the bell stopped and silent; the log line says the base (0xdff0a0) */
         if (a == DRV_PARPORT) {
             par_flag(1);
             kprintf("drv: pid %d (%s) claims the parallel port\n", current->pid, current->name);

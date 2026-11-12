@@ -7,6 +7,8 @@
  * clock being 3546895 Hz on PAL and 3579545 Hz on NTSC (PAL assumed: the pitch is not critical).
  * Not heard in an emulator without sound, so the driver logs what it saw: after a beep it reports whether
  * the channel raised its end-of-sample interrupt flag (INTREQ bit 7), which only happens if the DMA ran.
+ * While the sound server holds Paula (DESIGN D40, drv.c's DRV_PAULA claim) the bell is silent and the kernel touches no
+ * audio register; audio_hold stops all four channels when the claim is taken, before ZINE and when it ends.
  */
 #include "kernel.h"
 #include "hw.h"
@@ -30,6 +32,7 @@ static signed char *wave;                        /* one cycle of a square wave i
 static u32 remaining;                   /* ticks (1/100 s) left of the current beep */
 static u32 seen;                        /* end-of-sample flags seen while it ran */
 static u32 beeps;
+static u8 held;                         /* D40: the sound server has Paula */
 
 static void stop(void)
 {
@@ -38,8 +41,24 @@ static void stop(void)
     AUD1VOL = 0;
 }
 
+/* D40: all four channels stopped (volumes first, then their DMA), the bell silent while on */
+KCOLD void audio_hold(int on)
+{
+    u16 m = irq_save();                 /* the tick's audio_tick never sees half of it */
+    AUD0VOL = 0;
+    AUD1VOL = 0;
+    REG16(0xDFF0C8) = 0;               /* AUD2VOL */
+    REG16(0xDFF0D8) = 0;               /* AUD3VOL */
+    DMACON = 0x000F;
+    remaining = 0;
+    held = (u8)on;
+    irq_restore(m);
+}
+
 KCOLD void beep(u32 hz, u32 ms)
 {
+    if (held)
+        return;
     if (!wave) {
         wave = mem_alloc(WAVE_BYTES, MEM_CHIP, 0);
         if (!wave)

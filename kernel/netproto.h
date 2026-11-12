@@ -204,6 +204,12 @@ struct uroute {
 #define DRV_PAR_DDRB    0xBFE301u
 #define DRV_PAR_PRA     0xBFD000u
 #define DRV_PAR_DDRA    0xBFD200u
+/* DRV_CLAIM's base for Paula's four audio channels (DESIGN D40, docs/d40-sound.md): AUD0LC, the channels' registers
+ * 0xDFF0A0-0xDFF0DF. Taken only by the process the service manager runs for port "audio" (sndd), -EPERM for anyone
+ * else; no DMA region (sndd's chip RAM is its own) and no quiesce program: the kernel's own stop (the four volumes 0,
+ * then the channels' DMA off) runs when the holder ends and before ZINE takes the machine. While it is held the
+ * kernel's bell is silent. The only op of SYS_drv the sound server has */
+#define DRV_PAULA       0xDFF0A0u
 #define DRVC_CLEAN   1          /* frames the device will read: written back */
 #define DRVC_INVAL   2          /* buffers the device wrote: written back and dropped (never dropped unwritten) */
 
