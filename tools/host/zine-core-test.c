@@ -879,8 +879,10 @@ static void test_lean(void)
     CHECK(!zh_lean(&i, 100 * K, 1700 * K, 1000 * K), "lean: not below 128 KB");
     i.end = 400 * K;
     CHECK(!zh_lean(&i, 400 * K, 1700 * K, 9300 * K), "lean: not below a sixteenth of the free memory");
-    i.end = 3339 * K, i.bytes[1] = 900 * K;
-    CHECK(!zh_lean(&i, 3339 * K, 1700 * K, 9300 * K), "lean: not when its chip hunks need over half the free chip RAM");
+    i.end = 3339 * K, i.bytes[1] = 1476 * K;
+    CHECK(zh_lean(&i, 3339 * K, 1700 * K, 9300 * K), "lean: chip hunks that fit in the free chip RAM with 64 KB to spare");
+    i.bytes[1] = 1650 * K;
+    CHECK(!zh_lean(&i, 3339 * K, 1700 * K, 9300 * K), "lean: not when its chip hunks leave less than 64 KB of chip RAM");
 }
 
 int main(int argc, char **argv)

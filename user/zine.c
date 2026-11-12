@@ -496,6 +496,20 @@ int main(int argc, char **argv)
     /* 16.18: a big plain program's file is not kept either (zh_lean, hunk.h): its copy in the volume would only take
      * memory from the program (on the 68020 test machine 3-4 MB of 8, which three AGA demos then missed) */
     int lean = whole && zh_lean(&inf, len, info.chip_free, avail);
+    if (lean && inf.bytes[1]) {         /* its largest chip hunk must find a free piece of chip RAM now (path B puts it
+                                         * there), else the file stays (path A) */
+        u32 big = 0;
+        for (u32 i = 0; i < inf.nhunks; i++) {
+            zu32 memf, sz = zh_hunk_size(head, &inf, i, &memf);
+            if ((memf & ZMEMF_CHIP) && sz > big)
+                big = sz;
+        }
+        void *m = big ? sys_memalloc_chip((big + 8 + 15) & ~15u) : 0;
+        if (m)
+            sys_memfree(m);
+        else if (big)
+            lean = 0;
+    }
     if (lean)
         whole = 0;
     if (!whole && inf.ovl) {

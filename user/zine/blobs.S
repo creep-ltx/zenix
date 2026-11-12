@@ -770,6 +770,13 @@ zs_AllocBitMap:
     CF  zs_ConBeginIO, zb_con_beginio, 1, %a1
     CF  zs_ConAbortIO, zb_con_abort, 1, %a1
     CF  zs_ViewAddress, c_ViewAddress, 0
+    /* user Copper lists (blibs.c, 16.18) */
+    CF  zs_UCopperListInit, c_UCopperListInit, 2, %a0, %d0
+    CF  zs_CMove, c_CMove, 3, %a1, %d0, %d1
+    CF  zs_CWait, c_CWait, 3, %a1, %d0, %d1
+    CF  zs_CBump, c_CBump, 1, %a1
+    CF  zs_FreeCopList, c_FreeCopList, 1, %a0
+    CF  zs_FreeVPortCopLists, c_FreeVPortCopLists, 1, %a0
     /* the input for programs (binput.c, 16.17) */
     CFS zs_InpBeginIO, zb_inp_beginio, 1, %a1
     CFS zs_ZiBeginIO, zi_beginio, 1, %a1

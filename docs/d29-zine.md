@@ -2100,13 +2100,23 @@ more chunk of its fast MemHeader, in address order, refused unless it lies insid
 range and overlaps no chunk. Seen with Dual Panoply on the 68020: its 2,349 KB AllocMem missed the largest free block
 by 13 KB after round 7's blob grew.
 
+**User Copper lists** (graphics/copper.h of the NDK 3.2 for the structures; asked for by Loonies' The Morning Trip
+on the 68030 and 68060): `UCopperListInit` (-594) makes a CopList block of n instructions for the UCopList,
+`CMove` (-372) and `CWait` (-378) write the one at `CopPtr`, `CBump` (-366) moves on (a full block gets another of
+the same size behind it), `FreeCopList` (-546) and `FreeVPortCopLists` (-540) free them. When a screen or a View of
+the program's own is shown, the ViewPort's `UCopIns` instructions follow the screen's own in its Copper list: a MOVE
+as it is (none to the copper's own registers or below $40, which would stop the copper), a WAIT at the ViewPort's
+line plus its DyOffset and the display window's first line ($2C), past line 255 after the copper's wait for the end
+of line 255. The screen's Copper list grows to hold them (its size kept beside it).
+
 **A big program's file is not kept when nothing needs it.** Path A (16.12) keeps the program's file in the volume
 beside its hunks whenever both fit; on the 68020 test machine that took 3-4 MB of 8 from AGA demos whose next
 AllocMem then failed (Smoke Bomb asked 3,162 KB with 3,048 KB in one piece; fake elektronik lightshow and Massive the
 same way). `zine` now takes path B (the hunks loaded from the file before the hand-over, the file not kept) also when
 the program is plain (no overlays, at most 4 bytes after its last hunk: nothing it could read itself), its file is at
-least 128 KB and a sixteenth of the free memory, and its chip hunks need at most half the chip RAM free now (path B
-puts them in the chip RAM Zenix has free, which is less than the session gives); it says so ("its file (N KB) is not
+least 128 KB and a sixteenth of the free memory, and its chip hunks leave at least 64 KB of the chip RAM free now with
+the largest one finding a free piece (path B puts them in the chip RAM Zenix has free; in the session the program
+then has the same chip RAM as on path A); it says so ("its file (N KB) is not
 kept during the session, which leaves the program that much more memory"). The rule is `zh_lean` (hunk.c,
 host-tested). A program that opens its own file to read its hunks' bytes would not find it; none of the Top 100 was
 seen doing that (the ones that read data from their own file keep it after an overlay table, and stay path A).
@@ -2125,15 +2135,17 @@ supervisor stack above the frame (`S`) with the code before the first stacked ad
 *Verified* in FS-UAE: `tools/zine-input-test.sh` on the 68020 and the 68060 machine (zinput opens lowlevel.library:
 SystemControlA, ReadJoyPort's two types, GetKey in its keyboard interrupt, the keyboard, vertical-blank and 20 ms
 timer interrupts counted, ElapsedTime; the test's 68060 run had never found its disk images before, fixed),
-`tools/zine-emu-test.sh` (znext: the DOS list, GetDeviceProc, CompareDates, CopyMem at odd addresses, RectFill set
+`tools/zine-emu-test.sh` (zscreen: a user Copper list's MOVE to DMACON at line 10 seen in DMACONR, gone after
+FreeVPortCopLists; znext: the DOS list, GetDeviceProc, CompareDates, CopyMem at odd addresses, RectFill set
 and complemented across bytes; znext had 2,709
 KB of fast RAM before and 2,890 KB with the block's spare end), `tools/host/zine-test.sh` (zp_give: in address order,
 refused in a free block, over a chunk, in chip RAM, across two blocks, over a header, with a full array; zh_lean's
-seven cases). Not yet on a real machine.
+eight cases). Not yet on a real machine.
 
-Sizes (*measured*, the 68020-60 build): the blob's code 117,252 -> 121,306 bytes (memory 125,373 -> 129,481):
-lowlevel.library about 2.3 KB, the DOS list, GetDeviceProc and CompareDates about 1 KB, the rest the copy, RectFill,
-zp_give and the trace lines. `/bin/zine` 45,904 -> 46,232 bytes in memory (a library name, zh_lean and its message); the kernel unchanged.
+Sizes (*measured*, the 68020-60 build): the blob's code 117,252 -> 122,470 bytes (memory 125,373 -> 130,645):
+lowlevel.library about 2.3 KB, user Copper lists about 1.2 KB, the DOS list, GetDeviceProc and CompareDates about
+1 KB, the rest the copy, RectFill, zp_give and the trace lines. `/bin/zine` 45,904 -> 46,376 bytes in memory (a
+library name, zh_lean, the chip probe and its message); the kernel unchanged.
 
 ## 17. Questions for the owner (what ZINE should be)
 

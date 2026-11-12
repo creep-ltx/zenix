@@ -32,7 +32,7 @@ echo "$log" | grep -aq 'ztake ended (return code 0) after [2-4] s' && echo "$log
 echo "$log" | grep -aq 'zcrash crashed: illegal instruction at' && echo "$log" | grep -aq '^zcrash-rc=1' && ok "zcrash: an illegal instruction is reported, Zenix is back" || no "zcrash: $(echo "$log" | grep -a 'zcrash' | tail -2)"
 echo "$log" | grep -aq 'zbadcall called exec.library AddSemaphore (offset -600, from' && ok "zbadcall: a call ZINE lacks is named, the program stopped" || no "zbadcall: $(echo "$log" | grep -a 'zbadcall' | tail -2)"
 echo "$log" | grep -aq '^zalloc-rc=0' && ok "zalloc: 1 MB fast and 256 KB chip from AllocMem, written and read back, freed, AvailMem as before" || no "zalloc: $(echo "$log" | grep -a 'zalloc' | tail -2)"
-echo "$log" | grep -aq '^zscreen-rc=0' && ok "zscreen: an 8-plane screen from intuition, LoadRGB32's colours, CloseScreen" || no "zscreen: $(echo "$log" | grep -a 'zscreen' | tail -2)"
+echo "$log" | grep -aq '^zscreen-rc=0' && ok "zscreen: an 8-plane screen from intuition, LoadRGB32's colours, a user Copper list on its ViewPort (its MOVE seen in DMACONR, gone after FreeVPortCopLists; 16.18), CloseScreen" || no "zscreen: $(echo "$log" | grep -a 'zscreen' | tail -2)"
 # 16.6: an overlaid program: its root loaded with the overlay handle and tables, two nodes through its own overlay
 # supervisor (Seek, LoadSeg(NULL, table, handle)), one replacing the other, the data after the nodes read through the
 # handle; then an overlay entry with no node behind it: LoadSeg's refusal named and the supervisor's alert

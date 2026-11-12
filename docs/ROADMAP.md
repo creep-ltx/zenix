@@ -103,8 +103,8 @@ depth order and intuition's View's Copper lists: The Juggler plays its movie, J 
 
 **ZINE, built (2026-11-12, branch zine8, d29 16.18; not merged):** round 7's 68060 "regressions" explained (early
 quits for want of an FPU, which round 5's AttnFlags fixed, counted as working before), lowlevel.library, the DOS list
-and GetDeviceProc, CompareDates, the ZINE block's unused end given to the program, a faster copy (zine-top100-findings.md
-"Round 8").
+and GetDeviceProc, CompareDates, user Copper lists, the ZINE block's unused end given to the program, a big plain
+program's file not kept beside its hunks, a faster copy and RectFill (zine-top100-findings.md "Round 8").
 
 **Screen modes and preferences (owner 2026-11-06, docs/decisions.md):** the desktop's PAL hires / hires interlaced (NTSC detected), switched live; then preference programs with Test/Use/Save/Cancel for the screen mode, fonts, colours, for the desktop and the text console; the console's live mode/font switch. Fonts: `/usr/share/fonts/amiga/` for AmigaOS bitmap fonts copied as they are (a reader for .font files), `/usr/share/fonts/truetype/` later, `~/.fonts/` per user (docs/decisions.md). **The reader and the desktop's font are built (branch fonts, 2026-11-07, d38-desktop.md "Fonts"):** `font NAME SIZE` in `/etc/zdesk/screen`, read by displayd at its start, for titles, the bar, menus and labels (terminals keep the 8 x 8); **The preference programs are built (branch prefs, done 2026-11-07 in FS-UAE, d38-desktop.md "Preferences", d28-console-text.md 22):** `deskprefs` (the desktop's mode, font and colours, the font changed live by `DPY_FONT_SET`) and `conprefs` (the console's colours and Unicode font), Test/Use/Save/Cancel each checked by `tools/prefs-test.sh`; the console's interlaced mode (`CON_MODE`, conprefs' mode line, `/etc/console`'s `mode`) built 2026-11-12 in FS-UAE (branch pubprep, D28 22); next: `~/.fonts/`, the console's fixed-width fonts.
 
