@@ -371,7 +371,44 @@ After `cache_setup` (D37), with interrupts masked, before any process exists: `m
   reboot with protection on, the serial port during a big retenant, an instruction fetch fault, the data cache's
   pushes (FS-UAE has no 040/060 data cache, D37 section 8).
 
-## 15. As built (to be filled from the build)
+## 15. As built (2026-11-12, branch mmu)
+
+- **Code**: `kernel/mmu.c` (5,510 bytes of code and strings, 124 of BSS; the flips and the switch at -O2, the rest
+  -Os), hooks in `mem.c` (the three-way cut and `mem_owner_of`: +690 bytes), `proc.c`, `ipc.c`, `svc` marking in
+  `proc_load`, `drv.c`, `gcon.c`, `vfs.c`, `zine.c`, `cache.c` (`cache_block`), `main.c`. **kernel.bin 183,192 ->
+  190,012 bytes (+6,820)**; the mount tests' RAM disk 699 -> 692 KB for it (`tools/ksize-budget`, the Makefile).
+  zenixboot `MMU=` +160 bytes. Machines without protection run none of it: `mmu_on` 0 makes every hook return.
+- **Tables** (the boot line): FS-UAE's A1200 with a 68030, 2 MB chip and 8 MB Zorro II fast: 12 KB; with 4 MB fast: 8
+  KB; the 68060 with 2 MB chip, 8 MB Zorro II and 64 MB at 0x08000000: 77 KB (73 KB with 4 MB Zorro II).
+- **Memory after boot and one login** (`free`, FS-UAE): 68030 with 8 MB fast 7,553 -> 7,529 KB (24 KB: 12 KB of
+  tables, 12 KB of rounding); 68060 with 72 MB fast 73,089 -> 73,000 KB (89 KB: 77 of tables); chip RAM unchanged.
+- **Emulator figures** (FS-UAE 3.2.35 in warp mode, its MMU model on, `bench` and `msgping`, protection off -> on;
+  only the ratios mean anything, and FS-UAE's MMU emulation is itself slow, so these are no estimate of a real CPU):
+
+  | | 68030 | 68060 |
+  |---|---|---|
+  | a null system call (no switch) | 35 -> 37 us | 17 -> 17 us |
+  | `stat` through the filesystem server (two switches to a system process) | 4,036 -> 4,217 us (+4%) | 2,374 -> 2,458 us (+4%) |
+  | a call to a protected server and back (two retenants and a lend) | 554 -> 2,154 us (rebuilding the set at every reply) | 239 -> 1,229 us then, 938 us with the reply leaving the set alone (section 8) |
+
+  So a switch to and from a system process costs little (the registers), a switch between two protected programs a
+  few hundred emulated microseconds here; on a real 060 it is estimated in section 9.
+- **What the tests found at once**: `sed`'s addresses (`/re/p`, `/re/c`) called the regex matcher with no captures
+  array, and every match wrote the captures to address 0 (the vector table) without anyone noticing; with protection
+  on `sed` was killed there ("a write to 0x0 (the kernel's memory)"). Fixed in `user/regex.c` (commit of the same day).
+- **Verified in FS-UAE** (all with protection on, FS-UAE's MMU model, warp mode): `tools/mmu-test.sh` on the 68030,
+  the 68040 and the 68060 (every check of section 14); with `ZENIX_FSUAE_SET` on a 68030 (A1200, 4 MB fast) and a 68060 (A1200, 4
+  MB Zorro II and 64 MB 32-bit fast): `cmds-test` (after the sed fix), `users-test`, `memtest` (45 of 45),
+  `signal-test`, `mounttest` (its D26 links part failed once, before the sed fix: sed is in that script),
+  `dpy-test`. `zine-emu-test`: all 70 hand-overs came back with protection switched off and on again around each,
+  on both CPUs; its failures on the 68060 machine (zbig, zmmu, zfpu) are the same with protection off (the test is
+  made for its 68020 and its own 040/060 configs, which `ZENIX_FSUAE_SET` overrides). `zdesk-test` and `sound-test`
+  fail the same with and without protection on these machines (they expect a 68020's speed: "the outline drag on a
+  68020"; a WAV that ends before the Ctrl-C). `svc-test` and the other tests that need `zenix-zroot.hdf` could not
+  run: that image is too small for the programs (`zenixfs-tool: ... error -28 (no space)`), on main too (found here,
+  told to the main session). The matrix (protection off by default): all 14 machines pass, the 68020 ones too.
+- **Not done**: a reboot with protection on; the serial port at 115,200 during a big
+  retenant; the 1260 (section 18). The two later steps of section 9.
 
 ## 16. Interfaces
 
