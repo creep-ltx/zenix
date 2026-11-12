@@ -92,8 +92,10 @@ The proposals, each with what it saves (none built here):
    `ide_atapi` and `SYS_atapi`'s body (about 0.8 KB) when no CD drive answered; D41's flips, lends, fault decoding and
    switch (about 4.3 KB, the reviewer's measure) when protection is off - i.e. on every machine but a 68030/040/060
    with `MMU=ON`. About 5 KB more on a stock A1200. Same cost and risk as 1, one step further.
-   **The CD part built with D45** (752 bytes given back without a drive); **the MMU part left as a follow-up**
-   (d45 section 4: its 17 call sites test `mmu_on` inside the callee, so the gate must move first).
+   **The CD part built with D45** (752 bytes given back without a drive). **The MMU part built 2026-11-12 (D45
+   revision 3, section 13, branch mmuspan):** 2,928 bytes given back with protection off (the runtime code reached
+   only through one table the build's check can prove); measured on the stock A1200 2,704 bytes more free after the
+   boot (the rest is the table and gates kept resident); kernel.bin +232 bytes.
 3. **displayd without RTG on the demo floppy (floppy and RAM).** The floppy's bootblock never writes a card record
    (D43 section 3), so its desktop can never take a card: build displayd twice from the same files (`-DNO_RTG` leaving
    out fb.c, the chunky branches and the card's start) and put the small one on the DD floppy: 3,584 bytes of the

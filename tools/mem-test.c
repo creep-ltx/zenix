@@ -4,8 +4,9 @@
  * that ends above 1 GB; a range wholly below 1 GB (the A1200's fast RAM) behaves as before; ordinary blocks still come
  * from anywhere, big ones from the high end. DESIGN D45: the boot's spans inside the "kernel" (their bounds set by the
  * link, tools/mem-test.sh) reserved as ranges of one used block, given back by mem_boot_release (filled with ILLEGAL,
- * the free count up by exactly the span), the CD's kept while a drive is there, nothing reserved or freed when the range
- * table is full. Build and run: tools/mem-test.sh */
+ * the free count up by exactly the span), the CD's kept while a drive is there, memory protection's kept while it is on
+ * and given back (the table disarmed first) when it is off (section 13), nothing reserved or freed when the range table
+ * is full. Build and run: tools/mem-test.sh */
 #include <stdio.h>
 #include <stdarg.h>
 #include <sys/mman.h>
@@ -15,11 +16,22 @@ void exit(int) __attribute__((noreturn));
 void kprintf(const char *fmt, ...) { va_list ap; va_start(ap, fmt); vprintf(fmt, ap); va_end(ap); }
 void panic(const char *why) { printf("panic: %s\n", why); exit(2); }
 u32 klog_area_base(void) { return 0; }
-u8 mmu_on;                                      /* D41 off: its hooks are never called */
-void mmu_upd_gone(void) {}
-void mmu_block(u32 d, u32 l, u32 o) { (void)d; (void)l; (void)o; }
-void mmu_freed(u32 d, u32 l) { (void)d; (void)l; }
-static int cd_there, flushes;
+u8 mmu_on;                                      /* D41: off but in the D45 section 13 case */
+static int cd_there, flushes, disarms, freed_hooks, disarm_early;
+static u32 *mmu_span_word;                      /* a word inside the MMU span: still unfilled when the disarm comes? */
+static void t_v(void) {}
+static void t_p(struct proc *p) { (void)p; }
+static void t_3(u32 d, u32 l, u32 o) { (void)d; (void)l; (void)o; }
+static void t_freed(u32 d, u32 l) { (void)d; (void)l; freed_hooks++; }
+static void t_i(int b) { (void)b; }
+static int t_f(const u8 *f, u32 pc) { (void)f; (void)pc; return 0; }
+static const struct mmu_ops t_ops = { t_p, t_v, t_p, t_p, t_3, t_v, t_freed, t_i, t_v, t_f };
+const struct mmu_ops *mmu_ops = &t_ops;
+void mmu_disarm(void)                           /* the order: before the span is filled, flushed and freed */
+{
+    disarms++;
+    disarm_early = mmu_span_word && *mmu_span_word != 0x4AFC4AFCu && flushes == 1 && span_blk[2] == 0;
+}
 int ide_cd_present(void) { return cd_there; }
 void cache_flush_code(void) { flushes++; }
 
@@ -73,9 +85,10 @@ int main(void)
     munmap((void *)0x30000000, 0x100000);
 
     /* 4. DESIGN D45: a fast region 0x20000000-0x20100000 with the "kernel" at 0x20010000 (128 KB); its spans as
-     * tools/mem-test.sh links them: the boot's 0x20010100-0x20018100 (32 KB), the CD's 0x20018100-0x20018400 */
+     * tools/mem-test.sh links them: the boot's 0x20010100-0x20018100 (32 KB), the CD's 0x20018100-0x20018400, memory
+     * protection's 0x20018400-0x20019400 */
     {
-        u32 R = 0x20000000u, K = 0x20010000u, B0 = 0x20010100u, B1 = 0x20018100u, C1 = 0x20018400u;
+        u32 R = 0x20000000u, K = 0x20010000u, B0 = 0x20010100u, B1 = 0x20018100u, C1 = 0x20018400u, M1 = 0x20019400u;
         void *m = mmap((void *)R, 0x100000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
         if (m != (void *)R) { printf("FAIL: cannot map the D45 region\n"); return 1; }
         struct bootinfo bi;
@@ -87,16 +100,18 @@ int main(void)
         u32 cf, f0, f1, f2, ct, ft;
         mem_stats(&cf, &f0);
         mem_totals(&ct, &ft);
-        EXPECT_TRUE(nranges == 4 && span_blk[0] == (struct mblk *)B0 && span_blk[1] == (struct mblk *)B1,
-                    "D45: the two spans reserved as ranges of their own, after the real memory's");
+        EXPECT_TRUE(nranges == 5 && span_blk[0] == (struct mblk *)B0 && span_blk[1] == (struct mblk *)B1 &&
+                    span_blk[2] == (struct mblk *)C1, "D45: the three spans reserved as ranges of their own, after the real memory's");
         EXPECT_TRUE(f0 == 0x100000 - 0x20000, "... in use: the free count is the region less the kernel");
-        EXPECT_TRUE(ft == f0 + (B1 - B0) + (C1 - B1), "... counted in the pool's total");
+        EXPECT_TRUE(ft == f0 + (B1 - B0) + (C1 - B1) + (M1 - C1), "... counted in the pool's total");
         cd_there = 1;
+        mmu_on = 2;
         mem_boot_release();
         mem_stats(&cf, &f1);
         EXPECT_TRUE(f1 == f0 + (B1 - B0) && flushes == 1, "the boot span given back: free up by exactly its size, the caches flushed");
         EXPECT_TRUE(((u32 *)B0)[4] == 0x4AFC4AFCu && ((u32 *)B1)[-1] == 0x4AFC4AFCu, "... filled with ILLEGAL first");
         EXPECT_TRUE(span_blk[1] && USED(span_blk[1]), "the CD span kept: a drive answered");
+        EXPECT_TRUE(span_blk[2] && USED(span_blk[2]) && !disarms, "the memory protection span kept, its table armed: protection is on");
         int in = 0;
         for (int i = 0; i < 300 && !in; i++) {
             u8 *p = mem_alloc(8192, MEM_FASTONLY, 1);
@@ -104,20 +119,31 @@ int main(void)
         }
         EXPECT_TRUE(in, "... and the boot span's memory is handed out once the rest is taken");
         mem_free_owner(1);
+        mmu_on = 0;
+        freed_hooks = 0;
+        mmu_span_word = (u32 *)C1 + 4;
+        *mmu_span_word = 0;
         mem_boot_release();
         mem_stats(&cf, &f2);
-        EXPECT_TRUE(f2 == f1 && flushes == 1, "a second release does nothing");
+        EXPECT_TRUE(f2 == f1 + (M1 - C1) && flushes == 2 && disarms == 1 && !span_blk[2] && !freed_hooks,
+                    "protection off: the memory protection span given back, no hook run");
+        EXPECT_TRUE(disarm_early, "... the table disarmed first: before the fill, the flush and the free");
+        EXPECT_TRUE(((u32 *)C1)[4] == 0x4AFC4AFCu && ((u32 *)M1)[-1] == 0x4AFC4AFCu, "... filled with ILLEGAL first");
+        mem_boot_release();
+        mem_stats(&cf, &f1);
+        EXPECT_TRUE(f1 == f2 && flushes == 2 && disarms == 1, "a further release does nothing");
         /* the range table full: the spans stay the kernel's, the release frees nothing */
         nranges = 0; freeb[0] = freeb[1] = 0;
         memset(ranges, 0, sizeof ranges);
         nranges = 14;                                   /* 14 empty slots taken: the region's two ranges fill it */
-        span_blk[0] = span_blk[1] = 0;
+        span_blk[0] = span_blk[1] = span_blk[2] = 0;
         mem_init(&bi, K, 0x20000);
         mem_stats(&cf, &f0);
         cd_there = 0;
         mem_boot_release();
         mem_stats(&cf, &f1);
-        EXPECT_TRUE(nranges == 16 && !span_blk[0] && !span_blk[1] && f1 == f0 && flushes == 1,
+        EXPECT_TRUE(nranges == 16 && !span_blk[0] && !span_blk[1] && !span_blk[2] && f1 == f0 && flushes == 2 &&
+                    disarms == 1,
                     "the range table full: the spans stay the kernel's, nothing freed, no panic");
         munmap((void *)R, 0x100000);
     }

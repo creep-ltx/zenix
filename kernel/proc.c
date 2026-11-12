@@ -781,8 +781,7 @@ void schedule(void)
         if (n->ustk && !n->killed && (n->usp < n->ustk + GUARD_BYTES || n->usp > n->base + n->span))
             stack_fail(n, STK_USER);
         current = n;
-        if (mmu_on)
-            mmu_switch(n);              /* D41: its view in, or every access let through for a system process */
+        mmu_switch(n);                  /* D41: its view in, or every access let through for a system process */
         switch_to(old, n);
     }
     irq_restore(s);

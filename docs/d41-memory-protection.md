@@ -380,7 +380,9 @@ After `cache_setup` (D37), with interrupts masked, before any process exists: `m
   -Os), hooks in `mem.c` (the three-way cut and `mem_owner_of`: +690 bytes), `proc.c`, `ipc.c`, `svc` marking in
   `proc_load`, `drv.c`, `gcon.c`, `vfs.c`, `zine.c`, `cache.c` (`cache_block`), `main.c`. **kernel.bin 183,192 ->
   190,012 bytes (+6,820)**; the mount tests' RAM disk 699 -> 692 KB for it (`tools/ksize-budget`, the Makefile).
-  zenixboot `MMU=` +160 bytes. Machines without protection run almost none of it: `mmu_on` 0 makes every hook return; what runs on every boot is
+  zenixboot `MMU=` +160 bytes. Machines without protection run almost none of it: every hook is an inline gate in
+  `mmu.h` that calls nothing while `mmu_on` is 0, and since DESIGN D45 revision 3 (docs/d45-boot-memory.md section 13)
+  the runtime code lies in a span given back after the boot (calls go through the table `mmu_ops`); what runs on every boot is
   `mmu_setup`'s head (and on a 68030 the switch-off of a translation AmigaOS left on), the system-process mask
   (`mmu_sysmark`, `mmu_slot_new`) and the allocator's `alloc_in`/`carve` split (the same cuts as before; audit
   2026-11-12 A6-16). A 68040/060 not asked for protection has no MMU register read (audit A6-11).

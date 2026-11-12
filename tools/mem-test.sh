@@ -5,5 +5,6 @@ set -e
 cd "$(dirname "$0")/.."
 mkdir -p build
 cc -m32 -fno-pie -no-pie -Wall -Wextra -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast -Wno-builtin-declaration-mismatch -O1 -g -fsanitize=undefined -Wl,--defsym,__zinit_start=0x20010100 -Wl,--defsym,__zinit_end=0x20018100 \
-    -Wl,--defsym,__zhwcd_start=0x20018100 -Wl,--defsym,__zhwcd_end=0x20018400 -o build/mem-test tools/mem-test.c
+    -Wl,--defsym,__zhwcd_start=0x20018100 -Wl,--defsym,__zhwcd_end=0x20018400 \
+    -Wl,--defsym,__zhwmmu_start=0x20018400 -Wl,--defsym,__zhwmmu_end=0x20019400 -o build/mem-test tools/mem-test.c
 build/mem-test

@@ -104,9 +104,10 @@ pointers.
 
 ## Hard numbers worth knowing
 
-- The kernel's memory (DESIGN D45): `kernel.bin` 193,716 bytes; of its image, 25,296 bytes of boot-only code and data
-  and 752 of CD-drive code are given back to the pool after the boot (the CD's kept when a drive answered), so a
-  running kernel holds about 26 KB less than its image and BSS; a span that finds no free range slot (16) stays.
+- The kernel's memory (DESIGN D45): `kernel.bin` 193,948 bytes; of its image, 25,328 bytes of boot-only code and data,
+  752 of CD-drive code and 2,928 of memory protection's runtime code are given back to the pool after the boot (the
+  CD's kept when a drive answered, the MMU's while protection is on), so a running kernel holds about 28.4 KB less
+  than its image and BSS; a span that finds no free range slot (16) stays.
 
 - 32 processes, 28 message ports (12 held for services, 16 ordinary), 64 open files, 16 fds per process, 16 extra memory regions per process, 8 mounts
   (the root included), 1 KB environment, argv of at most 256 arguments / 8 KB (-E2BIG beyond; `xargs` splits into runs that fit), paths of

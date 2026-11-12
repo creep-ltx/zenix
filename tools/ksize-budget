@@ -81,10 +81,16 @@
 # given back by the idle loop, filled with ILLEGAL first), ide 4,700 -> 4,750 (ide_atapi split: the packet mover in
 # the CD span); kernel.bin 193,112 -> 193,716, TOTAL 193,150 -> 193,750 (844 bytes left on the mount tests' floppy).
 # About 26 KB of it (the boot's code, stage0, the boot program) is given back to the pool after the boot.
+# 2026-11-12 (DESIGN D45 revision 3, section 13: memory protection's runtime code in a third span, given back when
+# protection is off): mem 4,056 -> 4,167, budget 4,100 -> 4,200 (the third span reserved and released, the table
+# disarmed), mmu 5,540 -> 5,568 (the table, its stubs, arm and disarm; the bodies' own mmu_on tests gone), zine, cache
+# +40 (their gates load the table); after the code reviews the gates' branches laid out for "off" (+32); kernel.bin
+# 193,716 -> 193,948, TOTAL 193,750 -> 194,000; the mount tests' RAM disk 689 -> 688 KB for it (Makefile). 2,928
+# bytes more given back after the boot when protection is off.
 start     4300   8200
 main      5950   1100
 serial    6100   6500
-mem       4100    240
+mem       4200    240
 ide       4750    560
 emmc      4900    640
 floppy    4500    160
@@ -114,5 +120,5 @@ cache     1800     32
 gcon      3600     16
 mmu       5700    160
 embed    47500      0
-TOTAL   193750
+TOTAL   194000
 ROOM       800

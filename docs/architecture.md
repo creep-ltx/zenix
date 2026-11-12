@@ -193,8 +193,14 @@ none runs any more, gives the bundle's memory back with `SYS_update RELEASE`); i
    packet code in another (`.zhwcd`). `mem_init` reserves each as a range holding one block in use; when `kmain` hands
    over to the idle loop, `mem_boot_release` fills them with `ILLEGAL`, flushes the caches (`cache_flush_code`) and
    frees them (the CD's only when no CD drive answered): "mem: N bytes of boot code given back (chip|fast RAM free A ->
-   B)", 26,048 bytes in all on today's kernel. `tools/check-init.py` fails every kernel build in which anything outside
-   a span refers into it (relocations of the `-q` link, and the span's disassembly for gcc's calls through a register).
+   B)", 26,048 bytes in all on today's kernel. A third span (`.zhwmmu`, `.zhwmmud`: D45 section 13) holds memory
+   protection's runtime code (`kernel/mmu.c`, `KMMU`), reached only through the table `mmu_ops` points at (resident
+   stubs until `mmu_setup` arms it, armed exactly while `mmu_on` is set; the hooks in `mmu.h` are inline gates on
+   `mmu_on`); with protection off it is given back too (`mmu_disarm` first): 2,928 bytes. `tools/check-init.py` fails
+   every kernel build in which anything outside a span refers into it (relocations of the `-q` link, and the span's
+   disassembly for gcc's calls through a register, followed along every branch), in which anything but `mmu_arm`
+   refers to the MMU span's table, anything but `mmu_arm`/`mmu_disarm` writes `mmu_ops` or anything but
+   `mmu_arm`/`mmu_before_reset_` writes `mmu_on`, or in which the MMU span's register asm changed without review.
 
 ### Boot stage colours (`kernel/diag.h`, audit A11)
 
@@ -602,7 +608,7 @@ kernel, the klog area and the RAM disk, and in free memory; else it is ignored w
 ... is ignored: ..."). It is then **a block in use inside the pool** (`upd_reserve`: its header is the 16 bytes before
 the bundle; a free remainder smaller than two headers is taken into the block), so `SYS_update RELEASE` gives it
 back with the normal `mem_free` and it merges with its neighbours (no range slot: `add_range` keeps 16).
-**The boot's spans** (D45, section 3 step 5) are ranges of their own, appended after the real memory's, inside the
+**The boot's spans** (D45, section 3 step 5; three: the boot's, the CD drive's, memory protection's) are ranges of their own, appended after the real memory's, inside the
 kernel's image (chip or fast as the region that holds the kernel); each holds one used block (owner 0, its header in
 the span's first 32 bytes) until the idle loop frees it, so `mem_totals` (and `free`'s total) count them from the boot.
 A span that finds no range slot stays the kernel's (said on the log).

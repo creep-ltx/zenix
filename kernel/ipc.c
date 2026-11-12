@@ -402,8 +402,7 @@ struct umsg *ipc_recv(int port, int wait)
     m->next = 0;
     m->state = MSG_SERVING;
     m->server = current->pid;
-    if (mmu_on)
-        mmu_lend(m->client);            /* D41 8: a protected server sees its client's memory while it serves it */
+    mmu_lend(m->client);            /* D41 8: a protected server sees its client's memory while it serves it */
     return m;
 }
 

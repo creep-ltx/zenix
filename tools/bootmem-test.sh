@@ -3,15 +3,16 @@
 # DESIGN D45 (docs/d45-boot-memory.md section 10): the boot's memory given back. First the build's check of the spans
 # (tools/check-init-test.py: tools/check-init.py refuses each kind of reference it is there to refuse), then boots in
 # FS-UAE: the stock A1200 (68020, 2 MB chip RAM only: the span is chip RAM there), and a 68030 and a 68060 with memory
-# protection on (a copy of the build whose kernel defaults to MMU=ON, as tools/mmu-test.sh makes it). Each boot must
-# say "mem: N bytes of boot code given back" with N the boot span's size read from kernel.elf, the pool's free count
-# grown by exactly N, the CD span given back too (no CD drive in these machines), then run programs, a victim's memory
-# intact, and no exception or panic.
-# usage: tools/bootmem-test.sh [020 030 060 ...]          (default: all three)
+# protection off (the default) and on (030m, 060m: a copy of the build whose kernel defaults to MMU=ON, as
+# tools/mmu-test.sh makes it). Each boot must say "mem: N bytes of boot code given back" with N the boot span's size
+# read from kernel.elf, the pool's free count grown by exactly N, the CD span given back too (no CD drive in these
+# machines), the memory protection span (section 13) given back with protection off and kept with it on, then run
+# programs, a victim's memory intact, and no exception or panic.
+# usage: tools/bootmem-test.sh [020 030 060 030m 060m ...]          (default: all five)
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
 OUT=${ZENIX_OUT:-$(mktemp -d "${TMPDIR:-/tmp}/zenix-bootmem.XXXXXX")}; mkdir -p "$OUT"
-CPUS="${*:-020 030 060}"
+CPUS="${*:-020 030 060 030m 060m}"
 make -s BUILD="$BD" all 2>&1 | grep -v 'RWX permissions' | grep -i 'error\|\*\*\*'; [ "${PIPESTATUS[0]}" = 0 ] || { echo "build failed"; exit 1; }
 fail=0
 mkdir -p "$OUT/cit"
@@ -28,8 +29,8 @@ span() {
     e=$($N "$BD/kernel.elf" | awk -v n="__$1_end" '$3 == n { print $1 }')
     echo $(( (0x$e & ~15) - ((0x$s + 15) & ~15) ))
 }
-NB=$(span zinit) NC=$(span zhwcd)
-echo "  the spans in kernel.elf: boot $NB bytes, CD drive $NC bytes"
+NB=$(span zinit) NC=$(span zhwcd) NM=$(span zhwmmu)
+echo "  the spans in kernel.elf: boot $NB bytes, CD drive $NC bytes, memory protection $NM bytes"
 
 B="$OUT/build-mmu"
 rm -rf "$B"; cp -a "$BD" "$B" || exit 1
@@ -55,9 +56,11 @@ EOF
 for cpu in $CPUS; do
     case $cpu in
     020) conf=fsuae/a1200-020.fs-uae; set=''; bd="$BD"; ram=chip ;;
-    030) conf=fsuae/matrix/a1200-030.fs-uae; set='uae_mmu_model=68030'; bd="$B"; ram=fast ;;
-    060) conf=fsuae/matrix/a1200-060.fs-uae; set=''; bd="$B"; ram=fast ;;
-    *) echo "bootmem-test: $cpu: say 020, 030 or 060"; exit 2 ;;
+    030) conf=fsuae/matrix/a1200-030.fs-uae; set='uae_mmu_model=68030'; bd="$BD"; ram=fast ;;
+    060) conf=fsuae/matrix/a1200-060.fs-uae; set=''; bd="$BD"; ram=fast ;;
+    030m) conf=fsuae/matrix/a1200-030.fs-uae; set='uae_mmu_model=68030'; bd="$B"; ram=fast ;;
+    060m) conf=fsuae/matrix/a1200-060.fs-uae; set=''; bd="$B"; ram=fast ;;
+    *) echo "bootmem-test: $cpu: say 020, 030, 060, 030m or 060m"; exit 2 ;;
     esac
     L="$OUT/$cpu.log"
     ZENIX_BUILD="$bd" ZENIX_FSUAE_SET="$set${ZENIX_FSUAE_SET:+;$ZENIX_FSUAE_SET}" \
@@ -77,11 +80,25 @@ for cpu in $CPUS; do
         echo "  FAIL no line 'mem: N bytes of boot code given back'"; ok=0
     fi
     chk "the CD span given back ($NC bytes, no CD drive)" "^mem: $NC bytes of CD drive code given back"
-    [ "$cpu" = 020 ] || chk "with memory protection on" "^mmu: memory protection on: 680${cpu#0}"
+    case $cpu in
+    *m) c=${cpu%m}
+        chk "with memory protection on" "^mmu: memory protection on: 680${c#0}"
+        if grep -q "^mem: [0-9]* bytes of memory protection code given back" "$L"; then
+            echo "  FAIL the memory protection span given back with protection on"; ok=0
+        else echo "  ok   the memory protection span kept ($NM bytes): protection is on"; fi ;;
+    *)  chk "memory protection off" "^mmu: memory protection off"
+        line=$(grep -aoE "^mem: [0-9]+ bytes of memory protection code given back \(\w+ RAM free [0-9]+ -> [0-9]+\)" "$L" | head -1)
+        if [ -n "$line" ]; then
+            read -r n a b < <(echo "$line" | sed -E 's/^mem: ([0-9]+) .*free ([0-9]+) -> ([0-9]+)\)/\1 \2 \3/')
+            [ "$n" = "$NM" ] && [ $((b - a)) = "$n" ] &&
+                echo "  ok   the memory protection span given back: $n bytes, as kernel.elf says, free $a -> $b" ||
+                { echo "  FAIL the memory protection span: $n bytes (kernel.elf $NM), free $a -> $b"; ok=0; }
+        else echo "  FAIL no line 'mem: N bytes of memory protection code given back'"; ok=0; fi ;;
+    esac
     chk "a program's memory intact" 'crash: victim pid [0-9]+ intact'
     chk "programs run after it" '^status 0$'
     chk "the commands after it" '^done$'
-    if grep -q 'exception in the kernel\|panic\|mem: span [01] at' "$L"; then echo "  FAIL the kernel stopped, or a span stayed"; ok=0; fi
+    if grep -q 'exception in the kernel\|panic\|mem: span [012] at' "$L"; then echo "  FAIL the kernel stopped, or a span stayed"; ok=0; fi
     [ $ok = 1 ] && echo "PASS bootmem-test $cpu" || { echo "FAIL bootmem-test $cpu (see $L)"; fail=1; }
 done
 exit $fail

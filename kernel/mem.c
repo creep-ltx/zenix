@@ -147,8 +147,7 @@ KINIT static void upd_reserve(const struct bootinfo *bi, const u32 ex[][2], int 
 __attribute__((cold, optimize("Os"))) void upd_release(void)
 {
     if (upd_blk) {
-        if (mmu_on)
-            mmu_upd_gone();             /* D41: its pages leave root's views (they were read only for zup) */
+        mmu_upd_gone();                 /* D41: its pages leave root's views (they were read only for zup) */
         mem_free(upd_blk);
         kprintf("update: the bundle's %u bytes are free again\n", upd_size);
     }
@@ -158,12 +157,13 @@ __attribute__((cold, optimize("Os"))) void upd_release(void)
 }
 
 /* DESIGN D45 (docs/d45-boot-memory.md): the spans link/kernel.ld puts at the end of the kernel's image - the boot's
- * code and data, and the CD drive's code - reserved here, before mmu_setup builds its tables over the ranges, each as
+ * code and data, the CD drive's code and memory protection's (section 13) - reserved here, before mmu_setup builds its tables over the ranges, each as
  * a range of its own holding one block in use by the kernel (its header in the span's first 32 bytes, as upd_reserve
  * makes the bundle a block), appended after the real memory's ranges; mem_boot_release gives them back. Chip or fast as
  * the region that holds the kernel. A span not reserved (no range slot) stays resident: its pointer stays 0. */
-extern char __zinit_start[], __zinit_end[], __zhwcd_start[], __zhwcd_end[];
-static struct mblk *span_blk[2];        /* [0] the boot's, [1] the CD drive's; 0: not reserved (or given back) */
+extern char __zinit_start[], __zinit_end[], __zhwcd_start[], __zhwcd_end[], __zhwmmu_start[], __zhwmmu_end[];
+/* [0] the boot's, [1] the CD drive's, [2] memory protection's (D45 section 13); 0: not reserved (or given back) */
+static struct mblk *span_blk[3];
 
 KINIT void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem)
 {
@@ -181,8 +181,9 @@ KINIT void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem)
             add_minus(r->lower, r->upper, (r->attrs & MEMF_CHIP) != 0, ex, nex);
     }
     upd_reserve(bi, ex, nex);
-    for (int k = 0; k < 2; k++) {
-        u32 lo = ((u32)(k ? __zhwcd_start : __zinit_start) + 15) & ~15u, hi = (u32)(k ? __zhwcd_end : __zinit_end) & ~15u;
+    for (int k = 0; k < 3; k++) {       /* the bounds in code: a table of them would be resident data (D45 section 5) */
+        u32 lo = ((u32)(k == 0 ? __zinit_start : k == 1 ? __zhwcd_start : __zhwmmu_start) + 15) & ~15u;
+        u32 hi = (u32)(k == 0 ? __zinit_end : k == 1 ? __zhwcd_end : __zhwmmu_end) & ~15u;
         int chip = -1, n = nranges;
         for (int i = 0; i < bi->nregions && i < 8; i++)
             if ((bi->r[i].attrs & (MEMF_CHIP | MEMF_FAST)) && bi->r[i].lower <= lo && hi <= bi->r[i].upper)
@@ -294,8 +295,8 @@ void *mem_alloc(u32 n, u32 flags, u32 owner)
             int pg = (flags & MEM_USER) && mmu_on;
             void *p = alloc_in(&ranges[i], pg ? (n + MMU_PG - 1) & ~(MMU_PG - 1) : need, owner, limit, pg);
             if (p) {
-                if (pg)
-                    mmu_block((u32)p, n, owner);        /* valid at once for the process flipped in (D41 9) */
+                if (__builtin_expect(pg, 0))    /* pg holds mmu_on: the table directly, not the gate (D45 13.5) */
+                    mmu_ops->block((u32)p, n, owner);    /* valid at once for the process flipped in (D41 9) */
                 return p;
             }
         }
@@ -314,8 +315,7 @@ static struct range *range_of(u32 a)
 /* free a block, merge with free neighbours; returns the merged block */
 static struct mblk *free_blk(struct range *r, struct mblk *b)
 {
-    if (mmu_on)
-        mmu_freed((u32)(b + 1), SZ(b) - HDR);   /* D41: its whole pages invalid for every program */
+    mmu_freed((u32)(b + 1), SZ(b) - HDR);   /* D41: its whole pages invalid for every program */
     freeb[r->chip] += SZ(b);
     b->size &= ~1u;
     b->owner = 0;
@@ -424,17 +424,20 @@ void kfree(void *p) { mem_free(p); }
  * line, never runs stale code; then it is an ordinary free (D41: its pages invalid for every program, as they were). */
 KCOLD void mem_boot_release(void)
 {
-    for (int k = 0; k < 2; k++) {
+    for (int k = 0; k < 3; k++) {
         struct mblk *b = span_blk[k];
-        if (!b || (k && ide_cd_present()))
+        if (!b || (k == 1 && ide_cd_present()) || (k == 2 && mmu_on))
             continue;
         span_blk[k] = 0;
+        if (k == 2)
+            mmu_disarm();               /* D45 13: the table back to its stubs: nothing points into the span now */
         u32 n = SZ(b), chip = range_of((u32)b)->chip, f0 = freeb[chip];
         for (u32 *p = (u32 *)(b + 1), *e = (u32 *)((u32)b + n); p < e; p++)
             *p = 0x4AFC4AFCu;
         cache_flush_code();
         mem_free(b + 1);
-        kprintf("mem: %u bytes of %s given back (%s RAM free %u -> %u)\n", n, k ? "CD drive code" : "boot code",
+        kprintf("mem: %u bytes of %s code given back (%s RAM free %u -> %u)\n", n,
+                k == 0 ? "boot" : k == 1 ? "CD drive" : "memory protection",
                 chip ? "chip" : "fast", f0, freeb[chip]);
     }
 }
