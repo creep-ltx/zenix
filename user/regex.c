@@ -370,9 +370,14 @@ void re_free(void *prog)
 }
 
 /* s[from..len), with ^ only at s[0]: 1 a match (caps[0], caps[1] its start
- * and end), 0 none, -1 no memory */
+ * and end), 0 none, -1 no memory. caps may be 0 (only whether it matches:
+ * sed's addresses; it was written through at address 0 before, found by
+ * Zenix's memory protection, DESIGN D41) */
 int re_exec(void *prog, const char *s, int len, int from, int *caps)
 {
+    int own[RSLOTS];
+    if (!caps)
+        caps = own;
     RC *r = prog;
     VM v;
     TList a, b, *cl = &a, *nl = &b, *t;
