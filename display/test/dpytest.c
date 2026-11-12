@@ -94,10 +94,6 @@ static int fb_make(const char *spec)
         dprintf(2, "dpytest: -fb: root's, on a machine whose boot left its hardware table\n");
         return -1;
     }
-    if (sys_port_find(DPY_PORTNAME) >= 0) {
-        dprintf(2, "dpytest: -fb: a display server runs already\n");
-        return -1;
-    }
     fbrec = &hw->fb;
     fbrec->magic = 0;
     fbrec->base = 0;                    /* the server allocates the card and writes its address here */

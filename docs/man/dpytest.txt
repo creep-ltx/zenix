@@ -57,7 +57,7 @@ DESCRIPTION
     table, as zenixboot RTG records a real one, so the display server it
     starts draws the desktop there. The server allocates the card in fast
     RAM itself (it lives as long as the server draws on it) and clears
-    the record when it ends. Refused while a display server runs. With
+    the record when it ends (a server running already ignores it). With
     memory protection on (zenixboot MMU=ON) dpytest may not write the
     table and is ended.
 
