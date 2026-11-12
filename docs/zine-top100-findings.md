@@ -552,3 +552,19 @@ Griffin end by themselves as in the rerun (205, 208, 286, 252 s emulated); on th
 "Finished!". On the way, keeping IntuitionBase's `FirstScreen` made Elude's 14bit driver ask graphics'
 `GetDisplayInfoData` for the front screen's monitor (it found no screen before and skipped it): the display
 database's calls came with this round (d29 16.17).
+
+### Round 7's full rerun (2026-11-12, main 8b8b06d's code, all 500 on three machines, 50 s each for 020 and 030, 120 s for 060)
+
+Counted with the harness's own rule (running with a picture at the limit, or ended cleanly); the boot disks and
+non-programs are left out, so each machine is out of 426:
+
+| Machine | Before round 7 | After | Regressions |
+|---|---|---|---|
+| 68EC020, 8 MB fast | 261 | 259 | 4 |
+| 68030 + 68882, 16 MB fast | 314 | 314 | 1 |
+| 68060 with its FPU, 64 MB fast | 362 | 359 | 12 |
+
+The 68060 regressions are the ones to look at first: 11 of the 12 ran to their end (return code 0) in the last
+rerun and now crash (five on an illegal instruction) or stop on a missing call. Whether this is round 7's change or
+the 68060 setup is not yet investigated. The full
+breakdown is in `~/Amiga/Top100-zine/summary.md` under "Round 7: full rerun".
