@@ -16,6 +16,16 @@ or the kernel and bring the system down. Users, groups and file permissions (DES
 protection against honest mistakes, not against a program written to cheat - the same trust level as AmigaOS.
 The documentation must keep saying this.
 
+**The exception: memory protection (DESIGN D41, built 2026-11-12, off by default).** On a 68030, 68040 or 68060 with a
+working MMU, `zenixboot MMU=ON` makes every program a user runs see only its own memory (its block, its regions, its
+code read only): a stray read or write ends it with a line naming whose memory it was, and nothing else is damaged.
+Still unprotected then: the system processes (the servers the service manager starts, reserved ports, drivers, a
+display server, a mount's server), which are trusted as before; the kernel itself; a program's own memory (its stack
+overflowing into its own BSS, as above); and a protected server's clients while it holds their requests. Programs can
+no longer share memory by passing an address to each other, nor a protected server hand a client's pointer on to
+another protected server. The rounding of every protected block to whole 4 KB pages costs memory (d41 section 15).
+Never run on a real 68030/040/060 yet; not on the stock A1200 (a 68EC020 has no MMU) nor under Emu68.
+
 What the permissions do cover (audit D): a user cannot kill, stop or take over the terminal of another user's or a
 system process, cannot set the clock, cannot talk to the filesystem or disk server directly (the servers answer only
 the kernel and root; the names `fs`, `fs.*`, `disk` and `net` are reserved for root), cannot open another user's console

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
+#include "mmu.h"
 #include "hw.h"
 #include "hwinfo.h"
 #include "diag.h"
@@ -132,7 +133,8 @@ void exc_c(u32 *rb)
     u16 vec = (u16)((fv & 0xFFF) >> 2);
     u16 fmt = (u16)(fv >> 12);
 
-    u32 faddr = (fmt == 0xA || fmt == 0xB) ? *(u32 *)(frame + 16) : 0;
+    u32 faddr = (fmt == 0xA || fmt == 0xB) ? *(u32 *)(frame + 16) : fmt == 7 ? *(u32 *)(frame + 0x14) :
+                fmt == 4 && vec == 2 ? *(u32 *)(frame + 8) : 0;    /* 030; 040 and 060 access errors (D41) */
 
     if (!(sr & 0x2000) && current->pid != 0) {
         /* user-mode fault: kill just this process, free what it owned (an overflowed stack is the likely cause, and
@@ -141,6 +143,7 @@ void exc_c(u32 *rb)
         if (bad && !current->killed)
             kprintf("\n[kernel] pid %d (%s) overflowed its %s stack\n", current->pid, current->name,
                     bad == STK_KERNEL ? "kernel" : "user");
+        mmu_fault(frame, pc);           /* D41: memory protection says where it went first */
         kprintf("\n[kernel] pid %d (%s) killed: vector %u pc=%p addr=%p", current->pid, current->name, vec, pc, faddr);
         if (current->csize && pc - current->code < current->csize)
             kprintf(" (code+%x)", pc - current->code);     /* D13: where in the program, wherever its code is */
@@ -150,7 +153,7 @@ void exc_c(u32 *rb)
     }
     panic_begin();                      /* this text, too, must reach the log and the screen before the stop */
     kprintf("\n*** exception in the kernel: vector %u sr=%x pc=%p", vec, sr, pc);
-    if (fmt == 0xA || fmt == 0xB)
+    if (faddr)
         kprintf(" fault-addr=%p", faddr);
     panic_printing = 0;
     panic("unhandled exception");
@@ -471,6 +474,7 @@ void kmain(struct bootinfo *bi)
     mem_selftest();
     diag_stage(8, DIAG_PINK);
     cache_setup(bi);                            /* D37: the data cache on a real 68040/68060, the line says what */
+    mmu_setup(bi);                              /* D41: memory protection, when asked for and the MMU works */
     diag_stage(9, DIAG_WHITE);
     eclock_init();                              /* hr_time() from here on (gfx_init measures the frame with it) */
     rnd_init(bi);                               /* the entropy pool (D19): chip RAM is still as the cold start left it */

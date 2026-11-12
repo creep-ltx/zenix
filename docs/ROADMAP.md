@@ -160,7 +160,8 @@ zpkg-new kept out of a user's list (done 2026-11-05: --all shows them, man zpkg)
    `make demo`, the session, the keyboard, the network found by itself, `demo-test.sh`, the owner's A1200). Audit.
 6. **Sound and hardware:** a Paula server, `play`, a MOD player (done in FS-UAE 2026-11-12 on branch sound:
    docs/d40-sound.md, `/sbin/sndd`, `play`, `modplay`; not heard, not yet on the A1200, where the halves' length is to
-   be measured against a floppy's track reads); optional memory protection on CPUs with an MMU; USB, RTG, faster IDE,
+   be measured against a floppy's track reads); optional memory protection on CPUs with an MMU (built in FS-UAE 2026-11-12 on branch mmu: docs/d41-memory-protection.md,
+   off by default, `zenixboot MMU=ON`; not yet on a real 68030/040/060, the 1260's first run is its section 18); USB, RTG, faster IDE,
    CD. Audit.
 7. **Zenix builds itself, and fun:** assembler, C compiler, `make`, debugger, Lua; games and demos on Zenix. A full
    audit of the whole system, then release 1.0 with the owner's yes.

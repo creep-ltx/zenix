@@ -3,7 +3,10 @@
 /* crash: an illegal instruction - the kernel must kill only us.
  * crash stack: recurse until the user stack overflows - the stack guard must kill us with "overflowed its user stack".
  * crash kstack / crash idle: only in a STACK_TEST kernel (tools/diag-test.sh stack): damage the guard of our own kernel
- * stack / of pid 0's, as an overflow would. */
+ * stack / of pid 0's, as an overflow would.
+ * The memory protection tests (DESIGN D41, tools/mmu-test.sh): crash victim N [FILE]: a region filled with a pattern,
+ * its address said, N seconds later (or once FILE exists) checked ("intact" or "damaged"); crash read ADDR: a read there; crash write ADDR: a
+ * write there, refused unless the kernel's log says protection is on (without it the write would land). */
 static int deep(int n)
 {
     volatile char frame[200];           /* about 220 bytes a level: 16 KB of stack is gone after some 75 */
@@ -21,10 +24,64 @@ static int deep(int n)
 static const char victim[32] = "a constant the poke changes";
 static const char lit[16] = "literal text";
 
+static int protected_on(void)          /* the boot's "mmu: memory protection on:" line in the kernel's log */
+{
+    static char b[1025];
+    static const char want[] = "mmu: memory protection on:";
+    for (unsigned off = 0; off < 65536; off += 1024 - sizeof want) {
+        int n = sys_klog(off, b, 1024);
+        if (n <= 0)
+            return 0;
+        b[n] = 0;
+        if (strstr(b, want))
+            return 1;
+        if (n < 1024)
+            return 0;
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
+    if (argc > 2 && !strcmp(argv[1], "victim")) {
+        unsigned n = 8192, bad = 0;
+        volatile unsigned *r = sys_memalloc(n);
+        if (!r) { dprintf(1, "crash: no memory\n"); return 1; }
+        for (unsigned i = 0; i < n / 4; i++) r[i] = 0x5A17C0DEu ^ i;
+        dprintf(1, "crash: victim pid %d region %p\n", sys_getpid(), (void *)r);
+        oflush();
+        for (int t = atoi(argv[2]) * 10; t > 0; t--) {    /* N s, or until the file argv[3] is there */
+            struct ustat st;
+            if (argc > 3 && sys_stat(argv[3], &st) == 0)
+                break;
+            sys_sleep(10);
+        }
+        for (unsigned i = 0; i < n / 4; i++) bad += r[i] != (0x5A17C0DEu ^ i);
+        dprintf(1, "crash: victim pid %d %s\n", sys_getpid(), bad ? "damaged" : "intact");
+        return bad != 0;
+    }
+    if (argc > 2 && (!strcmp(argv[1], "read") || !strcmp(argv[1], "write"))) {
+        volatile unsigned *a = (volatile unsigned *)strtoul(argv[2], 0, 0);
+        if (argv[1][0] == 'w' && !protected_on()) {
+            dprintf(1, "crash: memory protection is off: no write to %p\n", (void *)a);
+            return 2;
+        }
+        dprintf(1, "crash: %s %p\n", argv[1][0] == 'r' ? "reading" : "writing", (void *)a);
+        oflush();
+        if (argv[1][0] == 'r')
+            dprintf(1, "crash: read %x\n", *a);
+        else
+            *a = 0x5A5A5A5Au;
+        dprintf(1, "crash: still here\n");
+        return 0;
+    }
     if (argc > 2 && !strcmp(argv[1], "sleep")) {
-        sys_sleep((u32)atoi(argv[2]) * 100);
+        for (int t = atoi(argv[2]) * 10; t > 0; t--) {    /* N s, or until the file argv[3] is there */
+            struct ustat st;
+            if (argc > 3 && sys_stat(argv[3], &st) == 0)
+                break;
+            sys_sleep(10);
+        }
         dprintf(1, "crash: slept %s s\n", argv[2]);
         return 0;
     }

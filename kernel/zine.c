@@ -14,6 +14,7 @@
 #include "hw.h"
 #include "zine.h"
 #include "hwinfo.h"
+#include "mmu.h"
 
 #define ADKCONR REG16(0xDFF010)
 
@@ -168,7 +169,9 @@ static long go(const struct uzine_go *g)
     a.adkcon = ADKCONR;
     u16 dma = DMACONR, ena = INTENAR;
     a.hr_at = hr_time();
+    mmu_hand(0);                        /* D41 11: the program expects no translation; the blob saves what it finds */
     long r = zine_enter(g->blob, &a);
+    mmu_hand(1);
     /* 9.6: the blob put the chips' registers and the CIAs back (the E-clock counter where it stood); the kernel's
      * devices now, then DMA and the interrupts Zenix had, last */
     INTREQ = 0x7FFF;

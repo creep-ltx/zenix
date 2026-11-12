@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
+#include "mmu.h"
 
 /* Processes. No MMU: all processes share one address space, so the
  * kernel never trusts a user pointer (user_ok_rd/wr) and contains a crashing
@@ -439,7 +440,7 @@ static int fill_v2(struct exec_src *x, u8 *data, const struct zex2 *h, u32 pid, 
     u32 ts = h->text_size, nrel = h->nrel_code + h->nrel_data, rsz = nrel * 4;     /* checked: no wrap */
     u8 *own = 0;
     if (!*segp) {
-        if (!(own = mem_alloc(ts, 0, pid)))
+        if (!(own = mem_alloc(ts, MEM_USER, pid)))
             return -ENOMEM;
         if (fs_exec_read(x, 0, own, ts))
             return -EIO;
@@ -503,7 +504,9 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
     u32 stk = v2 ? hu->v2.stack_size : h->stack_size;
     u32 stack = stk ? stk : USTACK_DEFAULT;
     u32 span = ((memsz + 15) & ~15u) + ((stack + 15) & ~15u) + argsz;
-    u8 *base = mem_alloc(span, 0, (u32)pid);
+    u32 uf = current->svc_depth ? 0 : MEM_USER;     /* D41: whole pages while protection is on, unless it is a system
+                                                     * process from the start (a service's server, section 7) */
+    u8 *base = mem_alloc(span, uf, (u32)pid);
     u32 *ks = mem_alloc(KSTACK, 0, (u32)pid);
     u32 envlen = parent ? parent->envlen : 0;
     char *env = envlen ? mem_alloc(envlen, 0, (u32)pid) : 0;      /* the parent cannot change it while it spawns */
@@ -567,6 +570,7 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
         kt[9] = (u32)base;
 
     memset(p, 0, sizeof *p);
+    mmu_slot_new(p);                                /* D41: a protected process until it is made a system one */
     p->ksp = kt;
     p->usp = (u32)usp;
     p->entry = v2 ? code : (u32)base;
@@ -658,8 +662,10 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
         rq_push(p);
         irq_restore(s);
     }
-    if (current->svc_depth)
+    if (current->svc_depth) {
         svc_born(pid);                  /* a service's server (D11): its entry is starting from now on */
+        mmu_sysmark(p);                 /* D41 7: it serves clients in place and may drive hardware */
+    }
     return pid;
 }
 
@@ -775,6 +781,8 @@ void schedule(void)
         if (n->ustk && !n->killed && (n->usp < n->ustk + GUARD_BYTES || n->usp > n->base + n->span))
             stack_fail(n, STK_USER);
         current = n;
+        if (mmu_on)
+            mmu_switch(n);              /* D41: its view in, or every access let through for a system process */
         switch_to(old, n);
     }
     irq_restore(s);
@@ -876,6 +884,7 @@ void proc_exit(int code)
     ints_off();
     struct proc *p = current;
     p->exiting = 1;
+    mmu_forget(p);                      /* D41: its view never applied again (before seg_put drops its code) */
     drv_exit(p);                        /* D19 2.4: a device it claimed is stopped before anything of it is freed */
     gcon_proc_exit(p->pid);             /* D38: a console it grabbed is given back (its chip RAM goes with it) */
     seg_put(p->seg);                    /* D13: after exc_c's crash check; the last user frees the code */

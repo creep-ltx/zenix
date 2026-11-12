@@ -55,7 +55,8 @@ branch nfs12, 2026-10-28); the C library's (D27 section 5, Linux's numbers, bloc
 1 done, 2 failed, 3 confirmed; 4 "confirmed, but the root half failed" (audit3 B1, 2026-10-26). `struct uupdate`'s (and
 the bootinfo's) flags bits: 1 `UPD_F_ROLLBACK` (D15), 2 `UPD_F_TRIAL` (D22 4.3, claimed 2026-10-28: an unconfirmed trial;
 the kernel keeps it after `UPD_RELEASE`; zenixboot sets it from D22 step 7). The bootinfo's boot options at `+0x84` (`kopts`, D37, branch cache,
-2026-11-04): 1 `KOPT_DCACHE_OFF`, 2 `KOPT_DCACHE_WT`. Poll bits on a port (D23 step 1, branch nfs12, 2026-10-28; recorded by audit 2026-10-29 B2-7): `POLLPRI` 2 (Linux's
+2026-11-04): 1 `KOPT_DCACHE_OFF`, 2 `KOPT_DCACHE_WT`; 4 `KOPT_MMU_ON` and 8 `KOPT_MMU_OFF` (D41, branch mmu,
+2026-11-12: memory protection on, off; both set: off). Poll bits on a port (D23 step 1, branch nfs12, 2026-10-28; recorded by audit 2026-10-29 B2-7): `POLLPRI` 2 (Linux's
 value) on a port: a message sent to it was cancelled (`UMSG_CANCEL`) since its owner last saw one. Socket options: `SO_LINGER` 13 (Linux's, D23 steps 3-4, branch nfs34,
 2026-10-28; recorded by the same audit). The display protocol (DESIGN D38 step 3, `display/proto.h`, version 1): port `display` (the D11 service of
 `/sbin/displayd`; a client's own ports `dpy.PID`), requests `DPY_HELLO` 1 .. `DPY_IMAGE_FREE` 11 and the window

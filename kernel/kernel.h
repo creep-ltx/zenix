@@ -34,6 +34,8 @@ struct bootinfo {
 };
 #define KOPT_DCACHE_OFF 1u              /* the 040/060 data cache stays off (and its store buffer, branch cache, PCR) */
 #define KOPT_DCACHE_WT  2u              /* the 040/060 data cache write-through instead of copyback */
+#define KOPT_MMU_ON     4u              /* DESIGN D41: memory protection on (a 68030/040/060 with a working MMU) */
+#define KOPT_MMU_OFF    8u              /* DESIGN D41: memory protection off (wins over the kernel's default) */
 
 /* serial.c */
 void serial_init(void);
@@ -137,6 +139,7 @@ extern u8 cache_dmode;               /* CACHE_D_*: what the data cache does (Emu
 #define MEM_CHIP     1u         /* must be chip RAM (DMA: graphics, audio, disk) */
 #define MEM_FASTONLY 2u         /* fast RAM only, fail rather than use chip */
 #define MEM_LOW1G    4u         /* fast RAM ending below 1 GB: what the Pi 4's VideoCore can read (the mailbox) */
+#define MEM_USER     8u         /* DESIGN D41: a process's own memory: whole pages while memory protection is on */
 void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem);
 /* DESIGN D15: the update bundle zenixboot left in memory (bootinfo +0x78..+0x80), checked and reserved by mem_init as
  * a block in use, given back by SYS_update RELEASE; SYS_update itself is in syscall.c */

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
+#include "mmu.h"
 #include "fsproto.h"
 #include "random.h"
 
@@ -1139,6 +1140,9 @@ long vfs_mount(const struct umountreq *r)
     int port = port_find(r->port);
     if (port < 0)
         return -ENODEV;                         /* no server on that port */
+    struct proc *srv = port_owner(port);
+    if (srv)
+        mmu_sysmark(srv);                       /* D41 7: it gets the kernel's requests, on a kernel stack */
     struct mount *mt = &mnt[free];
     memset(mt, 0, sizeof *mt);
     strcpy_(mt->path, abs);

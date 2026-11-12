@@ -9,6 +9,7 @@
 #include "hw.h"
 #include "hwinfo.h"
 #include "cache_plan.h"
+#include "mmu.h"
 
 /* start.S */
 long cpu_pcr(void);
@@ -29,6 +30,24 @@ static void mark(unsigned *map, u32 lo, u32 hi)  /* the 16 MB units [lo, hi) tou
 {
     for (u32 u = lo >> 24; hi > lo && u <= (hi - 1) >> 24; u++)
         map[u >> 5] |= 1u << (u & 31);
+}
+
+/* section 3's block over the fast RAM (cache_plan's answer), from the 16 MB units with fast RAM and with configured
+ * boards that are not RAM (io[]: those units, which D41 reads too); the caller has checked the hardware table */
+int cache_block(const struct bootinfo *bi, int is060, unsigned *base, unsigned *mask, unsigned *io)
+{
+    const struct hwinfo *hw = (const struct hwinfo *)HWINFO_ADDR;
+    unsigned fast[8] = { 0 }, bad;
+    memset(io, 0, 32);
+    for (int i = 0; i < bi->nregions && i < 8; i++)
+        if (bi->r[i].attrs & MEMF_FAST)
+            mark(fast, bi->r[i].lower, bi->r[i].upper);
+    for (u32 i = 0; i < hw->nboards && i < HW_MAXBOARDS; i++) {
+        const struct hwboard *b = &hw->board[i];
+        if (!(b->type & 0x20) && b->addr && !(b->cd_flags & 1))      /* not RAM, configured */
+            mark(io, b->addr, b->addr + b->size);
+    }
+    return cache_plan(fast, io, is060, base, mask, &bad);
 }
 
 static void off(const char *why, int is040plus)
@@ -57,17 +76,9 @@ void cache_setup(const struct bootinfo *bi)
         return off("DCACHE=OFF", 1);
     if (!(CIAA(0) & 0x40))              /* CIA-A PRA bit 6 low: the left mouse button is held */
         return off("mouse button held", 1);
-    unsigned fast[8] = { 0 }, io[8] = { 0 }, base, mask, bad;
-    for (int i = 0; i < bi->nregions && i < 8; i++)
-        if (bi->r[i].attrs & MEMF_FAST)
-            mark(fast, bi->r[i].lower, bi->r[i].upper);
-    for (u32 i = 0; i < hw->nboards && i < HW_MAXBOARDS; i++) {
-        const struct hwboard *b = &hw->board[i];
-        if (!(b->type & 0x20) && b->addr && !(b->cd_flags & 1))      /* not RAM, configured */
-            mark(io, b->addr, b->addr + b->size);
-    }
+    unsigned io[8], base, mask;
     int is060 = pcr != -1, wt = (bi->kopts & KOPT_DCACHE_WT) != 0;
-    int k = cache_plan(fast, io, is060, &base, &mask, &bad);
+    int k = cache_block(bi, is060, &base, &mask, io);
     if (k)
         return off(why[k], 1);
     u32 r[5] = { TTR(0u, 0u, CM_INH), TTR(base, mask, wt ? CM_WT : CM_CB), is060 ? 0x0200u : 0,  /* DCO inhibited */
@@ -99,6 +110,7 @@ void cache_setup(const struct bootinfo *bi)
 /* before a software reset (kbd.c machine_reset): nothing dirty lost, the registers as a hardware reset leaves them */
 void cache_before_reset(void)
 {
+    mmu_before_reset();                 /* D41: translation off first (the windows stay D37's until below) */
     if (cache_dmode != CACHE_D_OFF)
         cache_reset_state();
 }

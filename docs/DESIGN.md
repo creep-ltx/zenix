@@ -51,7 +51,9 @@ exception handling. **Kept in `archive/` but not built:** the old console, ELF l
 Zenix is multi-user from the start of the terminal phase, as a Unix expects, with one honest limit: **no MMU means no
 security boundary** - any program can read or write any memory and touch the hardware. Users, groups and permissions
 therefore give accounting, separation of home directories and protection against honest mistakes, not protection
-against a program written to cheat (the same trust level as AmigaOS). The docs must say so.
+against a program written to cheat (the same trust level as AmigaOS). The docs must say so. (D41, 2026-11-12: with
+memory protection switched on, on a CPU with an MMU, an ordinary program can no longer reach other memory or the
+hardware; the system's servers and root's powers stay as written here.)
 - A user id and group id (and up to 8 supplementary groups since 2026-10-31, set by login, su and sudo from
   /etc/group) on every process, inherited by children; calls getuid, geteuid, getgid, setuid (root, or back to the
   real id), setgid, groups, umask.
@@ -347,8 +349,7 @@ and NI in `ps`; verified in FS-UAE (`tools/prio-test.sh`); not yet measured on t
 3. Graphics server, the desktop, a terminal program. 4. Network, audio, the rest.
 (The phases that replace these milestones are in ROADMAP.md.)
 
-Open questions: whether to
-optionally use an MMU, and how much of the old user programs port unchanged.
+Open questions: how much of the old user programs port unchanged. (Whether to use an MMU optionally: D41.)
 
 Written 2026-10-22; decisions updated and checked against the code 2026-10-23.
 
@@ -388,3 +389,6 @@ Two programs, as X11 keeps them: `displayd` owns the screen, the blitter, the po
 
 ## D40. Sound: the Paula server, `play`, `modplay` (roadmap block 6; design note revision 2 after one independent review; built on branch sound, 2026-11-12)
 `/sbin/sndd`, a D11 service on port `audio` (reserved), owns Paula's four channels through one kernel claim, `DRV_CLAIM` of `DRV_PAULA` (the process of port `audio` only; the bell silent while held; the kernel stops the channels at its end and before ZINE). No interrupt code: sndd reads Paula's request bits at times worked out from the E-clock (Paula's clock / 5), woken by the 100 Hz tick. PCM streams double-buffered in chip RAM on a pair of channels (two at once), or one frames stream on all four for modules (`modplay` computes each tick, sndd applies the queued frames on time). Channels are allocated, not mixed. `play` reads WAV, 8SVX, AIFF and raw bytes; `modplay` ProTracker modules. Details, the protocol, the timing and its limits: [d40-sound.md](d40-sound.md).
+
+## D41. Optional memory protection on CPUs with an MMU (roadmap block 6; design note revision 2 after two independent reviews; the details delegated; built on branch mmu, 2026-11-12; off by default)
+On a 68030, 68040 or 68060 whose MMU works (tested at boot: EC parts and Emu68 have none), `zenixboot MMU=ON` switches on memory protection: the MMU only protects, never translates (one shared tree, every page mapped to itself, 4 KB pages), so the single address space, spawn, shared code and ZINE stay as they are. A protected process (every program a user runs) sees only its own memory: its block, its regions, its code read only; a stray read or write anywhere else (the kernel, another program, free memory, the chips, address 0) ends it with a line naming whose memory it was. System processes (the service manager's servers, reserved ports, drivers, a display server, a mount's server) see everything, as before, and serve clients in place (D1). The kernel runs through the transparent translation registers (D37's windows, set for supervisor accesses only), never the tree. A switch to another protected program flips the two views' pages; a switch to or from a system process rewrites two or three registers. A protected server sees its client's memory while it holds the request. Off by default until tried on the 1260 (`MMU=OFF`, the left mouse button). Details, the costs, the tests: [d41-memory-protection.md](d41-memory-protection.md).

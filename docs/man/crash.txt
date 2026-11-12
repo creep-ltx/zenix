@@ -8,6 +8,7 @@ SYNOPSIS
     crash stack
     crash kstack | idle
     crash sleep N | poke | damage | literal
+    crash victim N [FILE] | read ADDR | write ADDR
 
 DESCRIPTION
     Without an argument, executes an illegal instruction. The kernel must
@@ -34,7 +35,21 @@ DESCRIPTION
     kernel must say the shared code is damaged and name the processes
     still running it); crash literal opens, writes, reads into and
     spawns with string literals and prints what each system call said (a
-    read into a literal must fail with -14 in the shared build).
+    read into a literal must fail with -14 in the shared build). With
+    memory protection on (DESIGN D41) a poke or a damage of the shared
+    build ends the program at its write instead.
+
+    The last three are for the memory protection tests (tools/mmu-test.sh):
+    crash victim N fills a region of 8 KB with a pattern, says its
+    address ("crash: victim pid P region ADDR"), sleeps N seconds (or
+    until FILE exists) and says
+    whether the pattern is "intact" (exit 0) or "damaged" (exit 1);
+    crash read ADDR reads a long at ADDR (decimal, or hex with 0x) and
+    prints it; crash write ADDR writes one there. With protection on, an
+    address that is not crash's own memory ends it with the kernel's
+    "memory protection:" line and status 139. Without protection a read
+    goes through, and crash write refuses (exit 2) unless the kernel's log
+    says protection is on: the write would land.
 
     A test program.
 

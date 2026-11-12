@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
 #include "fsproto.h"                     /* UMSG_CANCEL (D23) */
+#include "mmu.h"
 
 /* Named ports with synchronous calls. See kernel.h for the model.
  * A client in P_MSG is woken only by the reply (or by its server dying),
@@ -60,6 +61,8 @@ KCOLD int port_create(const char *name, int owner)
         return i < NSVC && svc_handover(i) ? PORT_ID(i) : -EBUSY;
     if (reserved(name) && current->uid != 0)
         return -13;
+    if (reserved(name))
+        mmu_sysmark(current);           /* D41 7: the kernel sends it requests whose message is on a kernel stack */
     for (i = NSVC; i < NPORT; i++)
         if (!ports[i].used) {
             u32 gen = (ports[i].gen + 1) & 0x7FFFFF;          /* positive port numbers: 23 bits of generation */
@@ -399,6 +402,8 @@ struct umsg *ipc_recv(int port, int wait)
     m->next = 0;
     m->state = MSG_SERVING;
     m->server = current->pid;
+    if (mmu_on)
+        mmu_lend(m->client);            /* D41 8: a protected server sees its client's memory while it serves it */
     return m;
 }
 

@@ -19,6 +19,7 @@
 #include "hwinfo.h"
 #include "zine.h"
 #include "hw.h"
+#include "mmu.h"
 
 _Static_assert(sizeof(struct udrvattach) == UDRVATTACH_FIRST, "udrvattach's first size is frozen");
 _Static_assert(sizeof(struct udrvxfer) == UDRVXFER_FIRST, "udrvxfer's first size is frozen");
@@ -267,6 +268,7 @@ long drv_sys(u32 opw, u32 a, u32 b)
         if (current->ppid != srv)
             return -EPERM;              /* only the running network server's children */
     }
+    mmu_sysmark(current);               /* D41 7: a driver: its registers and DMA memory in user mode */
     switch (op) {
     case DRV_HWINFO: {
         const struct hwinfo *h = hw();
