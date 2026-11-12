@@ -276,6 +276,13 @@ def replayer():
     old = M.module({(0, 0, 0): (1, C2, 0, 0)}, [(M.wave(64, 'sine'), 0, 30, 8, 32)], [0], old=True)
     h, t = run(old, 1)
     check('15-sample module: loads, its loop start in bytes', h[1:5] == ['15', '1', '1', '1624'] and t[0]['ch'][0][5:] == [8, 32], (h, t[0]['ch'][0]))
+    # audit 2026-11-12 A6-1: the old format's loop start in bytes may be odd; Paula's places are even (sndd refuses others)
+    odd = M.module({(0, 0, 0): (1, C2, 0, 0)}, [(M.wave(64, 'sine'), 0, 30, 9, 32)], [0], old=True)
+    h, t = run(odd, 1)
+    check('15-sample module with an odd loop start: rounded down to even (8)', t[0]['ch'][0][5:] == [8, 32], (h, t[0]['ch'][0]))
+    # A6-2: finetune 7's B-3 is 108, below the server's 113: held at 113, not dropped (modplay sent no period then)
+    _, t = run(song({(0, 0, 0): (4, 113, 0, 0)}, smp=SMP + [(M.wave(64, 'sine'), 7, 32, 0, 64)]), 1)
+    check('finetune 7, B-3 (108): held at the server\'s lowest period, 113', per(t) == [113], per(t))
     eight = bytearray(song({}))
     eight[1080:1084] = b'8CHN'
     h, _ = run(bytes(eight), 1)
@@ -301,7 +308,11 @@ def replayer():
                 for c in x['ch']:
                     if c[3] + c[4] > bank or (c[6] and c[5] + c[6] > bank) or not 0 <= c[1] <= 64:
                         crashes += 1
-    check('200 damaged modules, 400 ticks each: no crash, every place inside the bank, volumes 0-64', crashes == 0, crashes)
+                    # what sndd's frame_ok demands (A6-3): even places and lengths, a period 0 (none) or 113..4095
+                    if (c[3] | c[4] | c[5] | c[6]) & 1 or not (c[0] == 0 or 113 <= c[0] <= 4095):
+                        crashes += 1
+    check('200 damaged modules, 400 ticks each: no crash, every place inside the bank and even, periods 113-4095, '
+          'volumes 0-64', crashes == 0, crashes)
     h, t = run(base, 64 * 6 * 2)
     check('the emulator test\'s tune: two positions, every channel starts notes',
           h is not None and all(sum(trig(t, c)) > 0 for c in range(4)) and t[-1]['pos'] == 1)

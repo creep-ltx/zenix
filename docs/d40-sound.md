@@ -177,8 +177,9 @@ stream in a reused slot.
   activity on a floppy-only machine makes underruns with 60 ms halves; `play -b 500` (half-second halves, 1 s of chip
   buffer) rides over a track read. The worst kernel section is to be measured on the stock A1200 and the default
   chosen from it (section 16).
-- The CPU writes each sample to chip RAM once, a long word at a time (the client's fast RAM bytes, gathered in
-  registers; stereo de-interleaved on the way). No other chip RAM access.
+- The CPU writes each sample to chip RAM once (mono with memcpy; stereo de-interleaved byte by byte on
+  the way); a half is cleared once when a stream opens or ends early (`do_open`, `pcm_seal`). No other chip RAM access
+  (audit 2026-11-12 A6-7: the text said long words throughout).
 - **The end:** `SND_DRAIN` answers when the last written byte has played (the time is known); `SND_CLOSE` stops the
   pair at once (volume 0, DMA off) and frees its chip RAM.
 - **Idle:** four silent halves in a row with nothing pending and the stream stops its DMA; the next write starts it
@@ -191,7 +192,7 @@ stream in a reused slot.
 Paula has four channels; mixing in software would cost the 14 MHz 68020 a few per cent per stream and chip RAM
 reads. The first model is **allocation, as audio.device does it**: two PCM streams at once (each a stereo pair,
 mono played on both sides) or one frames stream (a MOD) alone. A program that finds no channels is told -EBUSY at
-`SND_OPEN` and says so ("sound is in use by PID"). No priorities and no stealing in this step: the first comes first.
+`SND_OPEN` and says so ("sound is in use by another program"). No priorities and no stealing in this step: the first comes first.
 Mixing (several sounds on one pair) and priorities are later steps if wanted; the protocol has room (`SNDF_*` bits
 grow at the end).
 
@@ -279,8 +280,9 @@ One reader for `play`, from a file or standard input (no seeking: chunks are rea
 
 - **A client killed while it waits in `SND_WRITE`/`SND_DRAIN`/`SND_FRAMES`** (Ctrl-C): the kernel marks the message
   `UMSG_CANCEL` and wakes sndd's `evwait` (POLLPRI, D23); sndd stops that stream at once and answers -EINTR. (A
-  caught SIGINT would not mark the call: play and modplay catch none. A message marked cancelled when it arrives is
-  kept like any other and answered -EINTR at the next look.)
+  caught SIGINT would not mark the call: play and modplay catch none. A call made after its client was already killed carries
+  `UMSG_CANCEL` without raising the port's POLLPRI, so it is simply served like any other: harmless, the client is
+  gone; audit 2026-11-12 A6-7.)
 - **A client that ends between calls** (with a stream open): sndd checks each open stream's pid every half-second
   (`getpriority(PRIO_PROCESS, pid)`, -ESRCH when it is gone or a zombie) and closes the streams of the dead. Pids only
   count up (`next_pid`), so a pid is never someone else's. (displayd learns of a dead client from a failed post to its

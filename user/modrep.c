@@ -101,7 +101,8 @@ int mod_load(struct mod *m, const unsigned char *d, unsigned size, char *why)
         s->finetune = h[24] & 15;
         s->vol = h[25] > 64 ? 64 : h[25];
         if (m->nsmp == 15)
-            ls /= 2;                            /* the old format's loop start counts bytes, not words */
+            ls = ls / 2 & ~1u;                  /* the old format's loop start counts bytes, not words; Paula's places
+                                                 * are even (audit 2026-11-12 A6-1: an odd one made sndd refuse the frame) */
         s->off = off < m->banksize ? off : 0;   /* a cut file: the sample is what is there, or nothing */
         if (off >= m->banksize) len = 0;
         else if (len > m->banksize - off) len = (m->banksize - off) & ~1u;
@@ -397,7 +398,8 @@ void mod_tick(struct mod *m)
         }
         struct modout *o = &m->out[ch];
         o->flags = c->trig;
-        o->period = c->operiod;
+        o->period = c->operiod > 0 && c->operiod < PER_MIN ? PER_MIN : c->operiod;   /* finetune +2..+7's B-3 and a
+                                         * vibrato below B-3 held at the server's lowest period, not dropped (A6-2) */
         o->vol = c->ovol;
         o->start = c->start;
         o->len = c->len;

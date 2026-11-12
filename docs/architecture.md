@@ -734,8 +734,8 @@ pattern (section 6).
   register; the kernel is not built with `-msep-data` and keeps `a5` by the C calling rules; `switch_to` saves it).
 - **Memory protection** (D41, off by default; docs/d41-memory-protection.md). A *protected* process (every program a
   user runs) sees in user mode only its view: its block, its regions, its code read only (what `user_ok_wr`/`rd`
-  allow; root's also the update bundle, read only, for zup), and while it holds a client's request (`ipc_recv` to
-  `ipc_finish`) that client's view too. A *system* process (a per-slot mask: `svc_born`, a reserved port's creator,
+  allow; root's also the update bundle, read only, for zup), and while it holds a client's request (from `ipc_recv`
+  until the next retenant after `ipc_finish`: D41 section 8) that client's view too. A *system* process (a per-slot mask: `svc_born`, a reserved port's creator,
   any passing `SYS_drv` call, `CON_GRAB`, the owner of a port `SYS_mount` mounts; at once when marked mid-run) runs
   with the windows matching user accesses too, so it sees everything as before. `schedule()` calls `mmu_switch(next)`
   before `switch_to`: idle and an exiting process nothing; a system process the windows to "every access"; a protected

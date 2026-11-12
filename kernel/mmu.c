@@ -297,7 +297,8 @@ __attribute__((optimize("O2"))) static void view(const struct proc *p, int in)
             flip(p->reg[i].base, p->reg[i].base + p->reg[i].size, rw);
     if (p->csize && (!in || !(p->code & (MMU_PG - 1))))
         flip(p->code, p->code + p->csize, in ? D_VALID | D_WP : 0);
-    if (p->uid == 0 && upd_pa)          /* D15: zup (root) reads the update bundle in place, read only */
+    if (upd_pa && (p->uid == 0 || !in)) /* D15: zup (root) reads the update bundle in place, read only; out whatever
+                                         * the uid is now (a root tenant that called setuid kept it: audit A6-10) */
         flip(upd_pa, upd_pa + upd_size, in ? D_VALID | D_WP : 0);
 }
 
@@ -394,6 +395,7 @@ void mmu_lend(struct proc *c)
     if (!mmu_on || !c || current != tenant || c == current || (lent & SLOT(c)))
         return;
     u16 s = irq_save();
+    sr_to4();                           /* as retenant: the serial port's receive let in while a big view flips (A6-12) */
     view(c, 1);
     lent |= SLOT(c);
     mmu_flush(fam);
@@ -404,6 +406,7 @@ void mmu_lend(struct proc *c)
 static void flipf(u32 lo, u32 hi, u32 how)
 {
     u16 s = irq_save();
+    sr_to4();                           /* (A6-12, as mmu_lend) */
     flip(lo, hi, how);
     mmu_flush(fam);
     irq_restore(s);
@@ -486,6 +489,9 @@ void mmu_setup(const struct bootinfo *bi)
         return (void)off_why("Emu68");
     fam = (bi->attn & 0x88) ? 2 : 1;
     on.fam = off.fam = fam;
+    if (fam == 2 && !want)              /* a 68040/060 not asked: no MMU register read (an EC060 has none: audit A6-11);
+                                         * the 68030's cleanup below runs on every boot */
+        goto not_asked;
     int miss = mmu_regs_save(&off) != 0;
     /* the clean state, translation off: the loader's handoff did that on a 040/060 (D37 then set the windows); a 68030's
      * translation an AmigaOS tool left on (Enforcer, CPU FASTROM) is switched off here, protection or not, its tables
@@ -503,6 +509,7 @@ void mmu_setup(const struct bootinfo *bi)
         }
     }
     if (!want)
+not_asked:
         return (void)off_why(k & KOPT_MMU_OFF ? "MMU=OFF" : "not asked for (zenixboot MMU=ON)");
     if (!(CIAA(0) & 0x40))
         return (void)off_why("mouse button held");

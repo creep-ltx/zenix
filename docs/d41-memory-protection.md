@@ -126,8 +126,8 @@ boards are unknown, as D37), and a 68040/68060 with a board that is not RAM abov
 - **Geometry**, the same on all three CPUs: 4 KB pages; a root table of 128 entries (32 MB each, A31-A25), pointer
   tables of 128 entries (256 KB each, A24-A18), page tables of 64 entries (A17-A12). On the 040/060 that is the fixed
   4 KB layout (`TCR` P = 0, MC68040UM 3.2.1); on the 030 the translation control register says the same: `TC` =
-  0x80C07760 (E, PS = 12, IS = 0, TIA = 7, TIB = 7, TIC = 6, TID = 0; PS + IS + TIA + TIB + TIC = 32), `CRP` limit
-  0x7FFF and DT 2 (short descriptors).
+  0x80C07760 (E, PS = 12, IS = 0, TIA = 7, TIB = 7, TIC = 6, TID = 0; PS + IS + TIA + TIB + TIC = 32), `CRP`
+  0x80000002 (L/U 1 with a lower limit of 0: no limit; DT 2, short descriptors).
 - **Rules for changing a page** (both reviews): every change that makes a page valid or invalid is followed, before
   the kernel returns to user mode, by a push of the changed descriptors' lines (040/060 with the data cache on) and an
   ATC flush (`PFLUSHA`): the ATC keeps invalid entries too (MC68040UM figure 3-9, the R bit clear; the 030's B bit),
@@ -238,7 +238,10 @@ buffers in place. So while a protected tenant holds a request (`MSG_SERVING`, se
   nothing is done at once: the client's view leaves at the next retenant, which comes before the client runs again
   (it is flipped out with the rest, then the new tenant and the clients it still serves in, so a D13 segment several
   of them run is never left out by one flip-out). Until then the server could still reach the client's memory; a
-  server normally answers and waits for its next request in one trap (`replyrecv`), so the window is that trap.
+  server normally answers and waits for its next request in one trap (`replyrecv`), so the window is usually that
+  trap; but when `replyrecv` finds another request already queued, the server goes back to user mode still seeing the
+  earlier client's memory while it serves the next one, until the next retenant (audit 2026-11-12 A6-13: read, left
+  as it is; making the set again at once is the cost measured below).
   Measured: making the set again at every reply cost a whole retenant per message (section 15). A lent client that
   ends is flipped out at once (`mmu_forget`);
 - when such a server becomes the tenant again, every client whose request it holds is lent again (a scan of the 32
@@ -295,7 +298,7 @@ faulting process for any user-mode exception. With protection on it first says w
 
 The line: `[kernel] pid 12 (crash): memory protection: a write to 0x1000 (the kernel's memory): killed (SIGSEGV)`,
 the owner found by the memory manager (`mem_owner_of`: the kernel's, `pid 7 (sh)`'s, shared code, free memory, or
-"not memory" for the chips and unmapped space). Then the usual line and `proc_exit(139)`. The frame is never returned
+"no memory (the hardware, or nothing)" for the chips and unmapped space). Then the usual line and `proc_exit(139)`. The frame is never returned
 from, so the 040's pending write-backs and the 030's continuation state are simply dropped with the process. A fault
 in supervisor mode stays a panic (it would mean the kernel touched an address outside its windows, which section 3's
 refusal rules out).
@@ -327,7 +330,7 @@ After `cache_setup` (D37), with interrupts masked, before any process exists: `m
 4. The log lines (the kernel prints them; `%u` KB rounded up):
    `mmu: memory protection on: 68060, 4 KB pages, 68 KB of tables`
    `mmu: memory protection off: not asked for (zenixboot MMU=ON)` (or `MMU=OFF`, `mouse button held`,
-   `no MMU on a 68020`, `Emu68`, `no hardware table`, `no working MMU (68EC030?)`, `a board above 16 MB at ADDR`,
+   `no MMU on a 68020`, `Emu68`, `no hardware table`, `no working MMU (the probe gave N)`, `no working MMU (a register is missing)`, `a board above 16 MB at ADDR`,
    `out of memory for the tables`)
 
 ## 13. The switch, and the default
@@ -377,7 +380,10 @@ After `cache_setup` (D37), with interrupts masked, before any process exists: `m
   -Os), hooks in `mem.c` (the three-way cut and `mem_owner_of`: +690 bytes), `proc.c`, `ipc.c`, `svc` marking in
   `proc_load`, `drv.c`, `gcon.c`, `vfs.c`, `zine.c`, `cache.c` (`cache_block`), `main.c`. **kernel.bin 183,192 ->
   190,012 bytes (+6,820)**; the mount tests' RAM disk 699 -> 692 KB for it (`tools/ksize-budget`, the Makefile).
-  zenixboot `MMU=` +160 bytes. Machines without protection run none of it: `mmu_on` 0 makes every hook return.
+  zenixboot `MMU=` +160 bytes. Machines without protection run almost none of it: `mmu_on` 0 makes every hook return; what runs on every boot is
+  `mmu_setup`'s head (and on a 68030 the switch-off of a translation AmigaOS left on), the system-process mask
+  (`mmu_sysmark`, `mmu_slot_new`) and the allocator's `alloc_in`/`carve` split (the same cuts as before; audit
+  2026-11-12 A6-16). A 68040/060 not asked for protection has no MMU register read (audit A6-11).
 - **Tables** (the boot line): FS-UAE's A1200 with a 68030, 2 MB chip and 8 MB Zorro II fast: 12 KB; with 4 MB fast: 8
   KB; the 68060 with 2 MB chip, 8 MB Zorro II and 64 MB at 0x08000000: 77 KB (73 KB with 4 MB Zorro II).
 - **Memory after boot and one login** (`free`, FS-UAE): 68030 with 8 MB fast 7,553 -> 7,529 KB (24 KB: 12 KB of

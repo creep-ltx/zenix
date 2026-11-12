@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #pragma once
 /* DESIGN D41 (docs/d41-memory-protection.md): optional memory protection with the 68030/68040/68060 MMU, identity
- * mapped. kernel/mmu.c; the hooks below are called from mem.c, proc.c, ipc.c, svc.c, drv.c, zine.c, cache.c and main.c.
+ * mapped. kernel/mmu.c; the hooks below are called from mem.c, proc.c, ipc.c, vfs.c, gcon.c, syscall.c, drv.c, zine.c, cache.c and main.c.
  * Every hook is cheap when protection is off: the callers test mmu_on first where the path is hot. */
 #include "kernel.h"
 

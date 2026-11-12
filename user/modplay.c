@@ -33,7 +33,7 @@ static int load(const char *path)
         return -1;
     }
     if (st.size < 600 || st.size > (8u << 20)) { dprintf(2, "modplay: %s: not a module (size)\n", path); return -1; }
-    file = malloc(st.size);
+    file = malloc(st.size + 1);         /* + 1: an odd bank is sent rounded up to even (start), its last byte 0 */
     if (!file) { dprintf(2, "modplay: %s: no memory for %u bytes\n", path, st.size); return -1; }
     unsigned n = 0;
     while (n < st.size) {
@@ -42,6 +42,7 @@ static int load(const char *path)
         n += (unsigned)r;
     }
     sys_close(fd);
+    file[n] = 0;
     fsize = n;
     return 0;
 }
@@ -125,6 +126,10 @@ int main(int argc, char **argv)
     if (load(argv[i]) < 0) return 1;
     char why[64];
     if (mod_load(&m, file, fsize, why) < 0) { dprintf(2, "modplay: %s: %s\n", argv[i], why); return 1; }
+    if (fsize - mod_bankoff(&m) > SND_BANKMAX) {     /* (audit 2026-11-12 A6-5: the server's EINVAL said nothing) */
+        dprintf(2, "modplay: %s: its samples are over 1 MB (the sound server's bank)\n", argv[i]);
+        return 1;
+    }
     struct sndinfo si;
     int r = snd_info(&si, 0);
     if (r < 0) { dprintf(2, "modplay: %s\n", snd_why(r)); return 2; }

@@ -88,7 +88,7 @@ static int play(const char *name, int fd)
         sdec_close(&d);
         return 2;
     }
-    struct sndinfo hi;
+    struct sndinfo hi = {0};            /* (a failed snd_info leaves zeroes, not the stack's bytes: audit A6-9) */
     snd_info(&hi, h);
     if (!quiet)
         dprintf(1, "%s: %s %d-bit %s %u Hz -> %u Hz (period %u)%s\n", name, fmtname[d.fmt], d.bits,

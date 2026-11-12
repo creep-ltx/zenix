@@ -31,7 +31,7 @@ has "play -S: the server's state, PAL" '^sndd: PAL, clock 3546895 Hz, 0 stream'
 has "... exit 0" '^(.*# )?s0=0'
 S=$(tr -d '\r' < "$L" | sed -n '/^d0-done$/q;p' | grep -c 'audio: first beep')
 [ "$S" = 0 ] && echo "PASS the bell is silent while sndd holds Paula (no beep logged)" || { echo "FAIL the bell while sndd holds Paula"; pass=0; }
-has "... and again after a restarted sndd" '^.?0$'
+has "... and again after a restarted sndd" 'b1c=0$'      # (the bell's BEL byte comes before it on the line)
 S=$(after U1)
 echo "$S" | grep -qE '^sndd: .* 0 underrun' && echo "PASS 10 s of 11 kHz sound without an underrun (the reader keeps up on the 68020)" || { echo "FAIL underruns: $S"; pass=0; }
 # 1: 8-bit mono 11,025 Hz WAV: period round(3546895 / 11025) = 322, on the pair 0 + 1, volume 64

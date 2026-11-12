@@ -40,8 +40,9 @@ EFFECTS
     ED note delay, EE pattern delay.
 
 EXIT STATUS
-    0 played; 1 not a module it plays; 2 no sound (no server, the
-    channels in use, not enough chip RAM).
+    0 played; 1 not a module it plays (also one whose samples are
+    over 1 MB); 2 no sound (no server, the channels in use, not
+    enough chip RAM).
 
 NOTES
     Not done: E0 (the filter: the machine's), E8 and EF; 6- and

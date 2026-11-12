@@ -36,7 +36,9 @@ NOTES
     programs, the bell played through sndd, 14-bit sound. sndd does
     not run while the kernel is busy for another program (a floppy
     track read): a gap in the sound unless the halves are longer
-    (play -b). "play -S" shows its state.
+    (play -b). "play -S" shows its state, with the times Paula did not
+    take a channel's new sample place in time; the first such time is
+    also said on sndd's output.
 
 SEE ALSO
     play(1), modplay(1), docs/d40-sound.md

@@ -86,7 +86,14 @@ for cpu in $CPUS; do
             'pid [0-9]+ \(crash\): memory protection: a read of 0x[0-9a-f]+ \(the memory of pid [0-9]+ \(crash\)\)'
         chk "a write to 0x1000: the kernel's memory" 'memory protection: a write to 0x1000 \(the kernel.s memory\): killed'
         chk "a read of address 0" 'memory protection: a read of 0x0 \(the kernel.s memory\): killed'
-        chk "a write into the kernel's image" 'memory protection: a write to 0x[0-9a-f]+ \(the kernel.s memory\): killed'
+        # the kernel's own address from its boot line, matched exactly (audit 2026-11-12 A6-15: the 0x1000 line above
+        # satisfied a loose pattern, so a wrong or empty address passed)
+        ka=$(grep -aoE '^kernel: [0-9]+ bytes at 0x[0-9a-f]+' "$L" | head -1 | awk '{print $5}')
+        if [ -n "$ka" ] && [ "$ka" != 0x1000 ]; then
+            chk "a write into the kernel's image ($ka)" "memory protection: a write to $ka \\(the kernel.s memory\\): killed"
+        else
+            echo "  FAIL the kernel's address in its boot line ('$ka')"; ok=0
+        fi
         chk "a write into its own shared code" 'pid [0-9]+ \(crashpure\): memory protection: a write to 0x[0-9a-f]+ \(its own code \(read only\)\)'
         [ "$(grep -c '^status 139' "$L")" -ge 6 ] && echo "  ok   six stray accesses ended with status 139" ||
             { echo "  FAIL six stray accesses ended with status 139 ($(grep -c '^status 139' "$L"))"; ok=0; }

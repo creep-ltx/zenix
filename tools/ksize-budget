@@ -74,6 +74,9 @@
 # drive stops answering), syscall 10,050 -> 10,108 (SYS_atapi), diskd.zx in embed 8,064 -> 8,876 (cd0: the packets'
 # meaning, the disc's size and changes, 2048-byte blocks served as sectors); kernel.bin 190,684 -> 193,072, TOTAL
 # 190,700 -> 193,100; the mount tests' RAM disk 692 -> 689 KB for it (Makefile): 1,488 bytes of its margin left.
+# 2026-11-12 (block 6's audit, docs/audit-2026-11-12-block6.md A6-10..A6-12): mmu 5,510 -> 5,546 (the update bundle
+# flipped out whatever the uid, no MMU register read on a 68040/060 not asked, big flips with the serial receive let
+# in); kernel.bin 193,072 -> 193,112, TOTAL 193,100 -> 193,150.
 start     4300   8200
 main      5950   1100
 serial    6100   6500
@@ -107,5 +110,5 @@ cache     1800     32
 gcon      3600     16
 mmu       5700    160
 embed    47500      0
-TOTAL   193100
+TOTAL   193150
 ROOM       800

@@ -28,8 +28,8 @@ send modplay -q /snd/test.mod & sleep 2; echo M8; play -S; wait; echo "m2=$?"\r
 wait m2= 60
 send play -q /snd/long.wav & sleep 1; kill $(pgrep sndd); wait; echo "k1=$?"; dmesg | grep -E 'drv: (pid|claim)' | tail -3; echo M9\r
 wait M9 30
-send beep; sleep 1; dmesg | grep -c 'first beep'; echo "b1=$?"\r
-wait b1= 20
+send beep; sleep 1; echo "b1c=$(dmesg | grep -c 'first beep')"\r
+wait b1c= 20
 send sleep 34; pgrep sndd; echo "n=$?"; beep; sleep 1; dmesg | grep 'first beep'; echo b2-done\r
 wait b2-done 70
 send echo sound-test-done\r

@@ -60,7 +60,8 @@ NOTES
     An AIFF whose COMM chunk comes after its sound data cannot be read
     from a pipe. Floppy activity can make a gap with the default
     buffer (use -b). While sndd runs the terminal bell is silent; it
-    sounds again when sndd has ended (30 s after the last sound).
+    sounds again when sndd has ended (30 s after the last sound). If
+    the server's state cannot be read, the format line shows 0 Hz.
 
 SEE ALSO
     modplay(1), sndd(8), beep(1), docs/d40-sound.md

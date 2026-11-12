@@ -119,7 +119,10 @@ static void wait_bits(unsigned mask, unsigned per)
 {
     unsigned want = mask << 7, t0 = now(), lim = 2 * per / 5 + eclock_hz / 1000u;  /* a period and a millisecond */
     while ((CUST(INTREQR) & want) != want)
-        if (now() - t0 > lim) { waits_hit++; break; }
+        if (now() - t0 > lim) {     /* said once (CLAUDE.md: a wait on hardware says what it waited for; audit A6-6) */
+            if (!waits_hit++) dprintf(1, "sndd: Paula did not take the places of channels %x in time\n", mask);
+            break;
+        }
     CUST(INTREQ) = (unsigned short)want;
     for (int c = 0; c < 4; c++) if (mask & (1u << c)) irqs[c]++;
 }
