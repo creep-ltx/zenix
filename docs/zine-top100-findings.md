@@ -568,3 +568,80 @@ The 68060 regressions are the ones to look at first: 11 of the 12 ran to their e
 rerun and now crash (five on an illegal instruction) or stop on a missing call. Whether this is round 7's change or
 the 68060 setup is not yet investigated. The full
 breakdown is in `~/Amiga/Top100-zine/summary.md` under "Round 7: full rerun".
+
+## Round 8 (2026-11-12, branch zine8, d29 16.18)
+
+**Round 7's regressions, explained.**
+- **68060 (12):** not round 7's doing. The 68060's "before" was round 4's rerun, made before round 5 made AttnFlags
+  say the FPU (d29 16.15). Eleven of the twelve had then printed why they quit and ended with 0, which the counting
+  rule takes as working: Jesus Christ Motocross "error: fpu required (if you have 040/060, run setpatch first)", Beam
+  Riders (both copies) "68020+ and FPU required!", Impossible "FPU required", The Morning Trip "FPU required, try the
+  (bigger) nonfpu version!", The Martini Effect, Sojourn of the Soul, Dead Ahead, Hexel and Knarkzilla "FPU: None ...
+  These were not detected on your system", Lupus Reditus "reqires minimum MC68882 FPU". Now they get past the check and
+  meet ZINE's next gaps: lowlevel.library (Sojourn, Dead Ahead: a call through base 0), sprites (Impossible:
+  AllocSpriteDataA), user Copper lists (The Morning Trip: UCopperListInit), and crashes after long runs (below).
+  We come in peace (the twelfth) was "ran until the limit" before and stopped on a call through base 0 after 4,743 s
+  emulated in round 7; it works again in this round's rerun.
+- **68020 (4):** Rubbur was never stable on the 68020 (privilege violation, return code 1, a reset into Zenix in
+  rounds 1-7; traced twice this round: "Could not open display" once, a jump into the ROM at $F8000A the other time;
+  it runs to its end on the 68030 and 68060). HAM Eager crashes at a different low address each untraced run and ran
+  without a crash when traced: timing, not settled. Dual Panoply missed a 2,349 KB AllocMem by 13 KB after round 7's
+  blob grew: fixed by giving the program the ZINE block's unused end (about 180 KB). destroy fascism: below.
+- **68030 (1):** Boogietown's "Zenix did not boot to its prompt" was the harness (an empty serial log after 530 s, as
+  for Demos-AGA 099 in the same rerun); rerun below.
+
+**Fixed in ZINE (d29 16.18):** lowlevel.library (Flex's and Ephidrena's demo system: Software Make The Dance Foam
+Oil and fake elektronik lightshow now run to their end on the 68060, about an hour emulated each, where they quit
+after 70-90 s; Sojourn of the Soul gets through its loading), dos CompareDates (Reborn), the DOS list and
+GetDeviceProc (THE CURE), user Copper lists (The Morning Trip), the ZINE block's unused end given to the program
+(about 180 KB on the 68020 machine), a big plain program's file no longer kept beside its hunks (the 68020's 3-4 MB
+AGA demos), a faster copy for Read and CopyMem, RectFill a byte at a time (deeppan).
+
+**The black screens at the limit (the 68060's 34, traced at 120 s).** No common ZINE cause. About 24 take the machine
+(their own level 3 vector: the trace's sampler goes quiet) and compute past the limit: Software Failure's seven 64k
+intros (Forbid, Disable, Supervisor, then precalc), Luminagia, Hex Junkie, Tunnel Vision, Cruisin', Point of No
+Return, Bantam, 4k-Wavy, Cracktro 4k, Lola, scifi, Kilofix, Twenty, Massive, Deep, No-CPU Challenge, The Fall, total
+triple trouble. The rest spend the time in ZINE's calls or loops of their own: loading in small pieces (The Martini
+Effect: a Read and a thousand CopyMem calls), 900,000 mathffp calls in a decrunch (gush), RectFill every frame
+(deeppan), a loop re-opening CrM.library (Fetish: not in its folder), out of memory while loading (Dolor Sit Amet:
+an AllocMem of 129 KB with 127 KB in one piece), a string-compare loop after its CIA set-up (Silkcut, not settled),
+the sound process waiting on the emulated CPU (Shake Off The Dust, round 6). The limit also decides what the late
+screenshot shows: No-CPU Challenge has a picture at 50 s on the 68020 and is black at 120 s on the 68060.
+
+**Crashes after long runs (68060):** Beam Riders (both) at $100 in its own level 3 interrupt code at the end of the
+demo (the supervisor stack holds its saved d2-d6; d1 = $100: a jump through a computed pointer); Jesus Christ
+Motocross a CHK at $0A at 3 % of its precalc, Lupus Reditus line F at $0A after 2,129 s, Hexel at $5FE after 1,537 s:
+calls through a base of 0, not traced to their call this round.
+
+### Round 8's reruns (2026-11-12, branch zine8's code, the same harness: 50 s for the 020 and 030, 120 s for the 060)
+
+Not a full rerun: on each machine every production that did not work in round 7 (on the 68020 without the 47 that
+do not fit in its 10 MB and the 42 that need an FPU it lacks), 15 working ones picked at random, the lowlevel and DOS
+list users, and every production whose file is big enough for the new path-B rule; 377 runs, laid over round 7's
+results and counted with the same rule (boot disks and non-programs left out, out of 426):
+
+| Machine | Round 7 | Round 8 | Now working | No longer working |
+|---|---|---|---|---|
+| 68EC020, 8 MB fast | 259 | 262 | Smoke Bomb (its 3.3 MB file no longer kept beside its hunks; plays 164 s to its end), Cyboman 6 (black at the limit before), fake elektronik lightshow (see below) | none |
+| 68030 + 68882, 16 MB fast | 314 | 316 | Boogietown (the harness), Cebit 90, Fullmoon, Binary Roads (black at the limit before) | sumea, cathode (see below) |
+| 68060 with FPU, 64 MB fast | 359 | 366 | We come in peace, Sojourn of the Soul (lowlevel.library), Reborn (CompareDates), Norwegian Kindness, Kilofix, Luminagia, gush (black or a crash before) | none |
+
+How far to trust the 50 s and 120 s limits: the harness runs FS-UAE in warp mode, so the emulated time a run gets in its
+limit depends on how busy the PC is (the load was 15-17 all evening, other sessions' emulators included). Several of
+the "now working" black screens are that, and so are the two the 68030 lost: sumea now shows its tunnel part in the
+early shot and is between parts (black) in the late one, where round 7 showed its first effect and then its title;
+cathode, which round 7 saw end after 2,263 s emulated within 73 s, had not ended at the limit. fake elektronik
+lightshow counts as working on the 68020 only because it ends with return code 0: its music file was left out of the
+volume (it says "no file musikk/p61.dhreph2"), so it quits at once. Dual Panoply gets its 2,349 KB now and is in its
+precalc (black) at the limit, as on the 68030 and 68060. The Morning Trip gets past UCopperListInit and stops at
+AllocSpriteDataA (sprites), as Impossible does.
+
+Path B for big plain programs (d29 16.18) is limited to hunks that land below 16 MB: on the 68030 machine, where
+Zenix's allocator gave the hunks Zorro III RAM, it had made four more work (lux aeterna, You are Lucy, Outside Planet
+Earth, Concrete: their AllocMem got the file's memory) and sumea lose its picture; with the limit they are as in
+round 7 there. Giving those four the memory without moving old programs into 32-bit RAM needs Zenix's allocator to
+give a low block on request (a kernel change, for the main session).
+
+Top blockers now: 68020: does not fit (47), FPU instructions (42), black at the limit (23), not enough memory (15);
+68030: black (31), not enough memory (18), does not fit (18), illegal instruction (8); 68060: black (31), illegal
+instruction (11), return code 1 (3), sprites (2), calls through base 0 (exec -912, 2).
