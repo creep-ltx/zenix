@@ -2100,6 +2100,17 @@ more chunk of its fast MemHeader, in address order, refused unless it lies insid
 range and overlaps no chunk. Seen with Dual Panoply on the 68020: its 2,349 KB AllocMem missed the largest free block
 by 13 KB after round 7's blob grew.
 
+**A big program's file is not kept when nothing needs it.** Path A (16.12) keeps the program's file in the volume
+beside its hunks whenever both fit; on the 68020 test machine that took 3-4 MB of 8 from AGA demos whose next
+AllocMem then failed (Smoke Bomb asked 3,162 KB with 3,048 KB in one piece; fake elektronik lightshow and Massive the
+same way). `zine` now takes path B (the hunks loaded from the file before the hand-over, the file not kept) also when
+the program is plain (no overlays, at most 4 bytes after its last hunk: nothing it could read itself), its file is at
+least 128 KB and a sixteenth of the free memory, and its chip hunks need at most half the chip RAM free now (path B
+puts them in the chip RAM Zenix has free, which is less than the session gives); it says so ("its file (N KB) is not
+kept during the session, which leaves the program that much more memory"). The rule is `zh_lean` (hunk.c,
+host-tested). A program that opens its own file to read its hunks' bytes would not find it; none of the Top 100 was
+seen doing that (the ones that read data from their own file keep it after an overlay table, and stay path A).
+
 **Copying:** the blob's `zmemcpy` (dos `Read`, `CopyMem`, the saved chip RAM) copied bytes whenever source and
 destination were not both long-aligned; it now aligns the destination and copies longs four at a time (a 68020 and
 later read a long at any address). Demos that read their data in odd-sized pieces spent minutes of the 68060's
@@ -2117,12 +2128,12 @@ timer interrupts counted, ElapsedTime; the test's 68060 run had never found its 
 `tools/zine-emu-test.sh` (znext: the DOS list, GetDeviceProc, CompareDates, CopyMem at odd addresses, RectFill set
 and complemented across bytes; znext had 2,709
 KB of fast RAM before and 2,890 KB with the block's spare end), `tools/host/zine-test.sh` (zp_give: in address order,
-refused in a free block, over a chunk, in chip RAM, across two blocks, over a header, with a full array). Not yet on
-a real machine.
+refused in a free block, over a chunk, in chip RAM, across two blocks, over a header, with a full array; zh_lean's
+seven cases). Not yet on a real machine.
 
 Sizes (*measured*, the 68020-60 build): the blob's code 117,252 -> 121,306 bytes (memory 125,373 -> 129,481):
 lowlevel.library about 2.3 KB, the DOS list, GetDeviceProc and CompareDates about 1 KB, the rest the copy, RectFill,
-zp_give and the trace lines. `/bin/zine` 45,904 -> 45,926 bytes in memory (a library name); the kernel unchanged.
+zp_give and the trace lines. `/bin/zine` 45,904 -> 46,232 bytes in memory (a library name, zh_lean and its message); the kernel unchanged.
 
 ## 17. Questions for the owner (what ZINE should be)
 

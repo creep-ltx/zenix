@@ -493,6 +493,11 @@ int main(int argc, char **argv)
                 (inf.ovl ? inf.ovl_words * 4 + (inf.tabsize + 1) * 4 : 0);
     u32 avail = info.chip_free + info.fast_free;
     int whole = len <= avail && hunks <= avail - len;
+    /* 16.18: a big plain program's file is not kept either (zh_lean, hunk.h): its copy in the volume would only take
+     * memory from the program (on the 68020 test machine 3-4 MB of 8, which three AGA demos then missed) */
+    int lean = whole && zh_lean(&inf, len, info.chip_free, avail);
+    if (lean)
+        whole = 0;
     if (!whole && inf.ovl) {
         dprintf(2, "zine: %s does not fit in memory: its file (%u KB, all in memory during the session: it is "
                 "overlaid) and its hunks (%u KB) need more than the %u KB free\n", name, len >> 10, hunks >> 10,
@@ -670,8 +675,12 @@ int main(int argc, char **argv)
             return 1;
         }
         free(work);
-        dprintf(1, "ZINE: %s is loaded from its file now (its file, %u KB, and its hunks, %u KB, do not fit in memory "
-                "together); its file is not kept during the session\n", name, len >> 10, hunks >> 10);
+        if (lean)
+            dprintf(1, "ZINE: %s is loaded from its file now; its file (%u KB) is not kept during the session, which "
+                    "leaves the program that much more memory\n", name, len >> 10);
+        else
+            dprintf(1, "ZINE: %s is loaded from its file now (its file, %u KB, and its hunks, %u KB, do not fit in "
+                    "memory together); its file is not kept during the session\n", name, len >> 10, hunks >> 10);
         struct zv_hdr *vh = (struct zv_hdr *)vol;
         vh->pre_seg = preseg;
         vh->nkeep = P.n;

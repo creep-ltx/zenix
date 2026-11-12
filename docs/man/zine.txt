@@ -58,7 +58,10 @@ DESCRIPTION
     ("NAME is overlaid: N later parts ..."). A program whose file and
     hunks do not fit in memory together is loaded by zine from its
     file before the hand-over, and its file is not kept (zine says so);
-    that cannot be done for an overlaid program, or for chip RAM hunks
+    so is a big plain one (no overlays, nothing after its hunks; its
+    file at least 128 KB and a sixteenth of the free memory), whose
+    file would only take memory from it. That cannot be done for an
+    overlaid program, or for chip RAM hunks
     larger than the chip RAM Zenix has free at the moment: zine says
     which and refuses.
     A program may also send packets to its file's handler itself (as

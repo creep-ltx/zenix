@@ -472,3 +472,9 @@ int zh_load_node(const zu8 *f, zu32 len, const struct zh_info *inf, const struct
         zh_table(inf, work, tab, tabn);
     return e;
 }
+
+int zh_lean(const struct zh_info *inf, zu32 len, zu32 chip_free, zu32 avail)
+{
+    return !inf->ovl && len >= (128u << 10) && len >= avail / 16 && inf->end + 4 >= len &&
+           inf->bytes[1] <= chip_free / 2;
+}

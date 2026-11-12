@@ -860,6 +860,29 @@ static void test_path(void)
     passes++;
 }
 
+/* d29 16.18: zh_lean, the plain big program loaded from its file even when it would fit beside its hunks */
+static void test_lean(void)
+{
+    struct zh_info i;
+    memset(&i, 0, sizeof i);
+    zu32 K = 1024;
+    i.end = 3339 * K;
+    i.bytes[1] = 200 * K;
+    CHECK(zh_lean(&i, 3339 * K, 1700 * K, 9300 * K), "lean: a big plain program is loaded from its file");
+    i.end = 200 * K - 2, i.bytes[1] = 0;
+    CHECK(zh_lean(&i, 200 * K, 1700 * K, 2000 * K), "lean: a few bytes of padding after its hunks are no data");
+    i.end = 3339 * K, i.ovl = 1;
+    CHECK(!zh_lean(&i, 3339 * K, 1700 * K, 9300 * K), "lean: not an overlaid one");
+    i.ovl = 0, i.end = 3000 * K;
+    CHECK(!zh_lean(&i, 3339 * K, 1700 * K, 9300 * K), "lean: not one with data after its hunks");
+    i.end = 100 * K;
+    CHECK(!zh_lean(&i, 100 * K, 1700 * K, 1000 * K), "lean: not below 128 KB");
+    i.end = 400 * K;
+    CHECK(!zh_lean(&i, 400 * K, 1700 * K, 9300 * K), "lean: not below a sixteenth of the free memory");
+    i.end = 3339 * K, i.bytes[1] = 900 * K;
+    CHECK(!zh_lean(&i, 3339 * K, 1700 * K, 9300 * K), "lean: not when its chip hunks need over half the free chip RAM");
+}
+
 int main(int argc, char **argv)
 {
     if (argc == 3 && !strcmp(argv[1], "seeds")) {      /* the test programs, as the hunk fuzzer's seeds */
@@ -882,6 +905,7 @@ int main(int argc, char **argv)
         return 0;
     }
     test_hunk();
+    test_lean();
     test_overlay();
     test_vol();
     test_plan();
