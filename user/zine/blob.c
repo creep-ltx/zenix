@@ -429,6 +429,8 @@ void zb_run(void)
     if (zv_find(vol, 0, b->name, &idx))
         zb_stop(ZH_LOAD, ZS_NOFILE);
     const struct zv_ent *e = zv_ent(vol, idx);
+    if (e->nx)                          /* (zine keeps a program file in memory: 16.23) */
+        zb_stop(ZH_LOAD, ZS_BADFILE);
     const zu8 *f = (const zu8 *)vol + e->off;
     struct zh_info inf;
     char msg[96];
@@ -918,6 +920,23 @@ void zb_irq(u32 vec)
     u32 pend = INTREQR & INTENAR & lvlmask[lv];
     if (!pend)
         return;                         /* spurious */
+    /* 16.23: ExecBase lies in the low page (ZEXEC); a program that takes the machine over may write its own code
+     * there (Sanity's Elysium decrunches itself to $800). AmigaOS's ExecBase is elsewhere, so an interrupt the
+     * program did not take over still finds exec's handlers there; here their vectors would be the program's bytes.
+     * Its library node no longer exec's: the request is acknowledged (the CIAs' read), nothing of exec's is called */
+    if (EB(ZO_Node_ln_Type, u8) != NT_LIBRARY || EB(ZO_Library_lib_NegSize, u16) != ZEXEC_SLOTS * 6) {
+        if (lv == 2 && (pend & 0x0008) && (CIAA(CIA_ICR) & 8)) {
+            (void)CIAA(CIA_SDR);        /* a key: the handshake only, so the keyboard goes on */
+            CIAA(CIA_CRA) |= 0x40;
+            zb_wait_lines(3);
+            CIAA(CIA_CRA) &= (u8)~0x40;
+        }
+        if (lv == 6 && (pend & 0x2000))
+            (void)CIAB(CIA_ICR);
+        INTREQ = (u16)pend;
+        INTREQ = (u16)pend;
+        return;
+    }
     if (lv == 2 && (pend & 0x0008)) {
         u32 icr = CIAA(CIA_ICR);        /* read once: the read clears it */
         u32 done = zb_cia_irq(0, icr);

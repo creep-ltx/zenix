@@ -12,7 +12,7 @@
 #include "zcore.h"
 
 #define ZV_MAGIC    0x5a564f4cu         /* "ZVOL" */
-#define ZV_VERSION  4u
+#define ZV_VERSION  5u
 #define ZV_NAMEMAX  107                 /* bytes of a name (fib_FileName holds 108 with its end) */
 #define ZV_VOLMAX   30                  /* bytes of the volume's name */
 #define ZV_MAXFILES 2000u               /* section 5.6's limits (16.15: was 500): more, and only the program goes in */
@@ -40,7 +40,12 @@ struct zv_hdr {
     /* d29 16.14: the CPU support packages zine loaded and relocated in memory of its own (Zenix's, not the
      * program's), 0 none: [0] the 68060's (user/zine/zsp060.S), [1] the 68040's (zsp040.S); their bytes */
     zu32 sp[2], sp_size[2];
+    zu32 mem;                           /* d29 16.23: the program's memory (ZV_MEM_ALL, zine -c ZV_MEM_CHIP, -l ZV_MEM_LOW) */
 };
+#define ZV_MEM_ALL  0u                  /* every free chip and fast block */
+#define ZV_MEM_CHIP 1u                  /* chip RAM only, as AmigaOS's NoFastMem leaves a program */
+#define ZV_MEM_LOW  2u                  /* chip RAM and the fast RAM below 16 MB (the 24-bit addresses) */
+#define ZV_LOW16    0x1000000u          /* 16 MB: the end of the 24-bit addresses */
 struct zv_ent {
     zu32 parent;                        /* its directory's entry (the root: 0) */
     zu32 size;                          /* bytes (a directory: 0) */
@@ -50,7 +55,12 @@ struct zv_ent {
     zu16 dir;                           /* 1: a directory */
     zu16 namelen;
     char name[ZV_NAMEMAX + 1];          /* Latin-1, 0-ended */
+    zu32 nx;                            /* d29 16.23: 0, or the file is read from the disk during the session: off
+                                         * holds nx runs of its sectors on the IDE drive (struct zv_run) */
 };
+struct zv_run { zu32 lba, count; };     /* sectors of the whole drive; lba ZV_HOLE: count sectors of zeros */
+#define ZV_HOLE     0xFFFFFFFFu
+#define ZV_MAXRUNS  0x10000u            /* runs of one file */
 
 /* the bytes a block needs for n entries (the root included) and the files' bytes */
 zu32 zv_need(zu32 n, zu32 bytes, zu32 nfiles);
@@ -65,6 +75,10 @@ int zv_init(void *blk, zu32 size, zu32 cap, const char *name);
  * mode, mtime Unix seconds, size the bytes. The entry's index, with *data where its size bytes go (the caller reads
  * the file into it); or a ZV_E_ code (negative) and nothing added: say zv_reason() and go on. */
 int zv_add(void *blk, zu32 parent, const char *name, int dir, zu32 mode, zu32 mtime, zu32 size, zu8 **data);
+/* d29 16.23: a file of size bytes read from the disk: its nx runs (1..ZV_MAXRUNS) are already at zv_tail's place */
+int zv_add_runs(void *blk, zu32 parent, const char *name, zu32 mode, zu32 mtime, zu32 size, zu32 nx);
+/* where the next entry's data goes, and the bytes of room there */
+zu8 *zv_tail(void *blk, zu32 *room);
 /* (-3 was ZV_E_CLASH, a name the same as another but for case: since 16.10 both are added; zv_twin finds it) */
 #define ZV_E_NAME   -1                  /* not a Latin-1 name, or holds ':' or '/', or is empty, "." or ".." */
 #define ZV_E_LONG   -2                  /* longer than 107 bytes */

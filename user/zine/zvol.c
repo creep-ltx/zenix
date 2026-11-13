@@ -96,6 +96,7 @@ int zv_init(void *blk, zu32 size, zu32 cap, const char *name)
     h->used = 0;
     h->pre_seg = h->nkeep = h->now = 0;
     h->sp[0] = h->sp[1] = h->sp_size[0] = h->sp_size[1] = 0;
+    h->mem = ZV_MEM_ALL;
     if (latin1(name, h->volname, ZV_VOLMAX) < 0) {
         const char *z = "ZINE";
         int i = 0;
@@ -113,7 +114,29 @@ int zv_init(void *blk, zu32 size, zu32 cap, const char *name)
     return 0;
 }
 
+static int add(void *blk, zu32 parent, const char *name, int dir, zu32 mode, zu32 mtime, zu32 size, zu8 **data,
+               zu32 nx);
 int zv_add(void *blk, zu32 parent, const char *name, int dir, zu32 mode, zu32 mtime, zu32 size, zu8 **data)
+{
+    return add(blk, parent, name, dir, mode, mtime, size, data, 0);
+}
+
+int zv_add_runs(void *blk, zu32 parent, const char *name, zu32 mode, zu32 mtime, zu32 size, zu32 nx)
+{
+    if (!nx || nx > ZV_MAXRUNS)
+        return ZV_E_SPACE;
+    return add(blk, parent, name, 0, mode, mtime, size, 0, nx);
+}
+
+zu8 *zv_tail(void *blk, zu32 *room)
+{
+    struct zv_hdr *h = H(blk);
+    *room = h->size - h->data - h->used;
+    return (zu8 *)blk + h->data + h->used;
+}
+
+static int add(void *blk, zu32 parent, const char *name, int dir, zu32 mode, zu32 mtime, zu32 size, zu8 **data,
+               zu32 nx)
 {
     struct zv_hdr *h = H(blk);
     struct zv_ent e;
@@ -126,8 +149,8 @@ int zv_add(void *blk, zu32 parent, const char *name, int dir, zu32 mode, zu32 mt
         return ZV_E_FULL;
     if (dir)
         size = 0;
-    zu32 room = h->size - h->data - h->used;
-    if (size > room || ((size + 3) & ~3u) > room)
+    zu32 room = h->size - h->data - h->used, bytes = nx ? nx * (zu32)sizeof(struct zv_run) : size;
+    if (bytes > room || ((bytes + 3) & ~3u) > room)
         return ZV_E_SPACE;
     struct zv_ent *d = E(blk, h->nent);
     d->parent = parent;
@@ -142,10 +165,11 @@ int zv_add(void *blk, zu32 parent, const char *name, int dir, zu32 mode, zu32 mt
     d->ticks = t % 60 * 50;
     d->off = h->data + h->used;
     d->dir = dir ? 1 : 0;
+    d->nx = nx;
     d->namelen = (zu16)n;
     for (int i = 0; i <= n; i++)
         d->name[i] = e.name[i];
-    h->used += (size + 3) & ~3u;
+    h->used += (bytes + 3) & ~3u;
     if (data)
         *data = (zu8 *)blk + d->off;
     return (int)h->nent++;
@@ -168,13 +192,13 @@ int zv_check(const void *blk, zu32 len)
     const struct zv_hdr *h = H(blk);
     if (len < sizeof *h || h->magic != ZV_MAGIC || h->version != ZV_VERSION || h->size != len || !h->cap ||
         h->nent < 1 || h->nent > h->cap || zv_need(h->cap, 0, 0) == 0 || h->data != zv_need(h->cap, 0, 0) ||
-        h->data > len || h->used > len - h->data || !E(blk, 0)->dir || h->nkeep > ZV_NKEEP)
+        h->data > len || h->used > len - h->data || !E(blk, 0)->dir || h->nkeep > ZV_NKEEP || h->mem > ZV_MEM_LOW)
         return -ZE_INVAL;
     for (zu32 i = 0; i < h->nent; i++) {
         const struct zv_ent *e = E(blk, i);
         if ((i && e->parent >= i) || (i && !E(blk, e->parent)->dir) || e->namelen > ZV_NAMEMAX ||
-            e->name[e->namelen] || e->off < h->data || e->size > len - e->off || e->off - h->data > h->used ||
-            (e->dir && e->size))
+            e->name[e->namelen] || e->off < h->data || e->off - h->data > h->used || (e->dir && (e->size || e->nx)) ||
+            e->nx > ZV_MAXRUNS || (e->nx ? e->nx * (zu32)sizeof(struct zv_run) : e->size) > len - e->off)
             return -ZE_INVAL;
     }
     return 0;

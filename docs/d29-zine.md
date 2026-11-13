@@ -362,7 +362,8 @@ revision 2's FFS image and device: AmigaOS's own filesystem is not running, so Z
   `LIBS:68060.library`.
 - **Limits:** as built since 16.12: at most 2,000 entries (500 until 16.15; more: only the program goes in, said), 48 MB, and half the fast
   RAM the program leaves free; over that, archives and disk images and then the largest files are left out, each
-  named (16.12).
+  named (16.12). Since 16.23 a data file of 256 KB or more on the IDE drive's ext2 volume stays on the disk and is
+  read from there during the session (it counts in none of these limits).
 - **Writes** (owner answer 3, and 2026-11-04 "not all demos write to the same location"): as built (16.9), a file
   written on any path (`RAM:`, `T:`, `ENV:`, the program's own folder, `SYS:`, `DH0:`) lives in the program's own
   memory for the session (it can be read back by that path, loaded and deleted; it stands in front of the volume's
@@ -2390,6 +2391,76 @@ shell's history heap by 6 KB (shown with the same line only echoed).
 Sizes (*measured*, the 68020-60 build): the blob's code 127,000 -> 127,544 bytes (pools about 0.4 KB, the FreeMem line
 and the stub the rest); bss unchanged.
 
+### 16.23 Big data files read from the disk, chip RAM only, ExecBase written over (2026-11-13, branch zine14)
+
+**Big data files stay on the disk** (a design change to 5.6; `user/zine.c`, `user/zine/blibs.c`, `kernel/zine.c`,
+`user/fsd.c`, `kernel/ext2.c`). Until now every file of the program's folder was copied into ZINE's volume, in memory,
+before the hand-over, in at most half the fast RAM the program leaves free. A program then reads a data file into
+memory of its own, so a big file was in memory twice, and a folder bigger than the budget lost its largest files
+("left out"). Round 13 counted 48 failing productions on the 68020 machine, 34 on the 68030 and 6 on the 68060 with
+files left out; the 68060's Serenity failed with its 6 MB file in the volume (its pool needs 55 MB of the 64).
+
+*The design.* A file of 256 KB or more (`ZV_DISKMIN`) that is no program file (its first longword not `$3F3`) and not
+one of Zenix's fonts (`/usr/share/fonts/amiga`) stays on the disk. `zine` asks where its sectors lie and puts that list in the volume instead of the bytes
+(`struct zv_ent nx`, `struct zv_run`); ZINE's dos reads them from the drive when the program asks (`Read`, packets,
+`Seek` as before), while Zenix is paused.
+- *Where the sectors lie.* `SYS_zine` op `ZINE_MAP` (root's; `struct uzine_map`, frozen): the kernel asks the file's
+  filesystem server with `FS_BMAP` (new, frozen: runs of sectors on the server's device from a file's sector; holes
+  as `0xFFFFFFFF`). The built-in ext2 server answers it (`ext2_runs`, from the block map); every other server answers
+  -ENOSYS and its files stay in memory as before. `zine` adds the partition's start (the mount's device from
+  `SYS_mountinfo`, matched by `stat`'s device; its start from the disk server's `DISK_LIST`) and keeps only devices of
+  the drive `ide0`.
+- *Who reads.* Only the IDE drive (the A1200's Gayle port, the A4000's): the kernel answers `ZINE_MAP` with -ENODEV
+  when its disk is another (the PiStorm's SD card, the A3000's SCSI), and `zine` then keeps every file in memory. The
+  kernel gives the blob the drive's registers (`struct zine_args ide`, layout 2); the blob reads with its own small
+  reader: polled (the drive raises no interrupt, nIEN as Zenix left it; Gayle's latch is cleared by the kernel's
+  `ide_zine` on the way back), LBA28, the kernel's sectors a command and long or word moves, the status register and
+  the program's interrupts left alone, every wait timed by the beam's frames (1,600 frames: 32 s PAL, 27 s NTSC; CIA-B's
+  counter may be the program's), with a count of looks as a backstop. Aligned whole sectors go straight into the
+  program's buffer, the rest through a cache of 8 sectors. A failed read resets the drive (SRST, nIEN kept), so the
+  next command, the session's or Zenix's, meets a drive at rest; it answers -1 with `IoErr` 226 and is said once. The kernel's own IDE driver is not
+  called: it writes the kernel's memory (which the blob checks at the way back) and masks interrupts.
+- *Nothing is written.* The disks were synced before the hand-over and other programs' requests are held (7.2 step
+  5), so the sectors are the file's. A file changed between `zine`'s question and the hand-over (another user's
+  program in those milliseconds) would be read as it was asked: a member of the group zine can do anything to the
+  machine during a session anyway (owner answer 1).
+- *What stays in memory.* Program files (LoadSeg, Execute and the overlays read from memory), Zenix's fonts, files
+  under 256 KB, a file whose server cannot say, more than 65,536 runs. `LoadSeg`, `Execute`, `OpenLibrary` or
+  diskfont of a big non-program file left on the disk (one that could never load) is refused and said; `MODE_READWRITE`
+  copies it into a memory file 2 KB at a time. `zine -m` keeps every file in memory, as before. A block number out of
+  the volume (a damaged block map) ends the runs there: the file then stays in memory, whose read meets the damage as
+  before.
+- *Trade-offs.* Memory: the program gets the bytes the copies took (the 68030 machine's Foam Oil: 10 MB of its folder
+  stay on the disk). Speed: the reads take the drive's time during the session, as under AmigaOS from a hard disk
+  (a demo that streams from its file, as AmigaOS would read it); the polled reads take the CPU, the program's
+  interrupts go on. A cut in the middle (Ctrl-Amiga-Amiga) is safe: nothing is written. Size: kernel.bin + 672 bytes
+  (`ZINE_MAP`, the built-in fsd's `FS_BMAP` and `ext2_runs`); the mount tests' RAM disk 683 -> 682 KB for it.
+- *Not done.* Other filesystems (ZenixFS, FAT, FFS through their servers) and other drives; a write to such a file
+  is kept in memory as any write (16.9).
+
+**Chip RAM only, or no fast RAM above 16 MB** (question 6, decided by the main session: yes). `zine -c` (or
+`--chip-only`) gives the program chip RAM only, as AmigaOS's NoFastMem: its memory lists hold no fast RAM, its hunks
+go into chip RAM (the volume, ZINE's block and the blob stay in fast RAM, which nobody else uses meanwhile).
+`zine -l` (`--low`) leaves out the fast RAM above 16 MB (a block across it cut there): the 24-bit addresses a 1992
+program may assume. The mode travels in the volume's header (`mem`, `ZV_VERSION` 5); the blob builds the memory lists
+without the rest, and zine's "had N KB fast RAM" line says what the program could see. Neither saves sumea on the
+68030 machine: its hunks need 3.3 MB, more than the chip RAM, and the machine has no fast RAM below 16 MB (as a real
+A1200 with a CPU-slot board).
+
+**ExecBase written over** (`zb_irq`, `blob.c`). ZINE's ExecBase lies in the low page at `$800`; Sanity's Elysium
+turns its interrupts off, copies its decruncher to `$100` and itself to `$800` (274 KB) and decrunches there. An
+interrupt it did not take over later went through ZINE's handler, which read exec's vectors from the program's bytes
+and jumped there (round 12: "called a library from $12C"; round 13: a CHK crash at `$132`, black screens). AmigaOS's
+ExecBase is elsewhere, so its handlers still work then. Now the handler first checks exec's library node (its type
+and its negative size); when they are not exec's, it acknowledges the request (the CIA's register read, a key's
+handshake) and calls nothing. It hit sometimes (2 of 12 runs on the 68EC020 machine; Elysium played in 6 of 6 runs at
+a low PC load before the change).
+
+*Verified* in FS-UAE: `tools/zine-emu-test.sh` (zbig: zbig.huge, 1.5 MB, read from the disk, its first longword, an
+aligned 1 KB, 8 bytes through the cache, 8 across a sector's end, the last 8 and the end; `zine -m` as before:
+left out; `zine -c` zhello with 0 KB fast RAM; on the 68060 machine `zine -l` zalloc with the 8 MB below 16 MB of
+72 MB; zsuper: ExecBase written over and a SOFTINT acknowledged, which crashed without the change).
+
 ## 17. Questions for the owner (what ZINE should be)
 
 1. Owner answer 1 allowed "the Amiga's own console or through Wasabi". Typing into the console through Wasabi counts
@@ -2410,7 +2481,8 @@ and the stub the rest); bss unchanged.
    on a 68020 a little)? [Open.]
 6. (Round 13, 16.22.) Some 1992-era productions (sumea, Bacon of Hope) stop when their memory lies above 16 MB, as
    on a real machine whose fast RAM is on a CPU-slot board (AmigaOS users ran them with fast RAM switched off). Should
-   ZINE offer a way to start a program with chip RAM only (an option of `zine`)? [Open.]
+   ZINE offer a way to start a program with chip RAM only (an option of `zine`)? [Decided by the main session,
+   2026-11-13: yes. Built in 16.23: `zine -c` (chip RAM only) and `zine -l` (no fast RAM above 16 MB).]
 
 ## 18. Reviews
 

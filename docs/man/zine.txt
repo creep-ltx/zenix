@@ -4,7 +4,7 @@ NAME
     zine - run an AmigaOS program under Zenix
 
 SYNOPSIS
-    zine [--blob FILE] PROGRAM [ARGS...]
+    zine [--blob FILE] [-c | -l] [-m] PROGRAM [ARGS...]
 
 DESCRIPTION
     Runs PROGRAM, an AmigaOS executable, under ZINE: Zenix pauses, gives
@@ -25,7 +25,8 @@ DESCRIPTION
     An AmigaOS program with the x bit runs by its name too, as any
     command: the kernel sees the file starts with 00 00 03 F3 (an
     AmigaOS executable) and runs zine PATH ARGS... instead. Without the
-    x bit it runs only as zine FILE.
+    x bit it runs only as zine FILE. Run by its name it takes none of
+    the options below: zine -c FILE for those.
 
     While zine writes the disks out and the program runs, other
     programs' file requests wait (they go on when Zenix is back). If any
@@ -107,7 +108,12 @@ DESCRIPTION
     leaves free), copied into memory first. A bigger folder: its
     archives and disk images are left out first, then its largest
     files, each named (a program that loads one will not find it);
-    with more than 2000 entries only the program goes in. Names
+    with more than 2000 entries only the program goes in.
+    A data file of 256 KB or more stays on the disk and is read from
+    there while the program runs (zine says how many), when the
+    folder is on an ext2 volume of the IDE drive: it takes no memory
+    and counts in none of these limits. Program files and fonts are
+    always copied; on other disks and filesystems every file is. Names
     are found without case, as on AmigaOS (data/xyl.tp3 finds
     Data/XYL.TP3; the Latin-1 letters too). Two names in one folder that
     differ only in case (AmigaOS has no such pair) are both kept: a name
@@ -164,9 +170,21 @@ DESCRIPTION
 OPTIONS
     --blob FILE   use FILE instead of /lib/zine/zine.blob (the tests'
                   /tests/zine/null.blob pauses and resumes only)
+    -c, --chip-only
+                  the program gets chip RAM only, as AmigaOS's
+                  NoFastMem leaves it: no fast RAM in its memory lists,
+                  its hunks in chip RAM (for old programs that fail
+                  with fast RAM)
+    -l, --low     no fast RAM above 16 MB (the 24-bit addresses some
+                  1992 programs assume); chip RAM and the fast RAM
+                  below 16 MB
+    -m, --in-memory
+                  every file of the folder copied into memory, none
+                  read from the disk during the session
 
 EXAMPLES
     zine /home/demos/mydemo
+    zine -c /home/demos/olddemo    (chip RAM only)
     chmod +x mydemo; ./mydemo      (the same, by name)
 
 EXIT STATUS

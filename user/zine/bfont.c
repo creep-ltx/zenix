@@ -228,7 +228,7 @@ u32 c_AvailFonts(u8 *buf, s32 size, u32 flags)
         const void *vol = (const void *)Z.a.vol;
         for (u32 e = zv_next(vol, dir, 0), k = 0; e && k < 500; e = zv_next(vol, dir, e), k++) {
             const struct zv_ent *en = zv_ent(vol, e);
-            if (en->dir || en->namelen < 6 || lower(en->name[en->namelen - 5]) != '.' ||
+            if (en->dir || en->nx || en->namelen < 6 || lower(en->name[en->namelen - 5]) != '.' ||
                 lower(en->name[en->namelen - 4]) != 'f' || lower(en->name[en->namelen - 1]) != 't')
                 continue;
             char sizes[64], file[8];
