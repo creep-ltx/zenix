@@ -16,7 +16,9 @@ DESCRIPTION
     guard after it gets 32 bytes and nothing after; sizes 40, a bigger
     one and 8 get 40 bytes, the whole struct and -22 (EINVAL); stat, lstat,
     fstat, readdir, statfs, mountinfo and meminfo at size 0 and 100 write
-    their struct and nothing after it, a smaller size is -22; the disk
+    their struct and nothing after it (stat, lstat and fstat at 100 write
+    32 bytes, the device too; at 31 the first 28; at 32 the root's device
+    1), a smaller size is -22; the disk
     server's DISK_LIST writes 80 bytes, DISK_LISTSZ at most the size
     given. Then it checks the memory
     calls: memalloc of 0 or of sizes near 4 GB gives 0 (NULL), malloc of
