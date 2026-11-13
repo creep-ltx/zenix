@@ -248,7 +248,8 @@ RAMDISK_K := 640
 # the CD drive: about 2.4 KB of kernel, ATAPI in kernel/ide.c and cd0 in the built-in diskd). 688 since DESIGN D45
 # revision 3 (2026-11-12, memory protection's code in a span of its own: 200 bytes of kernel.bin). 685 since DESIGN D46
 # (2026-11-12, USB sticks: 3.4 KB of kernel.bin: the built-in diskd's usb0 2.3 KB, stage0's boot-only lookup 0.7 KB).
-RAMDISK_MOUNT_K := 685
+# 684 since DESIGN D49 (2026-11-13, directories in batches: 1.1 KB of kernel.bin, the built-in fsd's 0.7 KB).
+RAMDISK_MOUNT_K := 684
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/check-init.py tools/ksize-check.sh tools/ksize-budget
