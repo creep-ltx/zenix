@@ -49,7 +49,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet \
           rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs files show ttf2font \
-          play modplay lsusb lua make zld
+          play modplay lsusb lua make zld zas
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -1069,6 +1069,20 @@ $(BUILD)/zld.pzx: $(BUILD)/zld.cpuelf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ $(or $(STACK_zld),$(STACK_DEFAULT))
 $(BUILD)/zld.zx: $(BUILD)/zld.pzx
+	cp $< $@
+# ---- zas, the assembler (roadmap block 7, DESIGN D52 section 6): GNU as's m68k syntax to ELF objects, the same
+# objects as the PC's as for the whole build (tools/zas-host-test.sh). Ours, in standard C like zld: the same file builds
+# for the PC; on Zenix a C library program with shared code.
+$(BUILD)/zas/zas.o: user/zas.c $(LIBC_HDRS) tools/purecc.sh
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(LIBC_PFLAGS) -c $< -o $@
+$(BUILD)/zas.cpuelf: $(BUILD)/zas/zas.o $(BUILD)/crt0-pure.o $(BUILD)/libc-pure.a link/pure.ld
+	$(CC) $(LIBC_PFLAGS) $(PULDFLAGS) $(LIBC_LDFLAGS) $(BUILD)/crt0-pure.o $(BUILD)/zas/zas.o $(BUILD)/libc-pure.a \
+	    $(LIBGCC) -o $@
+$(BUILD)/zas.pzx: $(BUILD)/zas.cpuelf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ $(or $(STACK_zas),$(STACK_DEFAULT))
+$(BUILD)/zas.zx: $(BUILD)/zas.pzx
 	cp $< $@
 # the development package's other files (DESIGN D52 section 2), staged for tools/mkzup.py's family devel
 $(BUILD)/devel/usr/lib/libc.a: $(BUILD)/libc.a $(BUILD)/libc-pure.a $(BUILD)/crt0.o $(BUILD)/crt0-pure.o link/user.ld \
