@@ -350,6 +350,73 @@ main:
     bhi     fail
     lea     m_cia(%pc),%a0
     bsr     puts
+    /* 15 (d29 16.20): the resources as Loonies' replayer finds them without calling them: the first node of
+     * ExecBase's EXTER chain (IntVects[13].iv_Data) is ciab.resource's own Interrupt, 42 bytes in, PORTS's
+     * (IntVects[3]) ciaa.resource's; 40 bytes in the mask of the bits that have a handler; the vectors 64 bytes in, and
+     * a handler written into timer A's iv_Code (68 bytes in) is the one the interrupt calls */
+    moveq   #15,%d6
+    move.l  4.w,%a6
+    move.l  240(%a6),%a0        /* IntVects[13].iv_Data: the EXTER chain */
+    move.l  (%a0),%a0
+    lea     -42(%a0),%a0
+    cmp.l   V_ciab(%a4),%a0
+    bne     fail
+    lea     ciaaname(%pc),%a1
+    jsr     LVO_OpenResource(%a6)
+    tst.l   %d0
+    beq     fail
+    move.l  120(%a6),%a0        /* IntVects[3].iv_Data: the PORTS chain */
+    move.l  (%a0),%a0
+    lea     -42(%a0),%a0
+    cmp.l   %d0,%a0
+    bne     fail
+    move.l  V_ciab(%a4),%a6
+    moveq   #3,%d0
+    and.b   40(%a6),%d0         /* timers A and B free */
+    bne     fail
+    clr.l   V_cnt(%a4)
+    moveq   #0,%d0
+    lea     V_int(%a4),%a1
+    jsr     -6(%a6)             /* AddICRVector timer A */
+    tst.l   %d0
+    bne     fail
+    btst    #0,40(%a6)          /* now in use */
+    beq     fail
+    lea     ciaint(%pc),%a0
+    cmp.l   68(%a6),%a0         /* its vector's iv_Code */
+    bne     fail
+    lea     ciaint2(%pc),%a0
+    move.l  %a0,68(%a6)         /* a new handler, written as the replayer does */
+    lea     0xBFD000,%a0
+    move.b  #0xC5,0x400(%a0)
+    move.b  #0x02,0x500(%a0)
+    move.b  #0x11,0xE00(%a0)    /* CRA: start, load, continuous */
+    move.l  V_dos(%a4),%a6
+    moveq   #50,%d5
+4:  moveq   #1,%d1
+    jsr     -198(%a6)           /* Delay(1) */
+    move.l  #20*256,%d0
+    cmp.l   V_cnt(%a4),%d0
+    dbls    %d5,4b
+    lea     0xBFD000,%a0
+    move.b  #0,0xE00(%a0)
+    move.l  V_ciab(%a4),%a6
+    moveq   #0,%d0
+    lea     V_int(%a4),%a1
+    jsr     -12(%a6)            /* RemICRVector */
+    move.l  #20*256,%d0
+    cmp.l   V_cnt(%a4),%d0
+    bhi     fail
+    moveq   #0,%d0              /* only the new handler was called */
+    move.b  V_cnt+3(%a4),%d0
+    bne     fail
+    moveq   #3,%d0
+    and.b   40(%a6),%d0         /* free again */
+    bne     fail
+    tst.l   68(%a6)
+    bne     fail
+    lea     m_cia2(%pc),%a0
+    bsr     puts
     /* 14: the channels and the chip buffer given back; AvailMem as at the start */
     moveq   #14,%d6
     move.l  4.w,%a6
@@ -388,6 +455,9 @@ audint:
     rts
 ciaint:
     addq.l  #1,V_cnt(%a1)
+    rts
+ciaint2:
+    add.l   #256,V_cnt(%a1)
     rts
 
 /* audreq: a1 an IOAudio cleared, asking for the masks at V_mask (one) */
@@ -440,6 +510,7 @@ dosname: .asciz "dos.library"
 libname: .asciz "zt.library"
 audname: .asciz "audio.device"
 ciabname: .asciz "ciab.resource"
+ciaaname: .asciz "ciaa.resource"
 f_lib:   .asciz "RAM:zt.library"
 f_libl:  .asciz "ram:zt.library"
 c_sys:   .asciz "Assign LIBS: SYS:LIBS"
@@ -452,6 +523,7 @@ m_gone:  .asciz "zlibs: still loaded after the delete; RemLibrary expunged it, t
 m_aud:   .asciz "zlibs: audio.device gave the four channels, refused a second request and its CMD_WRITE\n"
 m_paula: .asciz "zlibs: Paula's channel 0 interrupt through SetIntVector\n"
 m_cia:   .asciz "zlibs: CIA-B timer A through ciab.resource\n"
+m_cia2:  .asciz "zlibs: the CIA resources found through ExecBase's chains, a handler written into the vector called\n"
 m_mem:   .asciz "zlibs: memory as at the start\n"
 m_fail:  .asciz "zlibs: failed (the return code names the step)\n"
     .even

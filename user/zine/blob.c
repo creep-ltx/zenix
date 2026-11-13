@@ -666,6 +666,58 @@ void zb_serial_hex(char tag, const u32 *v, int n)
     }
 }
 
+/* the trace build (round 10): the code a packed program unpacked, read from memory before Zenix's comes back, as
+ * 'D' lines (the address, then 8 longs): 1 KB around each of the last 8 distinct callers' return addresses and 2 KB
+ * around a crash's PC, with 'L' (the ring of the last 16 calls: slot, return address; the oldest first) */
+static void zb_dump(u32 a, u32 n)
+{
+    a &= ~31u;
+    for (u32 o = 0; o < n; o += 32) {
+        u32 v[9];
+        if (!c_TypeOfMem(a + o) || !c_TypeOfMem(a + o + 31))
+            continue;
+        v[0] = a + o;
+        for (int k = 0; k < 8; k++)
+            v[1 + k] = ((const u32 *)(a + o))[k];
+        zb_serial_hex('D', v, 9);
+    }
+}
+static void zb_trace_dump(void)
+{
+    extern u32 ztr_ring[32], ztr_ri;    /* blobs.S: the trace build's ring (the other builds: one long, unused) */
+    u32 ring[32], seen[8], ns = 0;
+    for (u32 i = 0; i < 16; i++) {
+        u32 j = (ztr_ri + i) & 15;
+        ring[2 * i] = ztr_ring[2 * j], ring[2 * i + 1] = ztr_ring[2 * j + 1];
+    }
+    zb_serial_hex('L', ring, 32);
+    if (zr_how == ZH_CRASH && Z.blk->pc >= 0x400)
+        zb_dump(Z.blk->pc - 1024, 2048);
+    for (int i = 15; i >= 0 && ns < 8; i--) {
+        u32 r = ring[2 * i + 1], k;
+        for (k = 0; k < ns && (seen[k] > r ? seen[k] - r : r - seen[k]) >= 512; k++)
+            ;
+        if (k < ns || r < 0x400 || (r & 1))
+            continue;
+        seen[ns++] = r;
+        zb_dump(r - 512, 1024);
+    }
+    u32 left = 512u << 10;              /* then the program's hunks themselves (a packed one unpacks into them), the
+                                         * first 512 KB: 'H' (the hunk's address and size) before each */
+    u32 s = Z.seglist;
+    for (int n = 0; s && n < 32 && left; n++) {
+        u32 a = s << 2, sz = c_TypeOfMem(a) ? *(const u32 *)(a - 4) : 0;
+        if (!sz || sz > (64u << 20))
+            break;
+        u32 h[2] = { a + 4, sz - 8 };
+        zb_serial_hex('H', h, 2);
+        u32 d = h[1] < left ? h[1] : left;
+        zb_dump(a + 4, d);
+        left -= d;
+        s = *(const u32 *)a;
+    }
+}
+
 /* the way back, path A (9.1 steps 1, 4-6; the sums of step 3 come with build step 5; the 040/060 MMU and PCR first,
  * zb_mmu_back): everything off, Zenix's memory back with low memory last, the chips' register
  * set and the CIAs from Zenix's records (9.2), then the kernel's resume */
@@ -675,8 +727,10 @@ void zb_back(void)
     if (Z.attn & 0x0088)
         zb_mmu_back(Z.mmu);             /* first: a program's translation must not stand while Zenix's memory returns */
     extern u32 zb_tracing;
-    if (zb_tracing)
+    if (zb_tracing) {
         zb_screen_report();
+        zb_trace_dump();
+    }
     b->how = zr_how;
     if (zr_how == ZH_RETURN || zr_how == ZH_EXIT)
         b->code = (s32)zr_code;

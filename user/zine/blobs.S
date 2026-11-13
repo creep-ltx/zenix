@@ -305,9 +305,13 @@ zs_setsr:
     moveq   #0,%d0
     move.w  %d2,%d0
     move.l  (%sp)+,%d2
-    .globl  zs_rts, zx_chain, zs_catch
+    .globl  zs_rts, zx_chain, zs_catch, zs_goon
 zs_rts:
 zx_chain:                               /* the server chains' handler in IntVects (blob.c runs the chain itself) */
+    rts
+zs_goon:                                /* a server that leaves the interrupt to the next one (Z set): the CIA
+                                         * resources' own nodes in the PORTS and EXTER chains (round 10) */
+    moveq   #0,%d0
     rts
 /* SuperState() (-150): from user mode by the privilege violation (above); in supervisor mode it does nothing and
  * answers 0 (the RKRM autodoc) */
@@ -1236,6 +1240,12 @@ zb_attn:
     .globl  zb_irq_pc
 zb_irq_pc:
     .long   0
+#ifndef ZINE_TRACE
+    .globl  ztr_ring, ztr_ri        /* the trace build's ring of calls (below); read only when zb_tracing is 1 */
+ztr_ring:
+ztr_ri:
+    .long   0
+#endif
     .globl  zb_tracing              /* 1 in the trace build: zb_back also writes the code before a bad call */
 zb_tracing:
 #ifdef ZINE_TRACE
@@ -1251,12 +1261,22 @@ zb_tracing:
     .even
 ztr_n:   .space 4
 ztr_tab: .space 8 * ZTR_MAX
+    .globl  ztr_ring, ztr_ri
+ztr_ri:  .space 4                   /* round 10: the last 16 calls (slot, the caller's return address), for the dump */
+ztr_ring: .space 8 * 16
     .text
 zx_trace:
     movem.l %d0-%d3/%a0-%a1,-(%sp)
     move.l  24(%sp),%d1             /* our return address: the slot + 6 */
     subq.l  #6,%d1
     move.l  %d1,%a1                 /* the slot */
+    move.l  ztr_ri,%d0              /* round 10: into the ring of the last calls */
+    and.w   #15,%d0
+    lsl.w   #3,%d0
+    lea     ztr_ring,%a0
+    move.l  %a1,0(%a0,%d0.w)
+    move.l  28(%sp),4(%a0,%d0.w)    /* the program's return address (its jsr to the slot) */
+    addq.l  #1,ztr_ri
     moveq   #'Z',%d0
     bsr.s   ztr_put
     moveq   #7,%d2

@@ -334,9 +334,12 @@ main:
     bne     fail
     move.l  V_bm(%a4),%a0
     jsr     LVO_FreeBitMap(%a6)
-    STEP    13                  /* SetChipRev answers; BestModeIDA of 640 wide, 2 planes: a HIRES id */
+    STEP    13                  /* SetChipRev answers ($1F on the AGA test machine: ALICE, LISA and MLISA as a
+                                 * real A1200's, d29 16.20); BestModeIDA of 640 wide, 2 planes: a HIRES id */
     moveq   #-1,%d0
     jsr     LVO_SetChipRev(%a6)
+    cmp.l   #0x1F,%d0
+    bne     fail
     lea     bidtags(%pc),%a0
     jsr     LVO_BestModeIDA(%a6)
     cmp.l   #-1,%d0
