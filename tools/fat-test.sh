@@ -96,7 +96,7 @@ PY
     has "ro: reads a file" '^fake config$'
     has "ro: reads what was written before" '^still-writable$'
     has "ro: df works" 'ide0p1 +[0-9]+'
-    for i in 1 2 3 4 5 6 7 8 9 10; do has "ro: change $i refused" "^(.*# )?ro$i=[1-9]"; done
+    for i in 1 2 3 4 5 6 7 8 9 10 11; do has "ro: change $i refused" "^(.*# )?ro$i=[1-9]"; done
     has "ro: the message says read-only" 'read-only file system'
     hasnot "ro: fatd did not crash" 'fatd.*(exception|crash|bus error|address error)'
     dd if=$CARD of=$OUT/after-ro.img bs=512 skip=2048 count=32768 status=none

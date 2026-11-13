@@ -34,6 +34,8 @@ send rm -r /mnt/Mappen; echo ro9=$?\r
 sleep 3
 send cp /bin/ls /mnt/ro-ls.bin; echo ro10=$?\r
 sleep 4
+send touch /mnt/config.txt; echo ro11=$?\r
+sleep 3
 send ls -l /mnt/Mappen\r
 sleep 3
 send sync\r

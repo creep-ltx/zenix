@@ -9,10 +9,16 @@ int main(int argc, char **argv)
     if (i < argc && !strcmp(argv[i], "-c")) { no_create = 1; i++; }
     for (; i < argc; i++) {
         struct ustat st;
-        if (sys_stat(argv[i], &st) == 0) { sys_utimes(argv[i], FS_UTIME_NOW); continue; }
+        if (sys_stat(argv[i], &st) == 0) {
+            if (sys_utimes(argv[i], FS_UTIME_NOW) < 0) { dprintf(2, "touch: %s: %s\n", argv[i], zwhy("cannot set the time")); rc = 1; }
+            continue;
+        }
         if (no_create) continue;
         int fd = sys_open(argv[i], O_WRONLY | O_CREAT);
-        if (fd < 0) { dprintf(2, "touch: %s: %s\n", argv[i], zwhy("cannot create")); rc = 1; } else { sys_close(fd); sys_utimes(argv[i], FS_UTIME_NOW); }
+        if (fd < 0) { dprintf(2, "touch: %s: %s\n", argv[i], zwhy("cannot create")); rc = 1; } else {
+            sys_close(fd);
+            if (sys_utimes(argv[i], FS_UTIME_NOW) < 0) { dprintf(2, "touch: %s: %s\n", argv[i], zwhy("cannot set the time")); rc = 1; }
+        }
     }
     return rc;
 }
