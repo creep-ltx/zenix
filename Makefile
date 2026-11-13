@@ -48,7 +48,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet \
-          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs files show \
+          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs files show ttf2font \
           play modplay lsusb
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
@@ -545,7 +545,7 @@ STACK_exfatd := 8192
 # protocol, the input and the font reader cold, -Os; the drawing and the fonts -O2: the golden path, input to screen), the client
 # library display/lib/libdisplay.c linked into each client (static, D38 5), the test client dpytest ----
 DPYDOBJS := $(patsubst %,$(BUILD)/dpyd-%.no,displayd win draw font amifont fb)
-$(BUILD)/dpyd-%.no: display/server/%.c display/server/dpyd.h display/server/amifont.h display/server/fb.h kernel/hwinfo.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+$(BUILD)/dpyd-%.no: display/server/%.c display/server/dpyd.h display/server/amifont.h display/ttf/ttfont.h display/ttf/ttf.h display/server/fb.h kernel/hwinfo.h display/proto.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Iuser -DDIW_V=$(DIWV) $(if $(filter displayd win amifont fb,$*),-Os) -c $< -o $@
 $(BUILD)/displayd.uelf: $(DPYDOBJS) $(BUILD)/screenfile.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(DPYDOBJS) $(BUILD)/screenfile.no $(BUILD)/libz.uo $(LIBGCC) -o $@
@@ -553,7 +553,7 @@ STACK_displayd := 8192
 # the demo floppies' displayd (audit 2026-11-12 block 6, 2.3): the same files with -DNO_RTG, without fb.c and the card's
 # branches (their bootblock writes no card record, D43 3), put on them as /sbin/displayd; every other image the full one
 DPYDNOBJS := $(patsubst %,$(BUILD)/dpydn-%.no,displayd win draw font amifont)
-$(BUILD)/dpydn-%.no: display/server/%.c display/server/dpyd.h display/server/amifont.h display/server/fb.h kernel/hwinfo.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+$(BUILD)/dpydn-%.no: display/server/%.c display/server/dpyd.h display/server/amifont.h display/ttf/ttfont.h display/ttf/ttf.h display/server/fb.h kernel/hwinfo.h display/proto.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Iuser -DNO_RTG -DDIW_V=$(DIWV) $(if $(filter displayd win amifont,$*),-Os) -c $< -o $@
 $(BUILD)/displayd-nortg.uelf: $(DPYDNOBJS) $(BUILD)/screenfile.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(DPYDNOBJS) $(BUILD)/screenfile.no $(BUILD)/libz.uo $(LIBGCC) -o $@
@@ -581,6 +581,13 @@ $(BUILD)/deskprefs.uo: display/prefs/deskprefs.c display/display.h display/proto
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
 $(BUILD)/deskprefs.uelf: $(BUILD)/deskprefs.uo $(BUILD)/libdisplay.no $(BUILD)/dpyd-amifont.no $(BUILD)/cfgfile.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/deskprefs.uo $(BUILD)/libdisplay.no $(BUILD)/dpyd-amifont.no $(BUILD)/cfgfile.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+# ttf2font (DESIGN D51, docs/d51-truetype.md): a TrueType font drawn once a size into an AmigaOS bitmap font, run by
+# displayd for a .ttf with no cache file; run once a size, so cold: -Os (ttf.c's reader and rasteriser, ttfont.c's
+# writer: no system calls, tools/ttf-host-test.sh builds the same files)
+$(BUILD)/ttf-%.no: display/ttf/%.c display/ttf/ttf.h display/ttf/ttfont.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
+$(BUILD)/ttf2font.uelf: $(patsubst %,$(BUILD)/ttf-%.no,ttf2font ttf ttfont) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(patsubst %,$(BUILD)/ttf-%.no,ttf2font ttf ttfont) $(BUILD)/libz.uo $(LIBGCC) -o $@
 # the desktop programs' configurable keys (display/keys.h: files' parser, shared with show, DESIGN D50), cold: -Os
 $(BUILD)/keys.no: display/lib/keys.c display/keys.h display/proto.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
