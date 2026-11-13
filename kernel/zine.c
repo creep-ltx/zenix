@@ -15,6 +15,7 @@
 #include "zine.h"
 #include "hwinfo.h"
 #include "mmu.h"
+#include "fsproto.h"
 
 #define ADKCONR REG16(0xDFF010)
 
@@ -22,6 +23,7 @@ _Static_assert(sizeof(struct uzine_info) == UZINE_INFO_MACHINE, "uzine_info: its
 _Static_assert(sizeof(struct uzine_go) == UZINE_GO_FIRST, "uzine_go's first size is frozen");
 
 long zine_enter(u32 entry, struct zine_args *a);       /* below: saves the CPU's state, calls the blob */
+void blk_zine(u32 *v);                                  /* blk.c (16.23) */
 void zine_resume(void);
 u32 zine_ksp, zine_secs;
 static int busy;
@@ -169,6 +171,7 @@ static long go(const struct uzine_go *g)
     a.adkcon = ADKCONR;
     u16 dma = DMACONR, ena = INTENAR;
     a.hr_at = hr_time();
+    blk_zine(a.ide);
     mmu_hand(0);                        /* D41 11: the program expects no translation; the blob saves what it finds */
     long r = zine_enter(g->blob, &a);
     mmu_hand(1);
@@ -199,6 +202,30 @@ static long go(const struct uzine_go *g)
     return r;
 }
 
+/* ZINE_MAP (16.23): the file's extents on the IDE drive, asked of its filesystem server (FS_BMAP) */
+long fs_call_on(int mi, u32 type, u32 a0, u32 a1, u32 a2, u32 a3);
+static long map(const struct uzine_map *um)
+{
+    struct uzine_map m;
+    if (current->uid != 0)
+        return -EPERM;
+    if (!user_ok_rd(current, (u32)um, UZINE_MAP_FIRST))
+        return -EFAULT;
+    memcpy(&m, um, sizeof m);
+    if (m.size < UZINE_MAP_FIRST || !m.n || m.n > 0x10000u)
+        return -EINVAL;
+    if (!user_ok_wr(current, (u32)m.ext, m.n * 8))
+        return -EFAULT;
+    u32 v[4] = { 0 };
+    blk_zine(v);
+    if (!v[0])
+        return -ENODEV;
+    if ((u32)m.fd >= NFD || !current->fd[m.fd] || current->fd[m.fd]->type != FT_INODE)
+        return -EBADF;
+    const struct file *f = current->fd[m.fd];
+    return fs_call_on(f->fs, FS_BMAP, f->ino, m.first, (u32)m.ext, m.n);
+}
+
 long zine_sys(u32 op, u32 a, u32 b)
 {
     if (op == ZINE_INFO) {
@@ -218,6 +245,8 @@ long zine_sys(u32 op, u32 a, u32 b)
         memcpy((void *)a, &i, n);
         return 0;
     }
+    if (op == ZINE_MAP)
+        return map((const struct uzine_map *)a);
     if (op != ZINE_GO)
         return -EINVAL;
     struct uzine_go g;

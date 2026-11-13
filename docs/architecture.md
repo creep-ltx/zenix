@@ -1114,7 +1114,10 @@ clean while the volume holds a half-done change. `FS_MARK` (root only, D15): 1 h
 installs), 0 lets it go; both answer 1 if the volume needed no check before (fsd's own short mark does not count),
 and 0 never clears a real need. With `-fsck` (boot's check of the root) fsd applies the root's rules but serves the
 volume read-only on a plain device handle, so `fsck.ext2` may open it raw. `zfsd` does not know `FS_MARK` (-ENOSYS):
-ZenixFS commits atomically.
+ZenixFS commits atomically. `FS_BMAP` (D29 16.23, root's, through `SYS_zine`'s `ZINE_MAP`): where a regular file's
+sectors lie on the server's device, as runs from a given sector (`ext2_runs`, from the block map; holes as
+`0xFFFFFFFF`), so ZINE can read a big data file from the IDE drive while Zenix is paused; `zfsd` and the other servers
+answer -ENOSYS.
 A mounted filesystem's server is registered by `mount` (the mount table, below). It answers
 `FS_ROOT` (root inode, device and type names) and `FS_QUIT` (umount: sync, release the device, exit). `fsd` (ext2) is
 built into the kernel image, and so is no other filesystem server: **`zfsd` (ZenixFS) is the file `/sbin/zfsd`** (DESIGN

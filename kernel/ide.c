@@ -490,6 +490,13 @@ static int ide_rw(u32 lba, u32 count, void *buf, int write)
     return 0;
 }
 
+/* D29 16.23: what ZINE's own reader needs to read the drive during a session (user/zine/blibs.c ide_read): the task-file
+ * registers (0: no drive), the data port, the drive's sectors, sectors a command and the long reads (bit 16) */
+void ide_zine_port(u32 *v)
+{
+    v[0] = ide_base, v[1] = ide_data, v[2] = nsectors, v[3] = max_sectors | (u32)ide_long << 16;
+}
+
 u32 ide_sectors(void)
 {
     return nsectors;

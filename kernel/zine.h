@@ -11,6 +11,10 @@
 
 #define ZINE_INFO 0                     /* a: struct uzine_info *, b: its size -> 0 */
 #define ZINE_GO   1                     /* a: struct uzine_go * -> the blob's answer (0: a program ran; see the block) */
+#define ZINE_MAP  2                     /* (d29 16.23) a: struct uzine_map * -> the extents filled (0: past the file's
+                                         * end), -ENODEV (no reader for the session: the machine's disk is not an IDE
+                                         * drive), -ENOSYS (its server cannot say), -EPERM (not root),
+                                         * -EBADF, -EINVAL (not a regular file), -EFAULT */
 
 struct uzine_info {                     /* what this machine has (frozen; UZINE_INFO_FIRST bytes) */
     u32 size;                           /* the bytes the kernel filled */
@@ -33,10 +37,23 @@ struct uzine_go {                       /* ZINE_GO's request (frozen; UZINE_GO_F
 };
 #define UZINE_GO_FIRST 32
 
+/* d29 16.23: where an open file's bytes lie on its device (frozen; UZINE_MAP_FIRST bytes): from the file's 512-byte
+ * sector FIRST, at most N runs into EXT, sectors of the device its filesystem is on (the server's answer to FS_BMAP,
+ * kernel/fsproto.h); only when the session has a reader (the IDE drive) */
+struct uzine_ext { u32 lba, count; };   /* lba UZINE_HOLE: a hole in the file, count sectors of zeros */
+#define UZINE_HOLE 0xFFFFFFFFu
+struct uzine_map {
+    u32 size;                           /* sizeof, at least UZINE_MAP_FIRST */
+    s32 fd;                             /* an open regular file */
+    u32 first, n;
+    struct uzine_ext *ext;
+};
+#define UZINE_MAP_FIRST 20
+
 /* ---- the kernel-blob interface (one build; not frozen) ---- */
 #define ZINB_MAGIC  0x5A494E42u         /* "ZINB": the blob's header, at its image offset ZINB_OFF */
 #define ZINB_OFF    32u                 /* after the ZEXE header (32 bytes): magic, layout, CRC32 of the file */
-#define ZINE_LAYOUT 1u
+#define ZINE_LAYOUT 2u                  /* 2 (d29 16.23): ide in struct zine_args */
 
 struct zine_range { u32 lo, hi; int chip; };   /* kernel/mem.c's pool ranges, as they are in its table */
 
@@ -59,6 +76,9 @@ struct zine_args {
     u16 pad;
     u32 eclock_hz;                      /* CIA E-clock rate: the tick latch is (eclock_hz + 50) / 100 - 1 */
     u32 hr_at;                          /* hr_time() at the hand-over: CIA-B's counter is set back to it */
+    u32 ide[4];                         /* (16.23) the IDE drive for ZINE's reader (kernel/ide.c ide_zine_port): the
+                                         * task-file registers (0: none), the data port, its sectors, sectors a
+                                         * command | long reads << 16 */
 };
 
 /* The ZINE block's start (zine fills the request, the blob the answer; zine reads it after SYS_zine) */

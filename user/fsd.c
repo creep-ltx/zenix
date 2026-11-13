@@ -268,6 +268,10 @@ static int handle1(struct umsg *m)
         fill_stat(&in, (struct ustat *)m->a[3]);
         return (int)in.ino;
     }
+    case FS_BMAP:                                     /* D29 16.23: the file's runs on the device */
+        if ((r = ext2_iget(m->a[0], &in))) return r;
+        if (!S_ISREG(in.mode)) return -EINVAL;
+        return ext2_runs(&in, m->a[1], (u32 *)m->a[2], m->a[3]);
     case FS_READ:
         if ((r = ext2_iget(m->a[0], &in))) return r;
         if (S_ISDIR(in.mode)) return -EISDIR;

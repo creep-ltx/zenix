@@ -359,6 +359,13 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   first: size, blob, blob_size, vol, vol_size, blk, blk_size, flags 0); both only grow at the end, the caller passes
   its size (kernel/zine.h). Not frozen: the kernel-blob interface after them (one build; a blob of another layout is
   -ENOEXEC).
+- **D29 16.23 (branch zine14, 2026-11-13):** `SYS_zine` op `ZINE_MAP` 2 (root's) with `struct uzine_map` (20 bytes
+  first: size, fd, first, n, ext) and `struct uzine_ext` {lba, count}, `UZINE_HOLE` 0xFFFFFFFF; answers the runs
+  filled (0 past the end), -ENODEV (the session has no reader: not the IDE drive), -ENOSYS (the server lacks
+  `FS_BMAP`), -EPERM, -EBADF, -EINVAL, -EFAULT. `FS_BMAP` 28 (a0 the inode, a1 its first 512-byte sector, a2 u32 pairs,
+  a3 their room): runs of sectors on the server's device, each following the one before in the file, holes
+  0xFFFFFFFF, the last ending at the file's last sector; 0 at or past the end; -EINVAL not a regular file; -ENOSYS a
+  server without it. The kernel-blob interface's layout became 2 (`struct zine_args ide`; not frozen).
 - **D29 12.1, running by name (branch zine04, 2026-10-31):** a file a program spawns that has the x bit and starts with
   the longword `0x000003F3` (AmigaOS's `HUNK_HEADER`) is run as `/bin/zine PATH ARGS...` (argv[0] "zine"); without
   `/bin/zine` the spawn is -ENOEXEC (the kernel log names the file). Such a file may be larger than 256 KB (Zenix

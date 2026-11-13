@@ -44,6 +44,7 @@ int ext2_set_clean(int clean); /* FS_MARK (D15): the clean bit set or cleared; t
 int ext2_release(u32 ino);   /* the last close of an inode that lost its last name while open: free it now */
 int ext2_iget(u32 ino, struct inode *out);
 u32 ext2_bmap(const struct inode *in, u32 n);
+int ext2_runs(const struct inode *in, u32 first, u32 *r, u32 n);   /* D29 16.23: FS_BMAP's runs, device sectors */
 int ext2_read(const struct inode *in, u32 off, void *dst, u32 n);
 int ext2_readdir(const struct inode *dir, u32 *cookie, struct udirent *out);
 int ext2_istat(u32 ino, struct inode *out);   /* D49: only the numbers a stat shows (ino .. links) */
