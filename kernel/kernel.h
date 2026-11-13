@@ -509,6 +509,10 @@ int may_signal(const struct proc *p);   /* syscall.c: 0, -ESRCH or -EACCES */
                                  * regions of their own and grows its chunks by the request, docs/d27-c-library.md
                                  * "The allocator"; 8 more cost 2 KB of the kernel's bss) */
 #define ENVMAX 1024
+/* spawn's arguments (frozen): at most SPAWN_ARGC words and SPAWN_ARGBYTES bytes of text, the 0 after each word counted;
+ * more is -E2BIG. Also the limit on a script's rewritten list (DESIGN D53 3.10). */
+#define SPAWN_ARGC     256
+#define SPAWN_ARGBYTES 8192
 /* P_WAIT and P_IO are no longer entered (D16: wait and I/O block in P_EV); SYS_procinfo still reports a process in
  * P_EV as one of them (waiting for a child: P_WAIT, else P_IO), so the numbers programs know keep their meaning */
 enum pstate { P_FREE = 0, P_READY, P_SLEEP, P_WAIT, P_IO, P_ZOMBIE, P_MSG, P_STOP, P_EV };
