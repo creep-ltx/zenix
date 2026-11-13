@@ -97,7 +97,7 @@ NETDRVZX := $(NETDRVS:%=$(BUILD)/drv-%.zx)
 TESTPZX := $(BUILD)/hello.pzx $(BUILD)/crash.pzx $(BUILD)/sigtest.pzx
 # the C library's test program (DESIGN D27 section 11, tools/libc-test.sh), in the test images' /tests: its ZEXE
 # build and its ZEX2 one (libctestpure)
-TESTLIBC := $(BUILD)/libctest.zx $(BUILD)/libctest.pzx $(BUILD)/tuitest.zx
+TESTLIBC := $(BUILD)/libctest.zx $(BUILD)/libctest.pzx $(BUILD)/tuitest.zx $(BUILD)/lua-probe.zx
 
 all: $(BUILD)/zenix.adf $(BUILD)/zenix.hdf $(TESTDRVS:%=$(BUILD)/drv-%.zx) $(BUILD)/libc-pure.a
 
@@ -1003,6 +1003,21 @@ $(BUILD)/lua.celf: $(LUA_SRCS:%=$(BUILD)/lua/%.o) $(BUILD)/crt0.o $(BUILD)/libc.
 $(BUILD)/lua.zx: $(BUILD)/lua.celf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ $(STACK_lua)
+# the test build with the stack probe (ports/lua/zenix/stackprobe.c): /tests/lua/luaprobe on the test images, a 256 KB
+# stack of which 240 KB are painted, so it measures what /bin/lua's stack must hold (tools/lua-test.sh)
+$(BUILD)/luap/%.o: ports/lua/upstream/src/%.c $(LIBC_HDRS) $(wildcard ports/lua/upstream/src/*.h) ports/lua/zenix/luauser.h \
+                   Makefile
+	@mkdir -p $(dir $@)
+	$(CC) $(LUA_CFLAGS) -DZENIX_LUA_STACKPROBE -c $< -o $@
+$(BUILD)/luap/stackprobe.o: ports/lua/zenix/stackprobe.c $(LIBC_HDRS) Makefile
+	@mkdir -p $(dir $@)
+	$(CC) $(LIBC_PFLAGS) -DZX_PROBE_BYTES=245760 -c $< -o $@
+$(BUILD)/lua-probe.celf: $(LUA_SRCS:%=$(BUILD)/luap/%.o) $(BUILD)/luap/stackprobe.o $(BUILD)/crt0.o $(BUILD)/libc.a link/user.ld
+	$(CC) $(LIBC_PFLAGS) $(ULDFLAGS) $(LIBC_FLOATLD) $(BUILD)/crt0.o $(LUA_SRCS:%=$(BUILD)/luap/%.o) $(BUILD)/luap/stackprobe.o \
+	    $(BUILD)/libc.a $(LIBGCC) -o $@
+$(BUILD)/lua-probe.zx: $(BUILD)/lua-probe.celf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ 262144
 
 # ---- Ahiru, the owner's file manager (roadmap block 3; ports/ahiru/README): its upstream files and the CFile core's
 # under it (the owner's CFile repository: ahiru/src, core/, fs/), pinned in ports/ahiru/upstream (tools/ahiru-vendor.sh,
