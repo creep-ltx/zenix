@@ -2207,6 +2207,11 @@ A limit that is hit now says so once in the program's output.
 
 **The trace build** writes the program's free memory chunk by chunk at the start (`K` address, size).
 
+**Not settled** (zine-top100-findings.md "Round 9"): Loonies' "CIA-timer could not be allocated!" (Impossible, The
+Morning Trip: they look for a free CIA timer without calling the resource), the crashes of Jesus Christ Motocross,
+Lupus Reditus and Beam Riders on the 68060 (no failing call before them in the trace), and destroy fascism's stack in
+ZINE's ExecBase page on the 68020.
+
 *Verified* in FS-UAE: `tools/zine-emu-test.sh` (zscreen: a 16x16 sprite from a BitMap by AllocSpriteDataA, taken as
 sprite 2 by GetExtSpriteA, MoveSprite's control words checked, and the hardware's collision of sprite 2 with plane 1
 seen in CLXDAT only while it is shown, none after FreeSprite; znext: DoPkt to the handler port and to a non-port, 40

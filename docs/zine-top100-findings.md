@@ -645,3 +645,58 @@ give a low block on request (a kernel change, for the main session).
 Top blockers now: 68020: does not fit (47), FPU instructions (42), black at the limit (23), not enough memory (15);
 68030: black (31), not enough memory (18), does not fit (18), illegal instruction (8); 68060: black (31), illegal
 instruction (11), return code 1 (3), sprites (2), calls through base 0 (exec -912, 2).
+
+## Round 9 (2026-11-13, branch zine9, d29 16.19)
+
+**Fixed or added in ZINE:** low memory on request (the kernel's `MEMA_LOW`; path B's hunks below 16 MB when they fit);
+the line that sends a big plain program to path B, lost in round 8's last commit, is back, now only when memory is
+short (file and hunks leave less than 16 MB); hardware sprites (ChangeSprite, MoveSprite, AllocSpriteDataA,
+GetExtSpriteA, ChangeExtSpriteA, FreeSpriteData); dos DoPkt and the handler's lock and volume actions; 64 open files
+(was 16).
+
+**The null-base crashes after long runs, traced (68060):**
+- **Hexel**: not a null base at first. It opens its precalculated tables and does not close every one; after 16
+  handles every Open failed ("Unable to open ram:packscript for write or append"), its loader went on with null
+  pointers and crashed 25 minutes later at $5FE. Fixed by the 64 handles; it now runs until the limit.
+- **Jesus Christ Motocross**: no library call between its last Flush and the crash (CHK at $0A, a jump into the
+  vector page) during its precalc's sine and square-root tables; the same instructions in a test program run
+  correctly under the 68060 package. Not settled.
+- **Lupus Reditus** and **Beam Riders**: both crash right after Forbid and two Supervisor calls, inside their own
+  supervisor or interrupt code (Lupus at $4000000C, Beam Riders at $100 with SR $2300); both decrunch into BSS hunks,
+  so their code cannot be read from the file. Not settled.
+- **destroy fascism (68020)**: an absolute-address intro (it decrunches itself to $50000 and jumps there); at the
+  crash its user stack is at $FD0, inside the page where ZINE keeps ExecBase. Not fixed.
+
+**Loonies' Impossible and The Morning Trip** get past the sprites and now print "CIA-timer could not be allocated!"
+and end with 0 (not counted as working). They do not call OpenResource or AddICRVector before saying it (a debug build
+showed neither); between Forbid and Permit they look for the timer without a library call, so they read a CIA
+resource's private fields or the resource list directly. Putting the two CIA resources on ExecBase's ResourceList did
+not change it. Not settled.
+
+**Also seen:** Nerve Axis' Relic says "AGA chipset ... Failed" in its own hardware check and ends with 0 (on the 68020
+and 68030 machines; GfxBase's ChipRevBits0 has the AA bits); an early quit the counting rule takes as working, in
+every round so far.
+
+### Round 9's reruns (2026-11-13, the same harness: 50 s for the 020 and 030, 120 s for the 060)
+
+On each machine: every lean candidate, every production whose round 8 result was a memory, loading, missing-call,
+crash or early-end failure (not "does not fit", FPU or MOVE16), 15 working ones picked at random, and the named ones
+above; 289 productions (305 runs with the 68060 repeats), laid over round 8's results and counted with the same rule (out of 426). The 68060's lean runs were
+repeated with the final rule (memory short). The "before" is round 8's merged result as counted at the start of this
+round.
+
+| Machine | Round 8 | Round 9 | Now working | No longer working |
+|---|---|---|---|---|
+| 68EC020, 8 MB fast | 262 | 262 | none | none |
+| 68030 + 68882, 16 MB fast | 316 | 323 | lux aeterna, You are Lucy, Outside Planet Earth, Concrete (low memory and path B), Nexus-7, Norwegian Kindness, cathode | none |
+| 68060 with FPU, 64 MB fast | 366 | 365 | THE CURE (DoPkt) | Norwegian Kindness, sumea (below) |
+
+The counting rule gives 324 and 367; The Morning Trip (68030, 68060) and Impossible (68060) are taken out by hand:
+they end with 0 after "CIA-timer could not be allocated!". Norwegian Kindness on the 68060 now reaches its end within
+the limit and crashes there (address error after 3,057 s emulated, on path A as in round 8, which stopped earlier);
+sumea on the 68060 is on path A as before and black at the limit (between parts: timing, as in round 8). Lucy ends
+with return code 1 after 314 s, its full length, on the 68030; the counting rule takes that as working.
+
+Top blockers now: 68020: does not fit (47), FPU instructions (43), black at the limit (23), not enough memory (13);
+68030: black (28), does not fit (18), not enough memory (15), "not enough memory in one piece" (7), MOVE16 (7); 68060:
+black (33), illegal instruction (10), return code 1 (3).
