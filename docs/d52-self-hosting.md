@@ -114,11 +114,12 @@ What it reads and refuses: ELF32 big-endian 68k relocatable objects, GNU `ar` ar
 with a message naming the file (and the symbol): COMDAT groups, common symbols, REL relocations, sections the layout
 has no place for, undefined references, duplicate definitions, a relocation out of reach or not supported (the ZEXE
 and ZEX2 rules of `tools/mkzexe.py`, with its checks), a damaged file. Nothing is written until the program is
-complete. One difference on purpose, which no program of the build meets: an `R_68K_32` to an absolute symbol (a
-number by `--defsym`, a `.set`) is written as the number; `tools/mkzexe.py` lists it for relocation, so the loader
-would add the load address to it. A reference to a symbol in a section the layout leaves out (`.comment`, `.note`) is
-refused, as ld refuses it. The review's cases the build does not use (merged constants, string tails, empty aligned
-sections, `--wrap`, an archive with two members of one name, GOT8O/16O/32O mixed in both orders) are in
+complete. An `R_68K_32` to an absolute symbol (a number by `--defsym`, a `.set`) is written as the number and not
+relocated; `tools/mkzexe.py` listed it for relocation (the loader would have added the load address) until it was
+made to match on 2026-11-13 (no program of the build met it; `tools/mkzexe-test.sh` and `tools/tests/zld/absv.S`
+check it now). A reference to a symbol in a section the layout leaves out (`.comment`, `.note`) is refused, as ld
+refuses it. The review's cases the build does not use (merged constants, string tails, empty aligned sections,
+`--wrap`, an archive with two members of one name, GOT8O/16O/32O mixed in both orders, absolute symbols) are in
 `tools/tests/zld`, compared with ld + mkzexe.py on every run.
 
 **Memory** (it must link mid-sized programs on the 4 MB minimum): the objects' symbol tables and the relocations of

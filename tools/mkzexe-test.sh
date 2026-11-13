@@ -6,6 +6,7 @@
 #     of a BSS array in the to-data list, the slot of a constant in the to-code list, the header adds up;
 #   - refused, each with its reason and the symbol named: an absolute reference from code to data (shared-to-data), a
 #     PC-relative one, a value equal to text_size, an undefined weak symbol (in a ZEXE too), an absolute symbol;
+#   - a plain program's absolute symbols (--defsym, .set): written as numbers, not relocated (as zld writes them);
 #   - the kernel's relocation table by distance (--delta): the same image and the same offsets as the plain table.
 #   tools/mkzexe-test.sh            (BUILD=dir to build in another directory; default a temporary one)
 cd "$(dirname "$0")/.." || exit 1
@@ -146,6 +147,32 @@ extern char hwreg[];
 int main(void) { return hwreg[0]; }
 EOF
 prog abs "$OUT/abs.c" -Wl,--defsym=hwreg=0xDFF000 && refused abs "an absolute symbol" "absolute symbol hwreg"
+
+# a plain program (ZEXE) whose data holds absolute symbols (--defsym, .set) and an address: the numbers stay as they
+# are, only the address is relocated, as zld writes it (found by zld's author 2026-11-13: mkzexe.py relocated them all)
+if "$CC" -m68020-60 -c tools/tests/zld/absv.S -o "$OUT/absv.o" &&
+   "$CC" "${F[@]}" -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections -Wl,--defsym=hwreg=0xDFF000 \
+       "$B/crt0.o" "$OUT/absv.o" "$B/libz.uo" "$LIBGCC" -o "$OUT/absv.elf" 2>"$OUT/absv.ld.log" &&
+   TOOLPREFIX=$PFX python3 tools/mkzexe.py "$OUT/absv.elf" "$OUT/absv.zx" >"$OUT/absv.log" 2>&1; then
+    python3 -I - "$OUT/absv.zx" "$OUT/absv.elf" "${PFX}nm" <<'EOF' && ok "a ZEXE's absolute symbols stay numbers, its address is relocated" || bad "a ZEXE's absolute symbols"
+import struct, subprocess, sys
+zx, elf, nm = sys.argv[1:4]
+sym = {}
+for l in subprocess.run([nm, elf], capture_output=True, text=True).stdout.splitlines():
+    p = l.split()
+    if len(p) == 3:
+        sym[p[2]] = int(p[0], 16)
+f = open(zx, "rb").read()
+n, off = struct.unpack(">II", f[16:24])
+table = set(struct.unpack(f">{n}I", f[off:off + 4 * n]))
+v = sym["vals"]
+words = struct.unpack(">3I", f[v:v + 12])
+assert words == (0xDFF000, 0x1234, sym["main"]), [hex(w) for w in words]
+assert v not in table and v + 4 not in table and v + 8 in table, "the relocation table"
+EOF
+else
+    bad "a ZEXE's absolute symbols ($(cat "$OUT/absv.ld.log" "$OUT/absv.log" 2>/dev/null | head -3))"
+fi
 
 # the kernel's relocation table by distance (--delta, docs/d13-shared-code.md section 10): the same image as with the
 # plain table, and the distances decode to exactly the plain table's offsets (start.S's loop does the same decoding;
