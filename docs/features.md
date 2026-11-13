@@ -203,6 +203,14 @@ suite (66 tests) and in FS-UAE on an A1200 with 4 MB of fast RAM: `tools/make-ho
 a failing command and its status, a recursive make: the same output as the PC's line for line). Not yet on a real
 Amiga. See man/make.txt.
 
+`zld` (roadmap block 7, DESIGN D52 section 5): the linker, ours: ELF objects and `ar` archives (the C library, libgcc)
+straight to a ZEXE or ZEX2 program, archive members pulled as ld pulls them, unreferenced sections dropped, strings
+merged, `--defsym`, `--wrap`, `-L`/`-l`; errors name the symbol and the object. In the development package `devel`
+with libc.a, libc-pure.a, libgcc.a, crt0.o, crt0-pure.o and the headers. **verified** on the PC: every program of the
+build (192) linked by zld is the build's (ld + mkzexe.py) byte for byte, refused links and damaged inputs under ASan and
+UBSan (`tools/zld-host-test.sh`); in FS-UAE on an A1200 with 4 MB of fast RAM zld links libctest, hello and sh on
+Zenix, each the PC's byte for byte, and they run (`tools/zld-test.sh`). Not yet on a real Amiga. See man/zld.txt.
+
 ## Tooling
 | Feature | Status |
 |---|---|

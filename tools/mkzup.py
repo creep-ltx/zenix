@@ -225,6 +225,7 @@ FAMILIES = [
     ("ctop", "ctop, a monitor in the way of btop: memory, disks, network, processes", "ctop"),
     ("lua", "Lua 5.4, the scripting language (DESIGN D52)", "lua"),
     ("make", "make, the POSIX make (pdpmake, public domain; DESIGN D52)", "make"),
+    ("devel", "zld, the linker, with the C library, crt0 and the headers (DESIGN D52)", "zld"),
     ("shadow", "users and passwords: su, sudo, passwd, useradd", "su sudo passwd useradd userdel gpasswd"),
     ("disktools", "disks and filesystems: fdisk, mkfs, fsck, dd, umount", "dd fdisk mkfs_ext2 fsck_ext2 mkfs_zenixfs "
                   "fsck_zenixfs umount"),
@@ -262,6 +263,9 @@ FAMILY_CONFIG = {"desktop": ["etc/dlogin", "etc/zdesk/keys", "etc/zdesk/menu", "
                              "usr/share/fonts/truetype/README"]}
 # a family's data files from the source tree (DESIGN D51: the TrueType font the desktop ships)
 FAMILY_DATA = {"desktop": [("display/ttf/go.ttf", "/usr/share/fonts/truetype/go.ttf")]}
+# a family's tree staged in the build directory, every file under it at the same path (DESIGN D52 section 2: the
+# development package's C library, start-up code and headers, tools/mkdevel.sh)
+FAMILY_TREE = {"devel": "devel"}
 FAMILY_FILES = {"zine": [("zine.blob", "/lib/zine/zine.blob"), ("sp060", "/lib/zine/sp060"), ("sp040", "/lib/zine/sp040")],
                 "zinstall": [("bootmenu", "/lib/zinstall/bootmenu"), ("zenixboot", "/lib/zinstall/zenixboot")]}
 FAMILY_LICENSES = {"zine": [("user/zine/msp/060/README", "m68060sp"), ("user/zine/msp/040/README", "m68040fpsp")],
@@ -373,6 +377,19 @@ def std_packages(build, uapps):
                 ents += [("d", 0o755, 0, 0, None, d) for d in ("/" + "/".join(parts[:i + 1]) for i in range(len(parts)))
                          if d not in have]
                 ents += [("f", 0o644, 0, 0, os.path.join(build, f), dst)]
+            if fam in FAMILY_TREE:
+                top = os.path.join(build, FAMILY_TREE[fam])
+                if not os.path.isdir(top):
+                    die("%s: missing (tools/mkdevel.sh)" % top)
+                for d, subs, fs in sorted(os.walk(top)):
+                    subs.sort()
+                    rel = os.path.relpath(d, top)
+                    if rel != ".":
+                        have = {e[5] for e in ents}
+                        if "/" + rel not in have:
+                            ents.append(("d", 0o755, 0, 0, None, "/" + rel))
+                    for f in sorted(fs):
+                        ents.append(("f", 0o644, 0, 0, os.path.join(d, f), "/" + os.path.normpath(os.path.join(rel, f))))
             for f, dst in FAMILY_DATA.get(fam, []):
                 have = {e[5] for e in ents}
                 parts = dst.split("/")[1:-1]

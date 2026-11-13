@@ -1,0 +1,20 @@
+wait zenix:/# 120
+send cd /root/zld; free; echo ==z""go\r
+wait ==zgo 30
+send time zld -v -s 16384 --defsym=vfprintf=__l_vfprintf --defsym=vfscanf=__l_vfscanf -o libctest crt0.o libctest.o -L . -lc -lgcc; echo c""st=$?\r
+wait cst= 1200
+send time zld -v -s 16384 -o hello crt0-pure.o hello.o libz.o libgcc.a; echo h""st=$?\r
+wait hst= 600
+send zld -v -s 24576 -o shx crt0-pure.o sh.o libz.o libgcc.a & p=$!; while ps | grep -v zombie | grep -q ' zld$'; do ps | grep --color=never ' zld$'; sleep 1; done; wait $p; echo s""st=$?\r
+wait sst= 1200
+send zld -o bad crt0.o undef.o libzu.o; echo u""st=$?; ls bad; echo ==u""end\r
+wait ==uend 300
+send ./hello; echo h""run=$?\r
+wait hrun= 120
+send ./shx -c 'echo sh says $((6*7))'; echo s""run=$?\r
+wait srun= 120
+send /root/zld/libctest; echo l""run=$?; echo ==l""end\r
+wait ==lend 900
+send sync; echo ==d""one\r
+wait ==done 60
+stop

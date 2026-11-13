@@ -1,0 +1,92 @@
+ZLD(1)			Zenix manual
+
+NAME
+    zld - link objects and archives into a Zenix program
+
+SYNOPSIS
+    zld [-v] [-s stack] [--defsym=sym=value] [--wrap=sym] [-L dir]
+        -o program file... [-lname...]
+
+DESCRIPTION
+    Reads ELF relocatable objects (.o, as the 68k gcc, and later Zenix's
+    own assembler and compiler, write them) and ar archives (.a: the C
+    library, libgcc) and writes a program Zenix runs. It does in one step
+    what the PC's build does with GNU ld and tools/mkzexe.py, and gives
+    the same program byte for byte.
+
+    The files are taken in the order given. An archive gives only the
+    members that define a symbol still undefined at that point, going
+    through its index again while a member it gave needs more; an archive
+    is not read again for a later file's needs (put libraries last, a
+    library before the ones it uses). Then only what the program's start
+    (_start, in crt0) reaches is kept: functions and data nobody refers to
+    are left out (the build compiles one section per function). Strings
+    that are the same, or the end of another, are kept once.
+
+    The kind of program follows crt0, the first file: crt0.o makes a plain
+    program (ZEXE: code, data, then the table of addresses the loader
+    relocates); crt0-pure.o makes a program with shared code (ZEX2, its
+    objects compiled for it: one copy of the code for every process
+    running it). The layout is the build's (link/user.ld, link/pure.ld):
+    code, constants, the address table (ZEX2), data with the constructor
+    tables, bss.
+
+OPTIONS
+    -o program        the file to write (mode 755); written only when the
+                      whole link succeeded
+    -s stack          the stack the program asks for, in bytes (default 0:
+                      the loader's 16 KB)
+    --defsym=sym=val  define sym as another symbol or a number (the C
+                      library's printf choice: --defsym=vfprintf=
+                      __l_vfprintf and --defsym=vfscanf=__l_vfscanf, or
+                      __d_ for the floating-point ones)
+    --wrap=sym        a call to sym goes to __wrap_sym, __real_sym to sym
+    -L dir            look for -l libraries in dir first
+    -lname            the archive libname.a from the -L directories, then
+                      /usr/lib
+    -v                print the program's sizes at the end
+
+EXAMPLES
+    A C library program, from the development package (zpkg -S devel):
+        zld -o hello -s 16384 --defsym=vfprintf=__l_vfprintf \
+            --defsym=vfscanf=__l_vfscanf /usr/lib/crt0.o hello.o -lc -lgcc
+    A program with shared code: crt0-pure.o first and -lc-pure.
+
+FILES
+    The development package devel puts beside /bin/zld:
+    /usr/lib/crt0.o, crt0-pure.o    the start of a plain, a shared program
+    /usr/lib/libc.a, libc-pure.a    the C library for each kind
+    /usr/lib/libgcc.a               gcc's helpers (soft float, 64-bit)
+    /usr/lib/zenix/user.ld, pure.ld the two layouts (zld has them built in)
+    /usr/include                    the C library's headers: the port's
+                                    first, the rest under /usr/include/pico
+                                    (gen, m68k, stdio, locale, pico itself,
+                                    include, libm, in that order for -I)
+
+EXIT STATUS
+    0 when the program was written, 1 on any error: a message names the
+    symbol and the object (undefined reference, multiple definition, a
+    relocation that does not fit or is not supported, a damaged file).
+
+NOTES
+    Not a general ELF linker: no linker scripts (the two layouts are built
+    in), no -r, no shared libraries, no section groups (COMDAT), no common
+    symbols (compile with -fno-common), RELA relocations only. The
+    relocations are those gcc's 68k code uses: R_68K_32, PC32, PC16, PC8
+    in both kinds, and in ZEX2 the address table's GOT32O, GOT16O, GOT8O
+    and the calls PLT32, PLT16, PLT8; a ZEX2 program's code may hold no
+    absolute address (as tools/mkzexe.py checks, with its messages). At
+    most 8192 address table entries reached with 16-bit offsets.
+
+    Memory: zld keeps the symbol tables and relocations of the objects it
+    uses and the program's image in memory, and reads archives through
+    their index (members it does not need are never read): linking sh (a
+    96 KB program) took at most 477 KB, emulator figures. It needs no
+    temporary files.
+
+    Inputs are not trusted: offsets, sizes and indexes are checked, and a
+    damaged object is refused with a message (tested with thousands of
+    damaged files under the PC's sanitizers).
+
+SEE ALSO
+    make(1), sh(1), zpkg(1); docs/d52-self-hosting.md section 5

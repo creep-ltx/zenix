@@ -16,7 +16,7 @@ How the facts were found: licences read from each project's own files or pages (
 |---|---|---|---|---|---|
 | 1 | Lua | Lua 5.4.9, `/bin/lua` | MIT: in the repo | 155 KB Lua + 66 KB C library, maths and soft float = 221 KB (measured) | no: **built** (section 9) |
 | 2 | make | pdpmake (POSIX make) | Unlicense (public domain): in the repo | about 25 KB + C library, about 40 KB (part measured, section 4) | no |
-| 3 | linker | `zld`, our own: ELF objects and archives straight to `.zx`/`.pzx` | ours, GPL-2.0-only | about 20-30 KB (estimate) | no |
+| 3 | linker | `zld`, our own: ELF objects and archives straight to `.zx`/`.pzx` | ours, GPL-2.0-only | 21 KB of its own code, 28 KB as a program with the C library (measured) | no: **built** (section 5) |
 | 4 | assembler | `zas`, our own, Motorola syntax, ELF objects (or vasm) | ours GPL-2 (vasm: not GPL-compatible) | about 30-50 KB (estimate); vasm 303 KB (measured) | **yes**: vasm only with its author's consent |
 | 5 | C compiler | tcc with a new 68k back end (or vbcc) | tcc LGPL-2.1: GPL-2-compatible (vbcc: not) | about 180-220 KB (tcc measured 176 KB for i386) | **yes**: the choice |
 | 6 | debugger | stage 1 `zdb` after a crash (no kernel change); stage 2 live | ours | stage 1 about 15 KB (estimate) | **yes** for stage 2 (a kernel change) |
@@ -81,6 +81,65 @@ Our own code, GPL-2.0-only.
   byte for byte the `.zx`/`.pzx` that `ld` + `mkzexe.py` give (or a difference that is explained and allowed: the
   order of sections). Then the same in FS-UAE on Zenix itself, the result run.
 - Needed by every compiler route below; that is why it comes before the assembler and the compiler.
+
+### As built (2026-11-13)
+
+`user/zld.c` (2,100 lines of standard C and POSIX: the same file builds for the PC and, as a C library program with
+shared code, for Zenix: 21.3 KB of its own code, `/bin/zld` 28.6 KB with the C library's parts, 5 KB of bss).
+`zld [-v] [-s STACK] [--defsym=SYM=VALUE] [--wrap=SYM] [-L DIR] -o PROGRAM FILE... [-lNAME]`; man/zld.txt.
+**Every program the build links (192: UAPPS, the servers, drivers, test programs, `zenixboot`, `bootmenu`) comes out
+byte for byte as `ld` + `tools/mkzexe.py` make it** (`tools/zld-host-test.sh`), so no difference had to be allowed.
+That needed GNU ld 2.45's own rules, each coded where it applies (read from binutils' source, `bfd/elflink.c`,
+`bfd/merge.c`, `bfd/elf32-m68k.c`, `ld/ldlang.c`, `ld/ldexp.c`, libiberty's `hashtab.c`):
+
+- **Archives:** the index in order, a member pulled for a symbol undefined (not weakly) at that point; another pass
+  only when a member added new undefined symbols. Sections are placed in the order the members were pulled, not the
+  archive's order.
+- **--gc-sections:** kept is what `_start`, `_init`/`_fini`, the `KEEP()` sections (`.text.start`, the constructor
+  tables), notes and `SHF_GNU_RETAIN` sections reach through their relocations.
+- **--defsym:** read where it stands among the inputs (gcc passes it before the objects): the value's symbol becomes
+  an undefined reference (it pulls archive members), the name is defined at once (it pulls nothing); a value whose
+  section was dropped gives an absolute symbol (`vfscanf` is `A 0` in a program that scans nothing).
+- **SHF_MERGE:** sections alike (flags, entry size, alignment, output section) merge into the first kept one in load
+  order; strings in the order first seen, a string that ends a longer one placed inside it (ld's reverse-sorted
+  suffix pass, its alignment rules), the size padded when every input's was.
+- **The address table of a ZEX2 program (.got):** ld's slot order is the order of libiberty's open-addressed hash
+  tables (per object, then merged), keyed by ld's numbers for its input files and a global symbol's first GOT use.
+  Those numbers were found by fitting all 14 ZEX2 links of the build: the output file 0, each object two (itself and
+  the LTO plugin's stand-in, as gcc always passes the plugin), each archive two when opened (itself and the first
+  member, opened to check the format), each member it gives two more. One more trap: libiberty grows a table on every
+  lookup made with INSERT, even when the entry is found, and ld looks up with INSERT for every relocation.
+
+What it reads and refuses: ELF32 big-endian 68k relocatable objects, GNU `ar` archives with a symbol index; refused
+with a message naming the file (and the symbol): COMDAT groups, common symbols, REL relocations, sections the layout
+has no place for, undefined references, duplicate definitions, a relocation out of reach or not supported (the ZEXE
+and ZEX2 rules of `tools/mkzexe.py`, with its checks), a damaged file. Nothing is written until the program is
+complete.
+
+**Memory** (it must link mid-sized programs on the 4 MB minimum): the objects' symbol tables and the relocations of
+their loaded sections, the archive's index, the merged strings and the program's image; archive members not needed
+are never read, debug sections never. Measured in FS-UAE (an A1200 with 4 MB of fast RAM, 3,469 KB free; emulator
+figures, not hardware speed): linking sh (a 96 KB ZEX2 program) zld owned at most 477 KB (`ps` once a second);
+libctest (92 KB, the C library's 913 KB archive searched) took 11.1 s, hello 1.0 s.
+
+**The development package** (`zpkg -S devel`, the family devel in `tools/mkzup.py`, staged by `tools/mkdevel.sh`):
+`/bin/zld`, `/usr/lib/libc.a`, `libc-pure.a`, `libgcc.a` (debug sections stripped), `crt0.o`, `crt0-pure.o`,
+`/usr/lib/zenix/user.ld` and `pure.ld`, the headers (the port's in `/usr/include`, picolibc's in the Makefile's order
+under `/usr/include/pico`); 685 KB packed. Why two levels: the port's headers (`stdio.h`, `stdlib.h`, `regex.h`,
+`sys/stat.h`, `sys/syslimits.h`) add to picolibc's by `#include_next`, which finds the next header of that name further
+down the `-I` list, and picolibc's own directories hold headers of the same names; one flat `/usr/include` would keep
+only one of each. So the port's are `/usr/include`, the first on the list, and picolibc's directories stay apart under
+`/usr/include/pico` in the Makefile's `LIBC_INC` order (man/zld.txt lists it for a compiler's `-I`). Accepted by the
+main session 2026-11-13.
+
+**Tests:** `tools/zld-host-test.sh` (the PC, in `make check`'s host list): the 192 links compared byte for byte;
+links that must fail (an undefined reference, a duplicate definition, a common symbol, a `bsr.w` out of reach, an
+`R_68K_16`, no crt0, not an object, a missing library) with their messages and no output file; 400 damaged objects and
+archives (3,000 in a longer run) under AddressSanitizer and UBSan, each linked or refused, never a crash.
+`tools/zld-test.sh` (FS-UAE, an A1200 with 4 MB of fast RAM): zld on Zenix links libctest from libc.a and libgcc.a
+(found with `-L` and `-l`), hello and sh (ZEX2), each the PC's output byte for byte, and they run (hello's lines, `sh -c`,
+libctest's 184 checks); a link with an undefined symbol is refused there with its message. **Verified in FS-UAE
+2026-11-13; not yet on a real Amiga.**
 
 ## 6. The assembler (item 4)
 
