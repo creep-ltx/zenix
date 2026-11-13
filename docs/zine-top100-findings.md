@@ -817,3 +817,60 @@ end) and ends with return code 1; the counting rule takes that as failed (a long
 lines); counted by hand it works, which gives 305 and 358. On the 68020 machine both still fail: their parts do not
 fit beside the program in ZINE's volume on 8 MB (Tint: "no program TBL-TINT.E01"; Captured Dreams: its own check,
 "Fast-RAM needed: 3200kb .. failed"). The 45 working ones at random still work.
+
+## Round 12: one-block memory and full rerun (2026-11-13, main at the round 11 merge, d29 16.21)
+
+**Fast RAM in one block, as on real A1200s.** The harness (`run1.py`, beside the results, not in this repository) gave
+the 68030 machine two blocks (FS-UAE's 8 MB `fast_memory` plus 8 MB of Zorro III) and the 68060 machine 8 + 64 MB. Now:
+- **68030**: `fast_memory` left out, `zorro_iii_memory = 16384`. Zenix's boot log: `ram 0x40000020..0x41000000 fast`,
+  `zorro: 0: ... 16384 KB, RAM, Zorro III`, `mem: 2015 KB chip, 16147 KB fast free`. One block of 16 MB.
+- **68060**: `zorro_iii_memory = 65536` only: `ram 0x40000020..0x44000000 fast`, `mem: 2015 KB chip, 65299 KB fast free`.
+  One block of 64 MB, as the Apollo 1260.
+- **68020**: unchanged (8 MB `fast_memory`).
+- Tried and failed: FS-UAE's CPU board options (`uae_cpuboard_type = Blizzard1230IV`, `uae_cpuboard_memory = 16384`):
+  Kickstart saw no fast RAM at all (0 KB fast free), the same trap as `uae_mbresmem_size` in the 2026-11-07 notes. The
+  Zorro III block works on a 030 and 060 because FS-UAE's `cpu = 68030/68060` makes the Z3 board appear.
+- The Z3 block sits at `$40000000` (32-bit space), not in the 24-bit `$200000` area, as on a real 030/060 card.
+
+**report.py's notes problem.** A run that ended by itself after 60 s or more emulated, but had "notes" from ZINE, was
+counted as failed (the "ran its course" rule needed `not notes`). Execute lines ("... asked dos Execute to run ...")
+and "differ only in case" are ZINE telling what it did, not a sign of failure: they no longer count (`failnotes()`).
+The notes that stay: no file / no library / no device / no resource, left out data, "goes into ZINE's volume". The
+round 10 phrase list is unchanged. On round 11's results on disk the change moves:
+- **68030**: Tint (Execute lines only; it plays all seven parts), Captured Dreams (the same), Norwegian Kindness (its
+  Execute lines; it ends at return code 1 after more than 60 s) to working.
+- **68060**: Tint and Captured Dreams to working.
+- **68020**: none (Tint and Captured Dreams still fail there on memory, as in round 11).
+On round 12's own results it moves Tint on the 68030 and 68060 machines. Norwegian Kindness is a long run that ends
+with return code 1, so it counts as working by the rule "ran its course"; that is the rule's honest limit.
+
+**The rerun** (all 500 productions on each machine, headless, 3 emulators at a time, 50 s for the 020 and 030, 120 s
+for the 060, main's build in `~/.cache/zrerun12/build`). Counted of 426 (disk image only and no executable left out),
+with the new notes rule on both sides. The old files on disk, recounted, give 243, 298 and 352; round 11's own table
+gave 246, 304 and 357 (merged results; those on-disk files differ from them by a few runs).
+
+| Machine | Round 11 (its table) | Round 11 files, recounted | Round 12 | Now working | No longer working |
+|---|---|---|---|---|---|
+| 68EC020, 8 MB fast | 246 | 243 | **243** | 4 | 4 |
+| 68030 + 68882, 16 MB in one block | 304 | 298 | **310** | 19 | 7 |
+| 68060 with FPU, 64 MB in one block | 357 | 352 | **353** | 8 | 7 |
+
+Part of the 030's gain is the one block ("could not be loaded" 25 -> 6, "does not fit in memory" as before); the rest of
+the changes on the 020 (same config) and the 060 (an A1200-like block of the same size) are run to run: black screens
+at the limit (still in precalc, load 15-23 on the PC while it ran) came and went. Black at the limit: 020 23 -> 28,
+030 30 -> 36, 060 34 -> 40; those are the ones to look at before trusting a "newly failing".
+
+Newly working (a production is listed on each machine where it changed):
+- 020: Smoke Bomb, fake elektronik lightshow, 1000%, Leisner.
+- 030: Jesus Christ Motocross, lux aeterna luceat eis, You are Lucy, Surfing Great Victoria, Master Control Program,
+  Fullmoon, entropy chamber, subside, Outside Planet Earth, Concrete, THE CURE, Boogietown, 1000%, Impossible, The
+  Morning Trip, Leisner, Planet Loonies, Lvis, Perspiration.
+- 060: We come in peace, Shake Off The Dust, THE CURE, Reborn, 1000%, Impossible, The Morning Trip, Leisner.
+
+Newly failing:
+- 020: Psychedelic and Clubisque (black at the limit), Elysium (a missing call), Three Men and a Glenz Vector (line F
+  at $FFFF).
+- 030: Software Make The Dance Foam Oil ("demo_init() failed"), Real (Complex), sumea, Supercool, Talking Heads (all
+  black at the limit), Zeon (illegal instruction), Three Men and a Glenz Vector (line F).
+- 060: Software Make The Dance Foam Oil, Serenity, sumea, the castle, Noxie (black at the limit), Signals (alert
+  8100000f), Goon Royale (zero divide: it did so in round 10 too).
