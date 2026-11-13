@@ -16,7 +16,7 @@ How the facts were found: licences read from each project's own files or pages (
 |---|---|---|---|---|---|
 | 1 | Lua | Lua 5.4.9, `/bin/lua` | MIT: in the repo | 155 KB Lua + 66 KB C library, maths and soft float = 221 KB (measured) | no: **built** (section 9) |
 | 2 | make | pdpmake (POSIX make) | Unlicense (public domain): in the repo | about 25 KB + C library, about 40 KB (part measured, section 4) | no |
-| 3 | linker | `zld`, our own: ELF objects and archives straight to `.zx`/`.pzx` | ours, GPL-2.0-only | 21 KB of its own code, 28 KB as a program with the C library (measured) | no: **built** (section 5) |
+| 3 | linker | `zld`, our own: ELF objects and archives straight to `.zx`/`.pzx` | ours, GPL-2.0-only | 22 KB of its own code, 30 KB as a program with the C library (measured) | no: **built** (section 5) |
 | 4 | assembler | `zas`, our own, Motorola syntax, ELF objects (or vasm) | ours GPL-2 (vasm: not GPL-compatible) | about 30-50 KB (estimate); vasm 303 KB (measured) | **yes**: vasm only with its author's consent |
 | 5 | C compiler | tcc with a new 68k back end (or vbcc) | tcc LGPL-2.1: GPL-2-compatible (vbcc: not) | about 180-220 KB (tcc measured 176 KB for i386) | **yes**: the choice |
 | 6 | debugger | stage 1 `zdb` after a crash (no kernel change); stage 2 live | ours | stage 1 about 15 KB (estimate) | **yes** for stage 2 (a kernel change) |
@@ -85,7 +85,7 @@ Our own code, GPL-2.0-only.
 ### As built (2026-11-13)
 
 `user/zld.c` (2,100 lines of standard C and POSIX: the same file builds for the PC and, as a C library program with
-shared code, for Zenix: 21.3 KB of its own code, `/bin/zld` 28.6 KB with the C library's parts, 5 KB of bss).
+shared code, for Zenix: 22.2 KB of its own code, `/bin/zld` 30.4 KB on the disk with the C library's parts, 5 KB of bss).
 `zld [-v] [-s STACK] [--defsym=SYM=VALUE] [--wrap=SYM] [-L DIR] -o PROGRAM FILE... [-lNAME]`; man/zld.txt.
 **Every program the build links (192: UAPPS, the servers, drivers, test programs, `zenixboot`, `bootmenu`) comes out
 byte for byte as `ld` + `tools/mkzexe.py` make it** (`tools/zld-host-test.sh`), so no difference had to be allowed.
@@ -114,7 +114,12 @@ What it reads and refuses: ELF32 big-endian 68k relocatable objects, GNU `ar` ar
 with a message naming the file (and the symbol): COMDAT groups, common symbols, REL relocations, sections the layout
 has no place for, undefined references, duplicate definitions, a relocation out of reach or not supported (the ZEXE
 and ZEX2 rules of `tools/mkzexe.py`, with its checks), a damaged file. Nothing is written until the program is
-complete.
+complete. One difference on purpose, which no program of the build meets: an `R_68K_32` to an absolute symbol (a
+number by `--defsym`, a `.set`) is written as the number; `tools/mkzexe.py` lists it for relocation, so the loader
+would add the load address to it. A reference to a symbol in a section the layout leaves out (`.comment`, `.note`) is
+refused, as ld refuses it. The review's cases the build does not use (merged constants, string tails, empty aligned
+sections, `--wrap`, an archive with two members of one name, GOT8O/16O/32O mixed in both orders) are in
+`tools/tests/zld`, compared with ld + mkzexe.py on every run.
 
 **Memory** (it must link mid-sized programs on the 4 MB minimum): the objects' symbol tables and the relocations of
 their loaded sections, the archive's index, the merged strings and the program's image; archive members not needed

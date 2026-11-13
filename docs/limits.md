@@ -272,7 +272,7 @@ pointers.
 - The linker, zld (DESIGN D52 section 5, man/zld.txt): the two built-in layouts only (no linker scripts, no `-r`, no
   shared libraries); ELF32 68k objects with RELA relocations; no section groups (COMDAT) and no common symbols
   (`-fno-common`); the relocations gcc's 68k code uses (`R_68K_32`, `PC32/16/8`, in ZEX2 also `GOT32O/16O/8O` and
-  `PLT32/16/8`); at most 8192 address-table entries reached with 16-bit offsets (ld's own limit); archives need GNU
+  `PLT32/16/8`); at most 32 address-table entries reached with 8-bit offsets and 8192 with 16-bit ones (ld's own limits); archives need GNU
   ar's symbol index. It holds the used objects' symbols and relocations and the whole program image in memory.
 - The text-UI library (roadmap block 3, `ports/tui/README`; the owner's tui.library linked in, used by
   `/tests/tuitest`, `sumi`, `maki`, `markdown` and `ahiru`): UTF-8 output and the C library's widths since the console's UTF-8

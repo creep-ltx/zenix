@@ -12,6 +12,7 @@
  * test) and for Zenix (a C library program). Every input is untrusted: every offset, size, index and count read from
  * a file is checked before use, and an error names the file and stops the link; nothing is written until the whole
  * program is ready. */
+#include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -119,6 +120,16 @@ static void err(const char *f, ...)
     oc(2, '\n');
     oflush(2);
     nerr++;
+}
+static void warn(const char *f, ...)
+{
+    va_list ap;
+    va_start(ap, f);
+    vsay(2, "zld: warning: ", ap);
+    vsay(2, f, ap);
+    va_end(ap);
+    oc(2, '\n');
+    oflush(2);
 }
 static void die(const char *f, ...)
 {
@@ -279,7 +290,9 @@ static const char *wrapped(const char *n)
     int i;
     for (i = 0; i < nwraps; i++) {
         u32 l = strlen(wraps[i]);
-        if (!strcmp(n, wraps[i]) && l + 8 < sizeof wbuf) {
+        if (!strcmp(n, wraps[i])) {
+            if (l + 8 >= sizeof wbuf)
+                die("--wrap=%s: the name is too long", n);
             memcpy(wbuf, "__wrap_", 7);
             memcpy(wbuf + 7, n, l + 1);
             return wbuf;
@@ -386,7 +399,7 @@ static struct obj *load_obj(int f, u32 base, u32 size, char *name, u32 moff)
         die("%s: bad section header table (%u entries of %u bytes)", name, shnum, be16(eh + 46));
     if (shoff > size || shnum * 40 > size - shoff)
         die("%s: the section header table lies past the end", name);
-    if (shstrndx >= shnum)
+    if (shstrndx >= shnum || shstrndx == 0)
         die("%s: bad section name table index %u", name, shstrndx);
     sh = xalloc(shnum * 40);
     rd(f, base + shoff, sh, shnum * 40, name);
@@ -432,7 +445,7 @@ static struct obj *load_obj(int f, u32 base, u32 size, char *name, u32 moff)
         u8 *raw;
         if (st->entsize != 16 || st->size % 16)
             die("%s: bad symbol table entry size", name);
-        if (link >= shnum || ss[link].type != SHT_STRTAB)
+        if (link >= shnum || link == 0 || ss[link].type != SHT_STRTAB)
             die("%s: the symbol table has no string table", name);
         n = st->size / 16;
         if (info > n || n > 0x1000000)
@@ -719,7 +732,7 @@ struct target {
     u8 absorbed;              /* the addend is in s already (a section symbol of a merged section) */
     const char *name;
 };
-enum { T_SEC, T_ABS, T_WEAK, T_UNDEF };
+enum { T_SEC, T_ABS, T_WEAK, T_UNDEF, T_DISC };   /* T_DISC: in a section the layout drops */
 static u32 merged_off(struct sec *s, u32 off);
 static u32 got_addr, gotplt_addr, ngot;
 
@@ -772,7 +785,7 @@ static void gtarget(struct gsym *g, struct target *t, int depth)
     {
         struct sec *s = &g->o->sec[g->shndx];
         if (!s->keep || stmt_out[s->stmt] == O_NONE) {
-            t->kind = T_ABS;
+            t->kind = s->keep ? T_DISC : T_ABS;
             t->s = g->value;
             t->out = O_NONE;
             return;
@@ -811,7 +824,7 @@ static void rtarget(struct obj *o, struct rela *r, struct target *t)
             if (!t->name || !*t->name)
                 t->name = s->name;
             if (!s->keep || stmt_out[s->stmt] == O_NONE) {
-                t->kind = T_ABS;
+                t->kind = s->keep || !(s->flags & SHF_ALLOC) ? T_DISC : T_ABS;
                 t->s = e->value;
                 t->out = O_NONE;
                 return;
@@ -1129,7 +1142,9 @@ static void got_assign(void)
         }
         free(el);
     }
-    if (n8 > 0x20 || n16 > 0x2000)
+    if (n8 > 0x20)
+        die("the address table is too large: %u entries reached with 8-bit offsets (at most 32)", n8);
+    if (n16 > 0x2000)
         die("the address table is too large: %u entries reached with 16-bit offsets (at most 8192)", n16);
     off[0] = 0;
     off[1] = 4 * n8;
@@ -1402,8 +1417,11 @@ static u32 merged_off(struct sec *s, u32 off)
 {
     struct msec *ms = s->mg;
     u32 lo = 0, hi = ms->n;
-    if (off >= ms->ofs[ms->n])
+    if (off >= ms->ofs[ms->n]) {
+        if (off > ms->ofs[ms->n])   /* (as ld: a warning, the end of the merged contents) */
+            warn("an offset (%x) past the end of the merged section %s", off, s->name);
         return ms->g->repr->addr + ms->g->size;
+    }
     while (hi - lo > 1) {
         u32 mid = (lo + hi) / 2;
         if (ms->ofs[mid] <= off)
@@ -1460,6 +1478,13 @@ static struct gsym *provide(const char *n)
     }
     return 0;
 }
+static u32 alignup(u32 dot, u32 a)
+{
+    u32 r = (dot + a - 1) & ~(a - 1);
+    if (r < dot)
+        die("the program is larger than 4 GB");
+    return r;
+}
 static u32 place_stmt(int st, u32 dot)
 {
     u32 i;
@@ -1467,7 +1492,7 @@ static u32 place_stmt(int st, u32 dot)
         struct sec *s = plist[st][i].s;
         if (s->gone)
             continue;
-        dot = (dot + (1u << s->align) - 1) & ~((1u << s->align) - 1);
+        dot = alignup(dot, 1u << s->align);
         s->addr = dot;
         if (dot + s->size < dot)
             die("the program is larger than 4 GB");
@@ -1495,7 +1520,7 @@ static u32 out_begin(int o, int lo, int hi, u32 dot)
             any = 1;
     if (any) {
         u32 a = 1u << out_align(lo, hi);
-        dot = (dot + a - 1) & ~(a - 1);
+        dot = alignup(dot, a);
         ohas[o] = 1;
     }
     ostart[o] = dot;
@@ -1541,12 +1566,14 @@ static void layout(void)
     dot = place_stmt(S_RODATA, dot);
     oend[O_RODATA] = dot;
     if (pure) {
-        dot = (dot + 15) & ~15u;
+        dot = alignup(dot, 16);
         text_end = dot;
         if (bfd2got.n) {
             got_addr = dot;
             ohas[O_GOT] = oload[O_GOT] = 1;
             ostart[O_GOT] = dot;
+            if (ngot > 0x10000000 || dot + ngot * 4 + 12 < dot)
+                die("the program is larger than 4 GB");
             dot += ngot * 4;
             oend[O_GOT] = dot;
             gotplt_addr = dot;
@@ -1582,12 +1609,12 @@ static void layout(void)
         p6->value = dot;
     dot = place_stmt(S_DATA, dot);
     oend[O_DATA] = dot;
-    dot = (dot + 3) & ~3u;
+    dot = alignup(dot, 4);
     bss_start = dot;
     dot = out_begin(O_BSS, S_BSS, S_BSS, dot);
     dot = place_stmt(S_BSS, dot);
     oend[O_BSS] = dot;
-    dot = (dot + 3) & ~3u;
+    dot = alignup(dot, 4);
     bss_end = dot;
     if ((g = lookup("__bss_start", 0)) != 0 && g->script == SC_SCRIPT)
         g->value = bss_start;
@@ -1674,6 +1701,11 @@ static void relocate(struct obj *o, struct sec *s)
         rtarget(o, r, &tg);
         if (tg.kind == T_UNDEF)
             continue;         /* reported already */
+        if (tg.kind == T_DISC) {
+            err("%s: %s at %s+%x: %s is defined in a section the program leaves out", o->name, rname(t), s->name,
+                r->off, tg.name);
+            continue;
+        }
         q = img + p;
         if (t >= 10 && t <= 12) {
             struct gent *e = got_find(o, r->info >> 8);
@@ -1713,8 +1745,8 @@ static void relocate(struct obj *o, struct sec *s)
             if (t == 1) {
                 if (tg.kind == T_WEAK)
                     err("%s: undefined (weak) symbol %s at %x: its address would be 0", o->name, tg.name, p);
-                else
-                    addrel(0, p);
+                else if (tg.kind == T_SEC)
+                    addrel(0, p);     /* (an absolute value stays as it is: the load address is not added) */
             } else if (t != 4 && t != 5 && t != 6)
                 err("%s: unsupported relocation %s at %s+%x", o->name, rname(t), s->name, r->off);
             continue;
@@ -1800,9 +1832,13 @@ static void usage(void)
 static u32 num(const char *s, const char *what)
 {
     char *e;
-    unsigned long v = strtoul(s, &e, 0);
-    if (!*s || *e)
+    unsigned long v;
+    if (*s < '0' || *s > '9')
         die("%s: not a number: %s", what, s);
+    errno = 0;
+    v = strtoul(s, &e, 0);
+    if (*e || errno || v > 0xffffffffUL)
+        die("%s: not a 32-bit number: %s", what, s);
     return v;
 }
 
@@ -1879,7 +1915,14 @@ int main(int argc, char **argv)
                 g->value = num(v, "--defsym");
                 g->alias = 0;
             } else {
-                struct gsym *t = lookup(wrapped(v), 1);
+                struct gsym *t;
+                const char *q;
+                for (q = v; *q; q++)
+                    if (!(*q == '_' || *q == '.' || *q == '$' || (*q >= '0' && *q <= '9') || (*q >= 'a' && *q <= 'z') ||
+                          (*q >= 'A' && *q <= 'Z')))
+                        die("--defsym %s=%s: only a symbol or a number (expressions are not supported)",
+                            ds[nds].name, v);
+                t = lookup(wrapped(v), 1);
                 undefine(t, 0, 0);
                 g->alias = t;
             }
@@ -1946,6 +1989,13 @@ int main(int argc, char **argv)
         g->outsec = so[i];
     }
     gc();
+    for (o = objs; o; o = o->next)   /* the dropped sections' relocations are never needed again */
+        for (i = 1; i < o->nsec; i++)
+            if (!o->sec[i].keep && o->sec[i].rel) {
+                free(o->sec[i].rel);
+                o->sec[i].rel = 0;
+                o->sec[i].nrel = 0;
+            }
 
     /* which layout: the magic word crt0 left at offset 4 */
     {
@@ -1972,6 +2022,9 @@ int main(int argc, char **argv)
             pure = 1;
         else if (memcmp(m + 4, "ZEXE", 4))
             die("no ZEXE header at offset 4 (crt0's .text.start first)");
+        if (start->size < (pure ? 40u : 32u))
+            die("%s: crt0's .text.start (%u bytes) is shorter than the %s header", so->name, start->size,
+                pure ? "ZEX2" : "ZEXE");
         if (!pure) {
             g = lookup("__text_end", 0);
             g->script = SC_NONE;
@@ -2021,8 +2074,21 @@ int main(int argc, char **argv)
     }
     merge();
     layout();
-    if (nerr)
+    if (pure)                         /* tools/mkzexe.py: nothing writable in the shared part */
+        for (o = objs; o; o = o->next)
+            for (i = 1; i < o->nsec; i++) {
+                struct sec *s = &o->sec[i];
+                if (s->keep && !s->gone && (s->flags & SHF_WRITE) && s->size &&
+                    (stmt_out[s->stmt] == O_TEXT || stmt_out[s->stmt] == O_RODATA)) {
+                    err("%s: writable section %s in the shared part", o->name, s->name);
+                    perr++;
+                }
+            }
+    if (nerr) {
+        if (perr)
+            err("%s: cannot be a ZEX2 program (%u problems)", outname, perr);
         exit(1);
+    }
 
     /* the image: every loaded output section from address 0 (objcopy -O binary) */
     imgsz = 0;
@@ -2090,10 +2156,12 @@ int main(int argc, char **argv)
         put32(out + 20, isz);
         put32(out + 24, stack);
         g = lookup("stage0_blob", 0);
+        put32(out + 28, 0);
         if (g && !g->script && (g->st == G_DEF || g->st == G_DEFW)) {
             struct target tg;
             gtarget(g, &tg, 0);
-            put32(out + 28, tg.s);
+            if (tg.kind == T_SEC)
+                put32(out + 28, tg.s);
         }
         if (verbose)
             say("%s: image %uB, %u relocs, mem %uB\n", outname, isz, rn[0], mem);

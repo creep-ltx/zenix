@@ -6,7 +6,10 @@
 #    build's .zx/.pzx byte for byte;
 #  - links that must fail, each with its message naming the symbol and the object: an undefined reference, a
 #    duplicate definition, a common symbol, a 16-bit PC-relative branch out of reach, a relocation a program cannot
-#    carry, no crt0; and no output file is left by a failed link;
+#    carry, no crt0, --defsym's limits, ZEX2's refusals (tools/mkzexe.py's), a crt0 shorter than its header, a
+#    program past 4 GB; and no output file is left by a failed link;
+#  - the cases in tools/tests/zld (merged constants and string tails, empty aligned sections, --wrap, an archive with
+#    two members of one name, ZEX2's GOT classes mixed) linked by ld + tools/mkzexe.py and by zld: the same bytes;
 #  - damaged objects and archives (a fixed set of random byte changes and cuts, ZLD_FUZZ of each, default 400) given to
 #    a build under AddressSanitizer and UBSan: each must link or be refused with a message, never crash.
 # ZENIX_BUILD names the build directory (default build), which must be complete (make); ZLD_KEEP=DIR keeps the damaged
@@ -90,6 +93,51 @@ must_fail "a relocation a program cannot carry" "$T/abs16.o: unsupported relocat
 must_fail "no crt0" "no _start" "$T/ok.o" $Z
 must_fail "not an object" "not an ELF object or an archive" $L "$T/undef.c" $Z
 must_fail "a missing library" "cannot find libnothere.a" $L "$T/ok.o" -lnothere
+must_fail "--defsym with an expression" "only a symbol or a number" --defsym=a=b+4 $L "$T/ok.o" $Z
+must_fail "--defsym to an undefined symbol" "--defsym a: undefined symbol \`nowhere'" --defsym=a=nowhere $L "$T/ok.o" $Z
+
+# ---- small cases against ld + tools/mkzexe.py (tools/tests/zld: what the build's programs do not use) ----
+LG=${Z#* }
+for f in tools/tests/zld/*.S; do
+    "${P}gcc" -m68020-60 -c "$f" -o "$T/$(basename "${f%.S}").o" 2>>"$T/gcc.log" || echo "FAIL $f: $(tail -2 "$T/gcc.log")"
+done
+mkdir -p "$T/d1" "$T/d2"
+cp "$T/dup1.o" "$T/d1/averyveryverylongmembername.o"; cp "$T/dup2.o" "$T/d2/averyveryverylongmembername.o"
+"${P}ar" q "$T/dup.a" "$T/d1/averyveryverylongmembername.o" "$T/d2/averyveryverylongmembername.o" 2>/dev/null
+"${P}ranlib" "$T/dup.a"
+vs_ld() {   # NAME user|pure OPTIONS -- FILES...
+    local name=$1 lay=$2 crt lib opts=()
+    shift 2
+    while [ "$1" != -- ]; do opts+=("$1"); shift; done
+    shift
+    if [ "$lay" = user ]; then crt=$B/crt0.o lib=$B/libz.uo; else crt=$B/crt0-pure.o lib=$B/libz.po; fi
+    local wl=()
+    for o in "${opts[@]}"; do wl+=("-Wl,$o"); done
+    "${P}gcc" -m68020-60 -msoft-float -nostdlib -nostartfiles -T link/$lay.ld -Wl,--build-id=none -Wl,-q \
+        -Wl,--gc-sections "${wl[@]}" -o "$T/$name.elf" "$crt" "$@" "$lib" $LG >"$T/ld.txt" 2>&1 &&
+        TOOLPREFIX=$P python3 tools/mkzexe.py "$T/$name.elf" "$T/$name.ref" 0 >>"$T/ld.txt" 2>&1 &&
+        "$T/zld-asan" "${opts[@]}" -o "$T/$name.zx" "$crt" "$@" "$lib" $LG >"$T/out.txt" 2>&1 &&
+        cmp -s "$T/$name.ref" "$T/$name.zx"
+    check $? "$name: zld's program is ld + mkzexe.py's byte for byte" "$(tail -2 "$T/ld.txt") $(head -2 "$T/out.txt")"
+}
+vs_ld "merged constants and strings across objects" user -- "$T/c1.o" "$T/c2.o"
+vs_ld "string tails merged, a label at a merged section's end" user -- "$T/m0.o" "$T/m2.o"
+vs_ld "an empty 64-aligned .rodata" user -- "$T/t1.o"
+vs_ld "an empty 64-aligned .init_array" user -- "$T/t1b.o"
+vs_ld "a referenced empty 64-aligned section" user -- "$T/t1c.o"
+vs_ld "--wrap" user --wrap=foo -- "$T/wr.o"
+vs_ld "an archive with two members of one name" user -- "$T/dm.o" "$T/dup.a"
+vs_ld "ZEX2: GOT8O, GOT16O and GOT32O mixed over two objects" pure -- "$T/g2.o" "$T/g3.o"
+vs_ld "ZEX2: the same, the objects the other way round" pure -- "$T/g3.o" "$T/g2.o"
+LP="$B/crt0-pure.o"
+ZP="$B/libz.po $LG"
+must_fail "ZEX2: a writable section in the shared part" "writable section .rodata.cnt in the shared part" $LP "$T/wsec.o" $ZP
+must_fail "ZEX2: an absolute address in the code" "a relocation in the shared part" $LP "$T/abs32.o" $ZP
+must_fail "ZEX2: a PC-relative reference from code to data" "a PC-relative reference from the shared part to the data part" $LP "$T/pcx.o" $ZP
+must_fail "ZEX2: 8-bit table offsets past 32 entries" "reached with 8-bit offsets (at most 32)" $LP "$T/g4.o" $ZP
+must_fail "a crt0 shorter than the ZEXE header" "shorter than the ZEXE header" "$T/tiny.o" "$T/ok.o" $Z
+must_fail "a crt0 shorter than the ZEX2 header" "shorter than the ZEX2 header" "$T/tiny2.o" "$T/ok.o" $ZP
+must_fail "a program past 4 GB" "the program is larger than 4 GB" $L "$T/big.o" $Z
 
 # ---- damaged objects and archives, under the sanitizers ----
 "${P}ar" rcs "$T/small.a" "$T/twice2.o" "$T/ok.o" 2>/dev/null

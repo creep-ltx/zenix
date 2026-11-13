@@ -29,7 +29,10 @@ DESCRIPTION
     objects compiled for it: one copy of the code for every process
     running it). The layout is the build's (link/user.ld, link/pure.ld):
     code, constants, the address table (ZEX2), data with the constructor
-    tables, bss.
+    tables, bss. Sections go by name: .text.start first, then .text*,
+    .rodata*, the constructor tables (.init_array*, .fini_array*), .data*,
+    .bss*; .comment*, .note* (and .eh_frame* in ZEX2) are left out; any
+    other section that is kept is refused.
 
 OPTIONS
     -o program        the file to write (mode 755); written only when the
@@ -75,8 +78,13 @@ NOTES
     relocations are those gcc's 68k code uses: R_68K_32, PC32, PC16, PC8
     in both kinds, and in ZEX2 the address table's GOT32O, GOT16O, GOT8O
     and the calls PLT32, PLT16, PLT8; a ZEX2 program's code may hold no
-    absolute address (as tools/mkzexe.py checks, with its messages). At
-    most 8192 address table entries reached with 16-bit offsets.
+    absolute address, no writable section and no PC-relative reference
+    between its two parts (tools/mkzexe.py's checks, with its messages). At
+    most 32 address table entries reached with 8-bit offsets and 8192 with
+    16-bit ones. A reference to a symbol whose section is left out
+    (.comment, .note) is refused. An absolute symbol (a number given by
+    --defsym, .set) is written as it is, without a relocation entry
+    (tools/mkzexe.py would add the load address to it).
 
     Memory: zld keeps the symbol tables and relocations of the objects it
     uses and the program's image in memory, and reads archives through
@@ -85,8 +93,8 @@ NOTES
     temporary files.
 
     Inputs are not trusted: offsets, sizes and indexes are checked, and a
-    damaged object is refused with a message (tested with thousands of
-    damaged files under the PC's sanitizers).
+    damaged object is refused with a message (every test run gives it 400
+    damaged files under the PC's sanitizers, a longer run thousands).
 
 SEE ALSO
     make(1), sh(1), zpkg(1); docs/d52-self-hosting.md section 5
