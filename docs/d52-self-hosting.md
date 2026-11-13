@@ -49,8 +49,9 @@ kernel decision.
 
 Lua 5.4.9 (2026-08-10), MIT, the reference interpreter. 5.5.1 is newer (its arrays take less memory), but the scripts
 and books in use are 5.4's; moving to 5.5 is a later update of the pinned copy. Built unchanged: the Zenix settings
-are compiler flags, no patch (section 9). Measured: 221 KB of 68k code with the C library, the maths library and the
-soft float it needs; as a program with shared code (ZEX2), one copy for all who run it. Section 9 has what was built.
+are compiler flags and upstream's user-header hook, no patch (section 9). Measured: 221 KB of 68k code with the C library, the maths library and the
+soft float it needs; a plain program (ZEXE: libgcc's soft float cannot be shared code today). Section 9 has what
+was built.
 
 ## 4. make (item 2)
 
@@ -73,8 +74,8 @@ scripts do, resolve the symbols, apply the `R_68K_*` relocations and write the Z
 table directly (architecture.md section 4; the ZEX2 rules of mkzexe.py, such as no relocation in the shared part).
 Our own code, GPL-2.0-only.
 
-- **Why our own:** GNU ld is GPL-3+ and over 1 MB; vlink (Volker Barthelmann) has the same terms as vasm (section 6)
-  and has no Zenix format. A linker for one CPU, one input format and one output format is small (about 1,500 lines
+- **Why our own:** GNU ld is GPL-3+ and over 1 MB; vlink (Frank Wille's, distributed beside vasm and vbcc; its
+  terms not read here, but of the same non-commercial kind as far as known) has no Zenix format. A linker for one CPU, one input format and one output format is small (about 1,500 lines
   of C, 20-30 KB of code: an estimate).
 - **Checked on the PC first:** `zld` built for the PC links the objects of every program in `UAPPS` and must give
   byte for byte the `.zx`/`.pzx` that `ld` + `mkzexe.py` give (or a difference that is explained and allowed: the
@@ -89,8 +90,10 @@ Candidates (68k, Motorola syntax, an output Zenix's linker can read, i.e. ELF re
   and hunk output. Licence (vasm.texi, 2002-2025): "This archive may be redistributed without modifications and used
   for non-commercial purposes. An exception for commercial usage is granted, provided that the target CPU is M68k
   and the target OS is AmigaOS. ... In all other cases you need my written consent." **Not GPL-compatible** (the
-  non-commercial clause is a restriction GPL-2 forbids), so never in the repository; a Zenix build is a modified
-  distribution for an OS that is not AmigaOS, so even a separate package needs the author's **written consent**.
+  non-commercial clause is a restriction GPL-2 forbids), so never in the repository. As a separate package the
+  terms allow passing on the archive unmodified for non-commercial use on any OS; but a Zenix build needs changes
+  (a modified version, which the terms do not allow), and Zenix copies may be sold (the AmigaOS exception does not
+  cover Zenix), so a Zenix package should have the author's **written consent**.
   Size measured: the 68k CPU module, the Motorola syntax and the ELF output compiled for Zenix are 153 KB of code and
   150 KB of tables (the opcode tables), about 320 KB with the C library.
 - **GNU as** (binutils): GPL-3+ since binutils 2.18; 2.17 (2006) was the last GPL-2+. Through BFD it is about 1 MB
@@ -101,8 +104,8 @@ Candidates (68k, Motorola syntax, an output Zenix's linker can read, i.e. ELF re
 - **A68k** (Aminet, public domain): 68000/68010 only, hunk objects only. No.
 - **Our own, `zas`** (recommended): GPL-2.0-only, Motorola syntax as vasm and Devpac write it, the 68020 integer
   instructions and addressing modes plus what the compiler of item 5 needs, sections, `dc`, `ds`, `equ`, `xdef`/`xref`,
-  simple macros later; ELF relocatable output with `R_68K_32`/`PC16`/`PC32`/`PC8`. Also gas's MIT-free syntax the
-  repository's own `.S` files use (`crt0.S` is three instructions), so Zenix can assemble its start-up code. An
+  simple macros later; ELF relocatable output with `R_68K_32`/`PC16`/`PC32`/`PC8`. Also gas's m68k syntax ("MIT
+  syntax", `%`-less registers as the repository writes them) the repository's own `.S` files use (`crt0.S` is three instructions), so Zenix can assemble its start-up code. An
   estimate: 2,500-3,500 lines, 30-50 KB. **Checked on the PC** the way the linker is: every instruction form
   assembled by `zas` and by `m68k-elf-as`, the object bytes and relocations compared.
 
@@ -122,7 +125,7 @@ run in 4 MB for a small file, be honest about its code. Candidates:
 | **vbcc** (Volker Barthelmann) | "redistributed without modifications ... non-commercial ... AmigaOS exception ... in all other cases you need my written consent": **not GPL-compatible** | excellent, the Amiga's own | the PC build is 1.4 MB (measured, x86-64); a 68k build maybe 0.6-0.9 MB (estimate); a function at a time, runs in 1-2 MB on AmigaOS | the best code with the least work, but a separate package only, with written consent; needs vasm and vlink too (same terms) |
 | gcc 2.95.3 + binutils 2.17 | GPL-2+: compatible | excellent, gcc's own ABI | cc1 about 2 MB (Amiga builds of the time), needs several MB to compile; 25-year-old code that today's compilers build only with work | for the 1260 (64 MB) at most; not for the minimum; no |
 | ACK (Amsterdam Compiler Kit) | BSD-3 since 2003: compatible | yes (m68020, `linux68k`) | many small passes (made for small machines) | C89 only (picolibc's headers need C99), its own object format and libc, its own ABI: much glue; no |
-| pcc (Portable C Compiler) | BSD, older files Caldera's 4-clause licence | an m68k back end exists in the tree, its state unknown (last release 1.1.0, 2014) | small | writes gas syntax, so it needs gas or a gas-syntax `zas`; uncertain; no |
+| pcc (Portable C Compiler) | BSD, older files under Caldera's 4-clause licence (with the advertising clause: GPL-incompatible inside one program) | an m68k back end exists in the tree, its state unknown (last release 1.1.0, 2014) | small | writes gas syntax, so it needs gas or a gas-syntax `zas`; uncertain; no |
 | cproc + QBE | ISC + MIT: compatible | none, and QBE is built for 64-bit targets (pointers are 64-bit "l") | small | a 32-bit back end changes QBE itself; no |
 | chibicc (and EiGen's ecc) | MIT (EiGen GPL-3, C++) | none (EiGen has an unfinished m68k part, C++) | chibicc never frees memory: a big file does not fit 4 MB | no |
 | lcc | its own licence ("may not be sold"): not open source | none in 4.2 | | no |
@@ -139,7 +142,8 @@ run, the two outputs compared. An estimate: one to two weeks of work, the larges
 upstream to tcc keeps it alive.
 
 **For the partner:** tcc with our own back end (free, recommended, takes longest) or vbcc + vasm + vlink as a
-separate package with Volker Barthelmann's written consent (best code, least work, not free software in the
+separate package with its authors' written consent (Volker Barthelmann for vbcc and vasm, Frank Wille for vlink;
+best code, least work, not free software in the
 partner's sense: "I do not like proprietary software"). Both could exist later: vbcc as an optional package if
 consent is given.
 
@@ -195,14 +199,15 @@ one copy of the code for every Lua running), but libgcc's soft float for the 68k
 (`_fpCCR`, `__exception_bits`, the exception handler's pointer) in data it reaches by absolute addresses, which
 `tools/mkzexe.py` rightly refuses in a shared part (33 such places). A pure soft float (libgcc's C soft-fp compiled
 through `tools/purecc.sh`, or the asm with its data reached through `a5`) would make every float-using program
-shareable; it is noted for the compiler item, which needs soft float too. `luac` is left out (`string.dump` and `load` do its job in scripts; it would be a second 200 KB program).
+shareable; it is noted for the compiler item, which needs soft float too. `luac` is left out (`string.dump` and
+`load` do its job in scripts; it would be a second 200 KB program).
 The package `lua` (tools/mkzup.py) with its notice in `/usr/share/licenses/lua`. Not on the demo floppies and not on
 the RAM-disk test floppy.
 
 **Sizes (measured, 2026-11-13):** `/bin/lua` 243,948 bytes on the disk; 220.8 KB of code, of which Lua's own is
 155 KB and the C library, the maths library and the soft float 66 KB. The test root image has 270 KB less free
 (5,241 of its 16,384 1-KB blocks free, 5,511 before): the program, its notice, the test scripts and libctest's check.
-**Memory** (FS-UAE, an A1200 with 4 MB of fast RAM, emulator figures from `tools/lua-test.sh`): see the test's
+**Memory** (FS-UAE, an A1200 with 4 MB of fast RAM, emulator figures from `tools/lua-test.sh`):
 a Lua that has just started owns 396 KB (its code and data 244 KB, its stack 128 KB, its first heap with the
 standard libraries about 24 KB); with 100 KB of strings in its heap 542 KB. A second Lua running at once costs the
 same again (no shared code, above).
@@ -212,34 +217,63 @@ the kernel's guard notices). Lua itself stops a script that nests too deep in C:
 calls (a C function calling Lua again: `string.gsub` with a function, `pcall`, `table.sort`'s comparison, a
 metamethod, `require`, `load` with a reader, a coroutine resumed from a coroutine, `tostring` through
 `__tostring`) or of the parser (brackets, tables, functions, blocks inside each other), with "C stack overflow", an
-error the script can catch; while it handles that error it allows a tenth more. Lua calling Lua costs no C stack
-in 5.4 (those calls nest until memory runs out). So the stack must hold `LUAI_MAXCCALLS` * 1.1 of the costliest
-level. `rootfs/tests/lua/cstack.lua` drives each of the 16 kinds of recursion to Lua's limit; run under Lua builds
-whose header named different stacks (FS-UAE, the A1200 with 4 MB fast, 2026-11-13), the kernel's guard killed the
-ones whose stack was too small:
+error the script can catch; while it handles that error it allows a tenth more, and a Lua message handler (`xpcall`)
+runs on top of the deepest chain. Lua calling Lua costs no C stack in 5.4 (those calls nest until memory runs out).
+The pattern matcher has a recursion counter of its own (lstrlib's `MAXCCALLS`, 200 upstream, 100 here through
+`luauser.h`: "pattern too complex" past it), which adds to the deepest chain.
 
-| Kind (cstack.lua) | 200 levels, 512-byte buffers: stack needed | 100 levels, 256-byte buffers |
-|---|---|---|
-| gsub (string.gsub's function calling gsub) | 192-256 KB | 80-96 KB |
-| traceback (gsub's chain, then a traceback made at the bottom) | 192-256 KB | 96-112 KB |
-| format (`%s` through `__tostring`) | 192-256 KB | 64-80 KB |
-| load (a reader that loads) | 128-192 KB | 80-96 KB |
-| pcall, sort, resume | 96-128 KB | 48-64 KB |
-| arith, require, tostring | 64-96 KB | under 48 KB |
-| index, the parser's five | under 64 KB | under 48 KB |
+`rootfs/tests/lua/cstack.lua` drives 18 kinds of recursion to Lua's limit (the 16 plain kinds, then the pattern
+matcher at every level of the gsub chain, then a message handler that goes down the chain again). Two ways of
+measuring, both in FS-UAE (the A1200 with 4 MB fast, 2026-11-13):
 
-A gsub level is about 0.8 KB with the smaller buffer (str_gsub's frame 676 bytes by `-fstack-usage`, 932 with
-upstream's). Upstream's 200 levels would need a 256 KB stack for every Lua; 100 levels and the 256-byte buffer
-(`luauser.h`: a longer result moves to the heap, as upstream's code does for any buffer that outgrows it) fit in
-112 KB, so **`STACK_lua` is 128 KB**: the worst kind measured plus 16 KB. 100 nested C calls or 100 levels of
-brackets is far beyond hand-written code; a script that goes past gets Lua's error, never a crash.
-`tools/lua-test.sh` runs all 16 kinds on the real build each time and fails if the guard ever fires.
+- **First, by bisection:** builds whose header named smaller stacks, the kernel's guard killing the ones whose stack
+  was too small. With upstream's 200 levels and 512-byte buffers gsub needed 192-256 KB. **This reads low:** the
+  guard is 16 bytes, checked at system calls and ticks, and a big frame that is mostly unwritten (str_gsub's buffer
+  and capture array) can dip past it unseen (the review's point): gsub "fitted" in 96 KB at 100 levels, but needs 99 KB.
+- **Then exactly, by a painted stack:** a test build, `/tests/lua/luaprobe` (`ports/lua/zenix/stackprobe.c`, through
+  upstream's `luai_userstateopen`/`luai_userstateclose` hooks in `luauser.h`), fills 240 KB of its stack with a
+  pattern when the Lua state opens and finds the deepest word written when it closes. With 100 levels and 256-byte
+  buffers, from the program's arguments down, in bytes:
 
-**Found on the way, fixed:** picolibc's `fflush` took `NULL` as a stream and called through the low memory's
+| Kind (cstack.lua, run one at a time) | Deepest stack |
+|---|---|
+| handler (a Lua message handler down the gsub chain again, the pattern at each level) | 111,996 |
+| pattern (the gsub chain, a 99-level pattern at every level) | 103,264 |
+| traceback (the gsub chain, a traceback made at the bottom) | 99,876 |
+| gsub (string.gsub's function calling gsub) | 99,288 |
+| load (a reader that loads) | 83,380 |
+| format (`%s` through `__tostring`) | 76,396 |
+| pcall | 59,324 |
+| resume (a coroutine resumed from a coroutine) | 57,116 |
+| sort (the comparison sorting again) | 53,116 |
+| arith, tostring, require (metamethods, `__tostring`, `package.preload`) | 40,740 / 39,924 / 35,204 |
+| functions, index, ifs, blocks, tables, parens (the parser; `__index`) | 30,796 / 29,100 / 21,748 / 19,104 / 17,496 / 15,976 |
+| zenix.lua (the whole functional test) | 29,100 |
+
+A gsub level is about 0.9 KB (str_gsub's frame 676 bytes by `-fstack-usage` with the 256-byte buffer, 932 with
+upstream's 512). Upstream's 200 levels would need about 250 KB for every Lua. **`STACK_lua` is 128 KB:** the deepest
+kind measured, 112 KB, plus 19 KB. `tools/lua-test.sh` runs the probe build over all 18 kinds on every run and fails
+unless the deepest leaves 8 KB of `STACK_lua` free, and runs them under `/bin/lua` itself, failing if the guard ever
+fires. 100 nested C calls or 100 levels of brackets is far beyond hand-written code; a script that goes past gets
+Lua's error. **Except binary chunks:** Lua does not check them (upstream: "binary chunks are not checked"), and
+lundump's loading of nested functions has no depth limit, so a crafted chunk given to `load` (whose default mode
+"bt" takes binary) can run past the stack, which without an MMU writes into memory that is not Lua's. Load binary
+chunks only from `string.dump` of code you trust (docs/man/lua.txt says so).
+
+**Found on the way, fixed: the allocator's `realloc`** (`user/zmalloc.c`, D27, shared by libz and the C library)
+grew a block in place by taking the whole free block after it, not only what it needed. A block lying just before a
+new chunk's untouched rest swallowed the rest (megabytes, once the heap had grown), the next request found nothing
+free and took a new chunk, and so on: Lua parsing `cstack.lua` (5 KB) held 13 MB in 16 regions and failed with
+"not enough memory". Now the rest stays free (`take`'s rule); `zmalloc-host grow` (in `tools/zmalloc-test.sh`)
+fails on the old code (out of regions at the 17th block) and passes on the new; the recorded traces of the other
+programs replay within their budgets as before. Every program using `realloc` was exposed to it.
+**Also fixed:** picolibc's `fflush` took `NULL` as a stream and called through the low memory's
 contents (Lua's `io.popen` calls `fflush(NULL)` first, as C allows: "every output stream"): every `io.popen`
 crashed. The port has its own `fflush` now (`libc/zenix/stdio.c`; picolibc's `fflush.c` left out in
-`libc/picolibc/sources.mk`), checked by `/tests/libctest` (a written stream's bytes in the file after `fflush(NULL)`,
-a read stream left where it was). **Found, a limit (docs/limits.md):** picolibc's printf (its Ryu engine, D27)
+`libc/picolibc/sources.mk`, its file removed): every stream with output waiting is flushed, a stream last read (an
+"r+" one too) left alone, as glibc does (flushing it would seek back over its buffered input, which a pipe or a
+terminal cannot do); checked by `/tests/libctest` (a written stream's bytes in the file after `fflush(NULL)`, a pipe
+being read keeping its buffered input). **Found, a limit (docs/limits.md):** picolibc's printf (its Ryu engine, D27)
 gives a number's shortest exact digits when more are asked: `%.17g` of 0.1 is `0.1` (glibc `0.10000000000000001`)
 and the subnormal 2^-1074 is `5e-324` at Lua's `%.14g`; round-trip safe, not C's exact expansion. Checked by
 `tools/lua-test.sh` so a change shows.
@@ -251,9 +285,9 @@ wrap-around, floats and their printing, the maths library to 12 digits, strings 
 `<close>`, errors and their messages, coroutines, goto, load and `string.dump`, `require`, files read and written
 in every mode, `seek`, `io.lines`, rename and remove, `os.tmpname`, `io.popen` both ways, `os.execute`'s statuses,
 `os.time` and `os.date` in UTC, the garbage collector's modes) must end with status 0 and leave no file;
-`cstack.lua`'s 16 kinds must each end in "C stack overflow". `tools/lua-test.sh` (FS-UAE, `make check`): the same
-script's output on Zenix compared with the PC's line for line, the 16 kinds stopped by Lua and the guard never
-firing, `lua -v`, `-e`, a script from standard input with arguments, a script file with arguments, an error's
+`cstack.lua`'s 18 kinds must each end in Lua's own error. `tools/lua-test.sh` (FS-UAE, `make check`): the same
+script's output on Zenix compared with the PC's line for line, the 18 kinds stopped by Lua and the guard never
+firing, the probe build's deepest stack against `STACK_lua`, `lua -v`, `-e`, a script from standard input with arguments, a script file with arguments, an error's
 message, traceback and status 1, a missing file, `os.exit(7)`, `-i` with a line typed at the prompt, the memory.
 **Verified in FS-UAE 2026-11-13; not yet on a real Amiga** (the first run there should time `zenix.lua` on the stock
 A1200 and the 1260, and run `cstack.lua`).
@@ -267,7 +301,8 @@ libgcc call); `lvm.c` at `-O2` instead of `-Os` is the first thing to try once t
 1. **The assembler** (section 6): our own `zas` (recommended) or vasm as a separate package with Volker
    Barthelmann's written consent?
 2. **The C compiler** (section 7): tcc with a 68k back end of our own (recommended; one to two weeks) or vbcc +
-   vasm + vlink as a separate package with the author's written consent? Or both, vbcc later as an option?
+   vasm + vlink as a separate package with their authors' written consent (Volker Barthelmann; vlink's Frank
+   Wille)? Or both, vbcc later as an option?
 3. **A live debugger** (section 8): may the kernel grow a way to stop a process and route its trace and breakpoint
    traps to a debugger (a design note with two reviews first)? Without it, `zdb` works on crashes only.
 4. **The fun** (section 8): which first: Lua's display-and-sound module for games, the BSD terminal games, Frotz,

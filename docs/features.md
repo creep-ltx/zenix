@@ -191,7 +191,7 @@ every standard library (strings and patterns, tables, maths with 64-bit integers
 coroutines, io with `io.popen`, os, debug, `require` of Lua modules); a plain program (no shared code: libgcc's soft
 float is not pure); a fixed stack that Lua's own limit on nested C calls keeps it inside (d52 section 9). **verified**
 on the PC and in FS-UAE on an A1200 with 4 MB of fast RAM: `tools/lua-host-test.sh` and `tools/lua-test.sh` (a script
-of 112 lines of results the same as the PC's line for line, 16 kinds of C recursion stopped by Lua, never by the
+of 112 lines of results the same as the PC's line for line, 18 kinds of C recursion stopped by Lua, never by the
 kernel's stack guard, the command line). Not yet on a real Amiga. See man/lua.txt.
 
 ## Tooling

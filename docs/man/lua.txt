@@ -64,6 +64,15 @@ NOTES
     would need a 256 KB stack. Lua-to-Lua calls do not count: they nest
     until memory runs out ("stack overflow").
 
+    A pattern that backtracks more than 100 levels deep (string.find,
+    match, gmatch, gsub) stops with "pattern too complex" (upstream: 200).
+
+    Load binary chunks (load with mode "b", or "bt", the default) only
+    from string.dump of code you trust: Lua does not check them, and a
+    crafted one can nest without limit and run past the stack, which
+    without an MMU writes into memory that is not Lua's. Source text is
+    always checked.
+
     Lua runs as one program per Lua: its 244 KB of code are not shared
     between two Luas running at once.
 

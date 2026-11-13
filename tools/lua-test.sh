@@ -28,9 +28,20 @@ check(len(got) == len(want) and not diff, "zenix.lua's %d lines are the PC's, li
       (len(got), len(want), diff[:5]))
 cs = part("cout", "cend")
 cases = re.findall(r"^(\w+)\t(.*)\tok$", cs, re.M)
-check(L.status("cst") == 0 and len(cases) >= 16 and all(e == "C stack overflow" for _, e in cases) and
-      "cstack done" in cs, "every C recursion (%d) stopped by Lua's own limit" % len(cases),
+check(L.status("cst") == 0 and len(cases) >= 18 and all(e == "C stack overflow" or (n, e) == ("handler",
+      "error in error handling") for n, e in cases) and "cstack done" in cs,
+      "every C recursion (%d) stopped by Lua's own limit" % len(cases),
       [c for c in cases if c[1] != "C stack overflow"] or cs[-400:])
+# the stack probe build (/tests/lua/luaprobe): every word the stack reached by all the kinds of recursion in one run,
+# against /bin/lua's stack (d52 section 9 has the depth of each kind, measured one at a time)
+stack = int(re.search(r"^STACK_lua := (\d+)$", open("Makefile").read(), re.M).group(1))
+pr = L.part("cend", "pend")
+probes = re.findall(r"^luaprobe: stack (\d+) bytes deep(.*)$", pr, re.M)
+deepest = int(probes[0][0]) if probes else 0
+check(len(probes) == 2 and "cstack done" in pr and not any(x for _, x in probes) and deepest + 8192 <= stack,
+      "the deepest stack of all the kinds (%d bytes) leaves 8 KB of STACK_lua (%d) free" % (deepest, stack), pr[-500:])
+if len(probes) == 2:
+    print("     (the stack's deepest: the C recursions %s bytes, zenix.lua %s bytes)" % (probes[0][0], probes[1][0]))
 check("overflowed its user stack" not in L.text, "the stack guard never fired",
       re.findall(r".*overflowed its user stack.*", L.text))
 check(re.search(r"^Lua 5\.4\.9  Copyright \(C\) 1994-2026 Lua\.org, PUC-Rio$", L.text, re.M) is not None,
@@ -47,7 +58,7 @@ check(re.search(r"^lua: cannot open /no/such/file\.lua", L.text, re.M) is not No
 check(L.status("xst") == 7, "os.exit(7): status 7", L.status("xst"))
 check(re.search(r"^args\tone\ttwo$", L.text, re.M) is not None and L.status("ast") == 0,
       "a script file with its arguments")
-check(re.search(r"^42$", L.text, re.M) is not None, "lua -i: the file run first, then a line typed at the prompt")
+check(re.search(r"^i=42$", L.text, re.M) is not None, "lua -i: the file run first, then a line typed at the prompt")
 m = part("mem", "mend")
 ps = re.findall(r"^ +\d+ +\d+ +\d+ +-?\d+ +\w+ +(\d+) +(\d+) lua$", m, re.M)
 fr = re.findall(r"^(?:chip RAM|fast RAM|RAM) free: (\d+) KB$", m, re.M)

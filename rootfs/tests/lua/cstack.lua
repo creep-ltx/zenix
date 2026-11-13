@@ -8,6 +8,7 @@ local only = arg[1]
 local function short(e)
     e = tostring(e)
     if e:find("C stack overflow", 1, true) then return "C stack overflow" end
+    if e:find("error in error handling", 1, true) then return "error in error handling" end
     e = e:gsub("^[^:]*:%d+: ", ""); return (e:match("^[^\n]*"):sub(1, 40))
 end
 local cases = {}
@@ -77,6 +78,21 @@ case("ifs", function() return assert(load(("if x then "):rep(400) .. ("end "):re
 case("traceback", function()
     local function f(s) return (string.gsub("x", "x", f)) end
     local ok, e = xpcall(f, debug.traceback, "x")
+    error(e, 0)
+end)
+-- the pattern matcher's own recursion (lstrlib's MAXCCALLS, a counter apart from Lua's) at every level of the gsub
+-- chain, so its deepest run sits on the deepest chain
+local deep = ("a"):rep(99)
+local deeppat = ("a?"):rep(99)
+case("pattern", function()
+    local function f(s) string.find(deep, deeppat); return (string.gsub("x", "x", f)) end
+    return f("x")
+end)
+-- a Lua message handler: it runs on top of the deepest chain (Lua allows a tenth more levels while it handles the
+-- error), and recurses through gsub again with the pattern at each level, until "error in error handling"
+case("handler", function()
+    local function f(s) string.find(deep, deeppat); return (string.gsub("x", "x", f)) end
+    local ok, e = xpcall(f, function(m) return f("x") end, "x")
     error(e, 0)
 end)
 -- string.rep, string.format and table.concat on big strings are not recursion, only memory: not here

@@ -84,6 +84,8 @@ case " $PROGS " in *" lua "*) lic ports/lua/upstream/LICENSE lua;; esac
 [ -z "$NOMAN" ] && lic libc/picolibc/COPYING.picolibc picolibc
 if [ -z "$NOTESTS" ] && [ -f "$B/libctest.zx" ]; then cp "$B/libctest.zx" "$T/tests/libctest" && chmod 755 "$T/tests/libctest"; fi
 if [ -z "$NOTESTS" ] && [ -f "$B/libctest.pzx" ]; then cp "$B/libctest.pzx" "$T/tests/libctestpure" && chmod 755 "$T/tests/libctestpure"; fi
+# Lua's stack probe build (DESIGN D52 9) beside the Lua test scripts
+if [ -z "$NOTESTS" ] && [ -f "$B/lua-probe.zx" ] && [ -d "$T/tests/lua" ]; then cp "$B/lua-probe.zx" "$T/tests/lua/luaprobe" && chmod 755 "$T/tests/lua/luaprobe"; fi
 # ZINE (DESIGN D29): its blob, the small AmigaOS /bin/zine loads (only on images with /bin/zine), and on test images
 # the null blob and the test programs (AmigaOS hunk executables written for the purpose) in /tests/zine
 if [ -f "$B/zine.blob" ] && [ -f "$T/bin/zine" ]; then mkdir -p "$T/lib/zine" && cp "$B/zine.blob" "$T/lib/zine/"; fi

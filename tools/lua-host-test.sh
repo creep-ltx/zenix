@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-only
 # Lua on the PC (DESIGN D52 section 9, ports/lua): the pinned Lua 5.4.9 source built for the PC with the settings
-# Zenix's build gives it (the Makefile's LUA_CFLAGS: LUA_USE_POSIX, LUAI_MAXCCALLS, ports/lua/zenix/luauser.h) under AddressSanitizer and
-# UBSan, then rootfs/tests/lua/zenix.lua and cstack.lua run with it. Checked: both end with status 0 and print their
-# last line, and every C-stack case ends in Lua's own "C stack overflow". The output of zenix.lua is the reference
-# tools/lua-test.sh compares Zenix's output with, line for line: LUA_EXPECTED=FILE keeps a copy of it.
+# Zenix's build gives it (the Makefile's LUA_CFLAGS: LUA_USE_POSIX, LUAI_MAXCCALLS, ports/lua/zenix/luauser.h) under
+# AddressSanitizer and UBSan, then rootfs/tests/lua/zenix.lua and cstack.lua run with it. Checked: both end with
+# status 0 and print their last line, and every C-stack case ends in Lua's own "C stack overflow" (the message
+# handler's in "error in error handling"). zenix.lua's os.tmpname makes and removes one file in /tmp (upstream's
+# fixed template). The output of zenix.lua is the reference tools/lua-test.sh compares Zenix's output with, line for
+# line: LUA_EXPECTED=FILE keeps a copy of it.
 cd "$(dirname "$0")/.." || exit 1
 T=$(mktemp -d "${TMPDIR:-/tmp}/zenix-lua.XXXXXX")
 trap 'rm -rf "$T"' EXIT
@@ -29,8 +31,9 @@ grep -q "^9223372036854775807	-9223372036854775808	true$" "$T/out.txt"; check $?
 grep -qx "== version	Lua 5.4	integer	float	nil" "$T/out.txt"; check $? "the version line"
 (cd rootfs/tests/lua && "$T/lua" cstack.lua) >"$T/cs.txt" 2>&1
 check $? "cstack.lua ran with status 0" "$(tail -3 "$T/cs.txt")"
-ncase=$(grep -c "	C stack overflow	ok$" "$T/cs.txt"); nall=$(grep -c "	ok$" "$T/cs.txt")
-[ "$ncase" = "$nall" ] && [ "$nall" -ge 16 ] && grep -qx "cstack done" "$T/cs.txt"
-check $? "every C-stack case stopped by Lua's own limit ($ncase of $nall)" "$(grep -v 'C stack overflow' "$T/cs.txt")"
+ncase=$(grep -cE "	(C stack overflow|error in error handling)	ok$" "$T/cs.txt"); nall=$(grep -c "	ok$" "$T/cs.txt")
+[ "$ncase" = "$nall" ] && [ "$nall" -ge 18 ] && grep -qx "handler	error in error handling	ok" "$T/cs.txt" &&
+    grep -qx "cstack done" "$T/cs.txt"
+check $? "every C-stack case stopped by Lua's own limit ($ncase of $nall)" "$(grep -vE 'C stack overflow|error in error' "$T/cs.txt")"
 [ -n "$LUA_EXPECTED" ] && cp "$T/out.txt" "$LUA_EXPECTED"
 exit $fail
