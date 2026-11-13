@@ -25,9 +25,11 @@ EXAMPLES
     ls *.c | xargs -I X cp X backup/X
 
 NOTES
-    One run takes as many words as a program can be given (256 arguments
-    and 8 KB of text, the kernel's limits for starting a program); more
-    words make more runs, none is left out. A single word too long for that
+    One run takes at most 253 arguments and 7,808 bytes of text: the
+    kernel's limits for starting a program (256 and 8 KB) less the room a
+    script's #! line adds (its interpreter, one argument, its path), so a
+    script gets full runs too. More words make more runs, none is left
+    out. A single word too long for that
     is reported and ends xargs with status 1. Running out of memory is
     reported ("out of memory") and ends the command with a non-zero status;
     nothing is cut short silently.

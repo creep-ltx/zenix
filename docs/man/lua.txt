@@ -47,14 +47,18 @@ EXAMPLES
     lua -e 'print(2^10, math.maxinteger)'
     lua count.lua *.txt
     ls | lua -e 'for l in io.lines() do print(#l, l) end'
+    ./count.lua *.txt           a script whose first line is #!/bin/lua
+                                (or #!/bin/env lua) and that has its
+                                x bit (chmod +x count.lua); arg[0] is
+                                ./count.lua (DESIGN D53)
 
 NOTES
     Numbers are 64-bit integers and double floats, as everywhere else;
     the floats are computed in software (no FPU is used), so a script
     heavy in floating-point maths is slow on a 68020 without one.
 
-    Zenix runs a script by the command lua file.lua; it does not start a
-    file by its #! line.
+    A script starts by its #! line (see sh(1)): the kernel runs
+    /bin/lua with the script's path and its arguments, as on Unix.
 
     The stack is fixed (no MMU): 128 KB. Lua stops a script that nests
     more than 100 C calls (a function given to string.gsub, pcall,

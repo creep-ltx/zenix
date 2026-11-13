@@ -307,8 +307,9 @@ libgcc call); `lvm.c` at `-O2` instead of `-Os` is the first thing to try once t
    traps to a debugger (a design note with two reviews first)? Without it, `zdb` works on crashes only.
 4. **The fun** (section 8): which first: Lua's display-and-sound module for games, the BSD terminal games, Frotz,
    or a Zenix intro (which waits for `DPY_SCREEN`)?
-5. **Running a script by its `#!` line** (`./count.lua` instead of `lua count.lua`): Zenix's spawn does not read
-   `#!` today; Lua and later `make` and `tcc -run` would profit. A kernel or shell change, so the partner's.
+5. **Running a script by its `#!` line** (`./count.lua` instead of `lua count.lua`): Zenix's spawn did not read
+   `#!`; Lua and later `make` and `tcc -run` would profit. A kernel or shell change, so the partner's. (Answered
+   "Yes" 2026-11-13; built as DESIGN D53, docs/d53-shebang.md.)
 6. **Lua on the demo floppies:** not planned (243 KB, 128 KB with gzip -9); the HD one has room. Wanted?
 
 ## 11. Sources

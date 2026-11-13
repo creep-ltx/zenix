@@ -1,0 +1,2 @@
+#!/tests/shebang/no-such-interpreter
+echo never

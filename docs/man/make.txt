@@ -100,6 +100,10 @@ EXAMPLES
     make -f build.mk -k test    keep going after a failure
     make CC=tcc prog            a macro from the command line
     make -q prog && echo current
+    ./build.mk install          a makefile whose first line is
+                                #!/bin/make -f, with its x bit: the
+                                kernel runs make -f ./build.mk install
+                                (DESIGN D53)
 
 NOTES
     Times are the file system's, whole seconds (the clock has no finer

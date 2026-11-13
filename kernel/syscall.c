@@ -157,10 +157,8 @@ KCOLD static long do_priority(int set, u32 which, u32 who, s32 nice)
     return 0;
 }
 
-/* spawn's arguments: up to SPAWN_ARGC arguments and SPAWN_ARGBYTES bytes of text (copied to the kernel heap, then to
- * the top of the new program's stack); more is -E2BIG ("argument list too long"), never a silent cut */
-#define SPAWN_ARGC     256
-#define SPAWN_ARGBYTES 8192
+/* spawn's arguments: up to SPAWN_ARGC arguments and SPAWN_ARGBYTES bytes of text (kernel.h; copied to the kernel heap,
+ * then to the top of the new program's stack); more is -E2BIG ("argument list too long"), never a silent cut */
 
 static __attribute__((noinline)) long do_spawn(u32 upath, u32 uargv, u32 ustdio)
 {

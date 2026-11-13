@@ -1,0 +1,20 @@
+wait zenix:/# 120
+send cd /tests/shebang; echo ==r""un; ./args.sh a1 b2; echo s1=$?; ./args.lua l1 l2; echo s2=$?; ./envlua e1; echo s3=$?; ./x.mk V=7; echo s4=$?; ./echo1 x y; ./long127; echo s5=$?; echo ==r""end\r
+wait ==rend 300
+send echo ==b""ad; ./long128; echo l8=$?; ./missing; echo mi=$?; ./nox.sh; echo nx=$?; ./nested; echo ne=$?; ./nomagic; echo nm=$?; ./crlf; echo cr=$?; sh ./nomagic; echo sn=$?; dmesg | grep --color=never 'exec: '; echo ==b""end\r
+wait ==bend 300
+send echo ==v""ia; make -f recipe.mk; echo mk=$?; echo x1 x2 | xargs /tests/shebang/args.sh; echo xa=$?; env /tests/shebang/args.sh v1; echo en=$?; find /tests/shebang -name echo1 -exec {} q \;; echo fi=$?; echo ==v""end\r
+wait ==vend 300
+send echo ==b""ig; lua -e 'local f = io.open("/tmp/big.sh", "w") f:write("#!/bin/sh\\necho big-ran\\nexit 0\\n") for i = 1, 5000 do f:write(("#"):rep(63) .. "\\n") end f:close()'; chmod 755 /tmp/big.sh; ls -l /tmp/big.sh; /tmp/big.sh; echo bg=$?; seq 1 600 | xargs /tests/shebang/count.sh; echo xc=$?; echo ==h""eap\r
+wait ==heap 300
+send ./args.sh > /dev/null; ./long128 2>/dev/null; echo ==w""1\r
+wait ==w1 120
+send free; ps; echo ==w""2\r
+wait ==w2 120
+send i=0; while [ $i -lt 100 ]; do ./long128 2>/dev/null; ./missing 2>/dev/null; ./nested 2>/dev/null; ./args.sh > /dev/null; i=$((i+1)); done; echo ==w""3\r
+wait ==w3 600
+send free; ps; echo ==g""end\r
+wait ==gend 120
+send echo ==p""s; cp psname.sh /tmp/psname.sh; chown 1000 /tmp/psname.sh; chmod 4755 /tmp/psname.sh; ls -l /tmp/psname.sh; /tmp/psname.sh; echo ps=$?; echo ==p""end\r
+wait ==pend 120
+stop

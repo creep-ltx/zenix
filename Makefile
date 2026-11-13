@@ -256,8 +256,9 @@ RAMDISK_K := 640
 # the CD drive: about 2.4 KB of kernel, ATAPI in kernel/ide.c and cd0 in the built-in diskd). 688 since DESIGN D45
 # revision 3 (2026-11-12, memory protection's code in a span of its own: 200 bytes of kernel.bin). 685 since DESIGN D46
 # (2026-11-12, USB sticks: 3.4 KB of kernel.bin: the built-in diskd's usb0 2.3 KB, stage0's boot-only lookup 0.7 KB).
-# 684 since DESIGN D49 (2026-11-13, directories in batches: 1.1 KB of kernel.bin, the built-in fsd's 0.7 KB).
-RAMDISK_MOUNT_K := 684
+# 684 since DESIGN D49 (2026-11-13, directories in batches: 1.1 KB of kernel.bin, the built-in fsd's 0.7 KB). 683
+# since DESIGN D53 (2026-11-13, scripts started by their #! line: 712 bytes of kernel.bin).
+RAMDISK_MOUNT_K := 683
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/check-init.py tools/ksize-check.sh tools/ksize-budget
@@ -1267,6 +1268,7 @@ $(BUILD)/crt0-pure.o: user/crt0.S | $(BUILD)
 	$(CC) $(ASFLAGS) -DZEX2 $< -o $@
 $(BUILD)/%.po: user/%.c user/libz.h user/usys.h tools/purecc.sh | $(BUILD)
 	tools/purecc.sh $(CC) $(UCFLAGS) -c $< -o $@
+$(BUILD)/sh.po $(BUILD)/sh.uo: kernel/shebang.h     # the shell explains a refused #! line as the kernel reads it (D53)
 $(BUILD)/%.puelf: $(BUILD)/%.po $(BUILD)/crt0-pure.o $(BUILD)/libz.po link/pure.ld
 	$(CC) $(UCFLAGS) $(PULDFLAGS) $(BUILD)/crt0-pure.o $< $(BUILD)/libz.po $(LIBGCC) -o $@
 $(BUILD)/%.pzx: $(BUILD)/%.puelf tools/mkzexe.py tools/check-68020-60.sh Makefile
