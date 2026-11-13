@@ -718,7 +718,7 @@ On round 9's merged results this took out:
   Magia, Perfect Circle, Rift, Little Nell (The Black Lotus' engine out of memory); Relic ("Relic.dat ... Failed");
   live axxion ("Memory error"); Pesso ("AGA not supported."); superautodrome 2 ("requires 4mb fast"); Melba
   ("Can't open asl.library V39").
-- **68030** (21): Silkcut, Magia, Perfect Circle, Starstruck, Ocean Machine, Rift, Little Nell (TBL engine);
+- **68030** (22): Silkcut, Magia, Perfect Circle, Starstruck, Ocean Machine, Rift, Little Nell (TBL engine);
   Software Make The Dance Foam Oil, Neonsky, Sojourn of the Soul, Dead Ahead, The Martini Effect (the Flex/Ephidrena
   engine's start failed); Relic ("AGA chipset ... Failed"); Multiverse, Impossible, the castle (Loonies' "Not enough
   memory"); The Morning Trip (CIA timer); live axxion (AHI); Pesso; superautodrome 2; Melba; Renouncetro ("[68040+
