@@ -37,6 +37,7 @@ typedef __pid_t pid_t;
 #define F_SETFD    2
 #define F_GETFL    3
 #define F_SETFL    4
+#define AT_FDCWD   -2                   /* picolibc's value: the one *at call Zenix has is utimensat, and only with this */
 int open(const char *, int, ...);
 int creat(const char *, mode_t);
 int fcntl(int, int, ...);
