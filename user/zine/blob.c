@@ -255,11 +255,9 @@ static void all_off(void)
 
 static void chips_for_program(void)
 {
-    u16 *c = (u16 *)ZBLANK;             /* the blank Copper list: null sprites, no planes, black */
-    for (int i = 0; i < 16; i++) {
-        *c++ = (u16)(0x120 + 2 * i);
-        *c++ = (u16)(i & 1 ? ZNULLSPR : 0);
-    }
+    u16 *c = (u16 *)ZBLANK;             /* the blank Copper list: the sprites (null ones), no planes, black */
+    zg_spr_ptrs(c);
+    c += 32;
     *c++ = 0x100, *c++ = 0x0200;
     *c++ = 0x180, *c++ = 0x0000;
     *c++ = 0xFFFF, *c++ = 0xFFFE;
@@ -281,7 +279,7 @@ void zb_blank_view(void)
     BPLCON0 = 0x0200;
     BPLCON2 = 0;
     if (Z.aga) {
-        FMODE = 0;
+        FMODE = zg_sprfm;               /* 16.19: the sprites' width */
         BPLCON3 = 0x0C00;
         BPLCON4 = 0x0011;
     }

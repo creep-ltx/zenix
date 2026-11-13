@@ -2153,6 +2153,75 @@ lowlevel.library about 2.3 KB, user Copper lists about 1.2 KB, the DOS list, Get
 1 KB, the rest the copy, RectFill, zp_give and the trace lines. `/bin/zine` 45,904 -> 46,376 bytes in memory (a
 library name, zh_lean, the chip probe and its message); the kernel unchanged.
 
+### 16.19 Low memory on request, sprites, the null bases (2026-11-12, branch zine9)
+
+**Low memory on request** (the main session's decision on round 8's question). `SYS_memalloc`'s second argument has a
+new bit, `MEMA_LOW` 2 (docs/claims.md, docs/frozen-interfaces.md): the region ends below 16 MB, cut from the low end
+of a free block (the kernel's `MEM_LOW16M`, beside the SD driver's `MEM_LOW1G`); without fast RAM there it falls back
+to chip RAM as a plain call does, and is 0 when nothing fits. With memory protection on it is whole pages as before,
+also taken from the low end (a limited block was cut from the high end of a free block that crossed the limit before,
+which could end above it). *Verified* on the host: `tools/mem-test.sh` (a range crossing 16 MB: small and big blocks
+below it, an ordinary big one still above, one too big refused, whole pages with protection on, a range wholly above
+gives none). The kernel's mem.o grew 40 bytes, kernel.bin 193,948 -> 194,012.
+
+**ZINE's loader asks for it** (`user/zine.c`). Path B's fast regions (16.12) are asked for below 16 MB first
+(`MEMA_LOW`), else anywhere: an old program's hunks land where a 24-bit program expects them whenever they fit there,
+as path A's AllocMem starts low too. A big plain program (16.18's `zh_lean`) takes path B when its chip hunks find
+chip RAM and its other hunks together a piece below 16 MB, or at least the largest one a piece anywhere (16.18 asked
+for the largest one below 16 MB from an allocator that gives big blocks from the top, which on the 68030 machine left
+lux aeterna, You are Lucy, Outside Planet Earth and Concrete on path A, where their big AllocMem failed). Found on
+the way: round 8's last commit had lost the line that sends a lean program to path B, so the rule of 16.18 was not
+used at all on main; it is back, and `zlean` (below) tests it. And `zh_lean` now also needs memory to be short: the
+program's file and hunks leave less than 16 MB of the free memory (on the 68060 test machine, with 72 MB, Kilofix
+crashed late on path B where it runs on path A; the file is kept there as before, which costs nothing a program
+misses). Host-tested (`tools/host/zine-test.sh`, two more zh_lean cases).
+
+**Sprites** (graphics; the RKRM Libraries' sprite chapter and the NDK 3.2's autodocs for what each call does,
+graphics/sprite.h for the structures, the AHRM and the AGA documents for SPRxPOS/SPRxCTL and FMODE; `user/zine/bnext.c`).
+Asked for by Loonies' Impossible and The Morning Trip (AllocSpriteDataA).
+- `GetSprite` (-408, 16.13) and `FreeSprite` (-414) as before (1-7 first, 0 the pointer's last); `ChangeSprite` (-420)
+  shows the data at the sprite; `MoveSprite` (-426) writes the two control words from x and y in the ViewPort's
+  resolution (hires and superhires halved and quartered, interlace halved, the ViewPort's offsets and the display
+  window's corner $2C/$81 added; a SimpleSprite one pixel to the left, as the autodoc's BUGS section says), the
+  ATTACHED bit kept; an attached partner moves along.
+- `AllocSpriteDataA` (-1020): a BitMap converted (planes 0 and 1, or 2 and 3 for `SPRITEA_Attached`), `SPRITEA_Width`
+  16, and 32 or 64 on AGA (else 0), `_XReplication` / `_YReplication` (-2 .. 2), `_OutputHeight`, `_OldDataFormat`;
+  the data in chip RAM aligned to its fetch: the control words' two fetches, each row's plane words, two empty
+  fetches. `FreeSpriteData` (-1032) frees only ZINE's own (a mark after the ExtSprite).
+- `GetExtSpriteA` (-930): `GSTAG_SPRITE_NUM`, `GSTAG_ATTACHED` (a pair, even and odd, the odd one's ATTACHED bit set);
+  refused (-1) when sprites of another width are in use, as the autodoc says. `ChangeExtSpriteA` (-1026).
+- Shown through the screen's Copper list (and the blank one): its first 32 words are the eight sprite pointers,
+  renewed in place when a sprite changes (the null sprite where none is shown); FMODE's sprite bits (32 or 64 wide)
+  follow the widest sprite taken.
+
+**dos DoPkt** (-240, asked for by THE CURE after GetDeviceProc): the action done at once for ZINE's handler port (every
+file handle's, lock's and DOS list entry's port, 16.7), dp_Res1 the answer and dp_Res2 IoErr(); another port is no
+handler ZINE knows (DOSFALSE, ERROR_ACTION_NOT_KNOWN). The handler port knows more actions now, for DoPkt and PutMsg
+alike: LOCATE_OBJECT, FREE_LOCK, COPY_DIR, EXAMINE_OBJECT, EXAMINE_NEXT, DISK_INFO, INFO, PARENT, CURRENT_VOLUME and
+IS_FILESYSTEM, each through the dos call that does the same.
+
+**64 files open at once** (was 16). Ephidrena's Hexel opens its precalculated tables and closes not every one; after
+16 open handles every Open failed ("Unable to open ram:packscript for write or append"), its loader went on with
+null pointers and crashed later (at $5FE after 1,537 s on the 68060: one of round 8's "calls through a base of 0").
+A limit that is hit now says so once in the program's output.
+
+**The trace build** writes the program's free memory chunk by chunk at the start (`K` address, size).
+
+**Not settled** (zine-top100-findings.md "Round 9"): Loonies' "CIA-timer could not be allocated!" (Impossible, The
+Morning Trip: they look for a free CIA timer without calling the resource), the crashes of Jesus Christ Motocross,
+Lupus Reditus and Beam Riders on the 68060 (no failing call before them in the trace), and destroy fascism's stack in
+ZINE's ExecBase page on the 68020.
+
+*Verified* in FS-UAE: `tools/zine-emu-test.sh` (zscreen: a 16x16 sprite from a BitMap by AllocSpriteDataA, taken as
+sprite 2 by GetExtSpriteA, MoveSprite's control words checked, and the hardware's collision of sprite 2 with plane 1
+seen in CLXDAT only while it is shown, none after FreeSprite; znext: DoPkt to the handler port and to a non-port, 40
+files open at once; zlean, a new 420 KB plain program built by `tools/mkbigtest.py`: its file not kept, its fast hunk
+loaded from the file below 16 MB). Not yet on a real machine.
+
+Sizes (*measured*, the 68020-60 build): the blob's code 122,470 -> 125,908 bytes and its bss 8,119 -> 8,963 (the
+sprites about 2.4 KB, DoPkt and the handler's new actions about 0.8 KB, 48 more file slots 768 bytes of bss);
+`/bin/zine` 46,452 -> 46,520 bytes in memory; the kernel 64 bytes (above).
+
 ## 17. Questions for the owner (what ZINE should be)
 
 1. Owner answer 1 allowed "the Amiga's own console or through Wasabi". Typing into the console through Wasabi counts

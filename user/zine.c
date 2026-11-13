@@ -372,14 +372,23 @@ static struct {
     struct { u32 base, size; } r[ZV_NKEEP];
     u32 n, *at, *sz, next, nh, chip_end;
 } P;
-static void *region(u32 want, int chip)
+static void *fast_region(u32 want, int low)
 {
-    void *m = chip ? sys_memalloc_chip(want) : sys_memalloc(want);
-    if (m && !chip && (u32)m < P.chip_end) {    /* fast asked, chip given (the allocator's fall-back) */
-        sys_memfree(m);
+    void *m = low ? sys_memalloc_low(want) : sys_memalloc(want);
+    if (m && ((u32)m < P.chip_end || (low && (u32)m + want > (16u << 20)))) {
+        sys_memfree(m);                 /* chip given (the allocator's fall-back), or an old kernel's high block */
         m = 0;
     }
     return m;
+}
+/* 16.19: fast hunks below 16 MB when they fit there (an old program may keep flags in an address's top byte, and
+ * path A's AllocMem starts low too), else anywhere */
+static void *region(u32 want, int chip)
+{
+    if (chip)
+        return sys_memalloc_chip(want);
+    void *m = fast_region(want, 1);
+    return m ? m : fast_region(want, 0);
 }
 static int pre_plan(const u8 *head, const struct zh_info *inf)
 {
@@ -497,28 +506,36 @@ int main(int argc, char **argv)
      * memory from the program (on the 68020 test machine 3-4 MB of 8, which three AGA demos then missed) */
     int lean = whole && zh_lean(&inf, len, info.chip_free, avail);
     if (lean) {                         /* the largest chip hunk must find a free piece of chip RAM now (path B puts it
-                                         * there), and the largest other one a piece of fast RAM below 16 MB: Zenix's
-                                         * allocator gives big blocks from the top, so on a machine with 32-bit RAM too
-                                         * path B would put the program there, where path A's AllocMem starts low (a
-                                         * 1992 demo, sumea, then showed nothing on the 68030 machine); else path A */
-        u32 big[2] = { 0, 0 };
+                                         * there), and the other ones a piece of fast RAM: all together below 16 MB
+                                         * (16.19, MEMA_LOW), or at least the largest one anywhere; path B then puts
+                                         * them below 16 MB where they fit (region, above: path A's AllocMem starts low
+                                         * too, and a 1992 demo, sumea, showed nothing on the 68030 machine with its
+                                         * hunks in 32-bit RAM); else path A */
+        u32 big[2] = { 0, 0 }, fast = 0;
+        P.chip_end = info.chip_total;
         for (u32 i = 0; i < inf.nhunks; i++) {
             zu32 memf, sz = zh_hunk_size(head, &inf, i, &memf);
             int k = (memf & ZMEMF_CHIP) != 0;
-            if (sz > big[k])
-                big[k] = sz;
+            big[k] = sz > big[k] ? sz : big[k];
+            if (!k)
+                fast += (sz + 8 + 15) & ~15u;
         }
-        for (int k = 0; k < 2 && lean; k++) {
-            if (!big[k])
-                continue;
-            u32 n = (big[k] + 8 + 15) & ~15u;
-            void *m = k ? sys_memalloc_chip(n) : sys_memalloc(n);
-            if (!m || (!k && (u32)m + n > (16u << 20)))
-                lean = 0;
-            if (m)
-                sys_memfree(m);
-        }
+        void *m = big[1] ? sys_memalloc_chip((big[1] + 8 + 15) & ~15u) : 0;
+        if (big[1] && !m)
+            lean = 0;
+        if (m)
+            sys_memfree(m);
+        m = lean && fast ? fast_region(fast, 1) : 0;
+        if (!m && lean && fast)
+            m = fast_region((big[0] + 8 + 15) & ~15u, 0);
+        if (fast && !m)
+            lean = 0;
+        if (m)
+            sys_memfree(m);
     }
+    if (lean)                           /* 16.19: this line was lost in round 8's last commit, which left path B for a
+                                         * big plain program unused */
+        whole = 0;
     if (!whole && inf.ovl) {
         dprintf(2, "zine: %s does not fit in memory: its file (%u KB, all in memory during the session: it is "
                 "overlaid) and its hunks (%u KB) need more than the %u KB free\n", name, len >> 10, hunks >> 10,
