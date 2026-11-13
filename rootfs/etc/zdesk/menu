@@ -1,6 +1,6 @@
 # The Zenix menu's programs (DESIGN D38 step 5): LABEL = COMMAND (run by /bin/sh -c). About Zenix and Log out follow.
 Shell = term
-Files = term -e ahiru
+Files = files
 Editor = term -e sumi
 Monitor = term -e ctop
 Preferences = deskprefs

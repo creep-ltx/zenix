@@ -1,0 +1,113 @@
+FILES(1)			Zenix manual
+
+NAME
+    files - the file view of Zenix Desktop
+
+SYNOPSIS
+    files [-v] [FOLDER]
+
+DESCRIPTION
+    A window on Zenix Desktop that lists a folder (the one named, else
+    the current one): folders first, then by name without case, each
+    with its size (as ls -h writes it) and date (as ls -l). The top line
+    is the folder's path, the bottom line the entry's mode, owner and
+    size, or a message, a question, or a line being typed. The Zenix
+    menu's Files and the desktop's Files icon start it. Its keys are
+    Ahiru's (ahiru(1)), and the mouse works too: a click picks a row, a
+    second click on it within half a second opens it, Shift and a click
+    marks it. The bar shows its menus, Files and Edit.
+
+    A window 72 columns wide or more (zoomed, or a wide screen) shows the
+    parent folder on its left; a click there goes to that folder. Names
+    that start with a dot are hidden until zh.
+
+    Opening a file (l, Return, a double click) looks at its first bytes:
+    a folder is entered; a program (Zenix's, AmigaOS's, a #! script)
+    with an x bit is run in a terminal window after "Run NAME? (y/n)";
+    text is shown by less in a terminal window; anything else asks
+    "Open NAME with:", and the words typed are run in a terminal window
+    with the path after them. These terminals stay when their program
+    ends (term -H) until a key: a short text that less just prints, or
+    a program's last words, can be read. i views with less, E edits
+    with $EDITOR, else sumi, else edit. S opens a terminal in the folder.
+
+    Copy and move: yy (yank) or dd (cut) remember the marked entries, or
+    the one under the cursor; pp in another folder runs cp -r or mv with
+    them. Names that already exist there are asked about first ("2 names
+    exist here: replace them? (y/n)"); po replaces without asking. A
+    paste into the entries' own folder, or of a folder into itself, is
+    refused (also through a link: folders are shown by their resolved
+    path). dD and Del delete the set after "Delete NAME? (y/n)", with
+    rm -r (folders with all in them; there is no trashcan). cw, a, A and
+    I rename on the bottom line, M makes a folder. While a command runs
+    the bottom line says so; Esc stops it (a second Esc at once), the
+    close gadget quits when it has ended. If it fails, the first line of
+    what it said is shown.
+
+KEYS
+    j k, Down Up           down, up
+    J K, Ctrl-d Ctrl-u     half a page
+    Shift-Down Shift-Up    a page (also Ctrl-f, Ctrl-b)
+    gg G                   the top, the bottom (also Shift-Left, -Right)
+    h, Left, Backspace     the parent folder (the cursor on the one left)
+    l, Right, Return       enter, or open the file
+    i  E                   view (less), edit
+    Space  v  uv           mark and move on, invert the marks, unmark
+    yy  dd  pp  po  uy     yank, cut, paste, paste replacing, forget
+    dD, Del                delete (asks)
+    cw  a  A  I            rename: empty, before the extension, at the
+                           end, at the start
+    M                      a new folder
+    /  n  N                search names (a part, without case)
+    on os ot oe            sort by name, size, time, extension; capitals
+                           (oN ...) reversed; or flips
+    zh                     show or hide hidden names
+    g/  gh  gt             go to /, home, /tmp
+    S                      a terminal here
+    R, F5                  read the folder again
+    ?, Help                the keys (j k move, any other key closes)
+    q                      quit (the close gadget too)
+
+    A prefix key (g, y, d, p, u, c, o, z) shows on the bottom line what
+    can follow. On the typed line: Left and Right move (Shift: to the
+    start, the end), Backspace and Del delete, Return takes it, Esc
+    leaves it. A question takes y for yes, any other key for no.
+
+    Every key can be changed in ~/.config/files/keys, in the format of
+    Ahiru.keys: one key a line, KEYS ACTION [ARGUMENT]; KEYS are typed
+    characters or names in <>: <Up> <Down> <Left> <Right>, <S-Up> (Shift)
+    ..., <C-d> (Ctrl), <Return> <Esc> <Tab> <Space> <Del> <BS> <Help>
+    <F1> .. <F10>. Two keys make a prefix; ACTION none takes a key away;
+    ; and # start comments. sort takes name, size, time or ext, then
+    reverse, or flip; go takes a path, root or home. When the file is
+    missing, files writes it with every built-in key (the full list to
+    edit). A line it does not understand is said on the bottom line at
+    the start; the others still work.
+
+OPTIONS
+    -v  write to standard output every row drawn ("files: row 3*: ..."
+        with * on the cursor's row), the bottom line, what it says and
+        starts, the window's place, and each folder's count and time
+
+FILES
+    ~/.config/files/keys    the keys (written when missing)
+
+EXIT STATUS
+    0 the window closed, 1 no desktop or no such folder, 2 a wrong
+    argument.
+
+NOTES
+    Only the rows on view are looked at (lstat): a folder of 500 files
+    costs its directory records and a screenful. A folder shows at most
+    4,096 entries and 64 KB of names; past that the bottom line says
+    only the first are shown. The listing uses the 8 x 8 font.
+    A program is always run in a terminal window: one that opens its own
+    window leaves an empty terminal until it ends (DESIGN D48 9).
+    Not done: previews (ahiru in a terminal has them), drag and drop,
+    a picture viewer, tabs, bookmarks, filters, archives as folders, a
+    trashcan, copying in the background, the settings kept between
+    runs. Other keys and clicks are not taken while a copy runs. Dates
+    are the kernel's clock (UTC), as ls.
+
+SEE ALSO
+    ahiru(1), zdesk(1), term(1), cp(1), mv(1), rm(1)

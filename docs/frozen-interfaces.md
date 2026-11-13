@@ -267,6 +267,9 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `fmode=`, `dmode=`, `ro`; `rw` refused); `fsinfo.type` `exfat`; the program text `/sbin/exfatd DEV -id START,SIZE
   [-o OPTIONS]`; the answer for a file of 4 GB or more (size 4294967295, `EFBIG` at open, as pfs3d's). No message type,
   struct or error number is new.
+- **D48 (the file view, branch files, 2026-11-13):** the keys file `~/.config/files/keys` (Ahiru.keys's format: `KEYS
+  ACTION [ARGUMENT]`, the key names in `<>`, `[main]`, `none`) and its action names; `files`' options (`-v`, a folder);
+  zdesk's menu and icon lines name `files`. No message type, struct or error number is new.
 - **D22 (zpkg, 2026-10-28):** `UPD_F_TRIAL` 2 in the bootinfo and `uupdate` flags; the manifest line `takes OTHER`;
   zup's journal line `live 1 NAME` and the live-only operations `S`, `M`, `X`; `/var/cache/zpkg/live/` and
   `/var/lib/zpkg/lock` (a pid and a newline, linked whole from `lock.PID`); zpkg's `/etc/zpkg.conf` (the words

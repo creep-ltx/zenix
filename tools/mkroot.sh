@@ -167,6 +167,7 @@ if [ -n "$DEMO" ]; then
     [ -e "$T/bin/wget" ] || rm -rf "$T/etc/ssl" "$T/usr/share/licenses/certdata"
     # the Zenix menu without the programs this disk lacks (deskprefs, D38 "Preferences")
     [ -e "$T/bin/deskprefs" ] || sed -i '/= *deskprefs *$/d' "$T/etc/zdesk/menu"
+    [ -e "$T/bin/files" ] || sed -i 's/= *files *$/= term -e ahiru/' "$T/etc/zdesk/menu" "$T/etc/zdesk/icons"
 fi
 # no image ever ships a random seed (DESIGN D19 9.3): every copy of it (a card, the demo floppy) would start with the
 # same one. Boot writes the machine's own at its first start.

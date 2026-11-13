@@ -278,7 +278,7 @@ hidden-pieces budget.
 5. **`zdesk`:** move, resize, raise, close, minimise; click to focus; the **top bar** (a menu under the Zenix name with
    the programs and About/Log out, a list of the windows with the minimised ones dimmed, memory and a clock); a few
    **desktop icons** that start programs (Shell, Files, Prefs as listed in its config; Files starts Ahiru in a terminal
-   until a graphical file view exists); the **About window**; **keyboard shortcuts**, all configurable in
+   until a graphical file view exists: since 2026-11-13 it starts `files`, D48); the **About window**; **keyboard shortcuts**, all configurable in
    `/etc/zdesk/keys` (a user's own file overrides it): Amiga+Return a terminal, Amiga+Q close, Amiga+M minimise,
    Amiga+Tab next window, Amiga+Space the menu, Amiga+arrows move the focused window, Amiga+Shift+arrows resize it
    (Amiga+F1..F10 remain the consoles). The look chosen from section 8, with its 16- and 8-colour palettes.
@@ -291,7 +291,8 @@ out, or Ctrl-C at its console) closes the desktop and gives the console back.
 screenshots in FS-UAE compared with expected pixels (as `colour-test.sh`); a fuzz of drawing batches (no crash, no
 write outside the screen). Speed only on the real A1200 (the stock one and the 1260), written down with the date.
 
-**Later, not in the first step:** workspaces and the i3-style tiling desktop; a graphical file view (Ahiru-style);
+**Later, not in the first step:** workspaces and the i3-style tiling desktop; a graphical file view (Ahiru-style; built 2026-11-13 as
+`files`, DESIGN D48, docs/d48-fileview.md);
 viewers (pictures, text); a preferences program (looks, keys, screen mode); TrueType fonts; the clipboard and drag and
 drop; menus of each program in the bar; a type-to-search launcher (FuzzyFind); 640x512 and RTG screens; sound events;
 the demo floppy's desktop edition (approved 2026-11-04: D25 revision 3, Part 1). Each its own approval.
