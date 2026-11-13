@@ -1072,7 +1072,7 @@ $(BUILD)/zld.zx: $(BUILD)/zld.pzx
 	cp $< $@
 # the development package's other files (DESIGN D52 section 2), staged for tools/mkzup.py's family devel
 $(BUILD)/devel/usr/lib/libc.a: $(BUILD)/libc.a $(BUILD)/libc-pure.a $(BUILD)/crt0.o $(BUILD)/crt0-pure.o link/user.ld \
-                               link/pure.ld $(LIBC_HDRS) tools/mkdevel.sh
+                               link/pure.ld $(LIBGCC) $(LIBC_HDRS) tools/mkdevel.sh
 	tools/mkdevel.sh $(BUILD) $(LIBGCC)
 
 # ---- Ahiru, the owner's file manager (roadmap block 3; ports/ahiru/README): its upstream files and the CFile core's
