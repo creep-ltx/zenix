@@ -349,6 +349,7 @@ struct zex2 {
 #define ZEX2_MAGIC 0x5a455832u
 union zhdr { struct zexe v1; struct zex2 v2; };
 #define ZEXE_MEM_MAX   (16u << 20)     /* the loader refuses a program asking for more (image + bss) */
+#define ZEXE_FILE_MAX  (16u << 20)     /* ... or a program file larger than this (-EFBIG; was 256 KB until 2026-11-13) */
 #define ZEXE_STACK_MIN 4096u            /* a stack size in the header, if not 0, lies in this range */
 #define ZEXE_STACK_MAX (1u << 20)
 
