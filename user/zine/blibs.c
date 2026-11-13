@@ -494,8 +494,9 @@ u32 c_SetIoErr(u32 e)
 /* ---- dos's files (5.6): the program's directory as the volume zine made (user/zine/zvol.h), never written; a file
  * written on any path is one of ZINE's memory files (16.9, below), gone with the session (owner answer 3); NIL:
  * takes the bytes and keeps none. A FileHandle (44 bytes) is given, its fh_Args the slot here. ---- */
-#define NFILES 16
+#define NFILES 64                       /* 16.19: was 16; Hexel keeps more open (it closes not every file it reads) */
 static struct { u8 used, sink, ram; u32 ent, pos, fh; } files[NFILES];     /* ram: a memory file's index + 1 */
+static void say_at(const char *a, u32 v, const char *c);
 #define MODE_OLDFILE 1005
 #define MODE_NEWFILE 1006
 #define MODE_READWRITE 1004
@@ -796,6 +797,11 @@ static u32 fh_new(u32 ent, int sink, int ram)
             *(u32 *)(fh + 8) = Z.hport; /* fh_Type: the port a program may send its packets to */
             return fh >> 2;
         }
+    static u8 said;
+    if (!said) {                        /* said once: every slot taken (or no memory for the handle) */
+        said = 1;
+        say_at("ZINE: a file could not be opened: ", NFILES, " files are open at once, ZINE's most (or no memory)\n");
+    }
     Z.ioerr = 103;                      /* ERROR_NO_FREE_STORE */
     return 0;
 }
@@ -2268,6 +2274,30 @@ static u16 *ucop_emit(const u8 *vp, u16 *l, const u16 *end)
     return l;
 }
 
+/* 16.19: the sprite pointers: the program's sprites (zg_spr, bnext.c), else the null sprite */
+void zg_spr_ptrs(u16 *l)
+{
+    for (int i = 0; i < 8; i++) {
+        u32 p = zg_spr[i] ? zg_spr[i] : ZNULLSPR;
+        *l++ = (u16)(0x120 + 4 * i), *l++ = (u16)(p >> 16);
+        *l++ = (u16)(0x122 + 4 * i), *l++ = (u16)p;
+    }
+}
+void zg_spr_show(void)                  /* the shown lists begin with the eight pointers: renewed in place */
+{
+    zg_spr_ptrs((u16 *)ZBLANK);
+    u16 *c = Z.shown ? *(u16 **)(Z.shown + SC_SIZEOF + 68) : 0;
+    if (c && c[0] == 0x120)
+        zg_spr_ptrs(c);
+}
+void zg_spr_mode(void)
+{
+    if (Z.shown)
+        show_screen((u8 *)Z.shown);
+    else if (Z.aga)
+        FMODE = zg_sprfm;
+}
+
 static void show_screen(u8 *sc)
 {
     u8 *bm = *(u8 **)(sc + SC_SIZEOF + 76) ? *(u8 **)(sc + SC_SIZEOF + 76) : sc + SC_BitMap;
@@ -2292,8 +2322,8 @@ static void show_screen(u8 *sc)
     }
     u32 room = *(u32 *)(sc + SC_SIZEOF + 84);
     u16 *l = c;
-    for (int i = 0; i < 16; i++)
-        *l++ = (u16)(0x120 + 2 * i), *l++ = (u16)(i & 1 ? ZNULLSPR : 0);
+    zg_spr_ptrs(l);                     /* the sprites the program shows (16.19), else the null sprite */
+    l += 32;
     u32 rows = *(u16 *)(bm + ZO_BitMap_Rows), most = Z.pal ? 256 : 200;
     if (*(u16 *)(sc + SC_Height) && *(u16 *)(sc + SC_Height) < rows)
         rows = *(u16 *)(sc + SC_Height);
@@ -2323,7 +2353,7 @@ static void show_screen(u8 *sc)
     *l++ = 0x108, *l++ = mod;
     *l++ = 0x10A, *l++ = mod;
     if (Z.aga) {
-        *l++ = 0x1FC, *l++ = (u16)(f3 ? 3 : 0);
+        *l++ = 0x1FC, *l++ = (u16)((f3 ? 3 : 0) | zg_sprfm);
         *l++ = 0x106, *l++ = vc_con3;
         *l++ = 0x10C, *l++ = vc_con4;
     }
@@ -2932,46 +2962,106 @@ static u32 fh_of_arg(u32 a)
     return a == FH_IN ? Z.in_fh : a == FH_OUT ? Z.out_fh : a < NFILES && files[a].used ? files[a].fh >> 2 : 0;
 }
 
-static void packet(struct znode *m)
+/* 16.19: the actions on locks and the volume too (dos DoPkt sends them; the AmigaDOS manual's packet chapter and
+ * dos/dosextens.h for their arguments): LOCATE_OBJECT 8 (lock, BSTR name, mode), FREE_LOCK 15, COPY_DIR 19,
+ * EXAMINE_OBJECT 23 and EXAMINE_NEXT 24 (lock, BPTR FileInfoBlock), DISK_INFO 25 (BPTR InfoData), INFO 26 (lock, BPTR
+ * InfoData), PARENT 29, CURRENT_VOLUME 7 (the volume's DOS list entry), IS_FILESYSTEM 1027 (yes) */
+u32 c_FindDosEntry(u32 d, const char *name, u32 flags);
+u32 c_LockDosList(u32 flags);
+static u32 pkt_do(s32 type, const u32 *a, u32 *res2)
 {
-    u32 *p = *(u32 **)((u8 *)m + 10);   /* ln_Name: the DosPacket */
-    if (c_TypeOfMem((u32)p) == 0 || ((u32)p & 1))
-        return;                         /* not a packet: nothing to answer, nowhere to reply */
-    u32 fh = fh_of_arg(p[5]), r1, r2 = 0;
+    u32 fh = fh_of_arg(a[0]), r1;
     Z.ioerr = 0;
-    switch ((s32)p[2]) {
+    switch (type) {
     case ACTION_READ:
-        r1 = c_Read(fh, (char *)p[6], (s32)p[7]);
+        r1 = c_Read(fh, (char *)a[1], (s32)a[2]);
         break;
     case ACTION_WRITE:
-        r1 = c_Write(fh, (const char *)p[6], (s32)p[7]);
+        r1 = c_Write(fh, (const char *)a[1], (s32)a[2]);
         break;
     case ACTION_SEEK:
-        r1 = (u32)c_Seek(fh, (s32)p[6], (s32)p[7]);
+        r1 = (u32)c_Seek(fh, (s32)a[1], (s32)a[2]);
         break;
     case ACTION_END:
         r1 = c_Close(fh) ? (u32)-1 : 0;
         break;
     case ACTION_FLUSH:
-        r1 = (u32)-1;                   /* DOSTRUE: nothing is buffered */
+    case 1027:                          /* ACTION_IS_FILESYSTEM */
+        r1 = (u32)-1;                   /* DOSTRUE: nothing is buffered; a filesystem */
         break;
+    case 8: {                           /* ACTION_LOCATE_OBJECT */
+        const u8 *b = (const u8 *)(a[1] << 2);
+        char nm[256];
+        u32 n = b && c_TypeOfMem((u32)b) ? b[0] : 0;
+        for (u32 i = 0; i < n; i++)
+            nm[i] = (char)b[1 + i];
+        nm[n] = 0;
+        u32 old = c_CurrentDir(a[0]);
+        r1 = c_Lock(nm, (s32)a[2]);
+        c_CurrentDir(old);
+        break;
+    }
+    case 15:                            /* ACTION_FREE_LOCK */
+        c_UnLock(a[0]);
+        r1 = (u32)-1;
+        break;
+    case 19:                            /* ACTION_COPY_DIR */
+        r1 = c_DupLock(a[0]);
+        break;
+    case 23:                            /* ACTION_EXAMINE_OBJECT */
+        r1 = c_Examine(a[0], (u8 *)(a[1] << 2));
+        break;
+    case 24:                            /* ACTION_EXAMINE_NEXT */
+        r1 = c_ExNext(a[0], (u8 *)(a[1] << 2));
+        break;
+    case 25:                            /* ACTION_DISK_INFO */
+        r1 = c_Info(0, (u32 *)(a[0] << 2));
+        break;
+    case 26:                            /* ACTION_INFO */
+        r1 = c_Info(a[0], (u32 *)(a[1] << 2));
+        break;
+    case 29:                            /* ACTION_PARENT */
+        r1 = c_ParentDir(a[0]);
+        break;
+    case 7: {                           /* ACTION_CURRENT_VOLUME: the volume's entry as a BPTR */
+        u32 d = c_LockDosList(8);
+        r1 = d ? c_FindDosEntry(d, ((const struct zv_hdr *)Z.a.vol)->volname, 8) >> 2 : 0;
+        break;
+    }
     default:
         r1 = 0;
         Z.ioerr = 209;                  /* ERROR_ACTION_NOT_KNOWN */
         if (unknown_actions < 4) {
             unknown_actions++;
-            say_at("ZINE: a packet of type ", p[2], " sent to a file's handler, which ZINE does not know: answered "
-                   "with an error\n");
+            say_at("ZINE: a packet of type ", (u32)type, " sent to a file's handler, which ZINE does not know: "
+                   "answered with an error\n");
         }
     }
-    if (r1 == (u32)-1 || !r1)
-        r2 = Z.ioerr;
-    p[3] = r1;
-    p[4] = r2;
+    *res2 = r1 == (u32)-1 || !r1 ? Z.ioerr : 0;
+    return r1;
+}
+
+static void packet(struct znode *m)
+{
+    u32 *p = *(u32 **)((u8 *)m + 10);   /* ln_Name: the DosPacket */
+    if (c_TypeOfMem((u32)p) == 0 || ((u32)p & 1))
+        return;                         /* not a packet: nothing to answer, nowhere to reply */
+    p[3] = pkt_do((s32)p[2], p + 5, &p[4]);
     u8 *rp = (u8 *)p[1];
     p[1] = Z.hport;
     if (rp && c_TypeOfMem((u32)rp))
         port_put(rp, m, 7);             /* NT_REPLYMSG */
+}
+
+/* DoPkt(port d1, action d2, arg1-5 d3-d7) (-240, V36; r the seven registers): the action done at once for ZINE's
+ * handler port (every file handle's, lock's and DOS list entry's), dp_Res1 the answer and dp_Res2 IoErr(); any other
+ * port is not a handler ZINE knows: DOSFALSE and ERROR_ACTION_NOT_KNOWN */
+u32 c_DoPkt(const u32 *r)
+{
+    u32 res2 = 209;
+    u32 r1 = r[0] == Z.hport ? pkt_do((s32)r[1], r + 2, &res2) : 0;
+    Z.ioerr = res2;
+    return r1;
 }
 
 void c_PutMsg(u8 *mp, struct znode *m)
@@ -3274,6 +3364,7 @@ F(GetColorMap); F(FreeColorMap); F(GetRGB4); F(SetRGB4CM); F(SetRGB32CM); F(GetR
 F(SumKickData); F(Fault); F(PrintFault); F(WaitBOVP); F(WritePixel); F(ReadPixel);
 F(AllocDBufInfo); F(FreeDBufInfo); F(ChangeVPBitMap); F(FilePart); F(PathPart); F(AddPart);
 F(CreateNewProc); F(CreateProc); F(AddTask); F(RemTask);
+F(DoPkt); F(ChangeSprite); F(MoveSprite); F(GetExtSpriteA); F(AllocSpriteDataA); F(ChangeExtSpriteA); F(FreeSpriteData);
 
 /* the offsets: the RKRM's Function Offset Reference (V37), the pools and ColdReboot from the NDK 3.2's exec_lib.fd */
 static const u16 exec_lvo[] = { 30, 108, 114, 120, 126, 132, 138, 144, 162, 168, 174, 198, 204, 210, 216, 234, 240,
@@ -3302,7 +3393,8 @@ static void (*const exec_fn[])(void) = { zx_Supervisor, zs_Alert, zs_rts, zx_Dis
 static const u16 gfx_lvo[] = { 192, 222, 228, 270, 288, 384, 456, 462, 390, 492, 498, 918, 924, 882, 852, 198,
     72, 78, 66, 474, 54, 60, 240, 342, 348, 354, 306, 234, 888, 960, 1050,
     792, 798, 300, 408, 414, 246, 336, 708, 588, 216, 210, 966, 972, 942,
-    570, 576, 582, 630, 996, 900, 204, 360, 402, 324, 318, 564, 726, 732, 756, 594, 372, 378, 366, 546, 540 };
+    570, 576, 582, 630, 996, 900, 204, 360, 402, 324, 318, 564, 726, 732, 756, 594, 372, 378, 366, 546, 540,
+    420, 426, 930, 1020, 1026, 1032 };
 static void (*const gfx_fn[])(void) = { zs_LoadRGB4, zs_LoadView, zs_WaitBlit, zs_WaitTOF, zs_SetRGB4, zs_VBeamPos,
     zs_OwnBlitter, zs_DisownBlitter, zs_InitBitMap, zs_AllocRaster, zs_FreeRaster, zs_AllocBitMap, zs_FreeBitMap,
     zs_LoadRGB32, zs_SetRGB32, zs_InitRastPort,
@@ -3312,11 +3404,12 @@ static void (*const gfx_fn[])(void) = { zs_LoadRGB4, zs_LoadView, zs_WaitBlit, z
     zs_VideoControl, zs_ScrollVPort, zs_MakeVPort, zs_MrgCop, zs_AllocDBufInfo, zs_FreeDBufInfo, zs_ChangeVPBitMap,
     zs_GetColorMap, zs_FreeColorMap, zs_GetRGB4, zs_SetRGB4CM, zs_SetRGB32CM, zs_GetRGB32, zs_InitVPort, zs_InitView,
     zs_WaitBOVP, zs_WritePixel, zs_ReadPixel, zs_FreeCprList, zs_FindDisplayInfo, zs_NextDisplayInfo,
-    zs_GetDisplayInfoData, zs_UCopperListInit, zs_CMove, zs_CWait, zs_CBump, zs_FreeCopList, zs_FreeVPortCopLists };
+    zs_GetDisplayInfoData, zs_UCopperListInit, zs_CMove, zs_CWait, zs_CBump, zs_FreeCopList, zs_FreeVPortCopLists,
+    zs_ChangeSprite, zs_MoveSprite, zs_GetExtSpriteA, zs_AllocSpriteDataA, zs_ChangeExtSpriteA, zs_FreeSpriteData };
 static const u16 dos_lvo[] = { 42, 48, 54, 60, 132, 144, 198, 312, 342, 354, 360, 462, 948, 954, 30, 36, 66, 150,
     156, 222, 72, 216, 324, 330, 576, 534, 798, 858, 228, 234,
     84, 90, 96, 102, 108, 114, 126, 210, 192, 372, 378, 384, 390, 402, 420, 870, 876, 882, 468, 474, 498, 138,
-    738, 654, 660, 666, 690, 684, 642, 648, 174 };
+    738, 654, 660, 666, 690, 684, 642, 648, 174, 240 };
 static void (*const dos_fn[])(void) = { zs_Read, zs_Write, zs_Input, zs_Output, zs_IoErr, zx_Exit, zs_Delay,
     zs_FPutC, zs_FPuts, zs_VFPrintf, zs_Flush, zs_SetIoErr, zs_PutStr, zs_VPrintf, zs_Open, zs_Close, zs_Seek,
     zs_LoadSeg, zs_UnLoadSeg, zs_Execute, zs_DeleteFile, zs_IsInteractive, zs_FRead, zs_FWrite, zs_GetProgramName,
@@ -3325,7 +3418,7 @@ static void (*const dos_fn[])(void) = { zs_Read, zs_Write, zs_Input, zs_Output, 
     zs_DupLockFromFH, zs_OpenFromLock, zs_ParentOfFH, zs_ExamineFH, zs_NameFromLock, zs_SameLock, zs_FilePart,
     zs_PathPart, zs_AddPart, zs_Fault, zs_PrintFault, zs_CreateNewProc, zs_CreateProc, zs_CompareDates, zs_LockDosList,
     zs_UnLockDosList, zs_LockDosList, zs_NextDosEntry, zs_FindDosEntry, zs_GetDeviceProc, zs_FreeDeviceProc,
-    zs_DeviceProc };
+    zs_DeviceProc, zs_DoPkt };
 static const u16 int_lvo[] = { 78, 210, 612, 198, 66, 252, 246, 606, 204, 72, 150, 270, 60, 300,
     510, 516, 768, 774, 780,
     474, 342, 336, 450, 90, 396, 408, 108, 588, 390, 384, 378, 162, 294 };
@@ -3938,6 +4031,12 @@ void zb_libs_init(void)
         }
         if (h)
             c_Enqueue((struct zlist *)(ZEXEC + ZO_ExecBase_MemList), &h->node);
+        extern u32 zb_tracing;
+        void zb_serial_hex(char tag, const u32 *v, int n);
+        for (struct zchunk *m = h && zb_tracing ? h->first : 0; m; m = m->next) {
+            u32 v[2] = { (u32)m, m->bytes };    /* the trace build: each chunk of the program's memory ('K') */
+            zb_serial_hex('K', v, 2);
+        }
     }
     /* the process and its CLI (6) */
     u8 *pr = (u8 *)take(ZO_Process_SIZEOF + 16);

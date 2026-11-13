@@ -95,10 +95,13 @@
 # its window of usbd's posts, its requests by post, the stick's partitions read once, lost records, stale slots;
 # diskd.zx 10,464 -> 12,740); kernel.bin 193,948 -> 197,316, TOTAL 194,000 -> 197,400; the mount tests' RAM disk
 # 688 -> 685 KB for it (Makefile).
+# 2026-11-12 (d29 16.19, SYS_memalloc's MEMA_LOW: a region below 16 MB for ZINE's loader): mem 4,167 -> 4,207, budget
+# 4,200 -> 4,250 (MEM_LOW16M; a limited block with protection on now also from the low end), syscall + 24; kernel.bin
+# 193,948 -> 194,012, TOTAL 194,000 -> 194,050; merged with D46 above: TOTAL 197,500.
 start     4850   8200
 main      5950   1100
 serial    6100   6500
-mem       4200    240
+mem       4250    240
 ide       4750    560
 emmc      4900    640
 floppy    4500    160
@@ -128,5 +131,5 @@ cache     1800     32
 gcon      3600     16
 mmu       5700    160
 embed    48600      0
-TOTAL   197400
+TOTAL   197500
 ROOM       800

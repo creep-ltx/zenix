@@ -31,6 +31,7 @@ Claim a number here **before** using it (system calls, message types, port names
 | 92 `drv`'s `DRV_CLAIM` base `DRV_PAULA` 0xDFF0A0 (Paula's four channels: the process of port `audio` only, before the network gate; DESIGN D40) | branch sound, 2026-11-12 |
 | 98 `atapi` (DESIGN D44: a packet command to the IDE port's ATAPI CD drive, `struct uatapi` in `kernel/diskproto.h`, first size 28; the disk server only) | branch cd, 2026-11-12 |
 | 92 `drv` for the service of port `usb` (DESIGN D46: `DRV_HWINFO`, the `DRV_CLAIM` of the hardware table's `xhci` and that claim's ops only, before the network gate); the quiesce step `DRVS_WAIT` 3 (until `(*addr & mask) == value`, at most 20 ms; not on `DRV_PARPORT`); the hardware table's `xhci`, `xhci_size`, `xhci_stop` where `reserved[3]` was, `XSTOP_DONE` 1, `XSTOP_RAN` 2, `XSTOP_SLOW` 4, `XSTOP_NOTXHCI` 8 | branch usb, 2026-11-12 |
+| 18 `memalloc`'s second argument bit `MEMA_LOW` 2 (a region ending below 16 MB, the 24-bit addresses; d29 16.19: ZINE's loader) | branch zine9, 2026-11-12 |
 | **next free: 99** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
 Message types claimed so far: `NET_*` 1-19 on port `net` (`kernel/netproto.h`, DESIGN D19 step 3: the `SOCK_*` op

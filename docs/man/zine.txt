@@ -60,8 +60,9 @@ DESCRIPTION
     file before the hand-over, and its file is not kept (zine says so);
     so is a big plain one (no overlays, nothing after its hunks; its
     file at least 128 KB and a sixteenth of the free memory), whose
-    file would only take memory from it. That cannot be done for an
-    overlaid program, or for chip RAM hunks
+    file would only take memory from it. Hunks loaded so go below
+    16 MB when they fit there, as old programs expect. That cannot be
+    done for an overlaid program, or for chip RAM hunks
     larger than the chip RAM Zenix has free at the moment: zine says
     which and refuses.
     A program may also send packets to its file's handler itself (as

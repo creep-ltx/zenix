@@ -71,6 +71,8 @@ static inline int sys_pipe2(int fds[2], int flags) { return sys3(17, (u32)fds, (
 static inline void *sys_memalloc(u32 n) { return (void *)sys3(18, n, 0, 0); }   /* 0 (NULL) on failure */
 #define MEMA_CHIP 1             /* DESIGN D38: chip RAM (the blitter, the Copper and the sprites reach only that) */
 static inline void *sys_memalloc_chip(u32 n) { return (void *)sys3(18, n, MEMA_CHIP, 0); }
+#define MEMA_LOW 2              /* d29 16.19: ending below 16 MB (the 24-bit addresses old Amiga programs assume) */
+static inline void *sys_memalloc_low(u32 n) { return (void *)sys3(18, n, MEMA_LOW, 0); }
 static inline int sys_memfree(void *p) { return sys3(19, (u32)p, 0, 0); }
 static inline u32 sys_ticks(void) { return (u32)sys3(20, 0, 0, 0); }
 static inline u32 sys_uptime(void) { return (u32)sys3(20, 1, 0, 0); }   /* whole seconds since boot (F9) */

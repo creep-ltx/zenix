@@ -92,7 +92,9 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   up; the kernel writing sprite 0's two control words in the vertical blank with HSTART 0x80 at the first pixel, so
   the server's list keeps FMODE's sprite bits 0); the grab ending with the descriptor's last close or the server's
   end; `SYS_memfree` -EBUSY for a region holding the grab's list or sprite; `SYS_memalloc`'s second argument
-  `MEMA_CHIP` 1 (its other bits ignored, as all of it was before).
+  `MEMA_CHIP` 1 (its other bits ignored, as all of it was before); `MEMA_LOW` 2 (d29 16.19, branch zine9,
+  2026-11-12: the region ends below 16 MB; with `MEMA_CHIP` too it is chip RAM, which always is; 0 when no such piece
+  is free).
   `CON_MOUSE` 10 on the grab's descriptor (a2 THRESHOLD 0..127 | MULTIPLIER 1..8 << 8: in a frame the counts beyond
   THRESHOLD count MULTIPLIER times; 0x100 none, the grab's start; -EINVAL out of range, -EBADF not the grab's).
 - **D38 step 3 (the display server, branch desk, 2026-11-04):** `SYS_peer` 96 (msg a request the caller serves, else

@@ -152,6 +152,11 @@ int zb_say_text(const char *pre, u32 p, const char *post);
 void zb_say(const char *s);             /* a line of ZINE's own into the program's output */
 u32 zb_ticks50(void);                   /* 1/50 s since the program started */
 u32 zb_mode_id(u32 modes);              /* bnext.c: the display ID of a ViewPort's mode bits */
+extern u32 zg_spr[8];                   /* bnext.c (16.19): each hardware sprite's data, 0 the null sprite */
+extern u16 zg_sprfm;                    /* bnext.c: FMODE's sprite width bits */
+void zg_spr_ptrs(u16 *l);               /* blibs.c: the eight SPRxPT MOVEs (32 words) at l */
+void zg_spr_show(void);                 /* blibs.c: zg_spr into the shown Copper lists */
+void zg_spr_mode(void);                 /* blibs.c: zg_sprfm changed: the display again */
 u32 c_DateStamp(u32 *ds);
 u32 c_GetVPModeID(const u8 *vp);
 u32 c_Output(void);
