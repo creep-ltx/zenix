@@ -69,9 +69,11 @@ real files do):
   modify sets the gun's top 6 bits and keeps its low 2 (the AGA notes' rule; AmigaOS 3.2's picture.datatype instead
   repeats the top bits into the low 2, a difference of at most 3 a gun: knowledge base `amiga/datatypes-and-media.md`).
   The control bits are the file's top two planes (6 and 7 of HAM8, 4 and 5 of HAM6), as the ILBM readers take them
-  (picture.datatype's HAM decoded the same way, knowledge base); not yet checked against a HAM8 file saved by a real
-  Amiga paint program (the hardware's own control planes are bitplanes 1 and 2, so a raw screen saved as it is would
-  differ): the partner's first HAM8 pictures will say.
+  (picture.datatype's HAM decoded the same way, knowledge base). Checked 2026-11-13 against a real 1993 AGA HAM8
+  file, Aminet pix/trace/TallShip (896 x 628 HAM8, hires lace, shipped with a 256-colour GIF of the same frame):
+  `pic.c`'s decode matches the GIF to within 7-8 of 255 a gun on average (the GIF's own 256-colour loss), with no
+  colour fringes, so the files carry the control bits in their top two planes (the hardware's own are bitplanes
+  1 and 2; the readers and writers swap them). The file is not in the repository (someone else's picture).
 - **24 planes:** red, green, blue, 8 planes each, bit 0 first.
 - Refused, with the reason in the window: other compressions, other plane counts, `PBM`/`ACBM`/`DEEP`, a palette-only
   file ("a palette, no picture"), a picture over 4096 x 4096 or over 4 MB decoded. A BODY cut short shows the rows
