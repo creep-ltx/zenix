@@ -13,7 +13,7 @@ upstream/  pdpmake 2.0.4, pinned and never changed: github.com/rmyorston/pdpmake
            Left out: README.md (documentation lives in docs/ only).
 
 Zenix's changes: no patch, no flag, no user header. All nine files compile as they are. What they needed from the C
-library was added there (libc/zenix/sys.c, tested by user/libctest.c in tools/libc-test.sh):
+library was added there (libc/zenix/pathtime.c, tested by user/libctest.c in tools/libc-test.sh):
 - utimensat with UTIME_NOW and AT_FDCWD (make -t): over SYS_utimes; Zenix keeps one time per file in whole seconds.
 - realpath (make's MAKE macro from a relative argv[0]): over libz's zrealpath, the name must exist.
 Commands are run by system(): /bin/sh -c (posix_spawn, D27), one shell per command line. SHELL is /bin/sh in upstream.

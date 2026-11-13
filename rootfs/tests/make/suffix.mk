@@ -3,8 +3,8 @@
 .txt.up:
 	@echo "up $< -> $@ ($*)"
 	cat $< $< > $@
-	@sleep 2
+	@sh wait2.sh
 .up.len:
 	@echo "len $< -> $@ ($*)"
 	cat $< $< > $@
-	@sleep 2
+	@sh wait2.sh

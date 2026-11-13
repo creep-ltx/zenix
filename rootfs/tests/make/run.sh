@@ -5,17 +5,18 @@
 # relative to WORKDIR with a slash in it (one run starts make by it: make makes its own name absolute). make is
 # otherwise found in PATH. Everything goes to standard output; the same output on the PC and on Zenix is the test.
 # A file made in the same second as the file it was made from is out of date (make rebuilds when the target is not
-# newer): after a build that the next step looks at, settle sleeps two seconds.
-# Plain sh only (Zenix's sh and the PC's). Files get different times by a sleep of two seconds (the clocks have whole
-# seconds).
+# newer): after a build that the next step looks at, and after files are written that a build is to be newer than,
+# settle waits two seconds of the wall clock (wait2.sh).
+# Plain sh only (Zenix's sh and the PC's).
 S=$1; W=$2; M=$3
 rm -rf "$W"; mkdir -p "$W" || exit 1
 cd "$W" || exit 1
+cp "$S/wait2.sh" wait2.sh      # the recipes of deps.mk and suffix.mk run it
 unset MAKEFLAGS MAKE PDPMAKE_POSIXLY_CORRECT PDPMAKE_PRAGMAS CMD FROMENV
 
 # run NAME ARGS...: make with the arguments, its output (both streams), then its status
 run() { echo "-- make $*"; make "$@" 2>&1; echo "status $?"; }
-settle() { sleep 2; }
+settle() { sh "$S/wait2.sh"; }
 use() { cp "$S/$1" Makefile; }
 # files in the working directory, with their contents, sorted by name
 state() { for f in "$@"; do if [ -f "$f" ]; then echo "$f: $(cat "$f" | tr '\n' ' ')"; else echo "$f: missing"; fi; done; }
@@ -23,10 +24,11 @@ state() { for f in "$@"; do if [ -f "$f" ]; then echo "$f: $(cat "$f" | tr '\n' 
 echo "== deps: build, nothing to do, a header newer, a source newer"
 use deps.mk
 echo "A" > a.c; echo "B" > b.c; echo "H" > common.h
+settle
 run
 settle
 run
-sleep 2; echo "H2" > common.h
+settle; echo "H2" > common.h
 run
 state prog
 settle
@@ -41,15 +43,15 @@ run -q; run -q all
 echo "== target newer than its prerequisite is not rebuilt"
 use touch.mk
 echo "s1" > src
-sleep 2; echo "t1" > tgt
+settle; echo "t1" > tgt
 run tgt
 state tgt
-sleep 2; echo "s2" > src
+settle; echo "s2" > src
 run tgt
 state tgt
 
 echo "== touch: -t makes the target current without running anything"
-sleep 2; echo "s3" > src
+settle; echo "s3" > src
 settle
 run -t tgt
 run tgt
@@ -62,6 +64,7 @@ run -t nosuchsource
 echo "== suffix rules, chained"
 use suffix.mk
 echo "hi" > hello.txt
+settle
 run hello.len
 state hello.txt hello.up hello.len
 settle
@@ -85,6 +88,7 @@ run -s SRC="x.c y.c"
 echo "== internal macros"
 use internal.mk
 echo "1" > in1; echo "2" > in2
+settle
 run
 state out
 settle
