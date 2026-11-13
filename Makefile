@@ -48,7 +48,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet \
-          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs files \
+          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs files show \
           play modplay lsusb
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
@@ -581,11 +581,23 @@ $(BUILD)/deskprefs.uo: display/prefs/deskprefs.c display/display.h display/proto
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
 $(BUILD)/deskprefs.uelf: $(BUILD)/deskprefs.uo $(BUILD)/libdisplay.no $(BUILD)/dpyd-amifont.no $(BUILD)/cfgfile.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/deskprefs.uo $(BUILD)/libdisplay.no $(BUILD)/dpyd-amifont.no $(BUILD)/cfgfile.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
-# the file view (DESIGN D48, docs/d48-fileview.md): a client of the display, cold: -Os
-$(BUILD)/files.uo: display/files/files.c display/display.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+# the desktop programs' configurable keys (display/keys.h: files' parser, shared with show, DESIGN D50), cold: -Os
+$(BUILD)/keys.no: display/lib/keys.c display/keys.h display/proto.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
-$(BUILD)/files.uelf: $(BUILD)/files.uo $(BUILD)/libdisplay.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/files.uo $(BUILD)/libdisplay.no $(BUILD)/libz.uo $(LIBGCC) -o $@
+# the file view (DESIGN D48, docs/d48-fileview.md): a client of the display, cold: -Os
+$(BUILD)/files.uo: display/files/files.c display/display.h display/keys.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
+$(BUILD)/files.uelf: $(BUILD)/files.uo $(BUILD)/keys.no $(BUILD)/libdisplay.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/files.uo $(BUILD)/keys.no $(BUILD)/libdisplay.no $(BUILD)/libz.uo $(LIBGCC) -o $@
+# the picture viewer (DESIGN D50, docs/d50-viewers.md): cold (-Os), the per-pixel loops in pic.c marked -O2 there and
+# tuned for the 68020 (the floor: without it gcc turns the shifts and adds back into muls.l, 28+ cycles on a 68020,
+# 2 on a 060); pic.c has no system calls (tools/show-host-test.sh builds the same file)
+$(BUILD)/show.uo: display/show/show.c display/show/pic.h display/display.h display/keys.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
+$(BUILD)/show-pic.uo: display/show/pic.c display/show/pic.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -mtune=68020 -c $< -o $@
+$(BUILD)/show.uelf: $(BUILD)/show.uo $(BUILD)/show-pic.uo $(BUILD)/keys.no $(BUILD)/libdisplay.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/show.uo $(BUILD)/show-pic.uo $(BUILD)/keys.no $(BUILD)/libdisplay.no $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/conprefs.uo: user/conprefs.c user/cfgfile.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
 $(BUILD)/conprefs.uelf: $(BUILD)/conprefs.uo $(BUILD)/cfgfile.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
@@ -1215,7 +1227,7 @@ box: $(BUILD)/box.zx
 # is refused when it does not fit, saying by how much; every build says the space left. The commands in the box are
 # its links (BOXAPPS); DEMOAPPS the separate programs. ----
 DEMOAPPS := sh login init mount zdesk term files ahiru sumi ctop telnet rz sntp displayd-nortg dlogin netd drv-a2065 drv-genet drv-ne2000
-DEMOAPPS_HD := $(DEMOAPPS) wget ssh maki markdown zine drv-plipbox fdisk mkfs_ext2 fsck_ext2 mkfs_zenixfs fsck_zenixfs \
+DEMOAPPS_HD := $(DEMOAPPS) show wget ssh maki markdown zine drv-plipbox fdisk mkfs_ext2 fsck_ext2 mkfs_zenixfs fsck_zenixfs \
                dd sync zfsd fatd ffsd pfs3d
 DEMODEPS := $(BUILD)/demoboot.bin $(BUILD)/demoload.zx $(BUILD)/kernel.bin $(BUILD)/box.zx $(USERZX) $(SBINZX) $(NETDRVZX) \
             $(BUILD)/displayd-nortg.zx $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(BUILD)/zine.blob $(BUILD)/sp060 $(BUILD)/sp040 $(shell find rootfs tools/demo -type f) \
