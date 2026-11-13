@@ -761,4 +761,7 @@ counted as crashed by the rule but plays its whole show. Impossible on the 68030
 in one piece (that machine has two blocks of 8 MB); Relic on the 68020 machine lacks the memory for its data file.
 
 Also found: `tools/zine-input-test.sh`'s check "the input.device handler saw the key events (10 or more)" fails now
-and then with 9 on main as on this branch (2 of 4 runs on main): a flaky test, not settled.
+and then with 9 on main as on this branch (2 of 4 runs on main): a flaky test. Settled in round 11: zinput quit at q's key-down and removed its handler
+before q's key-up came (both the handler and lowlevel's keyboard interrupt counted 9 in every failed run); it now
+quits at q's key-up (RAWKEY 0x90), which reaches the window only after the handler (priority 60, before intuition)
+has counted it. 14 runs in a row passed (10 in warp mode, 4 at stock speed), each with exactly 10.

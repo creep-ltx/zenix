@@ -4,7 +4,7 @@
  * button's line), then q). A window (IDCMP VANILLAKEY, RAWKEY, MOUSEBUTTONS) read through gadtools' GT_GetIMsg and
  * GT_ReplyIMsg, with a gadget list (CreateContext, CreateGadgetA, FreeGadgets) and menus (CreateMenusA, FreeMenus);
  * console.device's CMD_READ on the window; an input.device handler (priority 60) counting the key events;
- * keyboard.device's KBD_READEVENT; keymap.library's MapRawKey. Ends at the VANILLAKEY q and writes one line:
+ * keyboard.device's KBD_READEVENT; keymap.library's MapRawKey. Ends at q's key-up (RAWKEY 0x90) and writes one line:
  *   zinput: console C vanilla V raw R keyboard K handler H buttons B map M gadtools G front F rows R
  * C the console's first characters (CSI as ^), V the VANILLAKEY characters, R the last RAWKEY key-down code, K the
  * first keyboard.device code, H the handler's key events, B the MOUSEBUTTONS codes, M MapRawKey of Shift+a, G 1 when
@@ -279,7 +279,7 @@
 1:  move.l  4.w,%a6
     lea     ready(%pc),%a0
     bsr.w   say
-    /* the loop: until the VANILLAKEY q */
+    /* the loop: until q's key-up */
 10: move.l  v_win(%a4),%a0
     move.l  86(%a0),%a0             /* wd_UserPort */
     moveq   #0,%d0
@@ -305,14 +305,15 @@
     bne.s   12f
     lea     v_van(%a4),%a0
     bsr.w   append
-    cmp.b   #'q',%d3
-    bne.w   11b
+    bra.w   11b
+12: cmp.l   #0x400,%d2              /* RAWKEY: the key-downs; q's key-up (0x90) ends the loop */
+    bne.s   13f
+    cmp.b   #0x90,%d3               /* after the handler (priority 60, before intuition) counted it: */
+    bne.s   15f                     /* ending at q's key-down removed the handler before the key-up came */
     st      v_done(%a4)
     bra.w   11b
-12: cmp.l   #0x400,%d2              /* RAWKEY: the key-downs */
-    bne.s   13f
-    tst.b   %d3
-    bmi.s   11b
+15: tst.b   %d3
+    bmi.w   11b
     move.l  %d3,v_raw(%a4)
     bra.w   11b
 13: cmp.l   #8,%d2                  /* MOUSEBUTTONS: SELECTDOWN as 'D', SELECTUP as 'U' */
