@@ -219,6 +219,11 @@ pointers.
   holds fewer than 10; past that big blocks go into the chunks too, so a program runs out of memory, not of regions,
   first (in the PC's test 16 regions hold over 11 MB of 100-byte blocks); then `malloc` answers NULL. A program file is at most 16 MB (`ZEXE_FILE_MAX`; 256 KB until
   2026-11-13), may ask for at most 16 MB (image + BSS) and a stack of 4 KB to 1 MB.
+- The debugger (DESIGN D54, docs/d54-debugger.md; zdb): at most 4 processes debugged at once on the whole system
+  (`NDBG`; a fifth attach or start is -EAGAIN), 16 breakpoints a process (`NBP`; zdb holds 16 too), only in the
+  program's image, at most 4 KB a peek or poke (`DBG_MEMMAX`); no single steps on Emu68 (it takes no trace exception);
+  the crash's frames line at most 8 return addresses; zdb reads symbols only (no line numbers, no disassembler), and
+  its `bt` follows the frame pointer (gcc at -O2 keeps none: `-fno-omit-frame-pointer`, tcc always does).
 - Paths: the directory tools report a joined path longer than a system call takes (255 bytes) instead of cutting it, and
   one the kernel refuses once made absolute. What a path costs (measured 2026-10-31, `tools/ksize-budget`, -fstack-usage;
   all on the 2 MB stock A1200 too): 3,072 bytes of RAM for the working directories (96 in each of the 32 process slots),

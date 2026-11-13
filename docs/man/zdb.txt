@@ -1,0 +1,89 @@
+ZDB(1)			Zenix manual
+
+NAME
+    zdb - the debugger
+
+SYNOPSIS
+    zdb [-m map] program [argument...]
+    zdb [-m map] -p pid program
+    zdb [-m map] -c log program
+
+DESCRIPTION
+    The first form starts program stopped at its first instruction; the
+    second stops a running process of yours (root: anyone's) whose program
+    file is program; the third reads the last crash of program from a
+    kernel log (dmesg's text; - is standard input) and names the place,
+    the registers and the calls that led there.
+
+    Commands come from standard input, one a line (a prompt only on a
+    terminal). LOC is a symbol, symbol+0xOFF, an address 0x..., or a
+    register: $pc, $sp, $d0..$d7, $a0..$a7.
+
+    b LOC         a breakpoint (at most 16)
+    d LOC         take it out
+    i             the breakpoints
+    c             continue to the next stop
+    s [N]         N instructions (a TRAP, a system call, is run to the
+                  instruction after it)
+    n             one instruction, a jsr or bsr run to its return
+    r             the registers
+    x LOC [N]     N long words of memory (4)
+    p LOC         the long word at LOC, hex and decimal
+    set LOC VAL   write a long word
+    bt            the calls: the frame chain through a6; with no chain,
+                  words on the stack just after a call ("scan": a guess)
+    info          where the program is: base, code, and how many other
+                  processes run its code
+    k             kill it
+    detach        let it go on without the debugger
+    q             quit: kills a program zdb started, detaches from one
+                  it stopped
+
+    ^C while the program runs stops it (the kernel turns SIGINT to a
+    debugged program into a stop for the debugger).
+
+    Symbols come from a map in nm -n's format (OFFSET T NAME, offsets
+    from the program's start): program.map beside the program, or -m.
+    zld -M map writes one (tcc: -Wl,-M,map); on the PC, m68k-elf-nm -n
+    of the linked ELF file gives the same.
+
+EXAMPLES
+        tcc -fno-omit-frame-pointer -o prog prog.c -Wl,-M,prog.map
+        zdb ./prog 10
+        b main
+        c
+        bt
+    After a crash:
+        dmesg | zdb -c - ./prog
+
+EXIT STATUS
+    0 at the end of the commands, 1 when the program cannot be started,
+    stopped or read, 2 for a wrong command line.
+
+NOTES
+    You may debug only your own processes (root: any), never pid 1, the
+    servers the kernel starts, system processes, a set-user-id program
+    running as someone else, or a program that changed its user id; a
+    set-user-id program started under zdb runs as you, and one you may
+    not read is refused. A program started under zdb gets its own copy of
+    shared code, so its breakpoints touch no other process; one attached
+    to whose shared code others run refuses breakpoints ("start it under
+    zdb"). When zdb dies, the kernel takes its breakpoints out: a program
+    it stopped runs on, one it started is killed.
+    A fault (a division by zero, a bus error, ...) stops the program for a
+    look; continued, it ends as it would have (status 139).
+    The kernel log's crash lines hold the registers and up to 8 return
+    addresses (not for root's programs nor one that changed its user
+    id: the log is readable by everyone).
+    Inside a system call, d0 is the kernel's: a value written there is
+    replaced by the call's result.
+    Not here: line numbers (no debugging information is read), a
+    disassembler (x shows the words), watchpoints, following a program's
+    children. Single steps need the trace bit, which Emu68 (the PiStorm)
+    does not take: there s answers "not supported" and c takes out the
+    breakpoint it continues from. Code gcc builds at -O2 keeps no frame
+    pointer: use -fno-omit-frame-pointer (tcc always keeps one) for a full
+    bt. Up to 4 processes are debugged at once on the whole system.
+
+SEE ALSO
+    zld(1), tcc(1), dmesg(1); docs/d54-debugger.md

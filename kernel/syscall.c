@@ -503,6 +503,8 @@ void syscall_c(u32 *rb)
         if (current->uid == 0) { current->uid = current->ruid = (u16)a1; r = 0; }
         else if (a1 == current->ruid) { current->uid = (u16)a1; r = 0; }
         else r = -EPERM;
+        if (!r)
+            current->dbgf |= DBGF_NODEBUG;  /* D54 section 4: what it read as another id stays out of a debugger's */
         break;
     case SYS_setgid:
         if (current->uid == 0 || a1 == current->gid) { current->gid = (u16)a1; r = 0; }
@@ -539,6 +541,9 @@ void syscall_c(u32 *rb)
     case SYS_fstat:
         if (GETFD(f, a1) && UOKS(n, a2, a3, USTAT_FIRST, USTAT_SIZE))
             r = (s32)vfs_fstat(f, (struct ustat *)a2, (u32)n);
+        break;
+    case SYS_debug:                     /* D54: the debugger's call (kernel/dbg.c) */
+        r = (s32)dbg_sys(a1, a2, a3);
         break;
     case SYS_readdirs:                  /* D49: whole records into the caller's buffer (vfs_readdirs checks it) */
         if (GETFD(f, a1))

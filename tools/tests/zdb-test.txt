@@ -1,0 +1,24 @@
+wait zenix:/# 120
+send dmesg | grep -e '^mmu:'; cp /bin/id /tmp/sid; chmod 4755 /tmp/sid; cp /bin/id /tmp/sidx; chmod 4711 /tmp/sidx; cd /tests/zdb; echo ==s""tart\r
+wait ==start 60
+send zdb /tests/dbgtest 5 < run.cmd > /tmp/a.out 2>&1; echo za=$?; echo ==a""out; cat /tmp/a.out; echo ==a""end\r
+wait ==aend 300
+send printf 'b leaf\nc\nk\n' | zdb /tests/dbgtest 5 > /tmp/b.out 2>&1; echo ==b""out; cat /tmp/b.out; echo ==b""end\r
+wait ==bend 300
+send /tests/dbgtest loop > /dev/null & P=$!; sleep 1; printf 'b leaf\nc\np counter\ndetach\n' | zdb -p $P /tests/dbgtest > /tmp/c.out 2>&1; sleep 1; echo ==c""out; cat /tmp/c.out; ps | grep dbgtest; kill $P; echo ==c""end\r
+wait ==cend 300
+send sleep 20 | /tests/dbgtestpure wait > /tmp/b1.out & B1=$!; sleep 20 | /tests/dbgtestpure wait > /tmp/b2.out & B2=$!; sleep 2; echo ==d""out; free | grep shared; printf 'b leaf\ndetach\n' | zdb -p $B2 /tests/dbgtestpure 2>&1; sh slow1.sh | zdb /tests/dbgtestpure 5 > /tmp/d.out 2>&1; wait $B1; echo b1st=$?; wait $B2; echo b2st=$?; cat /tmp/b1.out /tmp/b2.out /tmp/d.out; echo ==d""end\r
+wait ==dend 300
+send sleep 8 | /tests/dbgtestpure wait > /tmp/e.out & E=$!; sleep 1; sh slow2.sh | zdb -p $E /tests/dbgtestpure > /tmp/e2.out 2>&1; wait $E; echo est=$?; echo ==e""out; cat /tmp/e2.out /tmp/e.out; /tests/dbgtestpure 2; echo e3=$?; echo damaged=$(dmesg | grep -c DAMAGED); echo ==e""end\r
+wait ==eend 300
+send zdb /tests/dbgtest crash < crash.cmd > /tmp/f.out 2>&1; /tests/dbgcheck as1000 /tests/dbgtest crash; dmesg > /tmp/log; echo ==f""out; cat /tmp/f.out; zdb -c /tmp/log /tests/dbgtest; dmesg | tail -4; echo ==f""end\r
+wait ==fend 300
+send /tests/dbgtest loop > /dev/null & P=$!; sleep 1; sh slow3.sh | zdb -p $P /tests/dbgtest > /tmp/g.out 2>&1 & Z=$!; sleep 4; kill -9 $Z; sleep 1; echo ==g""out; cat /tmp/g.out; ps | grep dbgtest; printf 'x leaf 1\ndetach\n' | zdb -p $P /tests/dbgtest; kill $P; sleep 1; echo ==g""end\r
+wait ==gend 300
+send sh slow3.sh | zdb /tests/dbgtest loop > /tmp/h.out 2>&1 & Z=$!; sleep 4; kill -9 $Z; sleep 2; echo ==h""out; cat /tmp/h.out; echo left=$(ps | grep -c dbgtest); dmesg | grep 'dbgtest' | tail -2; echo ==h""end\r
+wait ==hend 300
+send /tests/dbgcheck > /tmp/k.out 2>&1; echo zk=$?; echo ==k""out; cat /tmp/k.out; echo ==k""end\r
+wait ==kend 600
+send echo ==m""em; free; ps; echo ==m""end\r
+wait ==mend 60
+stop

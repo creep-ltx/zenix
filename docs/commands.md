@@ -1,6 +1,6 @@
 # Command reference
 
-Zenix has 160 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
+Zenix has 161 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
 page in `docs/man/NAME.txt`; a few more pages are for names that start the same program (`gunzip`, `zcat`, `chgrp`,
 `more`, `pkill`, `ifup`, `ifdown`, `unlzx`). The pages use the exact format that Zenix's own `man` reads (plain text of at most 78 columns, a
 `NAME(section)` header, `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`, `EXAMPLES`, `EXIT STATUS`, `SEE ALSO`); the
@@ -39,6 +39,7 @@ spot-checked against the code that day.
 | [zld](man/zld.txt) | link ELF objects and archives into a Zenix program, the same bytes as the PC's ld + mkzexe.py (ours; package devel; DESIGN D52) |
 | [zas](man/zas.txt) | assemble 68k assembly (GNU as's syntax) into an ELF object, the same bytes as the PC's GNU as (ours; package devel; DESIGN D52) |
 | [tcc](man/tcc.txt) | the C compiler: TinyCC with Zenix's 68k code generator, gcc's calling rules, links with zld (`ports/tcc`; package devel; DESIGN D52) |
+| [zdb](man/zdb.txt) | the debugger: start a program stopped or stop one of your own, breakpoints by name, steps, registers, memory, the call chain; a crash read back from the kernel log (ours; package devel; DESIGN D54) |
 | [sort](man/sort.txt), [uniq](man/uniq.txt), [cut](man/cut.txt), [tr](man/tr.txt), [tee](man/tee.txt) | filters |
 | [head](man/head.txt), [tail](man/tail.txt), [tac](man/tac.txt), [rev](man/rev.txt), [nl](man/nl.txt), [wc](man/wc.txt) | parts, reversed, numbered, counts |
 | [fold](man/fold.txt), [expand](man/expand.txt), [paste](man/paste.txt), [comm](man/comm.txt) | wrap, tabs, merge, compare sorted |
@@ -116,10 +117,12 @@ spot-checked against the code that day.
 [priotest](man/priotest.txt), [svctest](man/svctest.txt), [sigtest](man/sigtest.txt), [ptytest](man/ptytest.txt), [gcontest](man/gcontest.txt), [dpytest](man/dpytest.txt),
 [socktest](man/socktest.txt), [socktestd](man/socktestd.txt) (the socket layer and its test server, DESIGN D19),
 [nettest](man/nettest.txt) (the network over the loopback, D19), [cryptotest](man/cryptotest.txt) (the crypto library's known answers and times, D21).
+[dbgtest](man/dbgtest.txt), [dbgcheck](man/dbgcheck.txt) (the debugger's test programs, D54; on the test images only, not in `UAPPS`).
+[dbgtest](man/dbgtest.txt), [dbgcheck](man/dbgcheck.txt) (the debugger's test programs, D54; on the test images only, not in `UAPPS`).
 
 ## Run on AmigaOS, not on Zenix
 [zenixboot](man/zenixboot.txt) starts Zenix from files on a hard disk, CF or SD card partition, so that no floppy is
-needed (not one of the 160 programs: it is an AmigaOS program on the AmigaDOS boot partition).
+needed (not one of the 161 programs: it is an AmigaOS program on the AmigaDOS boot partition).
 [bootmenu](man/bootmenu.txt) is the boot menu of a disk with AmigaOS and Zenix on it (the SD card of
 `tools/mkdualcard.sh`): it boots a chosen AmigaOS partition or runs zenixboot.
 

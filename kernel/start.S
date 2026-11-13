@@ -143,8 +143,10 @@ stage0_blob_end:                    /* (tools/check-init.py: stage0's own code, 
 exc_common:
     movem.l %d0-%d7/%a0-%a6,-(%sp)
     move.l  %sp,-(%sp)
-    jsr     exc_c
-6:  bra.s   6b                      /* exc_c does not return in M0 */
+    jsr     exc_c                   /* returns only for the debugger (DESIGN D54): a step, a breakpoint, a stray trace */
+    addq.l  #4,%sp
+    movem.l (%sp)+,%d0-%d7/%a0-%a6
+    rte
 
 /* Level 2 autovector: CIA-A (timer tick, keyboard). Saves every register like the system-call entry (DESIGN D16
  * section 5: a handler can then be sent to from a tick that cut into user code, sig_deliver editing the block) and

@@ -67,6 +67,19 @@ for p in sh.pzx lua.zx libctest.pzx make-probe.zx; do
     grep -q "^$B/$p	" "$T/links.tsv"
     check $? "among them $p"
 done
+# -M MAP (DESIGN D54, zdb's symbols): the same program byte for byte, and the map nm -n's defined symbols of ld's link
+# (without .L labels, the linker script's own symbols and --defsym names), for a plain program and one with shared code
+for p in lua.zx sh.pzx; do
+    line=$(grep "^$B/$p	" "$T/links.tsv") || continue
+    IFS=$'\t' read -r -a a <<<"$line"
+    elf=${a[0]%.zx}.uelf; [ "$p" = sh.pzx ] && elf=$B/sh.puelf; [ "$p" = lua.zx ] && elf=$B/lua.celf
+    "$T/zld" -M "$T/m.map" -o "$T/m.zx" "${a[@]:1}" 2>"$T/e.txt" && cmp -s "$T/m.zx" "${a[0]}" &&
+        diff <(awk '{ print $1, toupper($2), $3 }' "$T/m.map" | sort) \
+             <("${P}nm" -n "$elf" | grep -v ' [aUwN] \| [Tt] \.L\| [Rr] \.L' |
+               grep -v ' __\(bss\|text\|data\|init_array\|fini_array\|preinit_array\|bothinit_array\|got\)_\?\(start\|end\)\| _GLOBAL_OFFSET_TABLE_$\| _end$\| __text_end$\| vfprintf$\| vfscanf$' |
+               awk '{ print $1, toupper($2), $3 }' | sort) >"$T/mapdiff.txt"
+    check $? "zld -M $p: the same program, its map nm -n's symbols" "$(head -4 "$T/mapdiff.txt") $(head -2 "$T/e.txt")"
+done
 
 # ---- links that must fail ----
 CF="-m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib -O2 -ffunction-sections -fdata-sections"

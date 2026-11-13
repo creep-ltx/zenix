@@ -822,6 +822,33 @@ pattern (section 6).
   DESIGN D20 7.2), else its parent's. `/dev/tty`, `SYS_ttymode`,
   `SYS_setfg` and `SYS_ttyintr` use it, so the second stage of `ls | less` on console 2 reads console 2's keys
   (before, a process whose fd 0 was a pipe fell back to console 1).
+- **The debugger** (DESIGN D54, `kernel/dbg.c`, `kernel/dbgproto.h`, docs/d54-debugger.md). `SYS_debug` (100),
+  `debug(op, pid, arg)`, ptrace-like: `DBG_ATTACH` (your own processes, root any; never pid 0/1, a process without a
+  parent, a system process, `priv`, one already traced or in the caller's own chain of debuggers, nor a `nodebug`
+  one for a user: set when the loader honoured a set-user-id bit or the caller could not read the file, and by
+  `setuid`), `DBG_NEXT` (the caller's next spawn starts traced: a ZEX2 program gets a private copy of its code, a
+  set-user-id bit is not honoured, an unreadable file is -EACCES, and an `ILLEGAL` at its entry stops it there),
+  `DBG_STOP`, `DBG_WAIT` (`EV_CHILD` on the debugger; `struct udbgstop`), `DBG_CONT`/`DBG_STEP` (the argument a signal
+  to send; a step sets T1 in the saved SR, -EOPNOTSUPP on Emu68), `DBG_GETREGS`/`SETREGS` (`struct udbgregs`: the block
+  `exc_common` saved while held in `exc_c`, else the trap #0 / level-2 block at `ktop - 68`, checked: format 0, user
+  mode; of SR only the condition codes are written), `DBG_PEEK`/`POKE` (at most 4 KB; the target's memory as
+  `user_ok_rd`/`wr` say, its code too when no other process runs it: a sole user's segment is disowned, `seg_disown`),
+  `DBG_BREAK`/`UNBREAK` (`ILLEGAL` 0x4AFC, only in the image, at most 16 a process, the instruction cache flushed),
+  `DBG_INFO`, `DBG_DETACH`. At most 4 processes are traced at once (`NDBG`: blocks on the kernel heap; `struct proc`
+  has one byte, `dbgf`). A debugger's stop is `P_STOP` that `SIGCONT` does not end and the parent's `wait` does not
+  report; `SIGINT` to a traced process becomes such a stop. `exc_c` holds a traced process at a breakpoint, a step
+  (vector 9) or any fault (then it ends as before, 139); `exc_common` returns through `rte` for the first two; a trace
+  exception in supervisor mode at `trap0_entry` or `exc_common` (a step over a group 2 exception) and one in user mode
+  in an untraced process (a T1 a debugger left) are harmless. `schedule()`'s stop branch skips a process loading a
+  service (`svc_depth`) and one held in `exc_c`. `sigreturn` keeps the trace bits. When the debugger ends, what it
+  attached to is detached (breakpoints out, T1 off, a held stop ended), what it started is killed; when the target ends
+  its block becomes an exit record for `DBG_WAIT`. `ZINE_GO` from a traced process is -EBUSY; a traced process that becomes a system process (`mmu_sysmark`)
+  is detached; `DBG_NEXT`'s bit is taken by every spawn attempt. Every user-mode crash
+  (not `nodebug`, not root's, the kernel stack sound) adds two log lines after the crash line: `[kernel] pid N regs: base B code C
+  sr S pc P d0..d7 ... a0..a7 ...` and `[kernel] pid N frames: K R1 .. RK` (up to 8 return addresses along `a6`, each
+  frame inside the process's block). Nothing of it runs on the hot paths: byte tests in the exception path, the stop
+  branch, `sig_send`, `proc_stop`, spawn, exit and wait. Verified in FS-UAE by `tools/zdb-test.sh` (68020, 68060, a
+  68030 with memory protection on).
 - Process exit closes fds, releases the tty, closes the process's ports (clients get an error), frees all
   memory owned by the pid, and wakes a waiting parent. A zombie nobody will wait for (its parent is gone or is
   itself a zombie) is freed by the idle loop, by every process exit and before a spawn looks for a free slot, so
@@ -835,11 +862,11 @@ pattern (section 6).
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 96 system calls (the numbers and
-a line on each are in `kernel/kernel.h`; numbers 1-99, of which 39, 40 and 68 are unused; the next free number is
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 97 system calls (the numbers and
+a line on each are in `kernel/kernel.h`; numbers 1-100, of which 39, 40 and 68 are unused; the next free number is
 claimed in CLAUDE.md first): the network (`sock`, `netsrv`, `drv`: section 11, "Sockets" and "The network's drivers"), files (`open close read write lseek readdir readdirs stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
-index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority setpgid`),
+index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority setpgid`, and `debug`, the debugger's: section 6),
 events and signals (`evwait sigaction sigprocmask sigreturn alarm`, section 6), the machine (`reboot`,
 `update`), services (`svc`), memory (`memalloc memfree meminfo`),
 time (`ticks hrtime time settime`; `ticks` with 0 is the 100 Hz tick count, a 32-bit number that wraps after 497 days, and with 1 the whole seconds since boot, the clock's own count that wraps after 136 years (`uptime`; audit 2026-10-26 F9); `time` is the seconds since 1970 as an **unsigned** 32-bit number, good until

@@ -33,7 +33,8 @@ Claim a number here **before** using it (system calls, message types, port names
 | 92 `drv` for the service of port `usb` (DESIGN D46: `DRV_HWINFO`, the `DRV_CLAIM` of the hardware table's `xhci` and that claim's ops only, before the network gate); the quiesce step `DRVS_WAIT` 3 (until `(*addr & mask) == value`, at most 20 ms; not on `DRV_PARPORT`); the hardware table's `xhci`, `xhci_size`, `xhci_stop` where `reserved[3]` was, `XSTOP_DONE` 1, `XSTOP_RAN` 2, `XSTOP_SLOW` 4, `XSTOP_NOTXHCI` 8 | branch usb, 2026-11-12 |
 | 18 `memalloc`'s second argument bit `MEMA_LOW` 2 (a region ending below 16 MB, the 24-bit addresses; d29 16.19: ZINE's loader) | branch zine9, 2026-11-12 |
 | 99 `readdirs` (DESIGN D49: fd, buffer, size; whole `struct udirx` records, `kernel/udirx.h`; size 104-65,535, bits 16-31 reserved for request flags, the buffer 4-aligned); `stat`'s (13), `lstat`'s (57) and `fstat`'s (14) size 32 `USTAT_SIZE`: the device at offset 28 (the mount's instance, 0 the kernel's own) | branch readdir, 2026-11-13 |
-| **next free: 100** | |
+| 100 `debug` (DESIGN D54: `debug(op, pid, arg)`, ops `DBG_ATTACH` 1 .. `DBG_INFO` 14 in `kernel/dbgproto.h`; `DBGW_*` 1-9; `struct udbgregs` (first size 76), `udbgstop` (24), `udbginfo` (28), `udbgmem` (12); `DBG_CONT`/`DBG_STEP`'s argument a signal; `NDBG` 4, `NBP` 16, `DBG_MEMMAX` 4096 as minimums; the breakpoint `ILLEGAL` 0x4AFC; `struct proc`'s `dbgf` bits `DBGF_*` 1-8, kernel-internal) | branch debugger, 2026-11-13 |
+| **next free: 101** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
 Message types claimed so far: `NET_*` 1-19 on port `net` (`kernel/netproto.h`, DESIGN D19 step 3: the `SOCK_*` op
 numbers 1-18 and `NET_CLOSE` 19; 1-63 are the kernel's to the server), `NETDRV_*` from 64 (the drivers' blocks, step 7:

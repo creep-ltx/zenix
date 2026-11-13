@@ -107,6 +107,11 @@
 # 684 -> 683 KB for the floppy's ROOM.
 # 2026-11-13 (a program file up to 16 MB, was 256 KB; at most half the image's bytes of relocations): proc 10,066 ->
 # 10,181 (the refusals' log line and the two relocation counts); kernel.bin 199,492 -> 199,608, TOTAL 199,600 -> 199,700.
+# 2026-11-13 (DESIGN D54, the live debugger): dbg new 4,030 and bss 17 (SYS_debug's 14 operations, the holds in the
+# exception path, the hooks' bodies, the crash's register and frame lines), proc 10,181 -> 10,599 (the loader's start
+# under a debugger, the stop branch, the exit and wait tests, the spawn's DBG_NEXT taken), seg + 46 (seg_disown),
+# main + 82, signal + 54, syscall + 68, zine + 12, mmu + 24, start + 6; kernel.bin 199,608 -> 204,464, TOTAL 199,700 ->
+# 204,500; the mount tests' RAM disk 683 -> 678 KB for the floppy's ROOM.
 start     4850   8200
 main      5950   1100
 serial    6100   6500
@@ -119,7 +124,7 @@ audio      620     32
 a3000     2400    100
 blk        460     16
 rtc       1550      4
-proc     10200  21500
+proc     10650  21500
 syscall  10300      0
 vfs      11750   1600
 tty       5900    100
@@ -129,7 +134,7 @@ confont   3100     32
 kbd       4300    180
 ipc       4150   2150
 svc       5600   1420
-seg       1250    256
+seg       1300    256
 event      700      0
 signal    2100      0
 random    3800    280
@@ -138,7 +143,8 @@ drv       3100    640
 zine      1600     16
 cache     1800     32
 gcon      3600     16
+dbg       4100     20
 mmu       5700    160
 embed    49600      0
-TOTAL   199700
+TOTAL   204500
 ROOM       800

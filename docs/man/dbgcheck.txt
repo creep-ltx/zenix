@@ -1,0 +1,32 @@
+DBGCHECK(1)			Zenix manual
+
+NAME
+    dbgcheck - test the debugger's system call
+
+SYNOPSIS
+    dbgcheck
+    dbgcheck as1000 program [argument...]
+
+DESCRIPTION
+    A test program for the debugger's system call, debug (100, DESIGN
+    D54), on the test images only (/tests/dbgcheck; tools/zdb-test.sh).
+    Run as root, it prints one line a check, ending in "ok" or "FAILED":
+    a user (uid 1000) may not attach to root's process, to pid 1 or to a
+    nodebug process of its own id; a set-user-id program started under
+    the debugger runs as the caller and one it may not read is refused;
+    root may attach to a nodebug process; a second debugger is refused; a
+    fifth traced process is EAGAIN; peeks and pokes outside the target are
+    EFAULT; SIGCONT does not end a debugger's stop; a detached process
+    runs on; a raw step over TRAP #0 (no panic on any CPU) and the
+    program's own end; a target blocked in a system call stops and its
+    registers read; a step left pending at a detach does no harm. It
+    expects /tmp/sid (a set-user-id copy of /bin/id) and /tmp/sidx (the
+    same without read for others) and /tests/dbgtest.
+
+    dbgcheck as1000 runs a program as uid 1000 and gives its status.
+
+EXIT STATUS
+    0 when every check passed, 1 otherwise.
+
+SEE ALSO
+    zdb(1), dbgtest(1)

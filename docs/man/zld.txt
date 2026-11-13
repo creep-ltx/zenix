@@ -48,6 +48,11 @@ OPTIONS
     -lname            the archive libname.a from the -L directories, then
                       /usr/lib
     -v                print the program's sizes at the end
+    -M map            also write the program's symbols to map, in nm -n's
+                      format (OFFSET T NAME, offsets from the program's
+                      start, sorted; T t code, R r constants, D d data, B b
+                      bss, upper case a global one), for zdb (zdb.txt);
+                      tcc passes it on as -Wl,-M,map
 
 EXAMPLES
     A C library program, from the development package (zpkg -S devel):

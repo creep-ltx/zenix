@@ -220,6 +220,8 @@ long zine_sys(u32 op, u32 a, u32 b)
     }
     if (op != ZINE_GO)
         return -EINVAL;
+    if (current->dbgf & DBGF_TRACED)
+        return -EBUSY;                  /* D54 section 4: no debugger across a ZINE session */
     struct uzine_go g;
     if (!user_ok_rd(current, a, UZINE_GO_FIRST))
         return -EFAULT;

@@ -351,6 +351,9 @@ GPL-2.0-only so they can go upstream; say if they should be GPL-2.0-only.
 
 ## 8. The debugger (item 6) and the fun (item 7)
 
+**Built as DESIGN D54 (docs/d54-debugger.md, 2026-11-13):** the live debugger with the kernel's part, the partner's
+yes; the two stages below were the plan before it.
+
 **Debugger, stage 1, no kernel change:** a crash already prints the program's name, the address and `code+OFFSET`
 (architecture.md section 4). `zdb` reads the program's symbol table (a `.sym` file the build writes beside each
 program from its ELF, function names and line numbers, in the development package) and turns the crash line into

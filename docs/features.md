@@ -231,6 +231,18 @@ the development package `devel`. **verified** on the PC: upstream's test suite's
 UBSan, its compile-time diagnostics as upstream's, damaged sources never crash it (`tools/tcc-host-test.sh`); in
 FS-UAE on an A1200 with 4 MB of fast RAM (`tools/tcc-test.sh`): the test suite (110 of its programs, built by the cross compiler) prints upstream's expectation or, where that is a little-endian PC's, what gcc's build prints; tcc's and gcc's code call each other right (the ABI test's four pairings); random programs print what gcc's builds print; libctest built by tcc passes all its checks and coreutils over libz built by tcc (their system calls through inline asm) behave as /bin's; `/bin/tcc` on Zenix compiles three sources into the cross compiler's objects byte for byte and `tcc -o` programs run. Not yet on a real Amiga. See man/tcc.txt.
 
+`zdb` (roadmap block 7, DESIGN D54): the live debugger, ours, with the kernel's system call `debug` (100): start a
+program stopped at its entry or stop a running one of your own (root any), breakpoints by symbol or address (the kernel
+keeps them and takes them out if the debugger dies), single steps (the trace bit; not on Emu68), registers, memory, a
+variable read and written by name, the call chain through the frame pointer, a fault stopped for a look before the
+program ends; a program started under it gets a private copy of shared code, so its breakpoints touch no other copy;
+`^C` stops the program. After a crash the kernel log has the registers and the frame chain, which `zdb -c` turns into
+names. Symbols from a map in `nm -n`'s format (`zld -M`, or the PC's nm). In the development package `devel`.
+**verified** in FS-UAE on an A1200 with 4 MB of fast RAM (68020), a 68060, and a 68030 with memory protection on
+(`tools/zdb-test.sh`: the commands' output, the shared-code proof, the debugger's death, `zdb -c`; the raw call's
+permissions and edges by `dbgcheck`); `zld -M`'s map is nm's on the PC (`tools/zld-host-test.sh`). Not yet on a real
+Amiga. See man/zdb.txt.
+
 ## Tooling
 | Feature | Status |
 |---|---|

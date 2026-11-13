@@ -372,6 +372,8 @@ KMMU static void mmu_sysnow_(void)    /* the current process made a system one: 
 
 void mmu_sysmark(struct proc *p)
 {
+    if (p->dbgf & DBGF_TRACED)
+        dbg_sysmark(p);                 /* D54 section 4: a system process has no debugger */
     sysmask |= SLOT(p);
     if (mmu_on && p == current)         /* from now on, also on its way back to user mode now */
         mmu_ops->sysnow();

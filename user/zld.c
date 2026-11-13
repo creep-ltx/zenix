@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -52,7 +53,7 @@ typedef int32_t i32;
 static char obuf[256];
 static int olen;
 static int nerr;
-static const char *outname;
+static const char *outname, *mapname;
 
 static void oflush(int fd)
 {
@@ -1827,7 +1828,65 @@ static int u32cmp(const void *a, const void *b)
 
 static void usage(void)
 {
-    die("usage: zld [-v] [-s STACK] [--defsym=SYM=VALUE] [--wrap=SYM] [-L DIR] -o OUT FILE.o|LIB.a|-lNAME ...");
+    die("usage: zld [-v] [-s STACK] [-M MAP] [--defsym=SYM=VALUE] [--wrap=SYM] [-L DIR] -o OUT FILE.o|LIB.a|-lNAME ...");
+}
+
+/* -M MAP (DESIGN D54 section 18, zdb's symbols): the kept, defined symbols with their places in the program, sorted,
+ * in nm -n's format ("%08x T name": T t code, R r constants, D d data and the address table, B b bss; upper case a
+ * global one), each once. No absolute, undefined, section or file symbols, none in a merged section, none named .L */
+struct mapent { u32 v; char t; const char *n; };
+static int mapcmp(const void *a, const void *b)
+{
+    const struct mapent *x = a, *y = b;
+    return x->v < y->v ? -1 : x->v > y->v ? 1 : strcmp(x->n, y->n);
+}
+static void writemap(const char *name)
+{
+    struct obj *o;
+    struct mapent *e = 0;
+    u32 n = 0, cap = 0, i;
+    int k;
+    for (o = objs; o; o = o->next)
+        for (k = 1; k < o->nsym; k++) {
+            struct esym *y = &o->sym[k];
+            int type = y->info & 15, glob = (y->info >> 4) != 0;
+            struct sec *s;
+            const char *nm = o->str + y->name;
+            if (type > 2 || !y->shndx || y->shndx >= o->nsec || !*nm || (nm[0] == '.' && nm[1] == 'L'))
+                continue;
+            s = &o->sec[y->shndx];
+            if (!s->keep || s->gone || s->mg || stmt_out[s->stmt] == O_NONE)
+                continue;
+            if (k >= o->nlocal && (o->g[k - o->nlocal]->o != o || o->g[k - o->nlocal]->shndx != y->shndx))
+                continue;     /* a global defined elsewhere (or twice): its definition writes it */
+            if (n == cap) {
+                cap = cap ? cap * 2 : 512;
+                e = realloc(e, cap * sizeof *e);
+                if (!e)
+                    die("out of memory");
+            }
+            e[n].v = sec_value(o, y->shndx, y->value);
+            e[n].n = nm;
+            switch (stmt_out[s->stmt]) {
+            case O_TEXT: e[n].t = 't'; break;
+            case O_RODATA: e[n].t = 'r'; break;
+            case O_BSS: e[n].t = 'b'; break;
+            default: e[n].t = 'd';
+            }
+            if (glob)
+                e[n].t = (char)(e[n].t - 32);
+            n++;
+        }
+    if (n)
+        qsort(e, n, sizeof *e, mapcmp);
+    FILE *f = fopen(name, "w");
+    if (!f)
+        die("%s: cannot write", name);
+    for (i = 0; i < n; i++)
+        fprintf(f, "%08x %c %s\n", (unsigned)e[i].v, e[i].t, e[i].n);
+    if (fclose(f))
+        die("%s: cannot write", name);
+    free(e);
 }
 static u32 num(const char *s, const char *what)
 {
@@ -1873,6 +1932,8 @@ int main(int argc, char **argv)
             stack = num(a + 8, "--stack");
         else if (!strcmp(a, "-v"))
             verbose = 1;
+        else if (!strcmp(a, "-M") && i + 1 < argc)
+            mapname = argv[++i];
         else if (!strncmp(a, "--defsym=", 9)) {
             char *eq = strchr(a + 9, '=');
             if (!eq || eq == a + 9 || !eq[1])
@@ -2089,6 +2150,8 @@ int main(int argc, char **argv)
             err("%s: cannot be a ZEX2 program (%u problems)", outname, perr);
         exit(1);
     }
+    if (mapname)
+        writemap(mapname);
 
     /* the image: every loaded output section from address 0 (objcopy -O binary) */
     imgsz = 0;

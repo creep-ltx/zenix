@@ -1,0 +1,24 @@
+DBGTEST(1)			Zenix manual
+
+NAME
+    dbgtest - the program the debugger's test debugs
+
+SYNOPSIS
+    dbgtest [N | wait | loop | crash | trap]
+
+DESCRIPTION
+    A test program for zdb (tools/zdb-test.sh, DESIGN D54), on the test
+    images only (/tests/dbgtest, its shared-code build /tests/dbgtestpure,
+    and their symbol maps). Built with a frame pointer and no sibling
+    calls, so zdb's bt finds every caller.
+
+    N       count to N (default 5) through three calls (outer, middle,
+            leaf), adding each number to the global counter; print
+            "counter C marker M" (the marker is 7, one more at 3); status 3
+    wait    print "ready", read a byte from standard input, then count to 5
+    loop    count for ever, a short sleep a round (to be attached to)
+    crash   three calls deep (b1, b2, boom), then a division by zero
+    trap    three system calls in a loop, then "trap done", status 4
+
+SEE ALSO
+    zdb(1), dbgcheck(1)
