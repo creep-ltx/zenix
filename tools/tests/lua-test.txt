@@ -1,0 +1,19 @@
+wait zenix:/# 120
+send cd /tests/lua; lua zenix.lua /tmp > /tmp/lz.txt 2>&1; echo zst=$?; echo ==z""out; cat /tmp/lz.txt; echo ==z""end\r
+wait ==zend 900
+send lua cstack.lua > /tmp/cs.txt 2>&1; echo cst=$?; echo ==c""out; cat /tmp/cs.txt; echo ==c""end\r
+wait ==cend 900
+send lua -v; lua -e 'print(1 + 1, #arg, arg[0])'; lua -e 'print(string.format("fmt=%.17g|%.14g", 0.1, 2^-1074))'; echo 'print("from a pipe", ...)' | lua - x y; echo pst=$?\r
+waitecho pst=0 60
+send lua -e 'error("boom")'; echo est=$?; lua /no/such/file.lua; echo nst=$?; lua -e 'os.exit(7)'; echo xst=$?\r
+waitecho xst=7 60
+send printf 'print("args", ...)\nreturn 0\n' > /tmp/a.lua; lua /tmp/a.lua one two; echo ast=$?\r
+waitecho ast=0 60
+send printf 'x = 41\n' > /tmp/i.lua; lua -i /tmp/i.lua\r
+wait > 60
+send print(x + 1)\r
+wait 42 30
+send os.exit(0)\r
+send echo ==m""em; free; lua -e 'os.execute("ps")'; lua -e 'local t = {} for i = 1, 1000 do t[i] = ("x"):rep(100) end os.execute("free; ps")'; echo ==m""end\r
+wait ==mend 120
+stop

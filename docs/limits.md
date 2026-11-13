@@ -194,7 +194,8 @@ pointers.
   2; a recalled history line cut to 478 the same; longer commands go on over several lines with a final backslash,
   at most 2047 bytes).
 - awk: a `printf`/`sprintf` field width or precision of at most 4096 ("field width too large", status 2).
-- Kernel stack 4 KB per process; user stack 16 KB by default, 24 KB for `sh`, 32 KB for `gzip`, `edit` and `markdown`, 4 KB for
+- Kernel stack 4 KB per process; user stack 16 KB by default, 24 KB for `sh`, 32 KB for `gzip`, `edit` and `markdown`, 128 KB for `lua` (its
+  limit of 100 nested C calls measured against it, DESIGN D52 9), 4 KB for
   `boot` and `init`, 8 KB for `diskd` (the last three live for ever and use under 700 bytes: DESIGN D18; the
   Makefile's `STACK_*`, written into each program's header). The lowest 16 bytes of each stack are the guard
   pattern (architecture.md section 6). Measured with `-fstack-usage`
@@ -249,7 +250,10 @@ pointers.
   call (the system calls take none: not atomic); `stat` gives one time (the modification's) for all three; the wall
   clock has whole seconds (`gettimeofday`'s microseconds 0), `CLOCK_MONOTONIC` and the sleeps 10 ms ticks, `clock()`
   is wall time since the start; `lseek` past 4 GB `EOVERFLOW`; `readdir`'s `d_type` the server's type or the record's stat (DESIGN D49), `DT_UNKNOWN` from a server that gives neither (nfscd on a NAS without READDIRPLUS); the
-  environment at most 63 variables and 1 KB; `printf` without a float build prints `%f` as `*float*`; no `fork`,
+  environment at most 63 variables and 1 KB; `printf` without a float build prints `%f` as `*float*`; with it a precision beyond a number's
+  shortest exact digits gives those digits (picolibc's Ryu engine): `%.17g` of 0.1 is `0.1`, not glibc's
+  `0.10000000000000001`, and the subnormal 2^-1074 is `5e-324` at `%.14g` (round-trip safe, not C's exact
+  expansion; found by Lua, DESIGN D52 9); no `fork`,
   `exec`, `mmap`, `sbrk`, threads; `O_CLOEXEC` is 0 (a spawned program gets only descriptors 0-2 anyway), `O_SYNC`
   and `O_NOCTTY` are not defined. The terminal (D27 5.4): `ICANON`, `ECHO` and `ISIG` all on is the kernel's cooked
   mode, any of them off its raw mode (with `ICANON` the C library edits the line: erase, kill, ^D, at most 511

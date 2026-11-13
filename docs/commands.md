@@ -34,6 +34,7 @@ spot-checked against the code that day.
 | [grep](man/grep.txt) | search (POSIX extended expressions) |
 | [sed](man/sed.txt) | stream editor |
 | [awk](man/awk.txt) | pattern scanning and text processing language (POSIX awk) |
+| [lua](man/lua.txt) | the Lua 5.4 scripting language (Lua 5.4.9 from lua.org, `ports/lua`; DESIGN D52) |
 | [sort](man/sort.txt), [uniq](man/uniq.txt), [cut](man/cut.txt), [tr](man/tr.txt), [tee](man/tee.txt) | filters |
 | [head](man/head.txt), [tail](man/tail.txt), [tac](man/tac.txt), [rev](man/rev.txt), [nl](man/nl.txt), [wc](man/wc.txt) | parts, reversed, numbered, counts |
 | [fold](man/fold.txt), [expand](man/expand.txt), [paste](man/paste.txt), [comm](man/comm.txt) | wrap, tabs, merge, compare sorted |

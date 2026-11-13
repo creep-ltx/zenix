@@ -1,0 +1,89 @@
+LUA(1)			Zenix manual
+
+NAME
+    lua - the Lua 5.4 scripting language
+
+SYNOPSIS
+    lua [options] [script [argument...]]
+    lua [options] -
+
+DESCRIPTION
+    Runs Lua programs: the script named, or the standard input with -,
+    or, with no script and a terminal for input, a prompt where lines of
+    Lua are typed and run (as with -i). The script's arguments are in the
+    table arg (arg[0] the script's name, arg[1] the first argument) and are
+    also passed to the script as its ... . A first line starting with #
+    is skipped, so a script may carry a #! line for other systems.
+
+    This is Lua 5.4.9, the reference interpreter from lua.org, unchanged.
+    The language and every standard library are there: strings with
+    patterns, tables, maths, utf8, coroutines, io, os, debug, require of
+    Lua modules, string.pack, metatables, goto, <close> and <const>.
+    The manual is at lua.org (the "Lua 5.4 Reference Manual").
+
+OPTIONS
+    -e chunk    run the Lua text chunk
+    -i          the prompt after the script (or after -e)
+    -l name     require("name") and keep it in the global name
+    -l g=name   require("name") as the global g
+    -v          print the version
+    -E          ignore LUA_INIT and the LUA_PATH variables
+    -W          turn warnings on
+    --          stop taking options
+    -           run the standard input
+
+ENVIRONMENT
+    LUA_INIT_5_4, LUA_INIT  a chunk (or @file) run before anything else
+    LUA_PATH_5_4, LUA_PATH  where require looks for Lua modules; the
+                default is /usr/local/share/lua/5.4/?.lua,
+                /usr/local/share/lua/5.4/?/init.lua, the same under
+                /usr/local/lib/lua/5.4/, ./?.lua and ./?/init.lua
+
+EXIT STATUS
+    0 when the script ends (or returns), 1 after an error (the message
+    and a traceback on standard error), the number given to os.exit.
+
+EXAMPLES
+    lua -e 'print(2^10, math.maxinteger)'
+    lua count.lua *.txt
+    ls | lua -e 'for l in io.lines() do print(#l, l) end'
+
+NOTES
+    Numbers are 64-bit integers and double floats, as everywhere else;
+    the floats are computed in software (no FPU is used), so a script
+    heavy in floating-point maths is slow on a 68020 without one.
+
+    Zenix runs a script by the command lua file.lua; it does not start a
+    file by its #! line.
+
+    The stack is fixed (no MMU): 128 KB. Lua stops a script that nests
+    more than 100 C calls (a function given to string.gsub, pcall,
+    table.sort or a metamethod that calls back into the same) or 100
+    levels of brackets, blocks or functions, with "C stack overflow" (an
+    error a script can catch with pcall); upstream allows 200, which
+    would need a 256 KB stack. Lua-to-Lua calls do not count: they nest
+    until memory runs out ("stack overflow").
+
+    Lua runs as one program per Lua: its 244 KB of code are not shared
+    between two Luas running at once.
+
+    Numbers printed with more digits than they need show their shortest
+    exact form: string.format("%.17g", 0.1) is 0.1, not
+    0.10000000000000001 (the C library's printf; reading it back gives
+    the same number).
+
+    require loads Lua modules only: C modules (.so) are not possible
+    ("dynamic libraries not enabled"). luac, the separate compiler, is
+    not installed: string.dump and load do its work in a script.
+
+    io.popen and os.execute run their commands through /bin/sh -c;
+    os.tmpname makes a file in /tmp. Lua's memory comes from the C
+    library's allocator; a part the garbage collector empties wholly
+    goes back to the system.
+
+    Lua is MIT licensed; its notice is /usr/share/licenses/lua. The
+    package is lua (zpkg -S lua). Source: ports/lua in Zenix's tree
+    (DESIGN D52).
+
+SEE ALSO
+    sh(1), awk(1)

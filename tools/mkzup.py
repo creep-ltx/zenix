@@ -223,6 +223,7 @@ FAMILIES = [
     ("markdown", "Markdown, a viewer and editor for Markdown files", "markdown"),
     ("ahiru", "Ahiru, a file manager: three columns, previews, archives, copy, move", "ahiru"),
     ("ctop", "ctop, a monitor in the way of btop: memory, disks, network, processes", "ctop"),
+    ("lua", "Lua 5.4, the scripting language (DESIGN D52)", "lua"),
     ("shadow", "users and passwords: su, sudo, passwd, useradd", "su sudo passwd useradd userdel gpasswd"),
     ("disktools", "disks and filesystems: fdisk, mkfs, fsck, dd, umount", "dd fdisk mkfs_ext2 fsck_ext2 mkfs_zenixfs "
                   "fsck_zenixfs umount"),
@@ -269,7 +270,8 @@ FAMILY_LICENSES = {"zine": [("user/zine/msp/060/README", "m68060sp"), ("user/zin
                    "markdown": [("ports/markdown/upstream/LICENSE", "markdown"),
                                 ("ports/tui/upstream/LICENSE", "markdown-tui")],
                    "ahiru": [("ports/ahiru/upstream/LICENSE", "ahiru"), ("ports/tui/upstream/LICENSE", "ahiru-tui")],
-                   "ctop": [("ports/ctop/upstream/LICENSE", "ctop"), ("ports/tui/upstream/LICENSE", "ctop-tui")]}
+                   "ctop": [("ports/ctop/upstream/LICENSE", "ctop"), ("ports/tui/upstream/LICENSE", "ctop-tui")],
+                   "lua": [("ports/lua/upstream/LICENSE", "lua")]}
 ANCHORS = "anchors"                       # DESIGN D21 8.1: build/anchors (tools/mkanchors.py) as /etc/ssl/anchors
 FONT = "cp437-8x8.psf"                    # DESIGN D20 4.2: build/cp437-8x8.psf as /usr/share/consolefonts/cp437-8x8.psf
 UFONT = "zenix-8x8.zcf"                   # DESIGN D28 6: the Unicode font init loads at boot (/etc/console's font line)
