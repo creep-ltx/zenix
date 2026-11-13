@@ -33,6 +33,8 @@ part_core() {
     fi
     if "$OUT/zine-core-test" >"$OUT/core.log" 2>&1; then echo "PASS zine-test: core: $(tail -1 "$OUT/core.log" | sed 's/^PASS zine-core: //')"
     else grep -a '^FAIL\|ERROR\|runtime error' "$OUT/core.log" | head -20; bad "core (log $OUT/core.log)"; fi
+    # 16.21: the trace build's dump read back (each line's check, the two passes, the gaps)
+    python3 -I tools/zine-dump.py --test >"$OUT/dump.log" 2>&1 && echo "PASS zine-test: the trace dump's decoder (a joined line dropped, a lost line taken from the other pass, gaps found)" || bad "tools/zine-dump.py --test: $(grep -v '^PASS' "$OUT/dump.log" | head -3)"
 }
 
 part_tables() {

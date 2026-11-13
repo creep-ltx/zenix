@@ -338,9 +338,17 @@ static void sp_install(u32 *v)
     extern void zv_crash(void), zv_linef(void);
     ((u32 *)h[10])[0] = (u32)zv_linef;
     ((u32 *)h[10])[1] = (u32)zv_crash;
+    extern u32 zb_tracing, ztr_fn, ztr_fvec[], ztr_ftgt[];
+    extern u8 ztr_fstub[];
     for (u32 i = 0; i < n; i++)
-        if (!(h[12 + 2 * i] & 0x100) || fpu)
-            v[h[12 + 2 * i] & 0xFF] = h[13 + 2 * i];
+        if (!(h[12 + 2 * i] & 0x100) || fpu) {
+            u32 vec = h[12 + 2 * i] & 0xFF;
+            v[vec] = h[13 + 2 * i];
+            if (zb_tracing && i < ztr_fn) {     /* round 11, the trace build: each entry counted (blobs.S) */
+                ztr_fvec[i] = vec, ztr_ftgt[i] = v[vec];
+                v[vec] = (u32)ztr_fstub + 16 * i;
+            }
+        }
     if (fpu)                            /* 16.15: AttnFlags say the FPU, as 68040/68060.library make them say
                                          * (AFF_68881, AFF_68882, AFF_FPU40): Elude's demos look for it there */
         Z.attn |= 0x0070;
@@ -667,22 +675,31 @@ void zb_serial_hex(char tag, const u32 *v, int n)
 }
 
 /* the trace build (round 10): the code a packed program unpacked, read from memory before Zenix's comes back, as
- * 'D' lines (the address, then 8 longs): 1 KB around each of the last 8 distinct callers' return addresses and 2 KB
- * around a crash's PC, with 'L' (the ring of the last 16 calls: slot, return address; the oldest first) */
+ * 'D' lines (the address, then 8 longs, then a check long: each of the nine rotated into it, tools/zine-dump.py): 1 KB
+ * around each of the last 8 distinct callers' return addresses and 2 KB around a crash's PC, with 'L' (the ring of
+ * the last 16 calls: slot, return address; the oldest first). Round 11: lines were lost on the way to the PC (a gap
+ * can also join two halves into one line that reads right), so each line has its check and the dump is sent twice
+ * ('G' 1 and 2 before each pass), paced: a line lost or damaged in one pass is whole in the other. */
 static void zb_dump(u32 a, u32 n)
 {
     a &= ~31u;
     for (u32 o = 0; o < n; o += 32) {
-        u32 v[9];
+        u32 v[10];
         if (!c_TypeOfMem(a + o) || !c_TypeOfMem(a + o + 31))
             continue;
         v[0] = a + o;
         for (int k = 0; k < 8; k++)
             v[1 + k] = ((const u32 *)(a + o))[k];
-        zb_serial_hex('D', v, 9);
+        u32 c = 0;
+        for (int k = 0; k < 9; k++)
+            c = (c << 1 | c >> 31) ^ v[k];
+        v[9] = c;
+        zb_serial_hex('D', v, 10);
+        zb_wait_lines(64);              /* about 4 ms a line, 23 KB/s: FS-UAE's port does not wait for the baud rate,
+                                         * and the PC's reader of its pty lost lines above about 0.5 MB/s (measured) */
     }
 }
-static void zb_trace_dump(void)
+static void zb_trace_pass(void)
 {
     extern u32 ztr_ring[32], ztr_ri;    /* blobs.S: the trace build's ring (the other builds: one long, unused) */
     u32 ring[32], seen[8], ns = 0;
@@ -715,6 +732,29 @@ static void zb_trace_dump(void)
         zb_dump(a + 4, d);
         left -= d;
         s = *(const u32 *)a;
+    }
+}
+static void zb_trace_dump(void)
+{
+    extern u32 ztr_fn, ztr_fvec[], ztr_fcnt[], ztr_fring[], ztr_fri;
+    for (u32 i = 0; i < ztr_fn && i < 16; i++)  /* 'F': a package vector and how often it was taken */
+        if (ztr_fvec[i]) {
+            u32 f[2] = { ztr_fvec[i], ztr_fcnt[i] };
+            zb_serial_hex('F', f, 2);
+        }
+    if (ztr_fn) {                       /* 'Q': the last 32 entries, the oldest first (the stub's number << 16 | SR, PC) */
+        u32 q[64];
+        for (u32 i = 0; i < 32; i++) {
+            u32 j = (ztr_fri + i) & 31;
+            u32 vec = ztr_fring[2 * j] >> 16;
+            q[2 * i] = !ztr_fring[2 * j + 1] ? 0 : (vec < 16 ? ztr_fvec[vec] : 0) << 16 | (ztr_fring[2 * j] & 0xFFFF);
+            q[2 * i + 1] = ztr_fring[2 * j + 1];
+        }
+        zb_serial_hex('Q', q, 64);
+    }
+    for (u32 pass = 1; pass <= 2; pass++) {
+        zb_serial_hex('G', &pass, 1);
+        zb_trace_pass();
     }
 }
 

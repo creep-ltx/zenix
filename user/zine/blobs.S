@@ -1242,8 +1242,16 @@ zb_irq_pc:
     .long   0
 #ifndef ZINE_TRACE
     .globl  ztr_ring, ztr_ri        /* the trace build's ring of calls (below); read only when zb_tracing is 1 */
+    .globl  ztr_fn, ztr_fstub, ztr_fvec, ztr_ftgt, ztr_fcnt, ztr_fring, ztr_fri    /* and its FPSP counts (below) */
 ztr_ring:
 ztr_ri:
+ztr_fn:
+ztr_fstub:
+ztr_fvec:
+ztr_ftgt:
+ztr_fcnt:
+ztr_fring:
+ztr_fri:
     .long   0
 #endif
     .globl  zb_tracing              /* 1 in the trace build: zb_back also writes the code before a bad call */
@@ -1312,4 +1320,49 @@ ztr_put:                            /* d0: a byte to the serial port, waiting fo
     rts
 ztr_hex: .ascii "0123456789abcdef"
     .even
+
+/* round 11: the trace build counts each entry into the CPU support package (sp_install puts these stubs in its
+ * vectors, the package's entries in ztr_ftgt) and keeps the last 32 (the stub's number << 16 | the stacked SR, the
+ * stacked PC) in ztr_fring; then it goes on into the package with every register and the stack as the CPU left them
+ * (a slot under the frame takes the entry, rts jumps there) */
+    .data
+    .globl  ztr_fn, ztr_fvec, ztr_ftgt, ztr_fcnt, ztr_fring, ztr_fri
+ztr_fn:    .long 16
+    .bss
+ztr_fvec:  .space 4 * 16
+ztr_ftgt:  .space 4 * 16
+ztr_fcnt:  .space 4 * 16
+ztr_fri:   .space 4
+ztr_fring: .space 8 * 32
+    .text
+    .globl  ztr_fstub
+    .balign 16
+ztr_fstub:
+    .irp    i, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+    .balign 16
+    subq.l  #4,%sp                  /* the slot for the entry */
+    move.l  %d0,-(%sp)
+    moveq   #\i,%d0
+    bra.w   ztr_fcom
+    .endr
+ztr_fcom:                           /* (sp) d1, a0, d0, the slot, then the frame: SR at 16, PC at 18 */
+    movem.l %d1/%a0,-(%sp)
+    lsl.w   #2,%d0
+    lea     ztr_fcnt,%a0
+    addq.l  #1,0(%a0,%d0.w)
+    lea     ztr_ftgt,%a0
+    move.l  0(%a0,%d0.w),12(%sp)
+    move.l  ztr_fri,%d1
+    and.w   #31,%d1
+    lsl.w   #3,%d1
+    lea     ztr_fring,%a0
+    lsr.w   #2,%d0
+    swap    %d0
+    move.w  16(%sp),%d0
+    move.l  %d0,0(%a0,%d1.w)
+    move.l  18(%sp),4(%a0,%d1.w)
+    addq.l  #1,ztr_fri
+    movem.l (%sp)+,%d1/%a0
+    move.l  (%sp)+,%d0
+    rts
 #endif

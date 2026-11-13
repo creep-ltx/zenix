@@ -2291,6 +2291,27 @@ first hunk stays, as it would there.
 to its own list and puts it in `cli_Module`; zexec's AvailMem is as at its start only when that list is unloaded:
 without the fix zexec ends with 8).
 
+**The trace dump made whole.** Round 10's dump lost lines on the way to the PC. The cause was on the PC: the serial
+tap (`tools/serial-tap.py`) searched the whole log on every read (the greeting's search copied it, a wait searched
+everything since it began), so on a trace build's megabytes its reader fell behind, the pty filled, and FS-UAE dropped
+what it wrote (in a Beam Riders dump about 40 % of the second pass, in runs of 2-3 KB). Both searches now cover the
+new part only (`tools/tap-test.sh` checks 60,000 lines at about 0.9 MB/s: none lost; the old tap lost half). The dump
+itself is also sturdier: each `D` line ends with a check long (the nine longs, each rotated left by one into it),
+the dump is sent twice (`G 1`, `G 2` before each pass), and paced (64 beam lines a line, about 4 ms: FS-UAE's port
+does not wait for the baud rate). `tools/zine-dump.py LOG DIR` drops a damaged line, takes each line from the pass
+that has it whole, writes one binary per piece and lists the gaps left in the hunks (`--test`: its own check, run
+by `tools/host/zine-test.sh`). Jesus Christ Motocross's dump: both passes whole, no damaged line.
+
+**The trace build counts the CPU support package's entries.** Its vectors point at small stubs (blobs.S) that count
+each entry and keep the last 32 (the vector, the stacked SR and PC), then go on into the package with the stack as the
+CPU left it. On the way back: `F` (a vector and its count) and `Q` (the last 32). Jesus Christ Motocross and a test
+program with its sine and square-root precalc take the same entries: one line F, its first FPU instruction with
+the FPU switched off (PCR's DFP), and none else: FS-UAE's 68060 does `fsin`, `fsqrt`, `fintrz` and `fmovecr` itself,
+so the package does not run for them, and the 12 bytes its stack is short come from elsewhere.
+
+Sizes (*measured*, the 68020-60 build): the blob's code 126,588 -> 127,000 bytes (the dump's check and second pass,
+the stubs' hook, the Execute fix); the trace blob's bss 13,155 -> 13,607 (the counts and their ring).
+
 ## 17. Questions for the owner (what ZINE should be)
 
 1. Owner answer 1 allowed "the Amiga's own console or through Wasabi". Typing into the console through Wasabi counts
