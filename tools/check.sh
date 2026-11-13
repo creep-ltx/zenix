@@ -11,7 +11,8 @@
 # Fast mode (docs/README.md "Fast mode"): every FS-UAE runs the same machine, cycle-exact, in warp mode
 # (tools/fsuae_conf.py make_fast), its emulated time running ahead of the clock: measured on 2026-11-04, zinstall-test f
 # 586 s -> 134 s, sumi-test 78 s -> 7 s, update-test 3856 s -> 1907 s (jobs added up; the table in docs/README.md). The
-# tests in STOCK below always run at stock speed, each with its reason.
+# tests in STOCK below always run at stock speed, each with its reason (and a test run by itself asks the list:
+# --stock-reason).
 # Scratch: everything of a run is in its folder /tmp/zenix-check.XXXXXX ($RUN): each job's output folder, its copy of the
 # build, its serial port and its TMPDIR (so mktemp and FS-UAE's run folders land there too). A job that passes frees its
 # folders at once; a failed one keeps them, of its build copy only the disks and kernel*.elf (with more than 2
@@ -34,7 +35,6 @@
 cd "$(dirname "$0")/.." || exit 1
 MODE=""
 while :; do case "$1" in --fast) MODE=fast; shift ;; --stock) MODE=stock; shift ;; *) break ;; esac; done
-RUN=$(mktemp -d /tmp/zenix-check.XXXXXX) || exit 1
 HOST="docs-check tap-test usize-test signal-host-test mkzexe-test zup-host-test ext2-host-test disk-host-test fat-host-test ffs-host-test pfs3-host-test iso9660-host-test exfat-host-test usb-host-test arc-host-test zenixfs-test mfm-test emmc-test genet-test ne2000-test plipbox-test serial-test term-test confont-test mem-test a3000-test stage0-test stage0-68k-test net-test random-host-test sock-host-test telnet-test crypto-test clock-host-test zpkg-test tls-test nfs-test wasabi-test libc-host-test libc-size zmalloc-test dos-host-test zine-test zinstall-host-test cache-host-test demoload-host-test amifont-host-test ttf-host-test sound-host-test rtg-host-test show-host-test lua-host-test make-host-test shebang-host-test zld-host-test"
 EMU="matrix cmds-test cmds2-test users-test jobs-test signal-test pty-test gcon-test dpy-test zdesk-test zdesk-draw-test drag-test lace-test font-test ttf-test prefs-test files-test show-test readdir-test dlogin-test prio-test kbd-test con-test cu-test diag-test colour-test memtest mounttest zenixfstest fat-test ffs-test pfs3-test cd-test exfat-test arc-test paths-test zroot-test zroot-card-test ide-speed-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test update-test useradd-test rootcheck-test random-test sock-test netd-test slip-test drv-test eth-test bbs-test time-test crypto68k-test ssh-test wget-test zpkg-emu-test sysupdate-test remote-test nfs-emu-test libc-test tui-test sumi-test maki-test markdown-test ahiru-test ctop-test zine-emu-test zine-input-test zinstall-test halt-test lineedit-test scroll-test conspeed-test box-test demo-test sound-test mmu-test bootmem-test rtg-test usb-test lua-test make-test shebang-test zld-test"
 DEFMODE=fast
@@ -98,6 +98,18 @@ STOCK[matrix:a1200-chip1m]="1 MB of chip RAM only: where memory runs out (consol
 STOCK[matrix:a1200-rdb]="the stock A1200, chip RAM only"
 STOCK[matrix:a600-68000]="refuses a 68000 at once: nothing to gain"
 
+# stock_reason TEST [ARG...]: why this job runs at stock speed (nothing: it may run fast)
+stock_reason() {
+    local t=$1 a; shift
+    [ -n "${STOCK[$t]}" ] && { echo "${STOCK[$t]}"; return; }
+    for a in "$@"; do [ -n "${STOCK[$t:$a]}" ] && { echo "$t $a: ${STOCK[$t:$a]}"; return; }; done
+}
+# tools/check.sh --stock-reason TEST [ARG...]: the reason, if the list holds the test or one of its parts (nothing
+# else is done). A test run by itself with ZENIX_FAST=1 asks this, so that it, too, keeps those parts at stock speed
+# (zpkg-emu-test: in warp mode its downloads failed on zpkg's time-outs, 2026-11-13)
+if [ "$1" = --stock-reason ]; then shift; stock_reason "$@"; exit 0; fi
+RUN=$(mktemp -d /tmp/zenix-check.XXXXXX) || exit 1
+
 load_ok() { awk '{ exit ($1 > 16) }' /proc/loadavg; }
 JOBS=${ZENIX_EMU_SLOTS:-6}
 MIN_TMP_MB=${ZENIX_MIN_TMP_MB:-2048}
@@ -132,12 +144,6 @@ m=($(ls fsuae/*.fs-uae fsuae/matrix/*.fs-uae | sed 's#.*/##; s#\.fs-uae##' | gre
 m1=""; m2=""; for n in "${m[@]}"; do if [ -n "${STOCK[matrix:$n]}" ]; then m1="$m1 $n"; else m2="$m2 $n"; fi; done
 SPLIT[matrix]="${m1# }|${m2# }"
 
-# stock_reason TEST [ARG...]: why this job runs at stock speed (nothing: it may run fast)
-stock_reason() {
-    local t=$1 a; shift
-    [ -n "${STOCK[$t]}" ] && { echo "${STOCK[$t]}"; return; }
-    for a in "$@"; do [ -n "${STOCK[$t:$a]}" ] && { echo "$t $a: ${STOCK[$t:$a]}"; return; }; done
-}
 tmp_free_mb() { df -Pm "$RUN" | awk 'NR == 2 { print $4 }'; }
 # stop_jobs: end every running job (each is its own process group, its id in $RUN/JOB.pid): TERM, then KILL
 stop_jobs() {

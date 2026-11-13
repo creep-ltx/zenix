@@ -139,7 +139,10 @@ SECTORS of 2) in 5 of 8 boots, and a cycle-exact 68020 ignores `uae_cpu_frequenc
 too: keys typed and screenshots taken by the cage rig, the BBS simulator and SLIP's noise, the clock tests, power cuts
 timed in the PC's seconds, downloads from a server on the PC (the Amiga's time-outs run in emulated seconds), and the
 stock machines whose memory floors are checked. The one list of them, each with its reason, is `STOCK` in
-`tools/check.sh`; a job holding one of them runs at stock speed as a whole, and says so. A script's host-side `sleep`
+`tools/check.sh`; a job holding one of them runs at stock speed as a whole, and says so. A test run by itself with
+`ZENIX_FAST=1` does not see check.sh's choice: `tools/check.sh --stock-reason TEST [PART]` prints the list's reason
+(nothing else is done), and `zpkg-emu-test` asks it for each part and runs a listed one at stock speed, saying so (in
+warp mode its downloads failed on zpkg's time-outs every time, 2026-11-13); the other tests in the list do not ask yet. A script's host-side `sleep`
 does not get faster in warp mode (it only lasts longer in the Amiga's time): wait for the output instead, and
 let a time the Amiga must see run on the Amiga (`cmd & sleep 3; kill ...` in one typed line). The serial tap types a
 character every 2 ms instead of 20 in fast mode, about the same speed in the Amiga's time.

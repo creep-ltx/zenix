@@ -317,7 +317,15 @@ EOS
 }
 
 [ $# = 0 ] && set -- e s m
+# ZENIX_FAST=1 (warp mode) is not taken for a part tools/check.sh's STOCK list holds (all three: zpkg's time-outs run in
+# emulated seconds, the server and zenix-slirp's pace in the PC's; in warp mode -S failed every time with "the server
+# stopped answering" or "took longer than its time", 2026-11-13): such a part runs at stock speed and says so
+fast=${ZENIX_FAST-}
 for p in "$@"; do
-    case $p in e|s|m) "part_$p" ;; *) echo "zpkg-emu-test: unknown part $p"; exit 2 ;; esac
+    case $p in e|s|m) ;; *) echo "zpkg-emu-test: unknown part $p"; exit 2 ;; esac
+    export ZENIX_FAST=$fast
+    why=$(tools/check.sh --stock-reason zpkg-emu-test "$p")
+    if [ "${fast:-0}" != 0 ] && [ -n "$why" ]; then echo "zpkg-emu-test: part $p at stock speed, not in warp mode: $why"; export ZENIX_FAST=0; fi
+    "part_$p"
 done
 exit $((1 - pass))
