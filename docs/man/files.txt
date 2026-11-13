@@ -24,7 +24,8 @@ DESCRIPTION
     Opening a file (l, Return, a double click) looks at its first bytes:
     a folder is entered; a program (Zenix's, AmigaOS's, a #! script)
     with an x bit is run in a terminal window after "Run NAME? (y/n)";
-    text is shown by less in a terminal window; anything else asks
+    text is shown by less in a terminal window; a picture (IFF ILBM,
+    GIF) is shown by show(1) in its own window; anything else asks
     "Open NAME with:", and the words typed are run in a terminal window
     with the path after them. These terminals stay when their program
     ends (term -H) until a key: a short text that less just prints, or

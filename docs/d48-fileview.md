@@ -19,8 +19,8 @@ client of the display protocol (D38 section 4) and needs no new message, port or
   on its left as well, Ranger's Miller columns collapsed to two. No preview column: there is no room at 640, and the
   previews are Ahiru's.
 - **Opening a file** runs the program that fits in a terminal window (`term`): a text file in `less`, `E` in the
-  editor, a program after a question; a picture or anything else asks what to open it with (there is no picture
-  viewer yet: "viewers" is its own item).
+  editor, a program after a question; a picture in the picture viewer `show` (D50, docs/d50-viewers.md: its own
+  window, no terminal); anything else asks what to open it with.
 - **Copy, move, rename, delete** ask first when anything would be lost, and the copying, moving and deleting are done
   by the commands themselves (`cp -r`, `mv`, `rm -r`), so there is one copy of that code and its rules.
 
@@ -73,7 +73,8 @@ client of the display protocol (D38 section 4) and needs no new message, port or
 
 ## 4. Keys and the mouse
 
-**Keys: Ahiru's, and configurable the way Ahiru.keys is.** The built-in keys are text in the program, in the format
+**Keys: Ahiru's, and configurable the way Ahiru.keys is** (the parser is `display/lib/keys.c` since D50, shared with
+`show`). The built-in keys are text in the program, in the format
 of `Ahiru.keys` (ports/ahiru/upstream/ahiru/src/keys.c): one key a line, `KEYS ACTION [ARGUMENT]`; KEYS are typed
 characters or names in `<>`: `<Up> <Down> <Left> <Right>`, `<S-Up>` (Shift) ..., `<C-d>` (Ctrl), `<Return> <Esc>
 <Tab> <Space> <Del> <BS> <Help> <F1>`..`<F10>`; two keys in a row make a prefix (the first shows on the status line
@@ -120,6 +121,7 @@ column goes to that folder. The menus are in the bar (section 2). Dragging files
 | a folder, or a link to one | entered |
 | a Zenix program (`ZEXE`/`ZEX2` at byte 4), an AmigaOS program (the hunk header `000003F3`: ZINE runs it) or a script (`#!`), with any `x` bit (the kernel's loader says no to one this user may not run) | asks "Run NAME? (y/n)", then `term -H -e PATH` |
 | text (no NUL byte, few control bytes) | `term -H -e less PATH` |
+| a picture `show` reads (IFF ILBM: `FORM` .... `ILBM`; GIF: `GIF87a`, `GIF89a`), when `/bin/show` is there (added by D50, docs/d50-viewers.md) | `show PATH`, started bare in the folder (no terminal: it draws its own window) |
 | anything else (a picture, a sound, an archive, data), and anything not a plain file (a device, a FIFO: never read, it could wait for ever) | asks "Open NAME with:", the line typed is the program and its words (at most 12), the path added last, run as `term -H -e WORDS... PATH`; Esc or an empty line does nothing |
 
 `i` always views with `less`; `E` edits with `$EDITOR`, else `sumi` when `/bin/sumi` is there, else `edit` (Ahiru's
@@ -204,8 +206,8 @@ check.sh's STOCK: screenshots at times on the PC's clock):
 
 ## 10. Not in this step (later, each its own approval)
 
-Previews (Ahiru's third column), drag and drop between windows and onto the desktop, a picture viewer (the
-"viewers" item: then `files` opens pictures with it), tabs, bookmarks, filters, archives as folders, a trashcan,
+Previews (Ahiru's third column), drag and drop between windows and onto the desktop (the picture viewer is built:
+D50, opened by section 5's rule), tabs, bookmarks, filters, archives as folders, a trashcan,
 copying in the background with a progress bar, file icons (`.info`), the settings remembered between runs (sort,
 hidden), the desktop's font for the listing.
 
