@@ -765,3 +765,55 @@ and then with 9 on main as on this branch (2 of 4 runs on main): a flaky test. S
 before q's key-up came (both the handler and lowlevel's keyboard interrupt counted 9 in every failed run); it now
 quits at q's key-up (RAWKEY 0x90), which reaches the window only after the handler (priority 60, before intuition)
 has counted it. 14 runs in a row passed (10 in warp mode, 4 at stock speed), each with exactly 10.
+
+## Round 11 (2026-11-13, branch zine11, d29 16.21)
+
+**The flaky input test** settled first (Round 10's last paragraph): the test program, not ZINE.
+
+**The blockers by reason** (round 10's merged results, the honest rule): 68020: does not fit (47), FPU instructions
+(43), black at the limit (23), not enough memory (13), return code 1 (11); 68030: black (27), does not fit (18), not
+enough memory (15), not enough memory in one piece (7), MOVE16 (7), data files left out of ZINE's volume (6), return
+code 1 (6); 68060: black (33), illegal instruction (10), return code 1 (3). Read one by one:
+- **68030, not enough memory (15) and in one piece (7)**: AllocMem of 9-16 MB in one piece, on a machine whose 16 MB
+  are two blocks of 8 MB (the harness's FS-UAE configuration, d29 16.21). Not ZINE's; left.
+- **Data files left out, return code 1 on the 68030 (Elude's, Metropolice, Kioea, Swansong...)**: directories of 9-23
+  MB that do not fit beside the program in 16 MB with ZINE's volume in memory (5.6); some ask for 14-25 MB at once.
+  ZINE's design; left.
+- **The Black Lotus' engine "Out of memory"** (68020, 68030; Starstruck and Rift on the 68060 too): it asks for one
+  pool of 48-56 MB; on the 68060 machine Starstruck's 18.7 MB data file in the volume leaves 43.6 MB in one piece.
+  Left (as above).
+- **Tint and Captured Dreams, return code 1 on all three**: their parts are run with Execute and each part's hunks
+  stayed after it ended (CrunchMania hands the decrunched hunks over in cli_Module). **Fixed** (d29 16.21).
+- **scifi, Cebit demo 90, Gift** (a call through a base of 0 at -912): the trace build is too slow to reach scifi's
+  call within the limit (black at 120 s); not settled.
+- **Rubbur** (68020 only, "Could not open display"): crashes into the ROM's area under the trace build instead; not
+  settled.
+- **68060 illegal instructions** (10): most fail on the 68020 and 68030 machines too (1000%, No Sleeping!, Leisner,
+  SoftWired, scifi); Lupus Reditus is its own bug (round 10); Beam Riders below.
+
+**The trace dump made whole**: the PC's serial tap lost the lines (d29 16.21); with it fixed, a 512 KB dump of Beam
+Riders and of Jesus Christ Motocross arrived in both passes whole.
+
+**The unsettled 68060 crashes, further**:
+- **Jesus Christ Motocross**: the 68060 package takes the same entries in the demo and in a test program with its
+  precalc: one line F (the first FPU instruction, the FPU switched on), nothing else; FS-UAE's 68060 does `fsin` and
+  `fsqrt` itself. The stack's 12 bytes are not lost in the package. Not settled.
+- **Beam Riders**: its level 3 handler, its replayer's frame routine and its callback lists read whole (d29 16.21);
+  none jumps to `$100`, and no computed jump in the dumped code could. Not settled.
+
+### Round 11's reruns (2026-11-13, the same harness: 50 s for the 020 and 030, 120 s for the 060)
+
+On each machine: Jesus Christ Motocross, Beam Riders (AGA and OCS), Tint, Captured Dreams, and 15 working ones at
+random (20 runs each), laid over round 10's merged results.
+
+| Machine | Round 10 (honest) | Round 11 | Now working | No longer working |
+|---|---|---|---|---|
+| 68EC020, 8 MB fast | 246 | 246 | none | none |
+| 68030 + 68882, 16 MB fast | 303 | 304 | Captured Dreams | none |
+| 68060 with FPU, 64 MB fast | 356 | 357 | Captured Dreams | none |
+
+Tint now plays all seven parts on the 68030 and 68060 machines (23 minutes 45 seconds, its own "Exit Info" at the
+end) and ends with return code 1; the counting rule takes that as failed (a long run with notes, here its Execute
+lines); counted by hand it works, which gives 305 and 358. On the 68020 machine both still fail: their parts do not
+fit beside the program in ZINE's volume on 8 MB (Tint: "no program TBL-TINT.E01"; Captured Dreams: its own check,
+"Fast-RAM needed: 3200kb .. failed"). The 45 working ones at random still work.

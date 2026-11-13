@@ -2285,7 +2285,8 @@ Shell unloads what `cli_Module` holds when a command ends (the AmigaDOS manual's
 unloaded the list it had loaded, of which only the decruncher was left, so every part's hunks stayed: by the fourth
 part of Tint chip RAM was down to 45 KB (each part takes 300-985 KB of it) and the part was "not started". Now the
 list in `cli_Module` is unloaded (none when it is 0: a command that keeps itself), as the Shell does; the 432-byte
-first hunk stays, as it would there.
+first hunk stays, as it would there. Captured Dreams now plays on the 68030 and 68060 machines, Tint all seven of
+its parts (23 minutes 45 seconds; it ends with return code 1).
 
 *Verified* in FS-UAE: `tools/zine-emu-test.sh` (zexec runs `zpart hand`, which makes a 64 KB block a segment linked
 to its own list and puts it in `cli_Module`; zexec's AvailMem is as at its start only when that list is unloaded:
@@ -2308,6 +2309,25 @@ CPU left it. On the way back: `F` (a vector and its count) and `Q` (the last 32)
 program with its sine and square-root precalc take the same entries: one line F, its first FPU instruction with
 the FPU switched off (PCR's DFP), and none else: FS-UAE's 68060 does `fsin`, `fsqrt`, `fintrz` and `fmovecr` itself,
 so the package does not run for them, and the 12 bytes its stack is short come from elsewhere.
+
+**What the whole dumps showed** (zine-top100-findings.md "Round 11"):
+- **Beam Riders** (68060): its level 3 handler (FSAVE, FMOVEM, then the INTREQ bits) calls its replayer's frame
+  routine, which counts frames, asks for the end at a frame limit through entry 28 of its own jump table (a flag),
+  calls a per-frame routine (the music player and two hooks, both empty) and a list of queued routines. None of
+  these jumps to `$100`, and the dumped code has no jump through a register plus an index that could; the crash
+  comes with d2-d7 just saved above the frame by a `movem.l d1-...` of its own. Not settled: a return or `jsr (an)`
+  through a bad value, or code outside the dump.
+- **Jesus Christ Motocross** (68060): the package is not involved (above); the crash is the same `rts` to 0 with
+  the saved FP7 (+0.0) still on the stack. Not settled.
+
+**Memory on the 68030 machine** (task of this round): the harness's 68030 machine has 16 MB of fast RAM as two blocks
+of 8 MB (FS-UAE's `fast_memory`, 24-bit at `$200000`, and `zorro_iii_memory`); 15 productions there fail only on an
+AllocMem of 9-16 MB in one piece (Impossible, Nature's 4k intros, Mo'saik...). An A1200 has no Zorro slots: a 68030
+board with 16 MB on one SIMM gives one block (the Blizzard 1230-IV's SCSI kit adds a second SIMM socket, so two
+blocks exist, rarely). The split is the harness's, not ZINE's; left as it is (the harness is not in this repository).
+The 68060 machine is the same: 8 MB at `$200000` and 64 MB of Zorro III memory (72 MB in all; the real 1260 has 64 MB
+in one block). There, Starstruck's 48 MB request fails for another reason: its 18.7 MB data file lies in ZINE's
+volume in fast RAM (5.6), so the largest free piece is 43.6 MB; a real machine reads the file from disk.
 
 Sizes (*measured*, the 68020-60 build): the blob's code 126,588 -> 127,000 bytes (the dump's check and second pass,
 the stubs' hook, the Execute fix); the trace blob's bss 13,155 -> 13,607 (the counts and their ring).
