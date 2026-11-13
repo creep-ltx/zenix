@@ -752,6 +752,22 @@ static void t_spawn(void)
     close(f);
     unlink(tf);
     checks("popen w", b, "into the command\n");
+    /* fflush(NULL): every stream open for writing, read streams left alone (DESIGN D52 9: picolibc's took NULL as
+     * a stream; Lua's io.popen calls it) */
+    tmpname(tf, ".ff");
+    FILE *fw = fopen(tf, "w"), *fr = fopen("/etc/passwd", "r");
+    if (fw) fputs("flushed by NULL\n", fw);
+    int fr0 = fr ? getc(fr) : EOF;
+    checki("fflush(NULL): 0", fflush(0), 0);
+    b[0] = 0;
+    f = open(tf, O_RDONLY);
+    slurp(f, b, sizeof b);
+    close(f);
+    checks("fflush(NULL): the written stream's bytes are in the file", b, "flushed by NULL\n");
+    check("fflush(NULL): a read stream goes on where it was", fr && fr0 == 'r' && getc(fr) == 'o', "");
+    if (fw) fclose(fw);
+    if (fr) fclose(fr);
+    unlink(tf);
     check("getppid", getppid() > 0 && getppid() != getpid(), "");
     /* system ignores SIGINT and SIGQUIT while it waits (POSIX: ^C is the command's), puts the caller's handlers
      * back after, and the command itself gets the defaults */
