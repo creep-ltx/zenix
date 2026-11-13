@@ -2332,6 +2332,64 @@ volume in fast RAM (5.6), so the largest free piece is 43.6 MB; a real machine r
 Sizes (*measured*, the 68020-60 build): the blob's code 126,588 -> 127,000 bytes (the dump's check and second pass,
 the stubs' hook, the Execute fix); the trace blob's bss 13,155 -> 13,607 (the counts and their ring).
 
+### 16.22 The user vectors, exec's puddles, a bad FreeMem named (2026-11-13, branch zine13)
+
+**Round 12's "newly failing" first** (zine-top100-findings.md "Round 13"): each was run twice more with round 12's
+build. Seven were noise (they ran this time: on the 68020 machine Psychedelic and Clubisque, on the 68030 Real,
+Supercool, Talking Heads and Zeon; on the 68060 Noxie ran in one of three runs). The real ones are below.
+
+**The user vectors point at a low stub** (`user/zine/blob.c`, `ZUSERVEC` in `blob.h`). Limbo's Three Men and a Glenz
+Vector clears address 4 itself (`move.l #0,4.w`, then `jmp $1000` into its copied code); its replayer then reads
+ExecBase through that 0: it tests the 68010 bit of `AttnFlags` at 297 (`$129`) and, when it is set, calls
+`Supervisor` at -30 through the base of 0, a jump to `$FFFFFFE2` (68020 machine: "line F at $FFFF"; 68030: a call
+reported as -912). A null base reads the vector table: `$128` is vector 74, a user vector (64-255; no Amiga device
+supplies a vector number). AmigaOS's exec fills those with a "no handler" stub in the ROM (the ROM boot-sequence
+hand-off, step 29), so their high word is `$00F8` or so and bit 0 of `$129` is clear; ZINE filled them with its crash
+path in the ZINE block (`$0093xxxx` on the 68020 machine, so the bit was set, and whether it was depended on where the
+block lay: the production ran in earlier rounds). Now the 192 user vectors point at a 6-byte `jmp` to the crash path
+at `$0BA0` in the low page (above the null sprite), high word 0. Three Men plays on the 68020 and 68030 machines.
+
+**Pools as exec keeps them** (`c_CreatePool` and the rest, `blob.c`). ZINE made every `AllocPooled` block its own
+AllocMem with its link and size in the 8 bytes before it. Haujobb's Signals writes 4 bytes before one of its 100-byte
+pooled blocks; the size there became about 3 GB, and at its end (after 1,300 s) `DeletePool`'s FreeMem of it ended in
+`AN_BadFreeAddr` (`$8100000F`; with two memory blocks in round 11 the layout differed and it ended cleanly). Now a pool
+is what the autodoc (the NDK 3.2's exec CreatePool) describes: puddles of `puddleSize` bytes, each with a MemHeader,
+the blocks of `threshSize` bytes or less made in them by `Allocate`, so no bookkeeping lies next to a block (4 bytes
+before one is the padding of the block before it, as in exec's puddles); a larger block gets a puddle of its own; a
+puddle whose blocks are all freed goes back; `CreatePool` refuses a `threshSize` above `puddleSize`, as the autodoc
+says; `MEMF_CLEAR` clears each block. Signals now ends by itself after its whole show on the 68060 machine.
+
+**A bad FreeMem says which block.** Before `AN_BadFreeAddr`, ZINE writes "FreeMem of N bytes at A, in no memory list"
+into the program's output: that line pointed at the pool above.
+
+**Not ZINE's, or not settled:**
+- **Elysium** (Sanity, 68020 machine): black in six runs on the 68EC020 and a CHK instruction crash in a seventh; on a full 68020 and on a 68030 with the
+  same 24-bit fast RAM it plays. It copies itself to `$800` from supervisor mode and decrunches there; what the EC020
+  model does differently was not found.
+- **sumea** (68030 and 68060): with all fast RAM in one block at `$40000000` (round 12's machines) it loads its files
+  and stops; with round 11's 8 MB below 16 MB it plays. A 1992 program; the knowledge base's note on high fast RAM
+  (Bacon of Hope) is the same. Real CPU-slot boards keep their RAM high too. A question (17.6).
+- **Serenity** (Elude, 68060): its pool grows to about 55 MB; ZINE leaves it 53.5 MB of the 64 MB (Zenix, ZINE and its
+  6 MB data file in ZINE's volume), and an `AllocPooled` of 129 KB is refused; with round 11's 72 MB it plays. ZINE's
+  volume design (5.6).
+- **Software Make The Dance Foam Oil**: on the 68030 machine its two 1 MB tables are left out of ZINE's volume (half the
+  free fast RAM, 3 MB, and its 7.6 MB music) and "demo_init() failed" follows "Unable to load file
+  'data/torus512.dat'"; its round 11 file on disk was older than round 11 (`asmstart() failed`, before lowlevel), so
+  it was not newly failing. On the 68060 its precalculation is still running at 400 s (black).
+- **the castle** (Loonies, 68060): stuck in its own Allocate/Deallocate loop on a dark screen in every run; round 11's
+  dark brown screen was just over report.py's "black" threshold.
+- **Goon Royale** (Spaceballs, 68060): a zero divide after 3,608 s in every run (round 10's too): after an hour.
+
+*Verified* in FS-UAE: `tools/zine-emu-test.sh` (zsuper: every user vector's high word 0 and no 68010 bit at 297, step
+8 fails without the change; zalloc: a pool of 4096/1024 with `MEMF_CLEAR`, a 316- and a 100-byte block 320 bytes apart
+in one puddle, both cleared, a long written before the second, a 2000-byte block apart, all freed, a fourth, DeletePool,
+AvailMem as at the start; zalloc b: FreeMem of 64 bytes at `$F80000` named, then the alert). The test's own memory
+check was moved past one thing: zalloc b runs after the last reading, because one more command line grew the
+shell's history heap by 6 KB (shown with the same line only echoed).
+
+Sizes (*measured*, the 68020-60 build): the blob's code 127,000 -> 127,544 bytes (pools about 0.4 KB, the FreeMem line
+and the stub the rest); bss unchanged.
+
 ## 17. Questions for the owner (what ZINE should be)
 
 1. Owner answer 1 allowed "the Amiga's own console or through Wasabi". Typing into the console through Wasabi counts
@@ -2350,6 +2408,9 @@ the stubs' hook, the Execute fix); the trace blob's bss 13,155 -> 13,607 (the co
    cannot tell such a program in advance. Should ZINE offer a way to start a program with the caches off (an option
    of `zine`, or the cache off until the program's first library call, which slows every packed program's unpacking
    on a 68020 a little)? [Open.]
+6. (Round 13, 16.22.) Some 1992-era productions (sumea, Bacon of Hope) stop when their memory lies above 16 MB, as
+   on a real machine whose fast RAM is on a CPU-slot board (AmigaOS users ran them with fast RAM switched off). Should
+   ZINE offer a way to start a program with chip RAM only (an option of `zine`)? [Open.]
 
 ## 18. Reviews
 

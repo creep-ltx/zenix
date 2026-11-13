@@ -874,3 +874,47 @@ Newly failing:
   black at the limit), Zeon (illegal instruction), Three Men and a Glenz Vector (line F).
 - 060: Software Make The Dance Foam Oil, Serenity, sumea, the castle, Noxie (black at the limit), Signals (alert
   8100000f), Goon Royale (zero divide: it did so in round 10 too).
+
+## Round 13 (2026-11-13, branch zine13, d29 16.22)
+
+**Noise or real.** Every production round 12 listed as newly failing ran twice more with round 12's build (passes
+started at PC load 10-12, which rose to 15-30 while they ran; 3 emulators at a time), and once more in the final
+rerun below (started at load 2-12, median 10.5).
+- **Noise** (ran in this round's runs): 68020 Psychedelic, Clubisque; 68030 Real (Complex), Supercool, Talking Heads,
+  Zeon; 68060 Noxie (ran in one of three runs).
+- **Real, fixed in ZINE** (d29 16.22): Three Men and a Glenz Vector (68020, 68030: the user vectors, read through a
+  base of 0 the program made itself); Signals on the 68060 (ZINE's pools kept a size word beside each block, which the
+  program overwrote; alert `8100000F` at its end).
+- **Real, not ZINE's or not settled**: Elysium on the 68020 machine (black in six runs, a CHK crash in a seventh; plays
+  with FS-UAE's full 68020 and on a 68030 with the same memory); sumea on the 68030 and 68060 (all fast RAM above 16
+  MB, round 12's one block; plays with round 11's 8 MB below 16 MB); Serenity on the 68060 (its pool needs about 55
+  MB; ZINE leaves 53.5 of the 64 MB, its 6 MB data file being in ZINE's volume; plays with round 11's 72 MB); Goon
+  Royale on the 68060 (a zero divide after 3,608 s in every run, round 10's too).
+- **Not newly failing**: Software Make The Dance Foam Oil (its round 11 files on disk were older than round 11; on the
+  68030 its two 1 MB tables are left out of ZINE's volume and "demo_init() failed" follows; on the 68060 its precalc
+  is still running at 400 s); the castle on the 68060 (stuck on a dark screen in every run; round 11's dark brown
+  was just above report.py's black threshold).
+
+**The biggest remaining blockers by reason** (round 12's merged results): 68020: does not fit (47) and not enough
+memory (13+6) on 8 MB with ZINE's volume in memory, FPU instructions (42, a real 68EC020 fails too), black at the limit
+(28); 68030: black (36), does not fit (18), memory messages (10), MOVE16 (9, a real 68030 fails too); 68060: black (40),
+illegal instructions (8, most fail on the other machines too, round 11). The black screens were looked at first: of
+round 12's newly black ones about half were load, and the rest memory (Serenity), high memory (sumea) or long
+precalc (Foam Oil). The memory ones come from ZINE's volume keeping data files in RAM (5.6); left as designed.
+
+### Round 13's reruns (2026-11-13, branch zine13's code, the same harness: 50 s for the 020 and 030, 120 s for the 060)
+
+On each machine: Three Men and a Glenz Vector, Signals, the named productions of each machine, 15 working ones picked
+at random (seed 13), and the newly failing ones of round 12 (25, 28 and 30 runs, 66 in all), laid over round 12's
+merged results.
+
+| Machine | Round 12 (honest) | Round 13 | Now working | No longer working |
+|---|---|---|---|---|
+| 68EC020, 8 MB fast | 243 | 246 | Three Men and a Glenz Vector; Psychedelic, Clubisque (noise) | none |
+| 68030 + 68882, 16 MB in one block | 310 | 315 | Three Men and a Glenz Vector; Real, Supercool, Talking Heads, Zeon (noise) | none |
+| 68060 with FPU, 64 MB in one block | 353 | 354 | Signals | none |
+
+The 45 working ones at random still work. Still failing as above: Elysium (68020), Foam Oil (68030, 68060), sumea
+(68030, 68060), Signals on the 68030 (black at the limit, as in round 11), Serenity, Noxie (this run), Goon Royale,
+the castle (68060).
+
