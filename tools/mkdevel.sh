@@ -30,6 +30,18 @@ tree() {
     done
 }
 tree libc/zenix/include "$D.new/usr/include"
+# two of the port's headers reach into the source tree for the one table they share with the kernel and libz
+# (sys/errno.h: kernel/errno.h; sys/socket.h: user/socket.h): those go to /usr/include/zenix, the includes pointed there
+mkdir -p "$D.new/usr/include/zenix"
+cp kernel/errno.h "$D.new/usr/include/zenix/errno.h"
+cp user/socket.h "$D.new/usr/include/zenix/socket.h"
+sed -i 's|^#include "\.\./\.\./\.\./\.\./kernel/errno\.h"$|#include <zenix/errno.h>|' "$D.new/usr/include/sys/errno.h"
+sed -i 's|^#include "\.\./\.\./\.\./\.\./user/socket\.h"$|#include <zenix/socket.h>|' "$D.new/usr/include/sys/socket.h"
+# (zenix/socket.h's libz branch, never taken in the C library, keeps its "../kernel/netproto.h")
+if grep -rn '#include "\.\./\.\./\.\./' "$D.new/usr/include" >&2; then
+    echo "mkdevel.sh: a header still includes a path outside /usr/include" >&2
+    exit 1
+fi
 mkdir -p "$D.new/usr/include/pico/gen" "$D.new/usr/include/pico/locale" "$D.new/usr/include/pico/libm"
 cp "$B/libc-inc/zenix-consts.h" "$D.new/usr/include/pico/gen/"
 tree libc/picolibc/newlib/libc/machine/m68k "$D.new/usr/include/pico/m68k"
