@@ -48,7 +48,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet \
-          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs \
+          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs files \
           play modplay lsusb
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
@@ -580,6 +580,11 @@ $(BUILD)/deskprefs.uo: display/prefs/deskprefs.c display/display.h display/proto
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
 $(BUILD)/deskprefs.uelf: $(BUILD)/deskprefs.uo $(BUILD)/libdisplay.no $(BUILD)/dpyd-amifont.no $(BUILD)/cfgfile.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/deskprefs.uo $(BUILD)/libdisplay.no $(BUILD)/dpyd-amifont.no $(BUILD)/cfgfile.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+# the file view (DESIGN D48, docs/d48-fileview.md): a client of the display, cold: -Os
+$(BUILD)/files.uo: display/files/files.c display/display.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
+$(BUILD)/files.uelf: $(BUILD)/files.uo $(BUILD)/libdisplay.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/files.uo $(BUILD)/libdisplay.no $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/conprefs.uo: user/conprefs.c user/cfgfile.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
 $(BUILD)/conprefs.uelf: $(BUILD)/conprefs.uo $(BUILD)/cfgfile.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
@@ -1208,7 +1213,7 @@ box: $(BUILD)/box.zx
 # (zenix-demo.adf, 880 KB) and the HD one (zenix-demo-hd.adf, 1.76 MB: also what the DD one has no room for). Each
 # is refused when it does not fit, saying by how much; every build says the space left. The commands in the box are
 # its links (BOXAPPS); DEMOAPPS the separate programs. ----
-DEMOAPPS := sh login init mount zdesk term ahiru sumi ctop telnet rz sntp displayd-nortg dlogin netd drv-a2065 drv-genet drv-ne2000
+DEMOAPPS := sh login init mount zdesk term files ahiru sumi ctop telnet rz sntp displayd-nortg dlogin netd drv-a2065 drv-genet drv-ne2000
 DEMOAPPS_HD := $(DEMOAPPS) wget ssh maki markdown zine drv-plipbox fdisk mkfs_ext2 fsck_ext2 mkfs_zenixfs fsck_zenixfs \
                dd sync zfsd fatd ffsd pfs3d
 DEMODEPS := $(BUILD)/demoboot.bin $(BUILD)/demoload.zx $(BUILD)/kernel.bin $(BUILD)/box.zx $(USERZX) $(SBINZX) $(NETDRVZX) \

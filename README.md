@@ -31,7 +31,7 @@ hello from Zenix
   always works at the speed of whoever is waiting for it.
 - 💾 **Talks to the rest of the world.** Its filesystem is ext2, which Linux reads, writes and checks. It reads Amiga
   RDB and PC partition tables and keeps AmigaOS partitions untouched. Plus ZenixFS, its own copy-on-write filesystem.
-- 🖥️ **A proper Unix at the keyboard.** A bash-like shell with job control, history and completion, 152 programs with
+- 🖥️ **A proper Unix at the keyboard.** A bash-like shell with job control, history and completion, 153 programs with
   manual pages, users and permissions, ten consoles on Amiga+F1 to F10, an ANSI/VT100 terminal with scrollback.
 - 🌐 **On the network, even a stock A1200.** TCP/IP (lwIP) as a server loaded only when a program opens a socket;
   BSD sockets, `ping`, `ifconfig`, `route`, `netstat`; SLIP over a null-modem cable to a Linux PC, which shares its
@@ -82,7 +82,7 @@ See [docs/pi-first-boot.md](docs/pi-first-boot.md).
 | [How it works](docs/how-it-works.md) | Walk-throughs: power-on to prompt, a pipe, a crash |
 | [Source tree](docs/source-tree.md) | What each folder and file is |
 | [Features](docs/features.md) · [Limits](docs/limits.md) | What it can do, what it can't (yet) |
-| [Commands](docs/commands.md) | All 152 programs, each with its manual page |
+| [Commands](docs/commands.md) | All 153 programs, each with its manual page |
 | [Roadmap](docs/ROADMAP.md) · [Design decisions](docs/DESIGN.md) | Where it's going, and what was decided |
 | [Next to AmigaOS](docs/vs-amigaos.md) · [Next to Unix](docs/vs-unix-linux.md) | How it compares |
 
