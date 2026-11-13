@@ -506,9 +506,19 @@ COLD ZM_API void *realloc1(void *p, zs_ulong n)
     if (h->tag != M_BIG) {
         struct mhdr *nx = NEXTB(h);
         if (cap > h->cap && nx->tag == M_HFREE && h->cap + 8 + nx->cap >= cap) {   /* the free block after it */
+            ZM;
+            int wasfresh = (struct fblk *)nx == fresh;
+            u32 all = h->cap + 8 + nx->cap;
             fl_del((struct fblk *)nx);
-            h->cap += 8 + nx->cap;
-            NEXTB(h)->tag &= ~M_PF;
+            if (all - cap >= 24) {      /* only what it needs: the rest stays free (taking all of it once swallowed
+                                         * a new chunk's megabytes into a 16-byte block: DESIGN D52 9, Lua) */
+                h->cap = cap;
+                mkfree(NEXTB(h), all - cap - 8);
+                if (wasfresh) fresh = (struct fblk *)NEXTB(h);     /* the untouched rest is still untouched */
+            } else {
+                h->cap = all;
+                NEXTB(h)->tag &= ~M_PF;
+            }
         }
     }
     if (cap <= h->cap) return p;
