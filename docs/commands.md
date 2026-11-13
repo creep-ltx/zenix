@@ -1,6 +1,6 @@
 # Command reference
 
-Zenix has 156 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
+Zenix has 157 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
 page in `docs/man/NAME.txt`; a few more pages are for names that start the same program (`gunzip`, `zcat`, `chgrp`,
 `more`, `pkill`, `ifup`, `ifdown`, `unlzx`). The pages use the exact format that Zenix's own `man` reads (plain text of at most 78 columns, a
 `NAME(section)` header, `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`, `EXAMPLES`, `EXIT STATUS`, `SEE ALSO`); the
@@ -34,6 +34,7 @@ spot-checked against the code that day.
 | [grep](man/grep.txt) | search (POSIX extended expressions) |
 | [sed](man/sed.txt) | stream editor |
 | [awk](man/awk.txt) | pattern scanning and text processing language (POSIX awk) |
+| [make](man/make.txt) | maintain programs from a makefile (pdpmake 2.0.4, POSIX make, public domain, `ports/pdpmake`; DESIGN D52) |
 | [lua](man/lua.txt) | the Lua 5.4 scripting language (Lua 5.4.9 from lua.org, `ports/lua`; DESIGN D52) |
 | [sort](man/sort.txt), [uniq](man/uniq.txt), [cut](man/cut.txt), [tr](man/tr.txt), [tee](man/tee.txt) | filters |
 | [head](man/head.txt), [tail](man/tail.txt), [tac](man/tac.txt), [rev](man/rev.txt), [nl](man/nl.txt), [wc](man/wc.txt) | parts, reversed, numbered, counts |
@@ -115,7 +116,7 @@ spot-checked against the code that day.
 
 ## Run on AmigaOS, not on Zenix
 [zenixboot](man/zenixboot.txt) starts Zenix from files on a hard disk, CF or SD card partition, so that no floppy is
-needed (not one of the 156 programs: it is an AmigaOS program on the AmigaDOS boot partition).
+needed (not one of the 157 programs: it is an AmigaOS program on the AmigaDOS boot partition).
 [bootmenu](man/bootmenu.txt) is the boot menu of a disk with AmigaOS and Zenix on it (the SD card of
 `tools/mkdualcard.sh`): it boots a chosen AmigaOS partition or runs zenixboot.
 

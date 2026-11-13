@@ -1,0 +1,131 @@
+MAKE(1)			Zenix manual
+
+NAME
+    make - maintain programs and files from rules in a makefile
+
+SYNOPSIS
+    make [--posix] [-ehiknpqrSst] [-C dir] [-f makefile] [-j n]
+         [-x pragma] [macro=value...] [target...]
+
+DESCRIPTION
+    Reads a makefile and brings each target up to date: a target that is
+    missing, or older than a file it depends on, is made by running the
+    commands of its rule. With no target the first one in the makefile is
+    made. The makefile is the one named by -f (- is standard input), else
+    PDPmakefile, makefile or Makefile in the working directory.
+
+    This is pdpmake 2.0.4 by Ron Yorston, a POSIX.1-2024 make in the public
+    domain, unchanged (the source is in ports/pdpmake). It reads the same
+    makefiles as other POSIX makes, and some of GNU make's extras (below).
+
+    Each command line of a recipe is run by /bin/sh -c, one shell for each
+    line (a cd on one line does not reach the next). A line starting with @
+    is not printed first, with - its failure is ignored, with + it is run
+    also with -n, -q or -t.
+
+    A makefile has rules (target: prerequisites, then the commands each
+    behind a tab), macros (NAME = value, used as $(NAME) or ${NAME}),
+    inference rules (.c.o: for a file made from another with that ending;
+    the endings are listed after .SUFFIXES:), include lines (include file,
+    and -include file for a file that may be missing) and comments (#).
+    The macros $@ (the target), $< (the first prerequisite), $? (those
+    newer than the target), $^ (all of them once), $+ (all, repeated as
+    given) and $* (the target without its ending) are set in a rule's
+    commands. A macro is set also on the command line (make CFLAGS=-g) and
+    by the environment; the makefile wins over the environment unless -e,
+    the command line wins over both. Macro assignment is =, ::= or :=
+    (at once), += (add), ?= (only if unset) and != (the output of a
+    command). $(SRC:.c=.o) replaces an ending, $(SRC:%.c=obj/%.o) a pattern.
+
+    Special targets: .PHONY (never a file: always made), .SILENT, .IGNORE,
+    .PRECIOUS (not removed when its commands fail), .SUFFIXES, .DEFAULT (the
+    rule for a target no rule names), .POSIX (first line: no extensions).
+
+OPTIONS
+    -C dir      change to dir first (more than one: each relative to the
+                one before)
+    -e          environment variables win over the makefile's macros
+    -f makefile read this file (- for standard input); more than one is read
+                in order
+    -h          the usage, and which standards the program supports
+    -i          ignore failing commands (as .IGNORE)
+    -j n        accepted and ignored: commands run one at a time
+    -k          after an error go on with the targets that do not depend on
+                it
+    -n          print the commands without running them (a command line with
+                + and every line that runs $(MAKE) are run anyway)
+    -p          print the macros and rules
+    -q          run nothing: status 0 if the targets are up to date, 1 if not
+    -r          no built-in rules, the suffix list cleared
+    -S          stop at the first error (the default; undoes -k)
+    -s          do not print commands (as .SILENT)
+    -t          do not run the commands: set the time of each target that is
+                out of date to now (a missing file is created empty)
+    -x pragma   allow one extension in POSIX mode (see the PRAGMAS below)
+    --posix     strict POSIX mode, no extensions; must come first
+
+    MAKEFLAGS (macro and environment variable) carries the options and the
+    macros given on the command line to the make that $(MAKE) starts.
+
+EXTENSIONS (off after .POSIX, --posix or PDPMAKE_POSIXLY_CORRECT)
+    double-colon rules; ifdef, ifndef, ifeq, ifneq, else and endif; lib.a(
+    member.o) as a target (the time of a member of an ar archive); chained
+    inference rules (hello.txt to hello.up to hello.len); * ? [ ] in target
+    and prerequisite names; $< and $* in ordinary rules; -C; a # inside a
+    command or a macro is not a comment; macro definitions mixed with the
+    targets on the command line.
+
+PRAGMAS
+    PDPMAKE_PRAGMAS (or -x), in POSIX mode: macro_name, target_name,
+    command_comment, empty_suffix, posix_2017, posix_2024, windows.
+    See pdpmake's own page (ports/pdpmake/upstream/pdpmake.1).
+
+BUILT-IN RULES
+    The usual inference rules and macros (CC, CFLAGS, YACC, LEX, AR, ARFLAGS,
+    LDFLAGS) are built in: .c.o runs $(CC) $(CFLAGS) -c, and so on, with CC
+    the name c17 (cc with the extensions on). Zenix has no compiler,
+    yacc, lex or ar yet, so these rules only work once they are installed;
+    SHELL is always /bin/sh and is not taken from the environment.
+
+EXIT STATUS
+    0 when everything asked for is up to date or was made; 2 for an error
+    (a command failed: "failed to build 'x' exit 3", a target with no rule
+    and no file, a circular dependency, a makefile that cannot be read or
+    parsed, a bad option; with -k the same error ends with 1); with -q, 1 if
+    something is out of date.
+
+EXAMPLES
+    make                        the first target of ./Makefile
+    make -n all                 what make all would run
+    make -f build.mk -k test    keep going after a failure
+    make CC=tcc prog            a macro from the command line
+    make -q prog && echo current
+
+NOTES
+    Times are the file system's, whole seconds (the clock has no finer
+    time). A target is out of date when it is not newer than a prerequisite,
+    so one made in the same second as the file it was made from is out of
+    date at the next run, and a chain of quick steps (a .c to a .o to a
+    program within a second) is made again once: the second run is the
+    first that finds the times apart. On a PC, with nanoseconds, it would
+    not be. The time of an archive member comes from the archive's header.
+
+    Make works recursively on the prerequisites and on nested macros with
+    a fixed stack (no MMU): 32 KB. A chain of 100 targets, or of 100
+    macros each defined by the next, uses about 10 KB, so about 300 levels
+    fit (docs/limits.md); further, the kernel's stack guard ends make with
+    its message, as for any program.
+
+    With -k a target that depends on one that has already failed (reached
+    through an earlier target) is still run: upstream's behaviour, found by
+    the test; a target reached only through the failed one is not.
+
+    The program's code is shared between two makes running at once (a
+    recipe that runs $(MAKE)): the second costs only its data.
+
+    Not done: parallel jobs (-j is ignored), GNU make's functions
+    ($(shell ...), $(wildcard ...)), % pattern rules as targets (the %
+    in a macro substitution works) and VPATH.
+
+SEE ALSO
+    sh(1), touch(1), lua(1), ports/pdpmake/README

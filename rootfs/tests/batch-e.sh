@@ -75,4 +75,10 @@ echo after-kills > $T/g3; cat $T/g3
 # a single command too big for memory says so and ends that shell (status 2), never a silent cut (the shell's arena
 # grows on demand: here a command substitution that never ends)
 sh -c 'x=$(yes 0123456789012345678901234567890123456789)' 2>&1; echo "huge-st=$?"
+# "$@" with no parameters is no argument at all (it was one empty argument: make "$@" made the target "")
+set --; n=0; for a in "$@"; do n=$((n+1)); done; echo "empty-at=$n"
+set -- x; n=0; for a in "$@" "$@"; do n=$((n+1)); done; echo "two-at=$n"
+set --; for a in "$*"; do n=1; done; echo "star=$n"
+set -- p q; set -- "x$@"; echo "xat=$# $1"
+set --; echo "[$@]" "a$@" ""
 echo batch-e-done

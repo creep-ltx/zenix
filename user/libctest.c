@@ -574,6 +574,40 @@ static void t_helpers(void)
     char p[64];
     check("path_find through $PATH", path_find("sh", p, sizeof p) && !strcmp(p, "/bin/sh"), p);
     check("zrealpath", zrealpath("/tmp/../etc/./", p, sizeof p) == 0 && !strcmp(p, "/etc"), p);
+    {   /* realpath (libc/zenix/sys.c over zrealpath) and utimensat (over SYS_utimes) */
+        char rp[ZPATH_MAX], *hp;
+        check("realpath: . and .. resolved", realpath("/tmp/../etc/./passwd", rp) == rp && !strcmp(rp, "/etc/passwd"), rp);
+        check("realpath of a missing name: ENOENT", !realpath("/tmp/no/such/thing", rp) && errno == ENOENT, "");
+        hp = realpath("/etc/../etc", 0);
+        check("realpath into a malloc'd buffer", hp && !strcmp(hp, "/etc"), hp ? hp : "null");
+        free(hp);
+        char ut[48];
+        snprintf(ut, sizeof ut, "/tmp/lcut%d", getpid());
+        int ufd = open(ut, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        struct stat us;
+        close(ufd);
+        struct timespec ts[2] = { { 1000000000, 0 }, { 1000000000, 0 } };
+        check("utimensat: a given time", utimensat(AT_FDCWD, ut, ts, 0) == 0 && stat(ut, &us) == 0 &&
+              us.st_mtim.tv_sec == 1000000000, "");
+        struct timespec om[2] = { { 0, UTIME_OMIT }, { 0, UTIME_OMIT } };
+        check("utimensat: UTIME_OMIT leaves the time", utimensat(AT_FDCWD, ut, om, 0) == 0 && stat(ut, &us) == 0 &&
+              us.st_mtim.tv_sec == 1000000000, "");
+        struct timespec nw[2] = { { 0, UTIME_NOW }, { 0, UTIME_NOW } };
+        time_t t0 = time(0);
+        check("utimensat: UTIME_NOW is the clock", utimensat(AT_FDCWD, ut, nw, 0) == 0 && stat(ut, &us) == 0 &&
+              us.st_mtim.tv_sec >= t0 - 1 && us.st_mtim.tv_sec <= t0 + 2, "");
+        utimensat(AT_FDCWD, ut, ts, 0);
+        check("utimensat: a null array is now", utimensat(AT_FDCWD, ut, 0, 0) == 0 && stat(ut, &us) == 0 &&
+              us.st_mtim.tv_sec >= t0 - 1 && us.st_mtim.tv_sec <= t0 + 2, "");
+        struct timespec bad[2] = { { 0, 1000000000L }, { 0, 0 } };
+        check("utimensat: a bad nanosecond count is EINVAL", utimensat(AT_FDCWD, ut, bad, 0) == -1 && errno == EINVAL, "");
+        check("utimensat: another directory descriptor with a relative path is ENOSYS", utimensat(3, "rel", ts, 0) == -1 &&
+              errno == ENOSYS, "");
+        check("utimensat: an absolute path ignores the descriptor", utimensat(3, ut, ts, 0) == 0, "");
+        check("utimensat of a missing file: ENOENT", utimensat(AT_FDCWD, "/tmp/no/such/thing", nw, 0) == -1 &&
+              errno == ENOENT, "");
+        unlink(ut);
+    }
     check("color_arg", color_arg("--color=never", 2) == 0 && color_arg("--colour", 2) == 2 && color_arg("-x", 2) == -1, "");
     check("color_auto on a file: no", (n = open("/etc/passwd", O_RDONLY)) >= 0 && !color_auto(n), "");
     close(n);

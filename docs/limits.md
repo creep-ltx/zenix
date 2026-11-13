@@ -194,7 +194,7 @@ pointers.
   2; a recalled history line cut to 478 the same; longer commands go on over several lines with a final backslash,
   at most 2047 bytes).
 - awk: a `printf`/`sprintf` field width or precision of at most 4096 ("field width too large", status 2).
-- Kernel stack 4 KB per process; user stack 16 KB by default, 24 KB for `sh`, 32 KB for `gzip`, `edit` and `markdown`, 128 KB for `lua` (its
+- Kernel stack 4 KB per process; user stack 16 KB by default, 24 KB for `sh`, 32 KB for `gzip`, `edit` and `markdown`, 32 KB for `make` (a chain of 100 targets uses 9.5 KB, 100 nested macros 10.1 KB: about 100 bytes a level, so some 300 levels; measured with the probe build, tools/make-test.sh), 128 KB for `lua` (its
   limit of 100 nested C calls measured against it, DESIGN D52 9), 4 KB for
   `boot` and `init`, 8 KB for `diskd` (the last three live for ever and use under 700 bytes: DESIGN D18; the
   Makefile's `STACK_*`, written into each program's header). The lowest 16 bytes of each stack are the guard
@@ -248,7 +248,7 @@ pointers.
   `/tests/tuitest`): paths at most 255 bytes
   (`PATH_MAX` 256), names 63, 16 descriptors (`OPEN_MAX`); `open`'s and `mkdir`'s mode is set by a `chmod` after the
   call (the system calls take none: not atomic); `stat` gives one time (the modification's) for all three; the wall
-  clock has whole seconds (`gettimeofday`'s microseconds 0), `CLOCK_MONOTONIC` and the sleeps 10 ms ticks, `clock()`
+  clock has whole seconds (`gettimeofday`'s microseconds 0; so `make` finds a target made in the same second as its prerequisite out of date, man/make.txt), `utimensat` only with `AT_FDCWD` and no flags, one time (the modification's) and whole seconds, `realpath` of an existing name of at most 255 bytes, `CLOCK_MONOTONIC` and the sleeps 10 ms ticks, `clock()`
   is wall time since the start; `lseek` past 4 GB `EOVERFLOW`; `readdir`'s `d_type` the server's type or the record's stat (DESIGN D49), `DT_UNKNOWN` from a server that gives neither (nfscd on a NAS without READDIRPLUS); the
   environment at most 63 variables and 1 KB; `printf` without a float build prints `%f` as `*float*`; with it a precision beyond a number's
   shortest exact digits gives those digits (picolibc's Ryu engine): `%.17g` of 0.1 is `0.1`, not glibc's

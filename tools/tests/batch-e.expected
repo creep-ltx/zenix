@@ -68,4 +68,9 @@ ln-dir=1
 after-kills
 sh: out of memory
 huge-st=2
+empty-at=0
+two-at=2
+star=1
+xat=2 xp
+[] a 
 batch-e-done

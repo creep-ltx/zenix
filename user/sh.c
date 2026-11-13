@@ -1454,6 +1454,8 @@ static void field_end(void)
     fn = 0; fhas = 0;
 }
 
+static int fhas_pre_quote;                    /* whether the field had text before the " that opened this quote (read only by "$@" inside it; known difference from
+ * bash: "$x$@" with $x empty and no parameters gives no field, bash gives an empty one) */
 static void fpush(char c, int quoted)
 {
     if (fn < FMAX - 1) { fbuf[fn] = c; fq[fn] = (u8)quoted; fn++; }
@@ -1587,7 +1589,8 @@ static int expand_dollar(const char *w, int i, int quoted)
         return e + 1;
     }
     if (c == '@' || c == '*') {
-        if (quoted && c == '@') { for (int k = 0; k < npos; k++) { append_val(pos_arg[k], 1); if (k + 1 < npos) field_end(); } }
+        if (quoted && c == '@' && !npos && !fn) fhas = fhas_pre_quote;      /* "$@" of nothing is no field, not an empty one */
+        else if (quoted && c == '@') { for (int k = 0; k < npos; k++) { append_val(pos_arg[k], 1); if (k + 1 < npos) field_end(); } }
         else for (int k = 0; k < npos; k++) { append_val(pos_arg[k], quoted); if (k + 1 < npos) { if (quoted) fpush(' ', 1); else field_end(); } }
         return i + 2;
     }
@@ -1698,7 +1701,7 @@ static void expand_word(const char *w, struct words *out)
         if (c == '\\') { if (w[i + 1]) { fpush(w[i + 1], 1); i += 2; } else i++; continue; }
         if (c == '\'') { i++; fhas = 1; while (w[i] && w[i] != '\'') fpush(w[i++], 1); if (w[i]) i++; continue; }
         if (c == '"') {
-            i++; fhas = 1;
+            i++; fhas_pre_quote = fhas || fn; fhas = 1;
             while (w[i] && w[i] != '"') {
                 if (w[i] == '\\' && (w[i + 1] == '$' || w[i + 1] == '`' || w[i + 1] == '"' || w[i + 1] == '\\')) { fpush(w[i + 1], 1); i += 2; }
                 else if (w[i] == '$') i = expand_dollar(w, i, 1);
