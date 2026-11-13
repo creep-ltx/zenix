@@ -447,6 +447,33 @@ static void do_cmd(char *line, int bg, int cancelled)
         for (uint32_t k = 0; k < cnt; k++) { printf("  %s\n", names[k]); free(names[k]); }
         printf("%s -> %ld entries=%u\n", line, r, cnt);
         return;
+    } else if (!strcmp(c, "lsx") && n >= 2) {        /* D49: ls through FS_READDIRS (a buffer of SIZE, default 300) */
+        r = call(FS_OPEN, (uintptr_t)P(0), 2, 0, (uintptr_t)&st);
+        if (r < 0) { printf("%s -> %ld\n", line, r); return; }
+        uint32_t ino = (uint32_t)r, ck = 0, cnt = 0, size = n >= 3 ? (uint32_t)strtoul(v[2], 0, 10) : 300, bad = 0;
+        static char *names[4096];
+        static unsigned char buf[2048 + 16];
+        for (;;) {
+            struct fsrdx q = { size, 0 };
+            memset(buf, 0xA5, sizeof buf);
+            r = call(FS_READDIRS, ino, ck, (uintptr_t)buf, (uintptr_t)&q);
+            for (uint32_t i = size; i < sizeof buf; i++) if (buf[i] != 0xA5) bad++;
+            if (r <= 0) break;
+            for (uint32_t o = 0; o < (uint32_t)r;) {
+                const struct udirx *x = (const struct udirx *)(buf + o);
+                uint32_t sz = udirx_step(x, (uint32_t)r - o);
+                if (!sz || !udirx_named(x) || x->flags) { bad++; break; }    /* nfscd gives no stats */
+                if (cnt < 4096) { char b[100]; snprintf(b, sizeof b, "%s %u", x->name, x->ino); names[cnt++] = strdup(b); }
+                o += sz;
+            }
+            if (q.next == ck) { bad++; break; }
+            ck = q.next;
+        }
+        call(FS_CLOSE, ino, 0, 0, 0);
+        qsort(names, cnt, sizeof names[0], cmpstr);
+        for (uint32_t k = 0; k < cnt; k++) { printf("  %s\n", names[k]); free(names[k]); }
+        printf("%s -> %ld entries=%u%s\n", line, r, cnt, bad ? " BAD" : "");
+        return;
     } else if (!strcmp(c, "readdir") && n >= 3) {   /* one FS_READDIR at a cookie: "name ino next" */
         static struct udirent_ de; static uint32_t nc;
         r = call(FS_READDIR, strtoul(v[1], 0, 10), strtoul(v[2], 0, 10), (uintptr_t)&de, (uintptr_t)&nc);

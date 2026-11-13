@@ -195,6 +195,40 @@ static int clear_setid(struct inode *in)
     return ext2_iput(in);
 }
 
+/* DESIGN D49: FS_READDIRS, ext2_readdir's records in a batch, each with lstat's answer for its name when the caller may
+ * search the directory (lstat's walk would need that x): the inode read as FS_LSTAT reads it, the type from its mode
+ * on a volume without file types. "." and ".." carry none (their lstat is the path's text, D26). An inode that cannot
+ * be read gives a record without it (the caller's lstat then says why) */
+static __attribute__((noinline)) int readdirs(struct umsg *m)
+{
+    struct inode dir, in;
+    struct udirent d;
+    struct fsrdx *q = (struct fsrdx *)m->a[3];
+    u32 cookie = m->a[1], used = 0, at;
+    int r = ext2_iget(m->a[0], &dir);
+    if (r) return r;
+    if (!S_ISDIR(dir.mode)) return -ENOTDIR;
+    int x = !ext2_enforce || fsp_access(ext2_uid, ext2_gid, ext2_ngroups, ext2_groups, dir.mode, dir.uid, dir.gid, FSP_X);
+    ext2_iget_ahead = 1;                                /* the inodes come in a row: their blocks read ahead */
+    for (;;) {
+        at = cookie;
+        if ((r = ext2_readdir(&dir, &cookie, &d)) <= 0) break;
+        if (!d.name[0]) continue;                       /* an empty name (damage) is never listed */
+        if (used && (m->kflags & UMSG_CANCEL)) { cookie = at; break; }   /* a killed client: what is written */
+        struct udirx *e = udirx_put((char *)m->a[2], q->size, &used, d.name, d.ino, d.type, cookie);
+        if (!e) { cookie = at; break; }                     /* full: this record comes first next time */
+        if (x && strlen(d.name) < 63 && !(d.name[0] == '.' && (!d.name[1] || (d.name[1] == '.' && !d.name[2]))) &&
+            !ext2_istat(d.ino, &in) && in.mode) {        /* (a name of 63 bytes may have been cut: lstat would miss it) */
+            fill_stat(&in, (struct ustat *)&e->st);
+            e->flags = UDX_STAT;
+            if (!e->type) e->type = (u8)udirx_type(in.mode);
+        }
+    }
+    ext2_iget_ahead = 0;
+    q->next = cookie;
+    return used ? (int)used : r;
+}
+
 /* One request. The result is >= 0, or a negative errno (kernel/errno.h) - the same numbers the ZenixFS server returns
  * for the same cases (audit E). A permission failure becomes -EACCES in handle(). */
 static int handle1(struct umsg *m)
@@ -255,10 +289,13 @@ static int handle1(struct umsg *m)
         u32 cookie = m->a[1];
         if ((r = ext2_iget(m->a[0], &in))) return r;
         if (!S_ISDIR(in.mode)) return -ENOTDIR;
-        r = ext2_readdir(&in, &cookie, (struct udirent *)m->a[2]);
+        struct udirent *ud = (struct udirent *)m->a[2];
+        r = ext2_readdir(&in, &cookie, ud);
         *(u32 *)m->a[3] = cookie;
         return r;
     }
+    case FS_READDIRS:
+        return readdirs(m);
     case FS_STATFS: {
         struct ustatfs *f = (struct ustatfs *)m->a[0];
         return ext2_statfs(&f->bsize, &f->blocks, &f->bfree, &f->files, &f->ffree);

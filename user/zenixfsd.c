@@ -150,6 +150,38 @@ static void fill_stat(uint32_t ino, const struct zenixfs_inode *in, struct ustat
     st->mtime = (u32)in->mtime; st->uid = in->uid; st->gid = in->gid; st->links = in->nlink;
 }
 
+/* DESIGN D49: FS_READDIRS, FS_READDIR's records in a batch (names over 63 bytes left out, as there), each with
+ * FS_LSTAT's answer for its name when the caller may search the directory; none for "." and ".." (their lstat is the
+ * path's text, D26) */
+static __attribute__((noinline)) int readdirs(struct umsg *m)
+{
+    struct zenixfs_inode d, in;
+    struct fsrdx *q = (struct fsrdx *)m->a[3];
+    uint64_t cookie = m->a[1], at;
+    uint32_t ino;
+    unsigned used = 0;
+    char nm[300]; uint8_t type;
+    int r = zenixfs_getattr(fs, m->a[0], &d);
+    if (r) return r;
+    int x = fsp_access(cuid, cgid, cng, cgs, d.mode, d.uid, d.gid, FSP_X);
+    for (;;) {
+        at = cookie;
+        if ((r = zenixfs_readdir(fs, m->a[0], &cookie, nm, &ino, &type)) <= 0) break;
+        if (strlen(nm) > 63) continue;              /* longer names (from other systems' volumes) do not fit a record */
+        if (!nm[0]) continue;                       /* an empty name (damage) is never listed */
+        if (used && (m->kflags & UMSG_CANCEL)) { cookie = at; break; }   /* a killed client: what is written */
+        struct udirx *e = udirx_put((char *)m->a[2], q->size, &used, nm, ino, udirx_type((unsigned)type << 12), (u32)cookie);
+        if (!e) { cookie = at; break; }             /* full: this record comes first next time */
+        if (x && !(nm[0] == '.' && (!nm[1] || (nm[1] == '.' && !nm[2]))) && !zenixfs_getattr(fs, ino, &in)) {
+            fill_stat(ino, &in, (struct ustat *)&e->st);
+            e->flags = UDX_STAT;
+            if (!e->type) e->type = (uint8_t)udirx_type(in.mode);
+        }
+    }
+    q->next = (u32)cookie;
+    return used ? (int)used : r;
+}
+
 /* Open inodes (FS_OPEN counts one, FS_CLOSE from the kernel one less). When the last name of an open file goes, the
  * file becomes an orphan (zenixfs_orphan_add: a marker in the tree, so a crash frees it at the next mount) and is
  * freed at the last close (zenixfs_orphan_done). ZenixFS never reuses an inode number, so even without this an old
@@ -274,6 +306,8 @@ static int handle1(struct umsg *m)
         if ((r = zenixfs_getattr(fs, m->a[0], &in))) return r;
         fill_stat(m->a[0], &in, (struct ustat *)m->a[1]);
         return 0;
+    case FS_READDIRS:
+        return readdirs(m);
     case FS_READDIR: {
         struct udirent *ud = (struct udirent *)m->a[2];
         uint64_t cookie = m->a[1];
@@ -283,7 +317,7 @@ static int handle1(struct umsg *m)
             if (r < 0) return r;
             if (r == 0) break;
             if (strlen(nm) < sizeof ud->name) {         /* longer names (from other systems' volumes) do not fit a udirent */
-                ud->ino = ino; ud->type = type;
+                ud->ino = ino; ud->type = udirx_type((unsigned)type << 12);   /* the library's DT_ numbers as ext2's (D49 review) */
                 strcpy(ud->name, nm);
                 break;
             }

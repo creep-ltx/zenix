@@ -622,6 +622,28 @@ def test_fuzz(rounds):
     check(f"fuzz: the damage reached the walks ({errors} volumes answered EIO after mounting)", errors >= done // 6)
 
 
+def rdx_check(label, out, min_records):
+    """DESIGN D49: tools/host/fsd-host.c's rdx: the batch against one by one and every stat against lstat"""
+    tot = [l for l in out.splitlines() if l.startswith("rdx-total")]
+    bad = [l for l in out.splitlines() if l.startswith("rdx-bad")]
+    ok = len(tot) >= 2 and all(t.endswith(" 0 bad") for t in tot) and not bad and tot[0] == tot[1]
+    n = int(tot[0].split()[2]) if tot else 0
+    check(f"{label}: FS_READDIRS lists what FS_READDIR lists, every stat is lstat's, sizes 104-300 too ({tot[0] if tot else 'no rdx'})",
+          ok and n >= min_records, "\n".join(bad[:5] + tot))
+
+
+def test_rdx():
+    for bits in (12, 16, 32):
+        img = mkimg(bits, 40 if bits == 32 else 8, name=f"rdx{bits}.img")
+        sh("mmd", "-i", img, "::sub", "::sub/deep").check_returncode()
+        for i in range(120):
+            mput(img, f"f{i}", b"x" * i)
+        mput(img, "a long name with spaces and more than thirteen characters.txt", b"long")
+        mput(img, "sub/deep/inner", b"in")
+        _, o = run(img, "mount\nopen /f7 w\nwrite %1 0 hello+world+grown\nrdx / 2048\nrdx / 0\n")
+        rdx_check(f"D49 FAT{bits} (a file open and grown)", o, 125)
+
+
 def main():
     rounds = int(sys.argv[1]) if len(sys.argv) > 1 else 330
     for t in ("mkfs.fat", "fsck.fat", "mcopy"):
@@ -634,13 +656,14 @@ def main():
     if subprocess.run(["gcc"] + CF + SAN + ["-o", os.path.join(T, "fatd-asan")] + SRC).returncode:
         print("FAIL build (asan)")
         return 1
-    only = os.environ.get("FAT_ONLY", "readwrite refusals readonly limits dirty cuts fuzz").split()
+    only = os.environ.get("FAT_ONLY", "readwrite refusals readonly limits dirty cuts rdx fuzz").split()
     if "readwrite" in only: test_readwrite()
     if "refusals" in only: test_refusals()
     if "readonly" in only: test_readonly()
     if "limits" in only: test_limits()
     if "dirty" in only: test_dirty()
     if "cuts" in only: test_cuts()
+    if "rdx" in only: test_rdx()
     if "fuzz" in only: test_fuzz(rounds)
     print(f"fat-host-test: {passes} passed, {fails} failed")
     return 1 if fails else 0

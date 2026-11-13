@@ -156,5 +156,20 @@ o=$(grep '^open -> ' $T/out | sed -n '3,$p' | awk '{print ($3 > 0) ? "ok" : $3}'
 "$TOOL" fsck $T/g.img > $T/fsck.log 2>&1 && check "zfsd: zenixfs-tool fsck clean after the groups test" ok || { check "zfsd: fsck after the groups test" bad; cat $T/fsck.log; }
 "$TOOL" fsck $T/z.img > $T/fsck.log 2>&1 && check "D26 zfsd: zenixfs-tool fsck clean afterwards" ok || { check "D26 zfsd: fsck afterwards" bad; cat $T/fsck.log; }
 
+# DESIGN D49: FS_READDIRS against FS_READDIR and FS_LSTAT (fsd-host's rdx) on 250 files, links, a folder without x for
+# a user; the types are ext2's numbers (1 file, 2 directory, 7 link), not the library's
+"$TOOL" mkfs $T/r.img 8 > /dev/null || { echo "FAIL mkfs"; exit 1; }
+{ echo mount; echo mkdir /big; for i in $(seq 1 250); do echo "open /big/f$i wc"; echo "close %$i"; done
+  echo "symlink f1 /big/lnk"; echo "mkdir /big/sub"; echo "mkdir /nox"; echo "open /nox/a wc"; echo "close %251"; echo "chmod /nox 744"; echo sync
+  echo "rdx / 2048"; echo "rdx / 0"; echo "as 1000 1000"; echo "rdx /nox 2048"; echo "lsat /big 0"; echo "lsat /big 2"; } > $T/r.txt
+run $T/r.img $T/r.txt $T/rout
+t1=$(grep '^rdx-total' $T/rout | sed -n 1p); t2=$(grep '^rdx-total' $T/rout | sed -n 2p)
+! grep -q '^rdx-bad' $T/rout && [ "$t1" = "$t2" ] && echo "$t1" | grep -q ' 0 bad$' && [ "$(echo "$t1" | awk '{print $3}')" -ge 258 ] &&
+    check "D49 zfsd: the batch lists what one by one lists, every stat is lstat's, sizes 104-300 ($t1)" ok ||
+    { check "D49 zfsd: batch against one by one" bad; grep -m5 'rdx-bad\|rdx-total' $T/rout; }
+[ "$(grep '^rdx /nox ' $T/rout | tail -1)" = "rdx /nox -> 3 0" ] && check "D49 zfsd: a folder the user may not search: names, no stats" ok ||
+    { check "D49 zfsd: no stats without x" bad; grep 'nox' $T/rout; }
+grep -q '^rdx-bad.*t[0-9]* *$' $T/rout; ! grep -q 'rdx-bad' $T/rout && check "D49 zfsd: types agree between the two forms" ok || check "D49 zfsd: types" bad
+
 echo "zfsd-test: $pass passed, $fail failed"
 [ $fail = 0 ]

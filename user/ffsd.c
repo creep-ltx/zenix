@@ -1223,6 +1223,38 @@ static int do_readdir(struct umsg *m)
     }
 }
 
+/* DESIGN D49: FS_READDIRS, do_readdir's records in a batch (the same walk, its position the entry's header block), each
+ * with FS_LSTAT's answer (node_load and fill_node of that block, as the walk's lookup gives) when the caller may search
+ * directories */
+static int do_readdirs(struct umsg *m)
+{
+    static struct udirent ud;
+    static node_t n;
+    static struct umsg mm;
+    struct fsrdx *q = (struct fsrdx *)m->a[3];
+    u32 cookie = m->a[1], nc = cookie, at;
+    unsigned used = 0;
+    int r, x = dmode_ok(FSP_X);
+    mm = *m;
+    mm.a[2] = (u32)&ud;
+    mm.a[3] = (u32)&nc;
+    struct cwalk sv;
+    u32 svdir;
+    for (;;) {
+        mm.a[1] = at = cookie;
+        sv = rd_w; svdir = rd_dir;              /* the chain walk before this entry: an entry not given is walked again */
+        if ((r = do_readdir(&mm)) <= 0) { if (!r) cookie = nc; break; }
+        cookie = nc;
+        if (!ud.name[0]) continue;                       /* an empty name (damage) is never listed */
+        if (used && (m->kflags & UMSG_CANCEL)) { cookie = at; rd_w = sv; rd_dir = svdir; break; }   /* a killed client */
+        struct udirx *e = udirx_put((char *)m->a[2], q->size, &used, ud.name, ud.ino, ud.type, cookie);
+        if (!e) { cookie = at; rd_w = sv; rd_dir = svdir; break; }   /* full: the next call redoes exactly this step */
+        if (x && !node_load(cookie & RD_END, &n)) { fill_node(&n, (struct ustat *)&e->st); e->flags = UDX_STAT; }
+    }
+    q->next = cookie;           /* (the loop check's state is kept across calls, as one by one: a looped chain still ends) */
+    return used ? (int)used : r;
+}
+
 /* is directory DIR inside directory SRC, or SRC itself? Up through the parents */
 static int inside(u32 dir, u32 src)
 {
@@ -1499,6 +1531,7 @@ static int handle1(struct umsg *m)
         return 0;
     }
     case FS_READDIR: return do_readdir(m);
+    case FS_READDIRS: return do_readdirs(m);
     case FS_CHDIR: {
         const char *p = (const char *)m->a[0];
         if ((r = walk(m->a[1], p, strlen(p), 1, 0, &n))) return r;

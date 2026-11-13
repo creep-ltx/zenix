@@ -109,6 +109,16 @@ def xdf(name, form, kb=None):
     return p
 
 
+def rdx_check(label, out, min_records):
+    """DESIGN D49: tools/host/fsd-host.c's rdx: the batch against one by one and every stat against lstat"""
+    tot = [l for l in out.splitlines() if l.startswith("rdx-total")]
+    bad = [l for l in out.splitlines() if l.startswith("rdx-bad")]
+    ok = len(tot) >= 2 and all(t.endswith(" 0 bad") for t in tot) and not bad and tot[0] == tot[1]
+    n = int(tot[0].split()[2]) if tot else 0
+    check(f"{label}: FS_READDIRS lists what FS_READDIR lists, every stat is lstat's, sizes 104-300 too ({tot[0] if tot else 'no rdx'})",
+          ok and n >= min_records, "\n".join(bad[:5] + tot))
+
+
 def test_read():
     """what other tools made, every type"""
     if XDF:
@@ -194,6 +204,35 @@ def test_read():
               "readlink -> 12 Work:foo/bar", "readlink -> 15 Sub/../orig.txt", "readlink -> -22", "mode 120777", "stat -> -2", "stat -> -40"):
         check(f"soft links: {w}", w in o, o)
     check("soft links followed in the volume", o.count("read -> 9 the data") == 4, o)
+    # DESIGN D49: FS_READDIRS against FS_READDIR and FS_LSTAT (fsd-host's rdx): hard links (their object's count and
+    # date), soft links, a big directory, a long-name volume's long names
+    _, o = run(p, "mount\nrdx / 2048\nrdx / 0\n")
+    rdx_check("D49 links", o, 15)
+    for dos in (0, 1, 3):
+        b = mkvol(f"rdx{dos}.img", dos, tree=lambda v: ([v.add_file(f"Big/f{i}", b"x" * i) for i in range(150)],
+                  v.add_file("Big/" + "N" * 30, b"long")))
+        _, o = run(b, "mount\nrdx / 2048\nrdx / 0\n")
+        rdx_check(f"D49 DOS\\{dos}", o, 151)
+    # D49 (the code review): a hash chain looped back to its start, longer than a batch: the listing ends (the chain
+    # walk's loop check keeps its state across batches, as one by one) and lists the loop's names once
+    lv = Volume(1024 * 1024 // 512, "Testvol", True, 3, 512, 2)
+    names, i = [], 0
+    while len(names) < 40:
+        n = f"q{i}"
+        if lv.name_hash(n.encode()) == lv.name_hash(b"q0"): names.append(n)
+        i += 1
+    for n in names: lv.add_file("Loop/" + n, b"x")
+    img = bytearray(lv.image())
+    chain = max((sorted(c) for sl in lv.hash.values() for c in sl.values()), key=len)
+    set_long(img, 512, chain[-1], 512 // 4 - 4, chain[0])
+    lp = os.path.join(T, "loop.img")
+    open(lp, "wb").write(img)
+    try:
+        _, o = run(lp, "mount\nrdx /Loop 2048\nrdx /Loop 0\n", timeout=60)
+        tot = [l for l in o.splitlines() if l.startswith("rdx /Loop ")]
+        check("D49: a looped hash chain of 40 names ends in batches as one by one", len(tot) == 2 and len(chain) == 40, o[-600:])
+    except subprocess.TimeoutExpired:
+        check("D49: a looped hash chain of 40 names ends in batches as one by one", False, "it never ended")
     # D26: the kernel follows
     _, o = run(p, "mount\nlinks on\nstat /Dir/s-plain\nstat /Dir/Sub/s-up2\nopen /Dir/s-up r\nlstat /Dir/s-plain\nstat /Dir/s-up/x\nstat /s-other\n")
     check("D26: the path continues at TEXT", "stat -> -1024 a0 Dir/orig.txt" in o and "stat -> -1024 a0 Dir/Sub/../../hard2" in o and "open -> -1026 a0 Dir/../Other/hard.txt" in o, o)

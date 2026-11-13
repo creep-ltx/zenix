@@ -340,6 +340,13 @@ def t_bigdir():
     r = c.cmd("ls many")
     names = sorted(l.split()[0] for l in c.all if l.startswith("  f"))
     ok(res(r) == 0 and names == ["f%03d" % i for i in range(300)], "a directory of 300 entries listed whole: %s" % r)
+    # D49: FS_READDIRS lists the same (names and inodes), in buffers of 104, 300 and 2048 bytes, without stats
+    one = sorted(l for l in c.all if l.startswith("  "))
+    for size in (104, 300, 2048):
+        c.all = []
+        r = c.cmd("lsx many %d" % size)
+        got = sorted(l for l in c.all if l.startswith("  "))
+        ok(res(r) == 0 and "BAD" not in r and "entries=302" in r and got == one, "D49: FS_READDIRS in %d-byte buffers lists the same: %s" % (size, r))
     ino = c.cmd("open many r")
     ino = res(ino)
     # positions asked again in any order give the same entries (6.3)

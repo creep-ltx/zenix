@@ -116,12 +116,24 @@ def expect_of(items):
     return exp
 
 
+def rdx_check(label, out, min_records):
+    """DESIGN D49: tools/host/fsd-host.c's rdx: the batch against one by one and every stat against lstat"""
+    tot = [l for l in out.splitlines() if l.startswith("rdx-total")]
+    bad = [l for l in out.splitlines() if l.startswith("rdx-bad")]
+    ok = len(tot) >= 2 and all(t.endswith(" 0 bad") for t in tot) and not bad and tot[0] == tot[1]
+    n = int(tot[0].split()[2]) if tot else 0
+    check(f"{label}: FS_READDIRS lists what FS_READDIR lists, every stat is lstat's, sizes 104-300 too ({tot[0] if tot else 'no rdx'})",
+          ok and n >= min_records, "\n".join(bad[:5] + tot))
+
+
 def compare(name, img, items, extra_rawnames=()):
     rc, out = run(img, "mount\ntree /\nstatfs\nquit\n", timeout=120)
     got, errs = tree(out)
     check(f"{name}: mounts", "mount -> 0 readonly" in out, out[:400])
     check(f"{name}: no error in the tree", not errs and rc == 0, errs[:5] or out[-800:])
     check(f"{name}: nothing written", "hostdisk-writes 0" in out, out[-200:])
+    _, o2 = run(img, "mount\nrdx / 2048\nrdx / 0\nquit\n", timeout=300)
+    rdx_check(f"D49 {name}", o2, 1)
     exp = expect_of(items)
     for p in list(exp):
         if p.endswith("/bad"):

@@ -80,6 +80,16 @@ def standard(v):
     return exp
 
 
+def rdx_check(label, out, min_records):
+    """DESIGN D49: tools/host/fsd-host.c's rdx: the batch against one by one and every stat against lstat"""
+    tot = [l for l in out.splitlines() if l.startswith("rdx-total")]
+    bad = [l for l in out.splitlines() if l.startswith("rdx-bad")]
+    ok = len(tot) >= 2 and all(t.endswith(" 0 bad") for t in tot) and not bad and tot[0] == tot[1]
+    n = int(tot[0].split()[2]) if tot else 0
+    check(f"{label}: FS_READDIRS lists what FS_READDIR lists, every stat is lstat's, sizes 104-300 too ({tot[0] if tot else 'no rdx'})",
+          ok and n >= min_records, "\n".join(bad[:5] + tot))
+
+
 def test_kinds():
     """each block size, reserved block size and index layout real volumes (or the format) have"""
     kinds = [dict(), dict(super_=True), dict(split=False), dict(bs=1024, rb=1024, super_=True), dict(bs=1024, rb=2048, super_=True), dict(rb=2048, super_=True),
@@ -97,6 +107,8 @@ def test_kinds():
         bad = [q for q, d in exp.items() if q not in got or int(got[q][2]) != len(d) or int(got[q][5], 16) != zlib.crc32(d)]
         check(f"{tag}: every file as it was written ({len(exp)})", not bad, bad[:5])
         check(f"{tag}: nothing written", "writes -> 0" in o and hashlib.sha256(open(p, "rb").read()).hexdigest() == h)
+        _, o = run(p, "mount\nrdx / 2048\nrdx / 0\n")
+        rdx_check(f"D49 {tag}", o, 300)
     # a directory block filled to its last byte: one entry of 24 bytes and 35 of 28 make the 1004 that fit
     v = Volume(16384)
     names = ["abc"] + [f"nam{i:04}" for i in range(35)] + ["after-the-full-block"]

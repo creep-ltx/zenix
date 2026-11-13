@@ -1002,7 +1002,8 @@ static void run(int o)
             }
             return;
         /* ---------------- READDIR ---------------- */
-        case FS_READDIR: {
+        case FS_READDIR: case FS_READDIRS: {   /* D49: FS_READDIRS the chunk's records in a batch, no stats (the
+                                                 * attribute cache keeps its own rules: lstat asks it) */
             if (op->step == 0) {
                 int n = node_find((u32)op->a[0]);
                 if (n < 0 || (N.nodes[n].flags & NF_STALE)) { op_finish(o, -NFS_ESTALE); return; }
@@ -1024,6 +1025,22 @@ static void run(int o)
             }
             struct chunk *ch = N.chunk;
             if (ch->valid && ch->rdt == t && ch->node == op->node && ch->gen == p->gen && op->pos >= ch->start) {
+                if (op->type == FS_READDIRS && op->pos < ch->start + ch->n) {
+                    struct fsrdx *q = (struct fsrdx *)op->a[3];
+                    unsigned used = 0;
+                    u32 at = op->pos;
+                    for (; at < ch->start + ch->n; at++) {
+                        const struct nfs_udirent *ce = &ch->e[at - ch->start];
+                        if (ce->name[0] && !udirx_put((char *)op->a[2], q->size, &used, ce->name, ce->ino, ce->type, at + 1)) break;
+                    }
+                    if (used) { q->next = at; op_finish(o, (int)used); return; }
+                    op->pos = at;                    /* only empty names: on past them */
+                }
+                if (op->type == FS_READDIRS && op->pos == ch->start + ch->n && ch->eof) {
+                    ((struct fsrdx *)op->a[3])->next = op->pos;
+                    op_finish(o, 0);
+                    return;
+                }
                 if (op->pos < ch->start + ch->n) {
                     struct nfs_udirent *ue = (struct nfs_udirent *)op->a[2];
                     if (ue) *ue = ch->e[op->pos - ch->start];

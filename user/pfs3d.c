@@ -714,6 +714,7 @@ static int do_open(struct umsg *m)
 #define RD_OFF(c)  (((c) & 0x7FF) * 2)
 static struct dwalk rd;
 static int rd_live;
+static ent_t rd_e;                     /* D49: the entry the last record named, for FS_READDIRS' stat */
 static int do_readdir(struct umsg *m)
 {
     struct udirent *ud = (struct udirent *)m->a[2];
@@ -742,6 +743,7 @@ static int do_readdir(struct umsg *m)
         if (nx) {
             if (e.kind == K_BAD || !e.nlen) { bad = 1; off = (u32)nx; continue; }
             am_name_list(e.name, e.nlen, e.an, ud->name, sizeof ud->name);
+            rd_e = e;
             ud->type = e.kind == K_DIR || e.kind == K_LDIR ? 2 : e.kind == K_SOFT ? 7 : 1;
             ud->ino = e.kind == K_LFILE || e.kind == K_LDIR ? e.link : e.an;
             if ((u32)nx >= RB) {                      /* the block is full: the next call starts on the next one */
@@ -759,6 +761,33 @@ static int do_readdir(struct umsg *m)
         if (rd.ord > 0xFFFFF) { rd_live = 0; return -EIO; }
         off = DIR_FIRST;
     }
+}
+/* DESIGN D49: FS_READDIRS, do_readdir's records in a batch, each with FS_LSTAT's answer (node_of the entry, as the walk's
+ * lookup gives: a hard link its object) when the caller may search directories */
+static int do_readdirs(struct umsg *m)
+{
+    static struct udirent ud;
+    static node_t n;
+    static struct umsg mm;
+    struct fsrdx *q = (struct fsrdx *)m->a[3];
+    u32 cookie = m->a[1], nc = cookie, at;
+    unsigned used = 0;
+    int r, x = dmode_ok(FSP_X);
+    mm = *m;
+    mm.a[2] = (u32)&ud;
+    mm.a[3] = (u32)&nc;
+    for (;;) {
+        mm.a[1] = at = cookie;
+        if ((r = do_readdir(&mm)) <= 0) { if (!r) cookie = nc; break; }
+        cookie = nc;
+        if (!ud.name[0]) continue;                       /* an empty name (damage) is never listed */
+        if (used && (m->kflags & UMSG_CANCEL)) { cookie = at; break; }   /* a killed client: what is written */
+        struct udirx *e = udirx_put((char *)m->a[2], q->size, &used, ud.name, ud.ino, ud.type, cookie);
+        if (!e) { cookie = at; break; }             /* full: this record comes first next time */
+        if (x && !node_of(&rd_e, m->a[0], &n)) { fill_node(&n, (struct ustat *)&e->st); e->flags = UDX_STAT; }
+    }
+    q->next = cookie;
+    return used ? (int)used : r;
 }
 static int handle1(struct umsg *m)
 {
@@ -796,6 +825,7 @@ static int handle1(struct umsg *m)
         return 0;
     }
     case FS_READDIR: return do_readdir(m);
+    case FS_READDIRS: return do_readdirs(m);
     case FS_CHDIR: {
         const char *p = (const char *)m->a[0];
         if ((r = walk(m->a[1], p, strlen(p), 1, 0, &n))) return r;

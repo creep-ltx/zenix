@@ -52,7 +52,7 @@ long nfs_send(const void *b, long n)
 
 #define NREQ 64
 /* the paths are FS_PATHMAX buffers, as the kernel's: with UMSG_LINKS (DESIGN D26) an answer may write TEXT there */
-static struct { uint32_t id, type; int done, used; unsigned char buf[9000]; char path[2][FS_PATHMAX]; char was[2][FS_PATHMAX]; uint32_t ck; } rq[NREQ];
+static struct { uint32_t id, type; int done, used; unsigned char buf[9000]; char path[2][FS_PATHMAX]; char was[2][FS_PATHMAX]; uint32_t ck; struct fsrdx q; } rq[NREQ];
 static uint32_t next_id = 1;
 void nfs_answer(uint32_t id, long result)
 {
@@ -169,6 +169,7 @@ static int new_req(uint32_t type, unsigned a)
         r.a[0] = p0; r.a[1] = 2; r.a[2] = type == FS_CHMOD ? 0644 : buf; r.a[3] = 5; break;
     case FS_FSTAT: r.a[0] = ino; r.a[1] = buf; break;
     case FS_READDIR: r.a[0] = ino; r.a[1] = a % 50; r.a[2] = buf; r.a[3] = (uintptr_t)&rq[i].ck; break;
+    case FS_READDIRS: rq[i].q.size = 104 + a * 61u % 8800; r.a[0] = ino; r.a[1] = a % 50; r.a[2] = buf; r.a[3] = (uintptr_t)&rq[i].q; break;   /* D49 */
     case FS_RENAME: case FS_LINK: case FS_SYMLINK: r.a[0] = p0; r.a[1] = p1; r.a[2] = 2; break;
     case FS_READLINK: r.a[0] = p0; r.a[1] = 2; r.a[2] = buf; r.a[3] = 100; break;
     case FS_STATFS: r.a[0] = buf; break;
@@ -199,7 +200,7 @@ static void run(const unsigned char *d, size_t n)
     new_req(FS_STAT, 0);
     answer_mount();
     /* a few requests held from the start */
-    new_req(FS_OPEN, 0); new_req(FS_READDIR, 2); new_req(FS_STATFS, 0); new_req(FS_READ, 2);
+    new_req(FS_OPEN, 0); new_req(FS_READDIR, 2); new_req(FS_READDIRS, 2); new_req(FS_STATFS, 0); new_req(FS_READ, 2);
     size_t p = 2;
     int steps = 0;
     while (p < n && steps++ < 200) {
@@ -232,7 +233,7 @@ static void run(const unsigned char *d, size_t n)
         }
         case 3: now_ms += 300u * (p < n ? d[p++] : 1); nfs_tick(); break;
         case 4: if (connected) { connected = 0; nfs_input(0, -104); } break;
-        case 5: if (p + 2 <= n) { new_req(d[p] % 26, d[p + 1]); p += 2; } break;
+        case 5: if (p + 2 <= n) { new_req(d[p] % 28, d[p + 1]); p += 2; } break;
         case 6:
             if (p < n) {
                 int i = d[p++] % NREQ;

@@ -713,6 +713,31 @@ fsd $T/lnp.img $T/ln3.txt $T/out
 for f in fast nul; do debugfs -w -R "rm /d/$f" $T/ln.img >/dev/null 2>&1; debugfs -w -R "rm /d/$f" $T/lnp.img >/dev/null 2>&1; done   # the two made invalid on purpose
 clean $T/ln.img && clean $T/lnp.img && check "D26: e2fsck -fn clean after the FS_LINKED tests" ok || { check "D26: e2fsck after the FS_LINKED tests" bad; cat $T/e2fsck.log; }
 
+# ---- DESIGN D49: FS_READDIRS against FS_READDIR and FS_LSTAT (tools/host/fsd-host.c rdx), on a volume with file types
+# and one of revision 0 (none): 300 files, a folder, a link, a hard link, a name of 70 bytes (cut to 63 in a record:
+# no stat), a folder a user may read but not search (no stats for that user), every buffer size 104-300 in turn ----
+rm -rf $T/rdsrc; mkdir -p $T/rdsrc/sub/deep $T/rdsrc/nox
+for i in $(seq 1 300); do echo $i > $T/rdsrc/f$i; done
+ln -s f1 $T/rdsrc/lnk; ln $T/rdsrc/f2 $T/rdsrc/hard; echo x > "$T/rdsrc/$(printf 'L%.0s' $(seq 1 70))"; echo d > $T/rdsrc/sub/deep/z
+echo in > $T/rdsrc/nox/a; chmod 744 $T/rdsrc/nox
+for kind in types rev0; do
+    rm -f $T/rd-$kind.img
+    if [ $kind = rev0 ]; then mke2fs -q -F -t ext2 -E revision=0 -b 1024 -d $T/rdsrc $T/rd-$kind.img 8M; else mke2fs -q -F -t ext2 -d $T/rdsrc $T/rd-$kind.img 8M; fi
+    printf 'mount\nrdx / 2048\nrdx / 0\nas 2000 2000\nrdx /nox 2048\n' > $T/rd.txt
+    fsd $T/rd-$kind.img $T/rd.txt $T/rd-$kind.out
+    t1=$(grep -m1 '^rdx-total' $T/rd-$kind.out); t2=$(grep '^rdx-total' $T/rd-$kind.out | sed -n 2p); t3=$(grep '^rdx-total' $T/rd-$kind.out | sed -n 3p)
+    ! grep -q '^rdx-bad' $T/rd-$kind.out && [ "$t1" = "$t2" ] && echo "$t1" | grep -q ' 0 bad$' &&
+        [ "$(echo "$t1" | awk '{print $3}')" -ge 312 ] && [ "$(echo "$t1" | awk '{print $5}')" -ge 307 ] &&
+        check "D49 ($kind): the batch lists what one by one lists, every stat is lstat's, sizes 104-300 too ($t1)" ok ||
+        { check "D49 ($kind): batch against one by one" bad; grep -m5 'rdx-bad\|rdx-total' $T/rd-$kind.out; }
+    [ "$(grep '^rdx /nox ' $T/rd-$kind.out | tail -1)" = "rdx /nox -> 3 0" ] && echo "$t3" | grep -q ' 0 bad$' &&
+        check "D49 ($kind): a folder the user may not search: its names, no stats" ok ||
+        { check "D49 ($kind): no stats without x" bad; grep 'nox\|rdx-total' $T/rd-$kind.out | tail -3; }
+    grep "^rdx / " $T/rd-$kind.out | head -1 > $T/rd-root
+    stat_long=$(grep -c "^rdx-bad.*LLLL" $T/rd-$kind.out)
+    [ "$stat_long" = 0 ] && check "D49 ($kind): the 70-byte name is listed cut, without a stat" ok || check "D49 ($kind): the cut name" bad
+done
+
 # every block write fsd made in all of these tests was inside the mark (fs_blk_write counts the others)
 [ ! -s $T/unmarked ] && check "every block write fsd made in these tests came after the mark (a host-build count)" ok || { check "block writes outside the mark" bad; sort $T/unmarked | uniq -c | head; }
 

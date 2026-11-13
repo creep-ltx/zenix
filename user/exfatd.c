@@ -634,6 +634,43 @@ static int do_readdir(struct umsg *m)
         return 1;
     }
 }
+/* DESIGN D49: FS_READDIRS, the same records in a batch, each with FS_LSTAT's answer (fill_ent of the entry set) when the
+ * caller may search directories; the damage rule of do_readdir (go on, -EIO at the end) kept in the position's bit 31 */
+static int do_readdirs(struct umsg *m)
+{
+    static ent_t e;
+    static char nm[64];
+    struct fsrdx *q = (struct fsrdx *)m->a[3];
+    u32 bad = m->a[1] >> 31, off = m->a[1] & 0x7FFFFFFF, at;
+    unsigned used = 0;
+    if (off & 31) return -EINVAL;
+    struct stream *d;
+    int root = m->a[0] == ROOT, r;
+    if (root) d = &rootst;
+    else {
+        struct ofile *o = slot_ino(m->a[0]);
+        if (!o) return -ESTALE;
+        if (o->kind != K_DIR) return -ENOTDIR;
+        d = &o->s;
+    }
+    int x = may(K_DIR, 0, FSP_X);
+    for (;;) {
+        at = off;
+        r = dir_next(d, &off, &e, root, 0, -1);
+        if (r == 0) { r = bad ? -EIO : 0; break; }
+        if (r == -ESTALE) break;
+        if (r < 0) { bad = 1; continue; }
+        u32 ino = ent_ino(&e);
+        list_name(&e, ino, nm);
+        if (!nm[0]) continue;                       /* an empty name (damage) is never listed */
+        if (used && (m->kflags & UMSG_CANCEL)) { off = at; break; }   /* a killed client: what is written */
+        struct udirx *x1 = udirx_put((char *)m->a[2], q->size, &used, nm, ino, e.kind == K_DIR ? 2 : 1, bad << 31 | off);
+        if (!x1) { off = at; break; }               /* full: this record comes first next time */
+        if (x) { fill_ent(&e, ino, (struct ustat *)&x1->st); x1->flags = UDX_STAT; }
+    }
+    q->next = bad << 31 | off;
+    return used ? (int)used : r;
+}
 /* the bitmap's zero bits for clusters 2 .. nclus + 1 (spec 7.1.5), read through the window; 0, or -errno */
 static int count_free(void)
 {
@@ -686,6 +723,7 @@ static int handle1(struct umsg *m)
         fill_slot(o, (struct ustat *)m->a[1]);
         return 0;
     case FS_READDIR: return do_readdir(m);
+    case FS_READDIRS: return do_readdirs(m);
     case FS_CHDIR:
         if ((r = walk(m->a[1], p, strlen(p), &n))) return r;
         if (node_kind(&n) != K_DIR) return -ENOTDIR;

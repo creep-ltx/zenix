@@ -112,6 +112,80 @@ static u32 flags_of(const char *s)
     return f | (r && w ? O_RDWR : w ? O_WRONLY : O_RDONLY);
 }
 
+/* DESIGN D49: rdx DIR [SIZE]: DIR and every directory under it read both ways, FS_READDIR one by one and FS_READDIRS in
+ * a buffer of SIZE bytes (default 2048; 0: every size 104..300 in turn) with guard bytes after it; the same names in
+ * the same order with the same inodes, a type the same or the old one 0, each UDX_STAT stat equal to FS_LSTAT of
+ * DIR/NAME (all 28 bytes), none on "." and "..", the records well formed, nothing past the buffer. Prints
+ * "rdx DIR -> RECORDS STATS" a directory, or "rdx-bad DIR: WHY" */
+static u32 rdx_records, rdx_stats, rdx_bad;
+static void rdx(const char *dir, u32 size0)
+{
+    static u8 buf[2048 + 64];
+    struct ustat ds;
+    char *ask = malloc(FS_PATHMAX);
+    strcpy(ask, dir);
+    int ino = req(FS_OPEN, (u32)ask, CWD, O_RDONLY, (u32)&ds);
+    if (ino < 0) { printf("rdx-bad %s: open %d\n", dir, ino); rdx_bad++; free(ask); return; }
+    u32 n1 = 0, cap = 64, ck = 0;
+    struct udirent *v = malloc(cap * sizeof *v);
+    int r;
+    while ((r = req(FS_READDIR, (u32)ino, ck, (u32)&v[n1], (u32)&ck)) > 0)
+        if (++n1 == cap) v = realloc(v, (cap *= 2) * sizeof *v);
+    int r1 = r;
+    if (size0 > 2048) size0 = 2048;                     /* the buffer's room (its guard bytes after it) */
+    u32 n2 = 0, stats = 0, size = size0 ? size0 : 104;
+    struct fsrdx q;
+    ck = 0;
+    char **subs = 0; u32 nsub = 0;
+    for (;;) {
+        memset(buf, 0xA5, sizeof buf);
+        q.size = size; q.next = 0xDEADBEEF;
+        r = req(FS_READDIRS, (u32)ino, ck, (u32)buf, (u32)&q);
+        for (u32 i = size; i < sizeof buf; i++) if (buf[i] != 0xA5) { printf("rdx-bad %s: wrote past %u\n", dir, size); rdx_bad++; break; }
+        if (r <= 0) break;
+        if ((u32)r > size || q.next == ck) { printf("rdx-bad %s: answer %d, next %u at %u\n", dir, r, q.next, ck); rdx_bad++; break; }
+        for (u32 o = 0; o < (u32)r;) {
+            struct udirx *x = (struct udirx *)(buf + o);
+            u32 st = udirx_step(x, (u32)r - o);
+            if (!st || !udirx_named(x)) { printf("rdx-bad %s: a bad record at %u\n", dir, o); rdx_bad++; break; }
+            o += st;
+            if (n2 >= n1 || strcmp(x->name, v[n2].name) || x->ino != v[n2].ino || (v[n2].type && x->type != v[n2].type)) {
+                printf("rdx-bad %s: record %u %s #%u t%u, one by one %s #%u t%u\n", dir, n2, x->name, x->ino, x->type,
+                       n2 < n1 ? v[n2].name : "(none)", n2 < n1 ? v[n2].ino : 0, n2 < n1 ? v[n2].type : 0);
+                rdx_bad++;
+            }
+            n2++;
+            int dot = x->name[0] == '.' && (!x->name[1] || (x->name[1] == '.' && !x->name[2]));
+            if (dot && x->flags) { printf("rdx-bad %s: %s has a stat\n", dir, x->name); rdx_bad++; }
+            if (x->flags & UDX_STAT) {
+                struct ustat ls;
+                snprintf(ask, FS_PATHMAX, "%s/%s", strcmp(dir, "/") ? dir : "", x->name);
+                int e = req(FS_LSTAT, (u32)ask, CWD, (u32)&ls, 0);
+                if (e < 0 || memcmp(&ls, &x->st, sizeof ls)) {
+                    printf("rdx-bad %s: %s stat %o %u %u, lstat %d %o %u %u\n", dir, x->name, x->st.mode, x->st.size, x->st.ino, e, ls.mode, ls.size, ls.ino);
+                    rdx_bad++;
+                }
+                stats++;
+                if ((x->st.mode & 0170000) == 0040000) {
+                    subs = realloc(subs, (nsub + 1) * sizeof *subs);
+                    subs[nsub] = malloc(FS_PATHMAX);
+                    snprintf(subs[nsub++], FS_PATHMAX, "%s/%s", strcmp(dir, "/") ? dir : "", x->name);
+                }
+            }
+        }
+        ck = q.next;
+        if (!size0 && ++size > 300) size = 104;
+    }
+    if (r != r1) { printf("rdx-bad %s: ended %d, one by one %d\n", dir, r, r1); rdx_bad++; }
+    if (n2 != n1) { printf("rdx-bad %s: %u records, one by one %u\n", dir, n2, n1); rdx_bad++; }
+    req(FS_CLOSE, (u32)ino, 0, 0, 0);
+    printf("rdx %s -> %u %u\n", dir, n2, stats);
+    rdx_records += n2; rdx_stats += stats;
+    free(v); free(ask);
+    for (u32 i = 0; i < nsub; i++) { rdx(subs[i], size0); free(subs[i]); }
+    free(subs);
+}
+
 #if defined(PFS3D) || defined(ISO9660D) || defined(EXFATD)
 /* tree DIR: every name under DIR, one line each: kind, mode, size, links, mtime, crc32 of all its data read in pieces,
  * the path, the listed inode and -> a soft link's text. A line "! CODE PATH" for any error. The judge of a real volume */
@@ -273,6 +347,12 @@ int main(void)
             while ((r = req(FS_READDIR, (u32)ino, cookie, (u32)&e, (u32)&cookie)) > 0) { printf(" %s", e.name); n++; }
             req(FS_CLOSE, (u32)ino, 0, 0, 0);
             printf(" (%u, %d)\n", n, r);
+            continue;
+        }
+        else if (!strcmp(cmd, "rdx")) {
+            rdx_records = rdx_stats = rdx_bad = 0;
+            rdx(a0 && *a0 ? a0 : "/", b0 && *b0 ? (u32)atol(b0) : 2048);
+            printf("rdx-total -> %u records, %u stats, %u bad\n", rdx_records, rdx_stats, rdx_bad);
             continue;
         }
         else if (!strcmp(cmd, "cut")) { extern unsigned long hostdisk_writes, hostdisk_limit; hostdisk_limit = hostdisk_writes + (unsigned long)atol(a); printf("cut -> %lu\n", hostdisk_limit); continue; }

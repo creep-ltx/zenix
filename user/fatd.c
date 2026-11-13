@@ -1094,24 +1094,56 @@ static int do_open(struct umsg *m)
     return (int)o->ino;
 }
 
+/* one listing's record: the entry dir_next found at *cookie (n), its name, type and inode as FS_READDIR gives them */
+static int rd_one(u32 d, u32 *cookie, node_t *n, struct udirent *ud)
+{
+    u16 s[13];
+    int r = dir_next(d, cookie, n);
+    if (r > 0) {
+        int k = n->haslfn ? name_out(lfn, lfn_len, ud->name, sizeof ud->name) : -1;
+        if (k < 0) name_out(s, short_units(n->e, s, 1), ud->name, sizeof ud->name);
+        ud->type = is_dir(n) ? 2 : 1;
+        if (!is_dir(n)) ud->ino = file_ino(n);
+        else { u32 x; ud->ino = dir_of(n, &x) ? 0 : dir_ino(x); }
+    }
+    return r;
+}
 static int do_readdir(struct umsg *m)
 {
     static node_t n;
-    struct udirent *ud = (struct udirent *)m->a[2];
     u32 cookie = m->a[1], d;
-    u16 s[13];
     int r = ino_dir(m->a[0], &d);
     if (r) return r;
-    r = dir_next(d, &cookie, &n);
-    if (r > 0) {
-        int k = n.haslfn ? name_out(lfn, lfn_len, ud->name, sizeof ud->name) : -1;
-        if (k < 0) name_out(s, short_units(n.e, s, 1), ud->name, sizeof ud->name);
-        ud->type = is_dir(&n) ? 2 : 1;
-        if (!is_dir(&n)) ud->ino = file_ino(&n);
-        else { u32 x; ud->ino = dir_of(&n, &x) ? 0 : dir_ino(x); }
-    }
+    r = rd_one(d, &cookie, &n, (struct udirent *)m->a[2]);
     *(u32 *)m->a[3] = cookie;
     return r;
+}
+/* DESIGN D49: FS_READDIRS, the same records in a batch, each with FS_LSTAT's answer (fill_node of the entry the walk
+ * would find) when the caller may search directories (dmode); none for "." and ".." (their lstat is the path's text) */
+static int do_readdirs(struct umsg *m)
+{
+    static node_t n;
+    static struct udirent ud;
+    struct fsrdx *q = (struct fsrdx *)m->a[3];
+    u32 cookie = m->a[1], d, at;
+    unsigned used = 0;
+    int r = ino_dir(m->a[0], &d);
+    if (r) return r;
+    int x = dmode_ok(FSP_X);
+    for (;;) {
+        at = cookie;
+        if ((r = rd_one(d, &cookie, &n, &ud)) <= 0) break;
+        if (!ud.name[0]) continue;                       /* an empty name (damage) is never listed */
+        if (used && (m->kflags & UMSG_CANCEL)) { cookie = at; break; }   /* a killed client: what is written */
+        struct udirx *e = udirx_put((char *)m->a[2], q->size, &used, ud.name, ud.ino, ud.type, cookie);
+        if (!e) { cookie = at; break; }             /* full: this record comes first next time */
+        if (x && !(ud.name[0] == '.' && (!ud.name[1] || (ud.name[1] == '.' && !ud.name[2])))) {
+            fill_node(&n, (struct ustat *)&e->st);
+            e->flags = UDX_STAT;
+        }
+    }
+    q->next = cookie;
+    return used ? (int)used : r;
 }
 
 /* is DIR (a cluster) inside the directory SRC, or SRC itself? Walks up through ".." */
@@ -1311,6 +1343,7 @@ static int handle1(struct umsg *m)
         return 0;
     }
     case FS_READDIR: return do_readdir(m);
+    case FS_READDIRS: return do_readdirs(m);
     case FS_CHDIR:
         if ((r = namei(m->a[1], (const char *)m->a[0], &n))) return r;
         if (!is_dir(&n)) return -ENOTDIR;
