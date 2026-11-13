@@ -1,0 +1,18 @@
+wait zenix:/# 120
+send cd /root/tcc; free; sh run.sh; echo ==r""un\r
+wait ==run 5400
+send cd /root/tcc/src; time tcc -w -c hello.c -o hello.o; echo h""st=$?\r
+wait hst= 600
+send time tcc -w -c fz1.c -o fz1.o; echo f""st=$?\r
+wait fst= 600
+send free; tcc -w -c zld.c -o zld.o & p=$!; while ps | grep -v zombie | grep -q ' tcc$'; do ps | grep --color=never ' tcc$'; sleep 1; done; wait $p; echo z""st=$?\r
+wait zst= 1800
+send tcc -w -o hello hello.c; ./hello; echo h""run=$?\r
+wait hrun= 600
+send tcc -w -o fz1 fz1.c; ./fz1 >fz1.out; echo f""run=$?; ./g-fz1 >g-fz1.out; cmp fz1.out g-fz1.out; echo f""cmp=$?\r
+wait fcmp= 600
+send tcc -c deep.c -o deep.o; echo d""st=$?\r
+wait dst= 300
+send sync; echo ==d""one\r
+wait ==done 60
+stop

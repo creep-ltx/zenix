@@ -80,6 +80,7 @@ case " $PROGS " in *" ahiru "*) lic ports/ahiru/upstream/LICENSE ahiru; lic port
 case " $PROGS " in *" ctop "*) lic ports/ctop/upstream/LICENSE ctop; lic ports/tui/upstream/LICENSE ctop-tui;; esac
 case " $PROGS " in *" lua "*) lic ports/lua/upstream/LICENSE lua;; esac
 case " $PROGS " in *" make "*) lic ports/pdpmake/upstream/LICENSE make;; esac
+case " $PROGS " in *" tcc "*) lic ports/tcc/upstream/COPYING tcc;; esac
 # the C library's notice (picolibc, BSD-style licences file by file, DESIGN D27 3.2) on the full images, as the base
 # package; and its test program in /tests
 [ -z "$NOMAN" ] && lic libc/picolibc/COPYING.picolibc picolibc

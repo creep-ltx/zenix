@@ -225,7 +225,7 @@ FAMILIES = [
     ("ctop", "ctop, a monitor in the way of btop: memory, disks, network, processes", "ctop"),
     ("lua", "Lua 5.4, the scripting language (DESIGN D52)", "lua"),
     ("make", "make, the POSIX make (pdpmake, public domain; DESIGN D52)", "make"),
-    ("devel", "zld, zas: linker and assembler, the C library, crt0, headers (D52)", "zld zas"),
+    ("devel", "tcc, zld, zas: compiler, linker, assembler, C library, headers (D52)", "zld zas tcc"),
     ("shadow", "users and passwords: su, sudo, passwd, useradd", "su sudo passwd useradd userdel gpasswd"),
     ("disktools", "disks and filesystems: fdisk, mkfs, fsck, dd, umount", "dd fdisk mkfs_ext2 fsck_ext2 mkfs_zenixfs "
                   "fsck_zenixfs umount"),
@@ -277,7 +277,8 @@ FAMILY_LICENSES = {"zine": [("user/zine/msp/060/README", "m68060sp"), ("user/zin
                    "ahiru": [("ports/ahiru/upstream/LICENSE", "ahiru"), ("ports/tui/upstream/LICENSE", "ahiru-tui")],
                    "ctop": [("ports/ctop/upstream/LICENSE", "ctop"), ("ports/tui/upstream/LICENSE", "ctop-tui")],
                    "lua": [("ports/lua/upstream/LICENSE", "lua")],
-                   "make": [("ports/pdpmake/upstream/LICENSE", "make")]}
+                   "make": [("ports/pdpmake/upstream/LICENSE", "make")],
+                   "devel": [("ports/tcc/upstream/COPYING", "tcc")]}
 ANCHORS = "anchors"                       # DESIGN D21 8.1: build/anchors (tools/mkanchors.py) as /etc/ssl/anchors
 FONT = "cp437-8x8.psf"                    # DESIGN D20 4.2: build/cp437-8x8.psf as /usr/share/consolefonts/cp437-8x8.psf
 UFONT = "zenix-8x8.zcf"                   # DESIGN D28 6: the Unicode font init loads at boot (/etc/console's font line)

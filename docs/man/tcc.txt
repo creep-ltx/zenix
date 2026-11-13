@@ -1,0 +1,89 @@
+TCC(1)			Zenix manual
+
+NAME
+    tcc - the C compiler (TinyCC with Zenix's 68k code generator)
+
+SYNOPSIS
+    tcc [options] -o program file... [-lname...]
+    tcc [options] -c file.c [-o file.o]
+    tcc [options] -E file.c
+
+DESCRIPTION
+    Compiles C (C99 and much of C11) into 68k code for every 68020 and
+    later CPU. Its objects call and are called as the C library's (built
+    by the PC's gcc) are: the same arguments, results, struct layouts and
+    alignments, floating point in software through libgcc, so no FPU is
+    needed. tcc compiles a function at a time in one pass: it is quick,
+    small, and its code plain (no optimiser).
+
+    With -c each C file becomes an ELF object (file.o). Without -c, -E
+    or -run tcc builds a program: each C file is compiled to a temporary
+    object, each .s file assembled with zas (a .S file is first run
+    through tcc's preprocessor), and zld links them with the C library:
+
+        zld -o program [-L dir...] [-Wl options] /usr/lib/crt0.o
+            objects... [-lname...] -lc -lgcc
+
+    The program is a plain ZEXE program (not one with shared code).
+    printf and scanf are the C library's floating-point ones unless a
+    -Wl,--defsym=vfprintf=... names another (zld(1)).
+
+OPTIONS
+    -c                compile (or assemble) only, to an object
+    -o file           the program or object to write (default a.out)
+    -E                preprocess only, to standard output
+    -Idir             look for #include files in dir first
+    -Dname[=value]    define a macro; -Uname undefines one
+    -Ldir, -lname     zld's: look for libname.a in dir (then /usr/lib)
+    -Wl,opt,...       pass options to zld, e.g. -Wl,-s,32768 for a
+                      32 KB stack (the loader's default is 16 KB)
+    -w, -Wall, -Werror, -Wno-...   warnings
+    -g                debugging information (stabs; -gdwarf: DWARF)
+    -std=c99|c11      the C standard (c99 is the default)
+    -v                show what is run (zas, zld) and tcc's version
+    -m68020 ... -m68060, -msoft-float   gcc's 68k options, accepted and
+                      without effect: the code is for every 68020+
+    Other options are upstream TinyCC's (tcc -hh lists them).
+
+FILES
+    From the development package (zpkg -S devel):
+    /usr/lib/tcc/include       tcc's own headers (stdarg.h, stddef.h,
+                               float.h, stdbool.h ...), searched first
+    /usr/include, /usr/include/pico/...   the C library's headers
+    /usr/lib/crt0.o, libc.a, libgcc.a     what a program is linked with
+    /bin/zld, /bin/zas          the linker and the assembler
+    TMPDIR (default /tmp)       the temporary objects of a build
+
+ENVIRONMENT
+    TMPDIR    where the temporary objects go
+    TCC_ZLD, TCC_ZAS   another zld or zas than /bin's (the PC's cross
+              compiler uses these)
+
+EXIT STATUS
+    0 when everything was compiled (and linked); 1 on an error, with a
+    message naming the file and the line.
+
+EXAMPLES
+    tcc -o hello hello.c && ./hello
+    tcc -c util.c && tcc -o prog main.c util.o
+    (the maths functions are in the C library: no -lm)
+
+NOTES
+    long double is double here (8 bytes; gcc's is 12): do not pass long
+    double values between tcc's and gcc's code. Inline assembly (GNU C's
+    asm statements, register variables like register int x asm("d0"))
+    knows a subset of the 68k instructions in GNU as's syntax (move,
+    lea, add, cmp, the shifts, branches, trap, movem ...; no FPU, no
+    relaxation: a forward branch is a word branch); .s files go to zas,
+    which knows them all. No C11 atomics (__atomic_* builtins need a
+    helper library that is not built). No -run (compile and run in
+    memory), no shared libraries, no bounds checking (-b). A program is
+    linked statically by zld, so an undefined weak symbol is refused
+    (zld(1)). The parser stops with "nested too deeply for tcc's stack"
+    past about 135 levels of brackets (fewer of other nestings):
+    Zenix's stack is fixed.
+    Speed: not measured on a real 68020 yet.
+
+SEE ALSO
+    zld(1), zas(1), make(1); docs/d52-self-hosting.md section 7;
+    ports/tcc/README (the port, its patch and its tests)

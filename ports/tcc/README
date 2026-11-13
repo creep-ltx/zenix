@@ -1,0 +1,62 @@
+tcc, the C compiler, on Zenix (roadmap block 7, its fifth item; DESIGN D52, docs/d52-self-hosting.md section 7; the
+user's page is docs/man/tcc.txt).
+
+What it is: TinyCC (tcc) with a 68k back end of Zenix's own, /bin/tcc. It compiles C (C99 and much of C11) for the
+68020 and every later 68k, calling and called as gcc's m68k-elf code is (arguments on the stack, results in d0/d1, a0
+for a struct result, gcc's struct layouts and alignments, floating point through libgcc), so its objects link with
+the C library and libgcc the PC's gcc builds. "tcc -o prog file.c" compiles, then links with zld (zenix-driver.c).
+Built twice by the Makefile (its "tcc" section): the PC's cross compiler, build/tcc/m68k-tcc (the tests use it), and
+/bin/tcc, a plain ZEXE program linked with Zenix's C library.
+
+upstream/  TinyCC's mob branch, pinned and never changed: repo.or.cz/tinycc.git, commit
+           f830a1697e159056b75de40a60464bc43ee670a3 (2026-11-13, "arm64-asm: exclusive load and store
+           instructions"); version 0.9.28rc. repo.or.cz serves no plain snapshot to a script, so the pin is git's:
+           "git archive --format=tar f830a169" of that commit is 5,027,840 bytes, sha256
+           8a7be77c55277edf3bd7587430ca32a951216e10e919008b347e510d018326ff, and this copy is these files of it
+           unchanged: the compiler's sources (tcc.c, libtcc.c, libtcc.h, tccpp.c, tccgen.c, tccdbg.c, tccasm.c,
+           tccelf.c, tccrun.c, tcctools.c, tcc.h, tcctok.h, elf.h, dwarf.h, stab.h, stab.def), conftest.c (its c2str
+           turns include/tccdefs.h into C strings), include/ (tcc's own headers), tests/tests2/ (the test suite
+           tools/tcc-host-test.sh and tools/tcc-test.sh run), COPYING (LGPL 2.1: the notice that travels with the
+           program, /usr/share/licenses/tcc), RELICENSING and VERSION. Left out: the other CPUs' back ends and
+           assemblers, Windows and macOS output, the runtime library lib/, the documentation (it lives in docs/).
+
+zenix/     Zenix's part, LGPL-2.1-or-later like tcc (so it can be offered upstream), except config.h (GPL-2.0-only):
+  m68k-gen.c      the 68k code generator (tccgen's back end interface): gcc's m68k-elf calling rules, 68020 code,
+                  soft float through libgcc's __adddf3 and friends (a float in one data register, a double in two)
+  m68k-link.c     the ELF relocations (R_68K_32, PC32, PC16, PC8, 16, 8), big-endian
+  m68k-asm.c      GNU C's inline asm (included by m68k-gen.c): operand constraints, register variables, clobbers,
+                  and a subset of the 68k instructions in gas's syntax (enough for user/usys.h's system calls; each
+                  form checked against GNU as's bytes by tools/tcc-host-test.sh); .s files go to zas
+  zenix-driver.c  "tcc -o prog ...": compiles each C file to a temporary object, assembles .s/.S with zas, links
+                  with zld (crt0.o, -lc -lgcc, the floating-point printf) instead of tcc's own linker
+  config.h        the build's settings (upstream's configure writes this file): the directories (/usr/lib/tcc, the
+                  C library's headers in /usr/include and /usr/include/pico in LIBC_INC's order), no dlopen, no
+                  bounds checking or backtraces
+  tcc.patch       the changes to upstream's files (the Makefile applies it to its copy in build/tcc/src):
+    - tcc.h, libtcc.c, tcc.c, tcctok.h, conftest.c: the target (TCC_TARGET_M68K, its names, the libgcc helpers'
+      names, gcc's 68k options -m68020-60 and -msoft-float accepted), the driver's hook, RELA relocations on a
+      32-bit target, long double as double, the 'le' byte helpers writing the target's order (big-endian).
+    - tccgen.c: a big-endian target (a long long's or a double's high word first in memory, a narrower read of a
+      wider value at its last bytes, bitfields numbered from a byte's high bit as gcc does), scalars aligned to 2,
+      soft-float values in data registers (R_RET, RC_TYPE), 64-bit multiply through __muldi3 (the 68060 has no
+      32x32->64 mulu.l), RELA addends in initialized data, and a stack-depth check in the recursive parser
+      functions (tcc_check_stack; Zenix's stack is fixed: STACK_tcc in the Makefile).
+    - tccelf.c: objects written in the target's byte order from a little-endian host (the PC's cross compiler).
+    - tccpp.c: an int constant saved in a token string from the value, not from its union's first word (a
+      big-endian host saved 0: upstream's bug, seen when tcc first ran on the 68k); '#' is not a comment in 68k
+      assembly (it marks an immediate); the token allocators' sizes settable (config.h: 32 KB, not 2 x 256 KB).
+    - include/tccdefs.h: the predefined macros gcc's m68k-elf has (__m68k__, big-endian, the integer types and
+      limits picolibc's headers read, __zenix__), va_list for the 68k's stack.
+
+Found while porting (for the record): see d52 section 7 "As built" (upstream's big-endian host bug above; a move
+sets the 68k's flags, so a spill between a compare and its branch must keep them).
+
+Tests: tools/tcc-host-test.sh (the PC: the cross compiler under AddressSanitizer and UBSan compiling tests/tests2 and
+generated programs (tools/tcc-gen.py), never a crash; its warnings and errors as upstream expects them; the inline
+assembler against GNU as) and tools/tcc-test.sh (FS-UAE, an A1200 with 4 MB of fast RAM: the test suite's programs
+built by the cross compiler run on Zenix, their output compared with upstream's or with gcc's for the same file;
+gcc's and tcc's objects calling each other; libctest and coreutils built by tcc; /bin/tcc compiling on Zenix, its
+objects the PC's byte for byte). Results: d52 section 7 "As built".
+
+To update: put the new commit's files listed above in upstream/, its commit, size and sha256 above; apply
+zenix/tcc.patch (fix what no longer applies); build; run both tests.

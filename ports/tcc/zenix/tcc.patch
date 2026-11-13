@@ -1,0 +1,1273 @@
+diff --git a/conftest.c b/conftest.c
+index a4450d51..ab26bde4 100644
+--- a/conftest.c
++++ b/conftest.c
+@@ -15,6 +15,7 @@ const char *platform_macros[] = {
+     "__ARM_EABI__",         "TCC_ARM_EABI",
+     "__aarch64__",          "TCC_TARGET_ARM64",
+     "__riscv",              "TCC_TARGET_RISCV64",
++    "__m68k__",             "TCC_TARGET_M68K",
+     "__APPLE__",            "TCC_TARGET_MACHO",
+     "__FreeBSD__",          "TARGETOS_FreeBSD",
+     "__FreeBSD_kernel__",   "TARGETOS_FreeBSD_kernel",
+diff --git a/include/tccdefs.h b/include/tccdefs.h
+index 2655c1dd..e9c6a88b 100644
+--- a/include/tccdefs.h
++++ b/include/tccdefs.h
+@@ -18,7 +18,7 @@
+ 
+ #if __SIZEOF_POINTER__ == 4
+     /* 32bit systems. */
+-#if defined  __OpenBSD__
++#if defined  __OpenBSD__ || defined __m68k__
+     #define __SIZE_TYPE__ unsigned long
+     #define __PTRDIFF_TYPE__ long
+ #else
+@@ -56,13 +56,23 @@
+     #define __CHAR_BIT__ 8
+     #define __ORDER_LITTLE_ENDIAN__ 1234
+     #define __ORDER_BIG_ENDIAN__ 4321
++#if defined __m68k__
++    #define __BYTE_ORDER__ __ORDER_BIG_ENDIAN__
++    #define __FLOAT_WORD_ORDER__ __ORDER_BIG_ENDIAN__
++    #define __BIGGEST_ALIGNMENT__ 2
++#else
+     #define __BYTE_ORDER__ __ORDER_LITTLE_ENDIAN__
++#endif
+ #if defined _WIN32
+     #define __WCHAR_TYPE__ unsigned short
+     #define __WINT_TYPE__ unsigned short
+ #elif defined __linux__
+     #define __WCHAR_TYPE__ int
+     #define __WINT_TYPE__ unsigned int
++#elif defined __m68k__
++    /* gcc's m68k-elf types */
++    #define __WCHAR_TYPE__ long int
++    #define __WINT_TYPE__ unsigned int
+ #else
+     #define __WCHAR_TYPE__ int
+     #define __WINT_TYPE__ int
+@@ -139,6 +149,198 @@
+     #define __INTPTR_TYPE__ __PTRDIFF_TYPE__
+ #endif
+     #define __INT32_TYPE__ int
++#if defined __m68k__
++    /* gcc's m68k-elf types and limits, as its headers (picolibc's) expect
++       them; long double is double here */
++    #define __CHAR16_TYPE__ short unsigned int
++    #define __CHAR32_TYPE__ long unsigned int
++    #define __CHAR8_TYPE__ unsigned char
++    #undef __CHAR_BIT__
++    #define __CHAR_BIT__ 8
++    #define __DBL_DENORM_MIN__ ((long double)4.94065645841246544177e-324L)
++    #define __DBL_DIG__ 15
++    #define __DBL_EPSILON__ ((long double)2.22044604925031308085e-16L)
++    #define __DBL_HAS_DENORM__ 1
++    #define __DBL_HAS_INFINITY__ 1
++    #define __DBL_HAS_QUIET_NAN__ 1
++    #define __DBL_IS_IEC_60559__ 1
++    #define __DBL_MANT_DIG__ 53
++    #define __DBL_MAX_10_EXP__ 308
++    #define __DBL_MAX_EXP__ 1024
++    #define __DBL_MAX__ ((long double)1.79769313486231570815e+308L)
++    #define __DBL_MIN_10_EXP__ (-307)
++    #define __DBL_MIN_EXP__ (-1021)
++    #define __DBL_MIN__ ((long double)2.22507385850720138309e-308L)
++    #define __DBL_NORM_MAX__ ((long double)1.79769313486231570815e+308L)
++    #define __FLT_DENORM_MIN__ 1.40129846432481707092e-45F
++    #define __FLT_DIG__ 6
++    #define __FLT_EPSILON__ 1.19209289550781250000e-7F
++    #define __FLT_EVAL_METHOD__ 0
++    #define __FLT_HAS_DENORM__ 1
++    #define __FLT_HAS_INFINITY__ 1
++    #define __FLT_HAS_QUIET_NAN__ 1
++    #define __FLT_IS_IEC_60559__ 1
++    #define __FLT_MANT_DIG__ 24
++    #define __FLT_MAX_10_EXP__ 38
++    #define __FLT_MAX_EXP__ 128
++    #define __FLT_MAX__ 3.40282346638528859812e+38F
++    #define __FLT_MIN_10_EXP__ (-37)
++    #define __FLT_MIN_EXP__ (-125)
++    #define __FLT_MIN__ 1.17549435082228750797e-38F
++    #define __FLT_NORM_MAX__ 3.40282346638528859812e+38F
++    #define __FLT_RADIX__ 2
++    #define __INT16_C(c) c
++    #define __INT16_MAX__ 0x7fff
++    #define __INT16_TYPE__ short int
++    #define __INT32_C(c) c ## L
++    #define __INT32_MAX__ 0x7fffffffL
++    #undef __INT32_TYPE__
++    #define __INT32_TYPE__ long int
++    #define __INT64_C(c) c ## LL
++    #define __INT64_MAX__ 0x7fffffffffffffffLL
++    #undef __INT64_TYPE__
++    #define __INT64_TYPE__ long long int
++    #define __INT8_C(c) c
++    #define __INT8_MAX__ 0x7f
++    #define __INT8_TYPE__ signed char
++    #define __INTMAX_C(c) c ## LL
++    #define __INTMAX_MAX__ 0x7fffffffffffffffLL
++    #define __INTMAX_TYPE__ long long int
++    #define __INTMAX_WIDTH__ 64
++    #define __INTPTR_MAX__ 0x7fffffffL
++    #undef __INTPTR_TYPE__
++    #define __INTPTR_TYPE__ long int
++    #define __INTPTR_WIDTH__ 32
++    #define __INT_FAST16_MAX__ 0x7fffffff
++    #define __INT_FAST16_TYPE__ int
++    #define __INT_FAST16_WIDTH__ 32
++    #define __INT_FAST32_MAX__ 0x7fffffff
++    #define __INT_FAST32_TYPE__ int
++    #define __INT_FAST32_WIDTH__ 32
++    #define __INT_FAST64_MAX__ 0x7fffffffffffffffLL
++    #define __INT_FAST64_TYPE__ long long int
++    #define __INT_FAST64_WIDTH__ 64
++    #define __INT_FAST8_MAX__ 0x7fffffff
++    #define __INT_FAST8_TYPE__ int
++    #define __INT_FAST8_WIDTH__ 32
++    #define __INT_LEAST16_MAX__ 0x7fff
++    #define __INT_LEAST16_TYPE__ short int
++    #define __INT_LEAST16_WIDTH__ 16
++    #define __INT_LEAST32_MAX__ 0x7fffffffL
++    #define __INT_LEAST32_TYPE__ long int
++    #define __INT_LEAST32_WIDTH__ 32
++    #define __INT_LEAST64_MAX__ 0x7fffffffffffffffLL
++    #define __INT_LEAST64_TYPE__ long long int
++    #define __INT_LEAST64_WIDTH__ 64
++    #define __INT_LEAST8_MAX__ 0x7f
++    #define __INT_LEAST8_TYPE__ signed char
++    #define __INT_LEAST8_WIDTH__ 8
++    #undef __INT_MAX__
++    #define __INT_MAX__ 0x7fffffff
++    #define __INT_WIDTH__ 32
++    #undef __LONG_LONG_MAX__
++    #define __LONG_LONG_MAX__ 0x7fffffffffffffffLL
++    #define __LONG_LONG_WIDTH__ 64
++    #undef __LONG_MAX__
++    #define __LONG_MAX__ 0x7fffffffL
++    #define __LONG_WIDTH__ 32
++    #define __PTRDIFF_MAX__ 0x7fffffffL
++    #undef __PTRDIFF_TYPE__
++    #define __PTRDIFF_TYPE__ long int
++    #define __PTRDIFF_WIDTH__ 32
++    #define __SCHAR_MAX__ 0x7f
++    #define __SCHAR_WIDTH__ 8
++    #define __SHRT_MAX__ 0x7fff
++    #define __SHRT_WIDTH__ 16
++    #undef __SIZEOF_DOUBLE__
++    #define __SIZEOF_DOUBLE__ 8
++    #undef __SIZEOF_FLOAT__
++    #define __SIZEOF_FLOAT__ 4
++    #undef __SIZEOF_INT__
++    #define __SIZEOF_INT__ 4
++    #undef __SIZEOF_LONG_LONG__
++    #define __SIZEOF_LONG_LONG__ 8
++    #undef __SIZEOF_LONG__
++    #define __SIZEOF_LONG__ 4
++    #undef __SIZEOF_POINTER__
++    #define __SIZEOF_POINTER__ 4
++    #undef __SIZEOF_PTRDIFF_T__
++    #define __SIZEOF_PTRDIFF_T__ 4
++    #undef __SIZEOF_SHORT__
++    #define __SIZEOF_SHORT__ 2
++    #undef __SIZEOF_SIZE_T__
++    #define __SIZEOF_SIZE_T__ 4
++    #undef __SIZEOF_WCHAR_T__
++    #define __SIZEOF_WCHAR_T__ 4
++    #undef __SIZEOF_WINT_T__
++    #define __SIZEOF_WINT_T__ 4
++    #define __SIZE_MAX__ 0xffffffffUL
++    #undef __SIZE_TYPE__
++    #define __SIZE_TYPE__ long unsigned int
++    #define __SIZE_WIDTH__ 32
++    #define __UINT16_C(c) c
++    #define __UINT16_MAX__ 0xffff
++    #define __UINT16_TYPE__ short unsigned int
++    #define __UINT32_C(c) c ## UL
++    #define __UINT32_MAX__ 0xffffffffUL
++    #define __UINT32_TYPE__ long unsigned int
++    #define __UINT64_C(c) c ## ULL
++    #define __UINT64_MAX__ 0xffffffffffffffffULL
++    #define __UINT64_TYPE__ long long unsigned int
++    #define __UINT8_C(c) c
++    #define __UINT8_MAX__ 0xff
++    #define __UINT8_TYPE__ unsigned char
++    #define __UINTMAX_C(c) c ## ULL
++    #define __UINTMAX_MAX__ 0xffffffffffffffffULL
++    #define __UINTMAX_TYPE__ long long unsigned int
++    #define __UINTPTR_MAX__ 0xffffffffUL
++    #undef __UINTPTR_TYPE__
++    #define __UINTPTR_TYPE__ long unsigned int
++    #define __UINT_FAST16_MAX__ 0xffffffffU
++    #define __UINT_FAST16_TYPE__ unsigned int
++    #define __UINT_FAST32_MAX__ 0xffffffffU
++    #define __UINT_FAST32_TYPE__ unsigned int
++    #define __UINT_FAST64_MAX__ 0xffffffffffffffffULL
++    #define __UINT_FAST64_TYPE__ long long unsigned int
++    #define __UINT_FAST8_MAX__ 0xffffffffU
++    #define __UINT_FAST8_TYPE__ unsigned int
++    #define __UINT_LEAST16_MAX__ 0xffff
++    #define __UINT_LEAST16_TYPE__ short unsigned int
++    #define __UINT_LEAST32_MAX__ 0xffffffffUL
++    #define __UINT_LEAST32_TYPE__ long unsigned int
++    #define __UINT_LEAST64_MAX__ 0xffffffffffffffffULL
++    #define __UINT_LEAST64_TYPE__ long long unsigned int
++    #define __UINT_LEAST8_MAX__ 0xff
++    #define __UINT_LEAST8_TYPE__ unsigned char
++    #define __WCHAR_MAX__ 0x7fffffffL
++    #define __WCHAR_MIN__ (-__WCHAR_MAX__ - 1)
++    #undef __WCHAR_TYPE__
++    #define __WCHAR_TYPE__ long int
++    #define __WCHAR_WIDTH__ 32
++    #define __WINT_MAX__ 0xffffffffU
++    #define __WINT_MIN__ 0U
++    #undef __WINT_TYPE__
++    #define __WINT_TYPE__ unsigned int
++    #define __WINT_WIDTH__ 32
++    #define __LDBL_DECIMAL_DIG__ 17
++    #define __LDBL_DENORM_MIN__ ((long double)4.94065645841246544177e-324L)
++    #define __LDBL_DIG__ 15
++    #define __LDBL_EPSILON__ ((long double)2.22044604925031308085e-16L)
++    #define __LDBL_HAS_DENORM__ 1
++    #define __LDBL_HAS_INFINITY__ 1
++    #define __LDBL_HAS_QUIET_NAN__ 1
++    #define __LDBL_IS_IEC_60559__ 1
++    #define __LDBL_MANT_DIG__ 53
++    #define __LDBL_MAX_10_EXP__ 308
++    #define __LDBL_MAX__ ((long double)1.79769313486231570815e+308L)
++    #define __LDBL_MAX_EXP__ 1024
++    #define __LDBL_MIN_10_EXP__ (-307)
++    #define __LDBL_MIN__ ((long double)2.22507385850720138309e-308L)
++    #define __LDBL_MIN_EXP__ (-1021)
++    #define __LDBL_NORM_MAX__ ((long double)1.79769313486231570815e+308L)
++    #undef __SIZEOF_LONG_DOUBLE__
++    #define __SIZEOF_LONG_DOUBLE__ 8
++#endif
+ 
+ #if !defined _WIN32
+     /* glibc defines. We do not support __USER_NAME_PREFIX__ */
+@@ -151,7 +353,13 @@
+     #define  __PRETTY_FUNCTION__ __FUNCTION__
+     #define __has_builtin(x) 0
+     #define __has_feature(x) 0
++#if defined __m68k__
++    /* tcc knows packed, aligned and others and ignores the rest; picolibc's
++       sys/cdefs.h defines __packed, __aligned() and _Alignas through this */
++    #define __has_attribute(x) 1
++#else
+     #define __has_attribute(x) 0
++#endif
+     /* C23 Keywords */
+     #define _Nonnull
+     #define _Nullable
+@@ -236,6 +444,16 @@
+     } __builtin_va_list;
+ 
+ #endif
++#elif defined __m68k__
++    /* every argument on the stack in a slot of 4 bytes or more; one of
++       fewer bytes lies at the slot's end (big-endian) */
++    typedef char *__builtin_va_list;
++    #define __va_slot(t) ((sizeof(t) + 3) & ~3)
++    #define __builtin_va_start(ap,last) (ap = (char *)&(last) \
++        + (sizeof(last) < 4 ? sizeof(last) : __va_slot(last)))
++    #define __builtin_va_arg(ap,t) (*(t *)((ap += __va_slot(t)) \
++        - (sizeof(t) < 4 ? sizeof(t) : __va_slot(t))))
++
+ #elif defined __riscv
+     typedef char *__builtin_va_list;
+     #define __va_reg_size (__riscv_xlen >> 3)
+diff --git a/libtcc.c b/libtcc.c
+index 44ea25fa..9520faea 100644
+--- a/libtcc.c
++++ b/libtcc.c
+@@ -53,6 +53,9 @@
+ #include "riscv64-gen.c"
+ #include "riscv64-link.c"
+ #include "riscv64-asm.c"
++#elif defined(TCC_TARGET_M68K)
++#include "m68k-gen.c"
++#include "m68k-link.c"
+ #else
+ #error unknown target
+ #endif
+@@ -71,6 +74,9 @@
+ 
+ /* XXX: get rid of this ASAP (or maybe not) */
+ ST_DATA struct TCCState *tcc_state;
++#ifdef TCC_STACK_LIMIT
++ST_DATA char *tcc_stack_top;
++#endif
+ TCC_SEM(static tcc_compile_sem);
+ /* an array of pointers to memory to be free'd after errors */
+ ST_DATA void** stk_data;
+@@ -884,7 +890,9 @@ LIBTCCAPI TCCState *tcc_new(void)
+     s->warn_implicit_function_declaration = 1;
+     s->warn_discarded_qualifiers = 1;
+     s->ms_extensions = 1;
+-    s->unwind_tables = 1;
++#ifndef TCC_TARGET_M68K
++    s->unwind_tables = 1;   /* (no m68k unwind information) */
++#endif
+ 
+ #ifdef CHAR_IS_UNSIGNED
+     s->char_is_unsigned = 1;
+@@ -1785,6 +1793,8 @@ static const char dumpmachine_str[] =
+     "aarch64"
+ #elif defined TCC_TARGET_RISCV64
+     "riscv64"
++#elif defined TCC_TARGET_M68K
++    "m68k"
+ #endif
+     "-"
+ #ifdef TCC_TARGET_PE
+@@ -2059,6 +2069,13 @@ PUB_FUNC int tcc_parse_args(TCCState *s, int *pargc, char ***pargv)
+             continue;
+ #endif
+         case TCC_OPTION_m:
++#ifdef TCC_TARGET_M68K
++            /* gcc's 68k options: the code is for every 68020+ already,
++               floating point in software */
++            if (!strncmp(optarg, "680", 3) || !strncmp(optarg, "cpu=", 4)
++                || !strcmp(optarg, "soft-float") || !strcmp(optarg, "nobitfield"))
++                break;
++#endif
+             if (set_flag(s, options_m, optarg) < 0) {
+                 if (x = atoi(optarg), x != 32 && x != 64)
+                     goto unsupported_option;
+diff --git a/tcc.c b/tcc.c
+index c2274fb2..d3fe5b8b 100644
+--- a/tcc.c
++++ b/tcc.c
+@@ -192,6 +192,8 @@ static const char version[] =
+         "AArch64"
+ #elif defined TCC_TARGET_RISCV64
+         "riscv64"
++#elif defined TCC_TARGET_M68K
++        "m68k"
+ #endif
+ #ifdef TCC_TARGET_PE
+         " Windows"
+@@ -248,6 +250,10 @@ static void set_environment(TCCState *s)
+     }
+ }
+ 
++#ifdef TCC_TARGET_M68K
++#include "zenix-driver.c"
++#endif
++
+ static char *default_outputfile(TCCState *s, const char *first_file)
+ {
+     char buf[1024];
+@@ -296,6 +302,15 @@ int main(int argc, char **argv)
+     char **argv0 = argv;
+     FILE *ppfp = NULL;
+ 
++#ifdef TCC_STACK_LIMIT
++    char stack_top;
++    tcc_stack_top = &stack_top;
++#endif
++#ifdef TCC_TARGET_M68K
++    /* building a program: compile, then link with zld */
++    if (zenix_driver(argc0, argv0, &ret))
++        return ret;
++#endif
+ redo:
+     argc = argc0, argv = argv0;
+     s = s1 = tcc_new();
+diff --git a/tcc.h b/tcc.h
+index 864a4e32..070c0a54 100644
+--- a/tcc.h
++++ b/tcc.h
+@@ -50,6 +50,13 @@ extern float strtof (const char *__nptr, char **__endptr);
+ extern long double strtold (const char *__nptr, char **__endptr);
+ #endif
+ 
++#if defined __m68k__ && defined TCC_TARGET_M68K
++/* tcc on Zenix: its C library has no long double functions, and the
++   target's long double is double anyway */
++# define strtold(p, e) ((long double)strtod(p, e))
++# define ldexpl(x, n) ((long double)ldexp((double)(x), n))
++#endif
++
+ #ifdef _WIN32
+ # define WIN32_LEAN_AND_MEAN 1
+ # ifndef _WIN32_WINNT
+@@ -158,11 +165,13 @@ extern long double strtold (const char *__nptr, char **__endptr);
+ /* #define TCC_TARGET_ARM64  *//* ARMv8 code generator */
+ /* #define TCC_TARGET_C67    *//* TMS320C67xx code generator */
+ /* #define TCC_TARGET_RISCV64 *//* risc-v code generator */
++/* #define TCC_TARGET_M68K   *//* m68k (68020+) code generator, Zenix */
+ 
+ /* default target is I386 */
+ #if !defined(TCC_TARGET_I386) && !defined(TCC_TARGET_ARM) && \
+     !defined(TCC_TARGET_ARM64) && !defined(TCC_TARGET_C67) && \
+-    !defined(TCC_TARGET_X86_64) && !defined(TCC_TARGET_RISCV64)
++    !defined(TCC_TARGET_X86_64) && !defined(TCC_TARGET_RISCV64) && \
++    !defined(TCC_TARGET_M68K)
+ # if defined __x86_64__
+ #  define TCC_TARGET_X86_64
+ # elif defined __arm__
+@@ -224,6 +233,8 @@ extern long double strtold (const char *__nptr, char **__endptr);
+     || defined TARGETOS_NetBSD \
+     || defined TARGETOS_FreeBSD_kernel
+ # define TARGETOS_BSD 1
++#elif defined TCC_TARGET_M68K
++# define TARGETOS_Zenix 1
+ #elif !(defined TCC_TARGET_PE || defined TCC_TARGET_MACHO)
+ # define TARGETOS_Linux 1 /* for tccdefs_.h */
+ #endif
+@@ -237,10 +248,19 @@ extern long double strtold (const char *__nptr, char **__endptr);
+ /* No ten-byte long doubles on window and macos except in
+    cross-compilers made by a mingw-GCC */
+ #if defined TCC_TARGET_PE \
+-    || (defined TCC_TARGET_MACHO && defined TCC_TARGET_ARM64)
++    || (defined TCC_TARGET_MACHO && defined TCC_TARGET_ARM64) \
++    || defined TCC_TARGET_M68K
+ # define TCC_USING_DOUBLE_FOR_LDOUBLE 1
+ #endif
+ 
++/* targets whose memory is big-endian: the 'le' helpers below then read and
++   write the target's order (section data, constants, debug info) */
++#if defined TCC_TARGET_M68K
++# define TCC_TARGET_BIG_ENDIAN 1
++#else
++# define TCC_TARGET_BIG_ENDIAN 0
++#endif
++
+ #ifdef CONFIG_TCC_PIE
+ # define CONFIG_TCC_PIC 1
+ #endif
+@@ -387,6 +407,9 @@ extern long double strtold (const char *__nptr, char **__endptr);
+ # include "riscv64-gen.c"
+ # include "riscv64-link.c"
+ # include "riscv64-asm.c"
++#elif defined(TCC_TARGET_M68K)
++# include "m68k-gen.c"
++# include "m68k-link.c"
+ #else
+ #error unknown target
+ #endif
+@@ -401,6 +424,14 @@ extern long double strtold (const char *__nptr, char **__endptr);
+ # define ElfW_Rel ElfW(Rela)
+ # define SHT_RELX SHT_RELA
+ # define REL_SECTION_FMT ".rela%s"
++#elif defined TCC_TARGET_M68K
++/* 32 bits with RELA relocations, as gcc's m68k-elf writes them */
++# define ELFCLASSW ELFCLASS32
++# define ElfW(type) Elf##32##_##type
++# define ELFW(type) ELF##32##_##type
++# define ElfW_Rel ElfW(Rela)
++# define SHT_RELX SHT_RELA
++# define REL_SECTION_FMT ".rela%s"
+ #else
+ # define ELFCLASSW ELFCLASS32
+ # define ElfW(type) Elf##32##_##type
+@@ -428,7 +459,9 @@ extern long double strtold (const char *__nptr, char **__endptr);
+ #define TOKSTR_MAX_SIZE     256
+ #define PACK_STACK_SIZE     8
+ 
++#ifndef TOK_HASH_SIZE
+ #define TOK_HASH_SIZE       16384 /* must be a power of two */
++#endif
+ #define TOK_ALLOC_INCR      512  /* must be a power of two */
+ #define TOK_MAX_SIZE        4 /* token max size in int unit when stored in string */
+ 
+@@ -1652,6 +1685,27 @@ ST_FUNC void gen_vla_sp_save(int addr);
+ ST_FUNC void gen_vla_sp_restore(int addr);
+ ST_FUNC void gen_vla_alloc(CType *type, int align);
+ 
++#if TCC_TARGET_BIG_ENDIAN
++/* the target's byte order, under the old names */
++static inline uint16_t read16le(unsigned char *p) {
++    return p[1] | (uint16_t)p[0] << 8;
++}
++static inline void write16le(unsigned char *p, uint16_t x) {
++    p[1] = x & 255;  p[0] = x >> 8 & 255;
++}
++static inline uint32_t read32le(unsigned char *p) {
++  return read16le(p + 2) | (uint32_t)read16le(p) << 16;
++}
++static inline void write32le(unsigned char *p, uint32_t x) {
++    write16le(p + 2, x);  write16le(p, x >> 16);
++}
++static inline uint64_t read64le(unsigned char *p) {
++  return read32le(p + 4) | (uint64_t)read32le(p) << 32;
++}
++static inline void write64le(unsigned char *p, uint64_t x) {
++    write32le(p + 4, x);  write32le(p, x >> 32);
++}
++#else
+ static inline uint16_t read16le(unsigned char *p) {
+     return p[0] | (uint16_t)p[1] << 8;
+ }
+@@ -1664,20 +1718,23 @@ static inline uint32_t read32le(unsigned char *p) {
+ static inline void write32le(unsigned char *p, uint32_t x) {
+     write16le(p, x);  write16le(p + 2, x >> 16);
+ }
++#endif
+ static inline void add32le(unsigned char *p, int32_t x) {
+     write32le(p, read32le(p) + x);
+ }
++#if !TCC_TARGET_BIG_ENDIAN
+ static inline uint64_t read64le(unsigned char *p) {
+   return read32le(p) | (uint64_t)read32le(p + 4) << 32;
+ }
+ static inline void write64le(unsigned char *p, uint64_t x) {
+     write32le(p, x);  write32le(p + 4, x >> 32);
+ }
++#endif
+ static inline void add64le(unsigned char *p, int64_t x) {
+     write64le(p, read64le(p) + x);
+ }
+ /* ------------ i386-gen.c ------------ */
+-#if defined TCC_TARGET_I386 || defined TCC_TARGET_X86_64 || defined TCC_TARGET_ARM
++#if defined TCC_TARGET_I386 || defined TCC_TARGET_X86_64 || defined TCC_TARGET_ARM || defined TCC_TARGET_M68K
+ ST_FUNC void g(int c);
+ ST_FUNC void gen_le16(int c);
+ ST_FUNC void gen_le32(int c);
+@@ -1731,6 +1788,26 @@ ST_FUNC void gen_increment_tcov (SValue *sv);
+ ST_FUNC void gen_clear_cache(void);
+ #endif
+ 
++/* A fixed stack (Zenix: no MMU, nothing grows it): the parser's recursive
++   functions check that the input's nesting leaves the stack room
++   (TCC_STACK_LIMIT bytes from the top, which main notes) */
++#ifdef TCC_STACK_LIMIT
++ST_DATA char *tcc_stack_top;
++#define tcc_check_stack() do { char tcc_here_; \
++        if (tcc_stack_top && tcc_stack_top - &tcc_here_ > TCC_STACK_LIMIT) \
++            tcc_error("nested too deeply for tcc's stack"); \
++    } while (0)
++#else
++#define tcc_check_stack() do { } while (0)
++#endif
++
++/* ------------ m68k-gen.c ------------ */
++#ifdef TCC_TARGET_M68K
++ST_FUNC void gen_struct_copy(int size);
++ST_FUNC void gen_cvt_csti(int t);
++ST_FUNC void gen_increment_tcov(SValue *sv);
++#endif
++
+ /* ------------ c67-gen.c ------------ */
+ #ifdef TCC_TARGET_C67
+ #endif
+diff --git a/tccelf.c b/tccelf.c
+index 9e2d1364..e68e9c64 100644
+--- a/tccelf.c
++++ b/tccelf.c
+@@ -2675,9 +2675,103 @@ static void update_reloc_sections(TCCState *s1, struct dyn_inf *dyninf)
+ 
+ /* Create an ELF file on disk.
+    This function handle ELF specific layout requirements */
++#if TCC_TARGET_BIG_ENDIAN
++/* A big-endian target's file written by a little-endian host: the ELF
++   structures tcc keeps in the host's order are turned around as they are
++   written (the sections' contents are in the target's order already). */
++static int elf_swap_needed(void)
++{
++    union { int i; char c; } u = { 1 };
++    return u.c == 1;
++}
++static uint32_t sw32(uint32_t x)
++{
++    return x >> 24 | (x >> 8 & 0xff00) | (x << 8 & 0xff0000) | x << 24;
++}
++static uint16_t sw16(uint16_t x)
++{
++    return x >> 8 | x << 8;
++}
++static void swap_ehdr(ElfW(Ehdr) *h)
++{
++    h->e_type = sw16(h->e_type), h->e_machine = sw16(h->e_machine);
++    h->e_version = sw32(h->e_version), h->e_entry = sw32(h->e_entry);
++    h->e_phoff = sw32(h->e_phoff), h->e_shoff = sw32(h->e_shoff);
++    h->e_flags = sw32(h->e_flags), h->e_ehsize = sw16(h->e_ehsize);
++    h->e_phentsize = sw16(h->e_phentsize), h->e_phnum = sw16(h->e_phnum);
++    h->e_shentsize = sw16(h->e_shentsize), h->e_shnum = sw16(h->e_shnum);
++    h->e_shstrndx = sw16(h->e_shstrndx);
++}
++static void swap_shdr(ElfW(Shdr) *h)
++{
++    h->sh_name = sw32(h->sh_name), h->sh_type = sw32(h->sh_type);
++    h->sh_flags = sw32(h->sh_flags), h->sh_addr = sw32(h->sh_addr);
++    h->sh_offset = sw32(h->sh_offset), h->sh_size = sw32(h->sh_size);
++    h->sh_link = sw32(h->sh_link), h->sh_info = sw32(h->sh_info);
++    h->sh_addralign = sw32(h->sh_addralign), h->sh_entsize = sw32(h->sh_entsize);
++}
++static void swap_phdr(ElfW(Phdr) *h)
++{
++    h->p_type = sw32(h->p_type), h->p_offset = sw32(h->p_offset);
++    h->p_vaddr = sw32(h->p_vaddr), h->p_paddr = sw32(h->p_paddr);
++    h->p_filesz = sw32(h->p_filesz), h->p_memsz = sw32(h->p_memsz);
++    h->p_flags = sw32(h->p_flags), h->p_align = sw32(h->p_align);
++}
++/* a section's contents as the file wants them: a swapped copy of the
++   symbols, relocations and hash tables, or the data itself */
++static unsigned char *swap_section(Section *s, int size)
++{
++    unsigned char *d;
++    int i;
++    if (s->sh_type == SHT_SYMTAB || s->sh_type == SHT_DYNSYM) {
++        ElfW(Sym) *p;
++        d = tcc_malloc(size);
++        memcpy(d, s->data, size);
++        for (i = 0, p = (ElfW(Sym) *)d; i < size / (int)sizeof *p; i++, p++) {
++            p->st_name = sw32(p->st_name), p->st_value = sw32(p->st_value);
++            p->st_size = sw32(p->st_size), p->st_shndx = sw16(p->st_shndx);
++        }
++        return d;
++    }
++    if (s->sh_type == SHT_RELX) {
++        ElfW_Rel *p;
++        d = tcc_malloc(size);
++        memcpy(d, s->data, size);
++        for (i = 0, p = (ElfW_Rel *)d; i < size / (int)sizeof *p; i++, p++) {
++            p->r_offset = sw32(p->r_offset), p->r_info = sw32(p->r_info);
++#if SHT_RELX == SHT_RELA
++            p->r_addend = sw32(p->r_addend);
++#endif
++        }
++        return d;
++    }
++    if (!strcmp(s->name, ".stab")) {
++        /* -g's stabs: n_strx (4), n_type, n_other (1 each), n_desc (2), n_value (4) */
++        unsigned char *p;
++        d = tcc_malloc(size);
++        memcpy(d, s->data, size);
++        for (p = d; p + 12 <= d + size; p += 12) {
++            *(uint32_t *)p = sw32(*(uint32_t *)p);
++            *(uint16_t *)(p + 6) = sw16(*(uint16_t *)(p + 6));
++            *(uint32_t *)(p + 8) = sw32(*(uint32_t *)(p + 8));
++        }
++        return d;
++    }
++    if (s->sh_type == SHT_HASH || s->sh_type == SHT_GNU_HASH || s->sh_type == SHT_DYNAMIC) {
++        uint32_t *p;
++        d = tcc_malloc(size);
++        memcpy(d, s->data, size);
++        for (i = 0, p = (uint32_t *)d; i < size / 4; i++, p++)
++            *p = sw32(*p);
++        return d;
++    }
++    return s->data;
++}
++#endif
++
+ static int tcc_output_elf(TCCState *s1, FILE *f, int phnum, ElfW(Phdr) *phdr)
+ {
+-    int i, shnum, offset, size, file_type;
++    int i, shnum, offset, size, file_type, shoff;
+     Section *s;
+     ElfW(Ehdr) ehdr;
+     ElfW(Shdr) shdr, *sh;
+@@ -2698,7 +2792,7 @@ static int tcc_output_elf(TCCState *s1, FILE *f, int phnum, ElfW(Phdr) *phdr)
+     ehdr.e_ident[2] = ELFMAG2;
+     ehdr.e_ident[3] = ELFMAG3;
+     ehdr.e_ident[4] = ELFCLASSW;
+-    ehdr.e_ident[5] = ELFDATA2LSB;
++    ehdr.e_ident[5] = TCC_TARGET_BIG_ENDIAN ? ELFDATA2MSB : ELFDATA2LSB;
+     ehdr.e_ident[6] = EV_CURRENT;
+ 
+ #if TARGETOS_FreeBSD || TARGETOS_FreeBSD_kernel
+@@ -2745,12 +2839,20 @@ static int tcc_output_elf(TCCState *s1, FILE *f, int phnum, ElfW(Phdr) *phdr)
+     ehdr.e_shnum = shnum;
+     ehdr.e_shstrndx = shnum - 1;
+ 
++    shoff = ehdr.e_shoff;
++#if TCC_TARGET_BIG_ENDIAN
++    if (elf_swap_needed()) {
++        swap_ehdr(&ehdr);
++        for (i = 0; phdr && i < phnum; i++)
++            swap_phdr(&phdr[i]);
++    }
++#endif
+     offset = fwrite(&ehdr, 1, sizeof(ElfW(Ehdr)), f);
+     if (phdr)
+         offset += fwrite(phdr, 1, phnum * sizeof(ElfW(Phdr)), f);
+ 
+     /* output section headers */
+-    while (offset < ehdr.e_shoff) {
++    while (offset < shoff) {
+         fputc(0, f);
+         offset++;
+     }
+@@ -2772,6 +2874,10 @@ static int tcc_output_elf(TCCState *s1, FILE *f, int phnum, ElfW(Phdr) *phdr)
+             sh->sh_offset = s->sh_offset;
+             sh->sh_size = s->sh_size;
+         }
++#if TCC_TARGET_BIG_ENDIAN
++        if (elf_swap_needed())
++            swap_shdr(sh);
++#endif
+         offset += fwrite(sh, 1, sizeof(ElfW(Shdr)), f);
+     }
+ 
+@@ -2784,6 +2890,14 @@ static int tcc_output_elf(TCCState *s1, FILE *f, int phnum, ElfW(Phdr) *phdr)
+                 offset++;
+             }
+             size = s->sh_size;
++#if TCC_TARGET_BIG_ENDIAN
++            if (size && elf_swap_needed()) {
++                unsigned char *d = swap_section(s, size);
++                offset += fwrite(d, 1, size, f);
++                if (d != s->data)
++                    tcc_free(d);
++            } else
++#endif
+             if (size)
+                 offset += fwrite(s->data, 1, size, f);
+         }
+diff --git a/tccgen.c b/tccgen.c
+index d9721a52..cd7f4baa 100644
+--- a/tccgen.c
++++ b/tccgen.c
+@@ -235,6 +235,12 @@ static int btype_size(int bt)
+ /* returns function return register from type */
+ static int R_RET(int t)
+ {
++#ifdef TCC_TARGET_M68K
++    /* gcc's m68k: one word in d0; two words (long long, double) with the
++       high, first one in d0 and the low one (tccgen's r) in d1 */
++    t &= VT_BTYPE;
++    return (t == VT_LLONG || t == VT_DOUBLE || t == VT_LDOUBLE) ? REG_IRET : REG_IRET1;
++#endif
+     if (!is_float(t))
+         return REG_IRET;
+ #ifdef TCC_TARGET_X86_64
+@@ -262,6 +268,11 @@ static int R2_RET(int t)
+ #elif defined TCC_TARGET_RISCV64
+     if (t == VT_LDOUBLE)
+         return REG_IRE2;
++#endif
++#ifdef TCC_TARGET_M68K
++    /* soft float: a double in two data registers, as a long long */
++    if (t == VT_DOUBLE || t == VT_LDOUBLE)
++        return REG_IRE2;
+ #endif
+     return VT_CONST;
+ }
+@@ -284,6 +295,9 @@ static int RC_RET(int t)
+ /* returns generic register class for type t */
+ static int RC_TYPE(int t)
+ {
++#ifdef TCC_TARGET_M68K
++    return RC_INT;
++#endif
+     if (!is_float(t))
+         return RC_INT;
+ #ifdef TCC_TARGET_X86_64
+@@ -319,6 +333,14 @@ static int RC2_TYPE(int t, int rc)
+ /* we use our own 'finite' function to avoid potential problems with
+    non standard math libs */
+ /* XXX: endianness dependent */
++#if TCC_TARGET_BIG_ENDIAN
++/* where the low and the high word of a two-word value lie */
++# define LO_OFS 4
++# define HI_OFS 0
++#else
++# define LO_OFS 0
++# define HI_OFS 4
++#endif
+ ST_FUNC int ieee_finite(double d)
+ {
+     int p[4];
+@@ -1431,6 +1453,10 @@ ST_FUNC void save_reg_upstack(int r, int n)
+                 sv.r = VT_LOCAL | VT_LVAL;
+                 sv.c.i = l;
+ 		sv.sym = NULL;
++#if TCC_TARGET_BIG_ENDIAN
++                if (p->r2 < VT_CONST && USING_TWO_WORDS(bt))
++                    sv.c.i = l + LO_OFS;
++#endif
+                 store(p->r & VT_VALMASK, &sv);
+ #if defined(TCC_TARGET_I386) || defined(TCC_TARGET_X86_64)
+                 /* x86 specific: need to pop fp register ST0 if saved */
+@@ -1440,7 +1466,7 @@ ST_FUNC void save_reg_upstack(int r, int n)
+ #endif
+                 /* special long long case */
+                 if (p->r2 < VT_CONST && USING_TWO_WORDS(bt)) {
+-                    sv.c.i += PTR_SIZE;
++                    sv.c.i = l + HI_OFS;
+                     store(p->r2, &sv);
+                 }
+             }
+@@ -1754,6 +1780,16 @@ static void incr_offset(int offset)
+     vtop->type.t = t;
+ }
+ 
++/* the same, folded into the offset of a frame or static lvalue */
++static void incr_lval_offset(int offset)
++{
++    int v = vtop->r & (VT_VALMASK | VT_LVAL);
++    if (v == (VT_LOCAL | VT_LVAL) || v == (VT_CONST | VT_LVAL))
++        vtop->c.i += offset;
++    else if (offset)
++        incr_offset(offset);
++}
++
+ static void incr_bf_adr(int o)
+ {
+     vtop->type.t = VT_BYTE | VT_UNSIGNED;
+@@ -1764,9 +1800,16 @@ static void incr_bf_adr(int o)
+ static void load_packed_bf(CType *type, int bit_pos, int bit_size)
+ {
+     int n, o, bits;
++    int step = 1;
+     save_reg_upstack(vtop->r, 1);
+     vpush64(type->t & VT_BTYPE, 0); // B X
+     bits = 0, o = bit_pos >> 3, bit_pos &= 7;
++#if TCC_TARGET_BIG_ENDIAN
++    /* the bytes from the last (the field's lowest bits) backwards */
++    o = (o * 8 + bit_pos + bit_size - 1) >> 3;
++    bit_pos = 7 - ((bit_pos + bit_size - 1) & 7);
++    step = -1;
++#endif
+     do {
+         vswap(); // X B
+         incr_bf_adr(o);
+@@ -1783,7 +1826,7 @@ static void load_packed_bf(CType *type, int bit_pos, int bit_size)
+             vpushi(bits), gen_op(TOK_SHL);
+         vrotb(3); // B Y X
+         gen_op('|'); // B X
+-        bits += n, bit_size -= n, o = 1;
++        bits += n, bit_size -= n, o = step;
+     } while (bit_size);
+     vswap(), vpop();
+     if (!(type->t & VT_UNSIGNED)) {
+@@ -1798,9 +1841,15 @@ static void store_packed_bf(int bit_pos, int bit_size)
+ {
+     int bits, n, o, m, c;
+     c = (vtop->r & (VT_VALMASK | VT_LVAL | VT_SYM)) == VT_CONST;
++    int step = 1;
+     vswap(); // X B
+     save_reg_upstack(vtop->r, 1);
+     bits = 0, o = bit_pos >> 3, bit_pos &= 7;
++#if TCC_TARGET_BIG_ENDIAN
++    o = (o * 8 + bit_pos + bit_size - 1) >> 3;
++    bit_pos = 7 - ((bit_pos + bit_size - 1) & 7);
++    step = -1;
++#endif
+     do {
+         incr_bf_adr(o); // X B
+         vswap(); //B X
+@@ -1823,7 +1872,7 @@ static void store_packed_bf(int bit_pos, int bit_size)
+         }
+         vdup(), vtop[-1] = vtop[-2]; // X B B V2
+         vstore(), vpop(); // X B
+-        bits += n, bit_size -= n, bit_pos = 0, o = 1;
++        bits += n, bit_size -= n, bit_pos = 0, o = step;
+     } while (bit_size);
+     vpop(), vpop();
+ }
+@@ -1956,11 +2005,17 @@ ST_FUNC int gv(int rc)
+                     save_reg_upstack(vtop->r, 1);
+                     /* load from memory */
+                     vtop->type.t = load_type;
++#if TCC_TARGET_BIG_ENDIAN
++                    incr_lval_offset(LO_OFS);
++                    /* the address of a saved pointer may now be in r */
++                    if ((vtop->r & VT_VALMASK) == r)
++                        r = get_reg(rc);
++#endif
+                     load(r, vtop);
+                     vdup();
+                     vtop[-1].r = r; /* save register value */
+                     /* increment pointer to get second word */
+-                    incr_offset(PTR_SIZE);
++                    incr_lval_offset(HI_OFS - LO_OFS);
+                 } else {
+                     /* move registers */
+                     if (!r_ok)
+@@ -2038,7 +2093,8 @@ ST_FUNC void lexpand(void)
+         vtop[0].c.i >>= 32;
+     } else if (v == (VT_LVAL|VT_CONST) || v == (VT_LVAL|VT_LOCAL)) {
+         vdup();
+-        vtop[0].c.i += 4;
++        vtop[-1].c.i += LO_OFS;
++        vtop[0].c.i += HI_OFS;
+     } else {
+         gv(RC_INT);
+         vdup();
+@@ -2121,6 +2177,13 @@ static void gen_opl(int op)
+         goto gen_mod_func;
+     case TOK_UMOD:
+         func = TOK___umoddi3;
++#ifdef TCC_TARGET_M68K
++        goto gen_mod_func;
++    case '*':
++        /* the 68060 has no 32x32->64 multiply: libgcc's */
++        func = TOK___muldi3;
++        goto gen_func;
++#endif
+     gen_mod_func:
+ #ifdef TCC_ARM_EABI
+         reg_iret = TREG_R2;
+@@ -2138,7 +2201,9 @@ static void gen_opl(int op)
+     case '^':
+     case '&':
+     case '|':
++#ifndef TCC_TARGET_M68K
+     case '*':
++#endif
+     case '+':
+     case '-':
+         //pv("gen_opl A",0,2);
+@@ -2506,7 +2571,7 @@ static void gen_opic(int op)
+     }
+ }
+ 
+-#if defined TCC_TARGET_X86_64 || defined TCC_TARGET_I386 || defined TCC_TARGET_ARM64
++#if defined TCC_TARGET_X86_64 || defined TCC_TARGET_I386 || defined TCC_TARGET_ARM64 || defined TCC_TARGET_M68K
+ # define gen_negf gen_opf
+ #elif defined TCC_TARGET_ARM
+ void gen_negf(int op)
+@@ -3419,8 +3484,14 @@ error:
+ 
+         if (ALLOW_SUBTYPE_ACCESS && (vtop->r & VT_LVAL)) {
+             /* value still in memory */
+-            if (ds <= ss)
++            if (ds <= ss) {
++#if TCC_TARGET_BIG_ENDIAN
++                /* the low-order bytes are the last ones */
++                if (ds < ss)
++                    incr_lval_offset(ss - ds);
++#endif
+                 goto done;
++            }
+             /* ss <= 4 here */
+             if (ds <= 4 && !(dbt == (VT_SHORT | VT_UNSIGNED) && sbt == VT_BYTE)) {
+                 gv(RC_INT);
+@@ -3479,7 +3550,7 @@ error:
+ 
+         if (ds >= ss)
+             goto done;
+-#if defined TCC_TARGET_I386 || defined TCC_TARGET_X86_64 || defined TCC_TARGET_ARM64 || defined TCC_TARGET_RISCV64
++#if defined TCC_TARGET_I386 || defined TCC_TARGET_X86_64 || defined TCC_TARGET_ARM64 || defined TCC_TARGET_RISCV64 || defined TCC_TARGET_M68K
+     if (ss == 4) {
+         gen_cvt_csti(dbt);
+         goto done;
+@@ -3500,8 +3571,23 @@ done:
+     vtop->type.t &= ~ ( VT_QUAL | VT_ARRAY | VT_TLS );
+ }
+ 
++#ifdef TCC_SCALAR_ALIGN_MAX
++static int type_size_1(CType *type, int *a);
++/* return type size as known at compile time. Put alignment at 'a': no
++   scalar is aligned beyond the target's largest (the 68k's 2) */
++ST_FUNC int type_size(CType *type, int *a)
++{
++    int size = type_size_1(type, a);
++    if ((type->t & VT_BTYPE) != VT_STRUCT && !(type->t & VT_ARRAY)
++        && *a > TCC_SCALAR_ALIGN_MAX)
++        *a = TCC_SCALAR_ALIGN_MAX;
++    return size;
++}
++static int type_size_1(CType *type, int *a)
++#else
+ /* return type size as known at compile time. Put alignment at 'a' */
+ ST_FUNC int type_size(CType *type, int *a)
++#endif
+ {
+     Sym *s;
+     int bt;
+@@ -3880,9 +3966,14 @@ ST_FUNC void vstore(void)
+             if (USING_TWO_WORDS(dbt)) {
+                 int load_type = (dbt == VT_QFLOAT) ? VT_DOUBLE : VT_PTRDIFF_T;
+                 vtop[-1].type.t = load_type;
++#if TCC_TARGET_BIG_ENDIAN
++                vswap();
++                incr_lval_offset(LO_OFS);
++                vswap();
++#endif
+                 store(r, vtop - 1);
+                 vswap();
+-                incr_offset(PTR_SIZE);
++                incr_lval_offset(HI_OFS - LO_OFS);
+                 vswap();
+                 /* XXX: it works because r2 is spilled last ! */
+                 store(vtop->r2, vtop - 1);
+@@ -4470,6 +4561,25 @@ static void struct_layout(CType *type, AttributeDef *ad)
+ #endif
+         }
+     }
++#if TCC_TARGET_BIG_ENDIAN
++    /* Big-endian (gcc's rule): a struct's bits are numbered from the most
++       significant bit of its first byte, so a field's lowest bit in its
++       container is counted from the container's other end. A field read
++       byte by byte keeps its position in the struct's bit stream:
++       load_packed_bf and store_packed_bf walk it backwards. */
++    for (f = type->ref->next; f; f = f->next) {
++        int s;
++        if (!(f->type.t & VT_BITFIELD) || f->auxtype == VT_STRUCT)
++            continue;
++        bit_size = BIT_SIZE(f->type.t);
++        if (bit_size == 0)
++            continue;
++        bit_pos = BIT_POS(f->type.t);
++        s = btype_size((f->auxtype != -1 ? f->auxtype : f->type.t) & VT_BTYPE);
++        f->type.t = (f->type.t & ~(0x3f << VT_STRUCT_SHIFT))
++                    | ((s * 8 - bit_pos - bit_size) << VT_STRUCT_SHIFT);
++    }
++#endif
+ }
+ 
+ /* Does 'n' fit into integer type 't' ? */
+@@ -5306,6 +5416,8 @@ static CType *type_decl(CType *type, AttributeDef *ad, int *v, int td)
+     CType *post, *ret;
+     int qualifiers, storage;
+ 
++    tcc_check_stack();
++
+     /* recursive type, remove storage bits first, apply them later again */
+     storage = type->t & VT_STORAGE;
+     type->t &= ~VT_STORAGE;
+@@ -5658,6 +5770,8 @@ ST_FUNC void unary(void)
+     Sym *s;
+     AttributeDef ad;
+ 
++    tcc_check_stack();
++
+     /* generate line number info */
+     if (debug_modes)
+         tcc_debug_line(tcc_state), tcc_tcov_check_line (tcc_state, 1);
+@@ -7237,6 +7351,8 @@ static void block(int flags)
+     struct scope o;
+     Sym *s;
+ 
++    tcc_check_stack();
++
+ again:
+     t = tok;
+     /* If the token carries a value, next() might destroy it. Only with
+@@ -7946,6 +8062,11 @@ static void init_putv(init_params *p, CType *type, unsigned long c)
+     size = type_size(type, &align);
+     if (type->t & VT_BITFIELD)
+         size = (BIT_POS(type->t) + BIT_SIZE(type->t) + 7) / 8;
++#if TCC_TARGET_BIG_ENDIAN
++    if ((type->t & VT_BITFIELD) && type->ref->auxtype != VT_STRUCT)
++        size = btype_size((type->ref->auxtype != -1 ? type->ref->auxtype : type->t) & VT_BTYPE)
++               - (BIT_POS(type->t) >> 3);
++#endif
+     init_assert(p, c + size);
+ 
+     if (sec) {
+@@ -7999,7 +8120,7 @@ static void init_putv(init_params *p, CType *type, unsigned long c)
+ 				   c + rel->r_offset - esym->st_value,
+ 				   ELFW(R_TYPE)(rel->r_info),
+ 				   ELFW(R_SYM)(rel->r_info),
+-#if PTR_SIZE == 8
++#if SHT_RELX == SHT_RELA
+ 				   rel->r_addend
+ #else
+ 				   0
+@@ -8008,12 +8129,34 @@ static void init_putv(init_params *p, CType *type, unsigned long c)
+ 		}
+ 	    }
+ 	} else {
++#if TCC_TARGET_BIG_ENDIAN
++            if ((type->t & VT_BITFIELD) && type->ref->auxtype != VT_STRUCT) {
++                /* the field's bits in its big-endian container */
++                int bit_pos = BIT_POS(type->t), bit_size = BIT_SIZE(type->t), i, k;
++                int s = btype_size((type->ref->auxtype != -1 ? type->ref->auxtype : type->t) & VT_BTYPE);
++                unsigned char *q;
++                for (i = 0; i < bit_size; i++) {
++                    k = bit_pos + i;
++                    q = (unsigned char *)ptr + s - 1 - (k >> 3);
++                    if ((val >> i) & 1)
++                        *q |= 1 << (k & 7);
++                    else
++                        *q &= ~(1 << (k & 7));
++                }
++            } else
++#endif
+             if (type->t & VT_BITFIELD) {
+                 int bit_pos, bit_size, bits, n;
+                 unsigned char *p, v, m;
++                int step = 1;
+                 bit_pos = BIT_POS(vtop->type.t);
+                 bit_size = BIT_SIZE(vtop->type.t);
+                 p = (unsigned char*)ptr + (bit_pos >> 3);
++#if TCC_TARGET_BIG_ENDIAN
++                p = (unsigned char*)ptr + ((bit_pos + bit_size - 1) >> 3);
++                bit_pos = 7 - ((bit_pos + bit_size - 1) & 7);
++                step = -1;
++#endif
+                 bit_pos &= 7, bits = 0;
+                 while (bit_size) {
+                     n = 8 - bit_pos;
+@@ -8022,7 +8165,7 @@ static void init_putv(init_params *p, CType *type, unsigned long c)
+                     v = val >> bits << bit_pos;
+                     m = ((1 << n) - 1) << bit_pos;
+                     *p = (*p & ~m) | (v & m);
+-                    bits += n, bit_size -= n, bit_pos = 0, ++p;
++                    bits += n, bit_size -= n, bit_pos = 0, p += step;
+                 }
+             } else
+             switch(bt) {
+@@ -8036,7 +8179,12 @@ static void init_putv(init_params *p, CType *type, unsigned long c)
+                 write16le(ptr, val);
+ 		break;
+ 	    case VT_FLOAT:
+-                write32le(ptr, val);
++                {
++                    /* c.f's bytes: c.i's low half on a little-endian host only */
++                    uint32_t u;
++                    memcpy(&u, &vtop->c.f, 4);
++                    write32le(ptr, u);
++                }
+ 		break;
+ 	    case VT_DOUBLE:
+                 write64le(ptr, val);
+@@ -8063,9 +8211,16 @@ static void init_putv(init_params *p, CType *type, unsigned long c)
+                 break;
+             case VT_PTR:
+             case VT_INT:
++#if SHT_RELX == SHT_RELA
++	        if (vtop->r & VT_SYM)
++	          greloca(sec, vtop->sym, c, R_DATA_PTR, val);
++	        else
++	          write32le(ptr, val);
++#else
+ 	        if (vtop->r & VT_SYM)
+ 	          greloc(sec, vtop->sym, c, R_DATA_PTR);
+ 	        write32le(ptr, val);
++#endif
+ 	        break;
+ #endif
+ 	    default:
+@@ -8095,6 +8250,8 @@ static void decl_initializer(init_params *p, CType *type, unsigned long c, int f
+     Sym indexsym;
+     CType *t1;
+ 
++    tcc_check_stack();
++
+     /* generate line number info */
+     if (debug_modes && !(flags & DIF_SIZE_ONLY) && !p->sec)
+         tcc_debug_line(tcc_state), tcc_tcov_check_line (tcc_state, 1);
+diff --git a/tccpp.c b/tccpp.c
+index 214e9cd4..14dd9522 100644
+--- a/tccpp.c
++++ b/tccpp.c
+@@ -135,8 +135,12 @@ ST_FUNC void expect(const char *msg)
+ #define TAL_DEBUG_PARAMS , const char *sfile, int sline
+ #endif
+ 
++#ifndef TOKSYM_TAL_SIZE
+ #define TOKSYM_TAL_SIZE (256 * 1024) /* allocator for TokenSym in table_ident */
++#endif
++#ifndef TOKSTR_TAL_SIZE
+ #define TOKSTR_TAL_SIZE (256 * 1024) /* allocator for TokenString instances */
++#endif
+ 
+ typedef struct TinyAlloc {
+     uint8_t *p;
+@@ -942,11 +946,11 @@ redo_start:
+                 else if (parse_flags & PARSE_FLAG_ASM_FILE)
+                     p = parse_line_comment(p - 1);
+             }
+-#if !defined(TCC_TARGET_ARM) && !defined(TCC_TARGET_ARM64)
++#if !defined(TCC_TARGET_ARM) && !defined(TCC_TARGET_ARM64) && !defined(TCC_TARGET_M68K)
+             else if (parse_flags & PARSE_FLAG_ASM_FILE)
+                 p = parse_line_comment(p - 1);
+ #else
+-            /* ARM/ARM64 assembly uses '#' for constants */
++            /* ARM/ARM64 and 68k assembly use '#' for constants */
+ #endif
+             break;
+ _default:
+@@ -1092,12 +1096,16 @@ static void tok_str_add2(TokenString *s, int t, CValue *cv)
+     case TOK_CUINT:
+     case TOK_CCHAR:
+     case TOK_LCHAR:
+-    case TOK_CFLOAT:
+     case TOK_LINENUM:
+ #if LONG_SIZE == 4
+     case TOK_CLONG:
+     case TOK_CULONG:
+ #endif
++        /* the value, not tab[0]: on a big-endian host that is the
++           high half of cv->i */
++        str[len++] = (int)cv->i;
++        break;
++    case TOK_CFLOAT:
+         str[len++] = cv->tab[0];
+         break;
+     case TOK_PPNUM:
+@@ -2634,7 +2642,7 @@ maybe_newline:
+                 p++;
+                 tok = TOK_TWOSHARPS;
+             } else {
+-#if !defined(TCC_TARGET_ARM) && !defined(TCC_TARGET_ARM64)
++#if !defined(TCC_TARGET_ARM) && !defined(TCC_TARGET_ARM64) && !defined(TCC_TARGET_M68K)
+                 if (parse_flags & PARSE_FLAG_ASM_FILE) {
+                     p = parse_line_comment(p - 1);
+                     goto redo_no_start;
+@@ -3242,6 +3250,7 @@ static int macro_subst_tok(
+     int t;
+     int v = s->v;
+ 
++    tcc_check_stack();
+     PP_PRINT(("#", v, s->d));
+     if (s->d) {
+         int *mstr = s->d;
+@@ -3559,6 +3568,8 @@ static const char * const target_os_defs =
+     "__NetBSD__\0"
+ # elif TARGETOS_OpenBSD
+     "__OpenBSD__\0"
++# elif TARGETOS_Zenix
++    "__zenix__\0"
+ # else
+     "__linux__\0"
+     "__linux\0"
+diff --git a/tcctok.h b/tcctok.h
+index d8e7b445..fcad5e86 100644
+--- a/tcctok.h
++++ b/tcctok.h
+@@ -284,6 +284,45 @@
+ # endif
+ #endif
+ 
++#if defined TCC_TARGET_M68K
++     /* libgcc's soft float and 64-bit multiply (gcc's m68k names) */
++     DEF(TOK___muldi3, "__muldi3")
++     DEF(TOK___addsf3, "__addsf3")
++     DEF(TOK___subsf3, "__subsf3")
++     DEF(TOK___mulsf3, "__mulsf3")
++     DEF(TOK___divsf3, "__divsf3")
++     DEF(TOK___adddf3, "__adddf3")
++     DEF(TOK___subdf3, "__subdf3")
++     DEF(TOK___muldf3, "__muldf3")
++     DEF(TOK___divdf3, "__divdf3")
++     DEF(TOK___eqsf2, "__eqsf2")
++     DEF(TOK___nesf2, "__nesf2")
++     DEF(TOK___ltsf2, "__ltsf2")
++     DEF(TOK___lesf2, "__lesf2")
++     DEF(TOK___gtsf2, "__gtsf2")
++     DEF(TOK___gesf2, "__gesf2")
++     DEF(TOK___eqdf2, "__eqdf2")
++     DEF(TOK___nedf2, "__nedf2")
++     DEF(TOK___ltdf2, "__ltdf2")
++     DEF(TOK___ledf2, "__ledf2")
++     DEF(TOK___gtdf2, "__gtdf2")
++     DEF(TOK___gedf2, "__gedf2")
++     DEF(TOK___extendsfdf2, "__extendsfdf2")
++     DEF(TOK___truncdfsf2, "__truncdfsf2")
++     DEF(TOK___floatsisf, "__floatsisf")
++     DEF(TOK___floatsidf, "__floatsidf")
++     DEF(TOK___floatunsisf, "__floatunsisf")
++     DEF(TOK___floatunsidf, "__floatunsidf")
++     DEF(TOK___floatdisf, "__floatdisf")
++     DEF(TOK___floatdidf, "__floatdidf")
++     DEF(TOK___fixsfsi, "__fixsfsi")
++     DEF(TOK___fixdfsi, "__fixdfsi")
++     DEF(TOK___fixunssfsi, "__fixunssfsi")
++     DEF(TOK___fixunsdfsi, "__fixunsdfsi")
++     DEF(TOK___fixsfdi, "__fixsfdi")
++     DEF(TOK___fixdfdi, "__fixdfdi")
++#endif
++
+ #if defined TCC_TARGET_C67
+      DEF(TOK__divi, "_divi")
+      DEF(TOK__divu, "_divu")

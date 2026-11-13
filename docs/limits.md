@@ -284,6 +284,15 @@ pointers.
   an `-I` path with the name 512; a decimal number for `.double` and the like up to 600 32-bit words (`number too
   large`). Each limit, when hit, is an error. The source, its included files, the symbols and the sections' bytes stay
   in memory, and the source is read again for every pass (at most 100, then it stops: the sizes do not settle).
+- The C compiler, tcc (DESIGN D52 section 7, man/tcc.txt): long double is double (8 bytes; gcc's is 12: long doubles
+  passed between tcc's and gcc's code are wrong); no C11 atomics (the `__atomic_*` builtins' helper library is not
+  built), no `-run`, no bounds checking or backtraces, no shared libraries; inline asm knows a subset of the 68k
+  instructions (no FPU, no MIT syntax, no relaxation); no optimiser (its code is about 1.6 times gcc -Os's size). Its
+  parser stops a compile with "nested too deeply for tcc's stack" once the stack's use passes 48 KB of its 64 KB
+  (`STACK_tcc`): about 135 levels of brackets, fewer of nested calls or initializers. A program linked by `tcc -o`
+  is a plain ZEXE program (no shared code). It holds a whole file's code and symbols in memory: about 1.2 MB for a 2,200-line file (d52 section 7). A
+  program it builds is bigger than gcc's (about 1.6 times): the loader's 256 KB for a program comes sooner (Lua: 387
+  KB).
 - The text-UI library (roadmap block 3, `ports/tui/README`; the owner's tui.library linked in, used by
   `/tests/tuitest`, `sumi`, `maki`, `markdown` and `ahiru`): UTF-8 output and the C library's widths since the console's UTF-8
   (DESIGN D28; `make TUI_UTF8=0` the Latin-1 build), no composing of a separate accent onto its letter; no mouse, no pastes, no resize events, no second screen (closing clears it); `TuiSignal` bit 8 (the

@@ -49,7 +49,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet \
           rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs files show ttf2font \
-          play modplay lsusb lua make zld zas
+          play modplay lsusb lua make zld zas tcc
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -72,6 +72,11 @@ STACK_lua := 131072
 # 100 bytes a level in the probe build's measurement) and once per level of nested macros (expand_macros), bounded only by
 # the Makefile's size: measured with the stack probe build (tools/make-test.sh, docs/limits.md)
 STACK_make := 32768
+# tcc (ports/tcc, DESIGN D52 section 7): its parser recurses once per level of nested brackets, statements,
+# initializers, declarators and macro calls (about 350 bytes a level of brackets); the recursive functions stop the
+# compile with "nested too deeply for tcc's stack" when the stack's use passes TCC_STACK_LIMIT, 16 KB below the end
+# (tcc compiling its own source used under 6 KB; about 135 levels of brackets fit): docs/limits.md
+STACK_tcc := 65536
 # boot (pid 1, built into the kernel image) lives for ever: its frames are under 500 bytes (-fstack-usage, 2026-10-26),
 # so 4 KB, the loader's least; it gave back the memory D15 cost in 1 MB of chip RAM (three sessions again)
 STACK_boot := 4096
@@ -1084,9 +1089,44 @@ $(BUILD)/zas.pzx: $(BUILD)/zas.cpuelf tools/mkzexe.py tools/check-68020-60.sh
 	tools/mkzexe.py $< $@ $(or $(STACK_zas),$(STACK_DEFAULT))
 $(BUILD)/zas.zx: $(BUILD)/zas.pzx
 	cp $< $@
+# ---- tcc, the C compiler (roadmap block 7, DESIGN D52 section 7; ports/tcc/README): TinyCC's source pinned unchanged in
+# ports/tcc/upstream, with Zenix's 68k back end and driver (ports/tcc/zenix: m68k-gen.c, m68k-link.c, zenix-driver.c)
+# and a patch (tcc.patch) put together in $(BUILD)/tcc/src. Two builds of it: the PC's cross compiler
+# ($(BUILD)/tcc/m68k-tcc, the host's cc: the tests compile with it) and /bin/tcc (UAPPS), a plain ZEXE program: tcc
+# folds constants in doubles, so libgcc's soft float, which a program with shared code cannot have (d52 9). Linked with
+# the floating-point printf. Its headers (stdarg.h, stddef.h, float.h, ...) go to /usr/lib/tcc/include in the
+# development package (tools/mkdevel.sh). ----
+TCC_SRC := $(BUILD)/tcc/src
+TCC_UP := $(wildcard ports/tcc/upstream/*.c ports/tcc/upstream/*.h ports/tcc/upstream/include/*.h)
+$(TCC_SRC)/.patched: $(TCC_UP) ports/tcc/upstream/stab.def $(wildcard ports/tcc/zenix/*) Makefile
+	rm -rf $(TCC_SRC) && mkdir -p $(TCC_SRC)/include
+	cp ports/tcc/upstream/*.c ports/tcc/upstream/*.h ports/tcc/upstream/stab.def ports/tcc/upstream/VERSION $(TCC_SRC)/
+	cp ports/tcc/upstream/include/*.h $(TCC_SRC)/include/
+	cp ports/tcc/zenix/*.c ports/tcc/zenix/config.h $(TCC_SRC)/
+	cd $(TCC_SRC) && patch -p1 -s --no-backup-if-mismatch <$(CURDIR)/ports/tcc/zenix/tcc.patch
+	touch $@
+# tccdefs.h (the predefined macros and builtins) as C strings in the program, by upstream's c2str (conftest.c)
+$(BUILD)/tcc/c2str: $(TCC_SRC)/.patched
+	cc -O2 -DC2STR -o $@ $(TCC_SRC)/conftest.c
+$(TCC_SRC)/tccdefs_.h: $(BUILD)/tcc/c2str $(TCC_SRC)/.patched
+	$(BUILD)/tcc/c2str $(TCC_SRC)/include/tccdefs.h $@
+TCC_DEPS := $(TCC_SRC)/.patched $(TCC_SRC)/tccdefs_.h
+# the PC's cross compiler (x86 to 68k ELF objects; it links with zld like /bin/tcc, see zenix-driver.c)
+$(BUILD)/tcc/m68k-tcc: $(TCC_DEPS)
+	cc -O2 -g -w -DTCC_TARGET_M68K -DONE_SOURCE=1 -I$(TCC_SRC) -o $@ $(TCC_SRC)/tcc.c -lm
+# /bin/tcc
+TCC_CFLAGS := $(LIBC_PFLAGS) -DTCC_TARGET_M68K -DONE_SOURCE=1 -DTCC_STACK_LIMIT=$$(($(STACK_tcc) - 16384)) \
+              -I$(TCC_SRC) -w
+$(BUILD)/tcc/tcc.o: $(TCC_DEPS) $(LIBC_HDRS)
+	$(CC) $(TCC_CFLAGS) -c $(TCC_SRC)/tcc.c -o $@
+$(BUILD)/tcc.celf: $(BUILD)/tcc/tcc.o $(BUILD)/crt0.o $(BUILD)/libc.a link/user.ld
+	$(CC) $(LIBC_PFLAGS) $(ULDFLAGS) $(LIBC_FLOATLD) $(BUILD)/crt0.o $(BUILD)/tcc/tcc.o $(BUILD)/libc.a $(LIBGCC) -o $@
+$(BUILD)/tcc.zx: $(BUILD)/tcc.celf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ $(STACK_tcc)
 # the development package's other files (DESIGN D52 section 2), staged for tools/mkzup.py's family devel
 $(BUILD)/devel/usr/lib/libc.a: $(BUILD)/libc.a $(BUILD)/libc-pure.a $(BUILD)/crt0.o $(BUILD)/crt0-pure.o link/user.ld \
-                               link/pure.ld $(LIBGCC) $(LIBC_HDRS) tools/mkdevel.sh
+                               link/pure.ld $(LIBGCC) $(LIBC_HDRS) tools/mkdevel.sh $(TCC_SRC)/.patched
 	tools/mkdevel.sh $(BUILD) $(LIBGCC)
 
 # ---- Ahiru, the owner's file manager (roadmap block 3; ports/ahiru/README): its upstream files and the CFile core's
