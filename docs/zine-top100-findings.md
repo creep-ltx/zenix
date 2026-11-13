@@ -700,3 +700,65 @@ with return code 1 after 314 s, its full length, on the 68030; the counting rule
 Top blockers now: 68020: does not fit (47), FPU instructions (43), black at the limit (23), not enough memory (13);
 68030: black (28), does not fit (18), not enough memory (15), "not enough memory in one piece" (7), MOVE16 (7); 68060:
 black (33), illegal instruction (10), return code 1 (3).
+
+## Round 10 (2026-11-13, branch zine10, d29 16.20)
+
+**The count made honest first.** The harness's `report.py` (beside the results, not in this repository) took a run
+that ended with code 0 (or after 60 s) as working even when the program had printed its own failure. Its `reason()`
+now reads the program's own lines in the serial log (ZINE's lines left out) and takes the run as failed when one of
+these reviewed phrases is among its last 6 lines, or anywhere when it ended within 60 s emulated: "CIA-timer could not
+be allocated"; "FPU required" / "requires a FPU" / "requires a math co-processor"; a checklist's "..... Failed";
+"needed] : FAILED"; "Requirement test failed"; "not supported" / "does not seem to meet"; "system_start() failed",
+"demo_init() failed", "cstart() failed"; "requires N mb fast", "Not enough memory", "out of memory", "Memory error",
+"Failed to allocate ... Aborting"; "Can't open X.library", "Could not initialize"; "Can't get image w name",
+"error in res_img", "Unknown layout". Never for a run that went on to the limit.
+
+On round 9's merged results this took out:
+- **68020** (16): Multiverse, Impossible, the castle, The Morning Trip, Grid 2, Beam Riders (AGA and OCS) (FPU);
+  Magia, Perfect Circle, Rift, Little Nell (The Black Lotus' engine out of memory); Relic ("Relic.dat ... Failed");
+  live axxion ("Memory error"); Pesso ("AGA not supported."); superautodrome 2 ("requires 4mb fast"); Melba
+  ("Can't open asl.library V39").
+- **68030** (21): Silkcut, Magia, Perfect Circle, Starstruck, Ocean Machine, Rift, Little Nell (TBL engine);
+  Software Make The Dance Foam Oil, Neonsky, Sojourn of the Soul, Dead Ahead, The Martini Effect (the Flex/Ephidrena
+  engine's start failed); Relic ("AGA chipset ... Failed"); Multiverse, Impossible, the castle (Loonies' "Not enough
+  memory"); The Morning Trip (CIA timer); live axxion (AHI); Pesso; superautodrome 2; Melba; Renouncetro ("[68040+
+  needed] : FAILED").
+- **68060** (13): Impossible, The Morning Trip (CIA timer); Starstruck, Rift, Brutalism, superautodrome 2 (memory);
+  Software Make The Dance Foam Oil, Sojourn of the Soul, Chips don't lie (a data file); live axxion (AHI); For real
+  (its speed test); Pesso; Melba.
+
+The screenshots of round 8's runs at the limit were gone (their folder was deleted after round 9), so 24, 28 and 30
+of those runs could not be judged again; their black ones are known by number (round 9's own count): 18, 21 and 21.
+**Round 9's honest baseline: 68020 246, 68030 302, 68060 354** (of 426; was 262, 324, 367 by the old rule).
+
+**Fixed in ZINE:** the CIA resources' own fields as Loonies' replayer reads them (the in-use mask 40 bytes in, the
+resource's Interrupt first in its chain 42 bytes in, the vectors 64 bytes in, a handler written there called);
+`ChipRevBits0` `$1F` on AGA (MLISA, as a real A1200 after SetPatch). The trace build dumps the program's memory.
+
+**What the dumps settled** (d29 16.20): Loonies' CIA check (fixed; The Morning Trip's clouds are hardware sprites,
+gone in a build with only the null sprite); Relic's AGA check (fixed); destroy fascism (the 68020's instruction
+cache, not memory: a 1993 intro copying code without a flush; runs with the cache off; a question for the owner);
+Lupus Reditus (plays its whole show and its end part, then its own timeline walk runs off its table about 7 minutes
+later: its own bug; screenshots show the show). **Not settled:** Beam Riders on the 68060 (a jump to `$100` from a
+callback in its own level 3 handler; the callback fell in a gap of the dump) and Jesus Christ Motocross on the 68060
+(an `rts` to 0, the user stack 12 bytes short at the end of its sine/sqrt precalc; the same routine in a test program
+runs right).
+
+### Round 10's reruns (2026-11-13, the same harness: 50 s for the 020 and 030, 120 s for the 060)
+
+On each machine: the named productions (Impossible, The Morning Trip, Relic, destroy fascism, Lupus Reditus, Beam
+Riders twice, Jesus Christ Motocross), every run the new rule takes out, every run at the limit whose screenshots were
+gone, and 15 working ones at random (57, 69 and 63 runs), laid over round 9's merged results.
+
+| Machine | Round 9 (honest) | Round 10 | Now working | No longer working |
+|---|---|---|---|---|
+| 68EC020, 8 MB fast | 246 | 246 | none | none |
+| 68030 + 68882, 16 MB fast | 302 | 303 | Relic, The Morning Trip | Cebit demo 90 (a call through a null base), No Sleeping! (illegal instruction): both fail with main's (round 9's) code too; their round 8 runs were at the limit |
+| 68060 with FPU, 64 MB fast | 354 | 356 | Impossible, The Morning Trip, Software Make The Dance Foam Oil (got past its data file this time) | Goon Royale (zero divide; the same with main's code) |
+
+Of the runs without screenshots, 18, 22 and 21 are black or failing now, as counted. Lupus Reditus on the 68060 is
+counted as crashed by the rule but plays its whole show. Impossible on the 68030 machine asks for 8,790 KB of fast RAM
+in one piece (that machine has two blocks of 8 MB); Relic on the 68020 machine lacks the memory for its data file.
+
+Also found: `tools/zine-input-test.sh`'s check "the input.device handler saw the key events (10 or more)" fails now
+and then with 9 on main as on this branch (2 of 4 runs on main): a flaky test, not settled.

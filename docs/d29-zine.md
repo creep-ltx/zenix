@@ -2289,6 +2289,11 @@ the blob's code 125,908 -> 126,588 bytes (the dump about 0.4 KB, called only in 
    no document on the clean-room list describes. May a public developer kit's interface files (for example the free
    NDK 3.2's includes and `.fd` files) be added to the list, for names and numbers only? [Yes, interface files only,
    never source.]
+5. (Round 10, 16.20.) An old 68000 production that copies code and runs it without flushing the instruction cache
+   (Angels' destroy fascism) crashes on a 68020+ with the cache on, as on a real A1200 without a "degrader". ZINE
+   cannot tell such a program in advance. Should ZINE offer a way to start a program with the caches off (an option
+   of `zine`, or the cache off until the program's first library call, which slows every packed program's unpacking
+   on a 68020 a little)? [Open.]
 
 ## 18. Reviews
 
