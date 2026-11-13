@@ -23,8 +23,8 @@ class Log:
 
     def status(self, name):
         """the exit status the script echoed as NAME=N (None if never)"""
-        m = re.search(r"(?:(?<!\w)|(?<=\x1b\[\?1049l))%s=(\d+)$" % name, self.text, re.M)   # (also right after
-        # the text-UI library's last escape)
+        m = re.search(r"(?:(?<!\w)|(?<=\x1b\[\?1049l))%s=(\d+)[^\d\n]?$" % name, self.text, re.M)   # (also right
+        # after the text-UI library's last escape; the next command's first letter may share the line: "sst=0z")
         return m and int(m.group(1))
 
     def memory(self, f, prog, label):
