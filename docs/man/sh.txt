@@ -81,7 +81,8 @@ LANGUAGE
                 $((1+2*3)) arithmetic (names, $name, ${name}, $1, $# inside
                 are their values);  ~ the home directory
     Wildcards:  * any text  ? one character  [abc] [a-z] [!a]
-                (names starting with . need a literal .)
+                (names starting with . need a literal .; a symbolic link
+                that leads nowhere matches too, as in bash)
     Braces:     pre{a,b}post gives preapost prebpost; {1..5} {a..e} {01..10}
                 {1..10..3} (not inside quotes)
     Pipes and lists:  a | b   a && b   a || b   a ; b   a &   ! a

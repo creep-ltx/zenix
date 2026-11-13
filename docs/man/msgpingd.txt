@@ -4,7 +4,8 @@ NAME
     msgpingd - test message server
 
 SYNOPSIS
-    msgpingd [-port NAME] [-call NAME] [-fs | -fsstall | -fsbad | -fslinked]
+    msgpingd [-port NAME] [-call NAME]
+             [-fs | -fsstall | -fsbad | -fslinked | -fsdir]
              [count]
 
 DESCRIPTION
@@ -38,6 +39,11 @@ DESCRIPTION
                 it, and unchanged to the rest; it answers its root, a
                 sync, a close and the quit (the kernel must refuse the
                 wrong ones with an I/O error: tools/mounttest.sh).
+    -fsdir      an older filesystem server (DESIGN D49): its root lists
+                ".", ".." and n00 .. n49 through FS_READDIR only and
+                answers FS_READDIRS "not known", so programs read it
+                one record a call (tools/readdir-test.sh).
+
     A development tool; see docs/architecture.md, "Ports and messages".
 
 SEE ALSO

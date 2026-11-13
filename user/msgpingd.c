@@ -13,13 +13,63 @@
  * FS_LINKED wrongly: FS_OPEN of anything but its root and /f -1025 (FSL_A1 for a one-path request: outside the table),
  * FS_READ and FS_READDIR -1024 (requests that never ask for it), anything else -1024 with the path left as it is (a
  * valid answer: the kernel goes on at that text, from /); its root opens as a directory, /f as a file; FS_ROOT 2,
- * FS_SYNC and FS_CLOSE 0, FS_QUIT ends it. */
+ * FS_SYNC and FS_CLOSE 0, FS_QUIT ends it. -fsdir: an older filesystem server (DESIGN D49's fallback): its root lists
+ * ".", ".." and n00 .. n49 (inodes 10 .. 59, files) through FS_READDIR only, FS_READDIRS is -ENOSYS as every
+ * request it does not know; FS_OPEN, FS_STAT, FS_LSTAT of the root or of a name, FS_FSTAT, FS_CLOSE, FS_SYNC, FS_QUIT. */
 #define FS_OPEN 1
 #define FS_READDIR 6
 #define FS_CLOSE 24
 #define FS_SYNC 13
 #define FS_ROOT 22
 #define FS_QUIT 23
+#define FS_STAT 4
+#define FS_FSTAT 5
+#define FS_LSTAT 19
+/* -fsdir's inode of PATH (from the root: "/", "", "." are the root, "nNN" and "/nNN" a file), 0 for none */
+static u32 fsdir_ino(const char *p)
+{
+    while (*p == '/') p++;
+    if (!*p || !strcmp(p, ".")) return 2;
+    if (p[0] == 'n' && p[1] >= '0' && p[1] <= '4' && p[2] >= '0' && p[2] <= '9' && !p[3]) return 10 + (u32)((p[1] - '0') * 10 + p[2] - '0');
+    return 0;
+}
+static void fsdir_stat(u32 ino, u32 *st)
+{
+    memset(st, 0, 28);                          /* struct ustat: ino, mode, size, mtime, uid, gid, links */
+    st[0] = ino; st[1] = ino == 2 ? 040755 : 0100644; st[2] = ino == 2 ? 0 : 3; st[3] = 1700000000; st[6] = 1;
+}
+static int fsdir(struct umsg *m)
+{
+    u32 ino;
+    switch (m->type) {
+    case FS_ROOT: return 2;
+    case FS_SYNC: case FS_CLOSE: return 0;
+    case FS_OPEN:
+        if (!(ino = fsdir_ino((const char *)m->a[0]))) return -2;
+        fsdir_stat(ino, (u32 *)m->a[3]);
+        return (int)ino;
+    case FS_STAT: case FS_LSTAT:
+        if (!(ino = fsdir_ino((const char *)m->a[0]))) return -2;
+        fsdir_stat(ino, (u32 *)m->a[2]);
+        return 0;
+    case FS_FSTAT:
+        if (m->a[0] != 2 && (m->a[0] < 10 || m->a[0] > 59)) return -116;
+        fsdir_stat(m->a[0], (u32 *)m->a[1]);
+        return 0;
+    case FS_READDIR: {
+        struct udirent *d = (struct udirent *)m->a[2];
+        u32 c = m->a[1];
+        if (m->a[0] != 2) return -20;
+        if (c >= 52) { *(u32 *)m->a[3] = 52; return 0; }
+        memset(d, 0, sizeof *d);
+        if (c < 2) { strcpy(d->name, c ? ".." : "."); d->ino = 2; d->type = 2; }
+        else { d->name[0] = 'n'; d->name[1] = (char)('0' + (c - 2) / 10); d->name[2] = (char)('0' + (c - 2) % 10); d->ino = 8 + c; d->type = 1; }
+        *(u32 *)m->a[3] = c + 1;
+        return 1;
+    }
+    }
+    return -38;                                 /* FS_READDIRS too: the fallback is tested with this */
+}
 int main(int argc, char **argv)
 {
     const char *pname = "ping";
@@ -30,6 +80,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-fsbad")) fs = 2;
         else if (!strcmp(argv[i], "-fsstall")) fs = 4;
         else if (!strcmp(argv[i], "-fslinked")) fs = 3;
+        else if (!strcmp(argv[i], "-fsdir")) fs = 5;
         else if (!strcmp(argv[i], "-call") && i + 1 < argc) {
             struct umsg c;
             memset(&c, 0, sizeof c);
@@ -44,6 +95,8 @@ int main(int argc, char **argv)
     for (;;) {
         if ((int)m == -1) return 1;
         int r = 0;
+        if (fs == 5 && m->type == FS_QUIT) { sys_reply(m, 0); return 0; }
+        if (fs == 5) { m = sys_replyrecv(m, fsdir(m), port); continue; }
         if (fs) {
             if (m->type == FS_SYNC && fs != 3) for (;;) sys_sleep(100);
             if (fs == 4 && m->type != FS_ROOT && m->type != FS_CLOSE && m->type != FS_QUIT) for (;;) sys_sleep(100);

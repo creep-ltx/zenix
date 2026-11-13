@@ -65,11 +65,12 @@ static void bench_fsstat(void)
 
 static void bench_ipc(void)
 {
-    int pid = sys_spawn("/bin/pingd", 0, 0);
-    if (pid < 0) { dprintf(1, "(no pingd, skipping ipc)\n"); return; }
+    static char *const av[] = { "msgpingd", "-port", "bping", 0 };     /* its own port: "ping" may be a service */
+    int pid = sys_spawn("/bin/msgpingd", av, 0);
+    if (pid < 0) { dprintf(1, "(no msgpingd, skipping ipc)\n"); return; }
     int port, tries = 0;
-    while ((port = sys_port_find("ping")) < 0 && ++tries < 200) sys_sleep(1);
-    if (port < 0) return;
+    while ((port = sys_port_find("bping")) < 0 && ++tries < 200) sys_sleep(1);
+    if (port < 0) { sys_kill(pid); sys_wait(pid); return; }
     struct umsg m;
     m.type = 1; m.a[0] = 1; m.a[1] = 2;
     sys_call(port, &m);
@@ -224,8 +225,117 @@ static void bench_malloc(void)
     report("malloc + free, 300-3,800 bytes", e, n / 8 * 8);
 }
 
-int main(void)
+/* bench dir PATH (docs/d49-readdir.md 2 and 9): where a directory listing's time goes, and the two ways of reading it
+ * checked against each other. Timed: the null call, a trip to the directory's server with little work (fstat of the
+ * open directory), a plain message trip (msgpingd), one record a call (SYS_readdir), the batches (libz's zdir over
+ * SYS_readdirs), an lstat of every name (what ls did per name), the first and the last name's lstat. Checked: the same
+ * names in the same order with the same inodes both ways, a type the same or the old one 0, every stat a batch gave
+ * equal to lstat's (28 bytes), none on "." and "..", SYS_readdirs' -EINVAL for a buffer of 103 bytes and for one not
+ * 4-aligned, one record in 104 bytes. "bench dir: identical, N records, S stats" and status 0, else "bench dir: BAD"
+ * lines and status 1. With -q only the checks (no timing lines). */
+static int bench_dirpath(const char *path, int quiet)
 {
+    struct ustat st;
+    int fd = sys_open(path, O_RDONLY), r, n = 0, cap = 64, bad = 0, nst = 0;
+    if (fd < 0) { dprintf(2, "bench: %s: %s\n", path, zstrerror(fd)); return 1; }
+    struct udirent *v = malloc((u32)cap * sizeof *v);
+    if (!v) return 1;
+    u32 t0 = sys_hrtime();
+    while ((r = sys_readdir(fd, &v[n])) > 0)
+        if (++n == cap) { struct udirent *nv = realloc(v, (u32)(cap *= 2) * sizeof *v); if (!nv) return 1; v = nv; }
+    u32 e_old = sys_hrtime() - t0;
+    if (r < 0) { dprintf(2, "bench: %s: %s\n", path, zstrerror(r)); return 1; }
+    t0 = sys_hrtime();
+    struct zdir *z = zdir_open(path);
+    const struct udirx *x;
+    int k = 0;
+    struct ustat *xs = malloc((u32)(n + 1) * sizeof *xs);
+    char *hx = calloc((u32)n + 1, 1);
+    if (!z || !xs || !hx) { dprintf(2, "bench: %s: %s\n", path, zwhy("cannot open")); return 1; }
+    while ((x = zdir_next(z))) {
+        if (k < n && (strcmp(x->name, v[k].name) || x->ino != v[k].ino || (v[k].type && x->type != v[k].type))) {
+            dprintf(1, "bench dir: BAD record %d: %s #%u type %u, one by one %s #%u type %u\n", k, x->name, x->ino, x->type, v[k].name, v[k].ino, v[k].type);
+            bad = 1;
+        }
+        if (k < n && (x->flags & UDX_STAT)) { memcpy(&xs[k], &x->st, sizeof xs[k]); hx[k] = 1; }
+        k++;
+    }
+    u32 e_new = sys_hrtime() - t0;
+    if (zdir_err(z)) { dprintf(1, "bench dir: BAD the batches ended with %s\n", zstrerror(zdir_err(z))); bad = 1; }
+    zdir_close(z);
+    if (k != n) { dprintf(1, "bench dir: BAD %d records in batches, %d one by one\n", k, n); bad = 1; }
+    t0 = sys_hrtime();
+    for (int i = 0; i < n; i++) {
+        char *full = path_join(path, v[i].name);
+        int le = full ? sys_lstat(full, &st) : -ENAMETOOLONG;
+        int dot = v[i].name[0] == '.' && (!v[i].name[1] || (v[i].name[1] == '.' && !v[i].name[2]));
+        if (hx[i] && (dot || le < 0 || memcmp(&st, &xs[i], sizeof st))) {
+            dprintf(1, "bench dir: BAD %s: the batch's stat (mode %o size %u ino %u) is not lstat's (%d: mode %o size %u ino %u)\n",
+                    v[i].name, xs[i].mode, xs[i].size, xs[i].ino, le, st.mode, st.size, st.ino);
+            bad = 1;
+        }
+        nst += hx[i];
+        free(full);
+    }
+    u32 e_lstat = sys_hrtime() - t0;
+    {   /* the call's own checks: a buffer too small, one not 4-aligned, the smallest that holds one record */
+        static u32 b[64];
+        sys_lseek(fd, 0, 0);
+        int r1 = sys_readdirs(fd, b, 103), r2 = sys_readdirs(fd, (char *)b + 2, 200), r3 = sys_readdirs(fd, b, 104);
+        int nosys = r3 == -ENOSYS;
+        if (!nosys && (r1 != -EINVAL || r2 != -EINVAL || r3 <= 0 || r3 > 104 || !udirx_step((struct udirx *)b, (u32)r3))) {
+            dprintf(1, "bench dir: BAD SYS_readdirs: 103 bytes %d, an odd buffer %d, 104 bytes %d\n", r1, r2, r3);
+            bad = 1;
+        }
+        if (nosys && !quiet) dprintf(1, "bench dir: the directory's server reads one record a call (-ENOSYS: libz's old path)\n");
+    }
+    if (!quiet) {
+        dprintf(1, "dir %s: %d records\n", path, n);
+        report("readdir, one record a call", e_old, (u32)n);
+        report("readdir in batches (zdir)", e_new, (u32)n);
+        report("lstat of every name", e_lstat, (u32)n);
+        {   /* the call alone, without libz: its records counted, nothing looked at */
+            static u32 b[512];
+            u32 recs = 0;
+            sys_lseek(fd, 0, 0);
+            t0 = sys_hrtime();
+            while ((r = sys_readdirs(fd, b, sizeof b)) > 0)
+                for (u32 o = 0, st; o < (u32)r && (st = udirx_step((struct udirx *)((char *)b + o), (u32)r - o)); o += st) recs++;
+            if (r == 0) report("SYS_readdirs alone, 2 KB a call", sys_hrtime() - t0, recs);
+            else dprintf(1, "SYS_readdirs alone: %d after %u records\n", r, recs);
+        }
+        t0 = sys_hrtime();
+        for (int i = 0; i < 5000; i++) sys_getpid();
+        report("null system call (getpid)", sys_hrtime() - t0, 5000);
+        t0 = sys_hrtime();
+        for (int i = 0; i < 300 && !nfail; i++) if ((r = sys_fstat(fd, &st)) < 0) failed("fstat", path, r);
+        report_checked("fstat of the directory (a trip)", sys_hrtime() - t0, 300);
+        bench_ipc();
+        char *fn = 0, *ln = 0;
+        for (int i = 0; i < n; i++)
+            if (strcmp(v[i].name, ".") && strcmp(v[i].name, "..")) { free(ln); ln = path_join(path, v[i].name); if (!fn && ln) fn = strdup(ln); }
+        if (fn && ln) {
+            t0 = sys_hrtime();
+            for (int i = 0; i < 50 && !nfail; i++) if ((r = sys_lstat(fn, &st)) < 0) failed("lstat", fn, r);
+            report_checked("lstat of the first name", sys_hrtime() - t0, 50);
+            t0 = sys_hrtime();
+            for (int i = 0; i < 50 && !nfail; i++) if ((r = sys_lstat(ln, &st)) < 0) failed("lstat", ln, r);
+            report_checked("lstat of the last name", sys_hrtime() - t0, 50);
+        }
+        free(fn); free(ln);
+    }
+    sys_close(fd);
+    free(v); free(xs); free(hx);
+    if (!bad) dprintf(1, "bench dir: identical, %d records, %d stats\n", n, nst);
+    return bad;
+}
+
+int main(int argc, char **argv)
+{
+    if (argc >= 3 && !strcmp(argv[1], "dir")) {
+        int q = argc == 4 && !strcmp(argv[2], "-q");
+        return bench_dirpath(argv[2 + q], q);
+    }
     dprintf(1, "Zenix benchmark (E-clock %u Hz)\n", E_HZ);
     bench_cpu();
     bench_syscall();

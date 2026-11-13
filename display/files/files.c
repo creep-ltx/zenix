@@ -154,26 +154,24 @@ static int list_find(const struct list *l, const char *name)
 static int list_read(struct list *l, const char *dir)
 {
     memset(l, 0, sizeof *l);
-    int fd = sys_open(dir, O_RDONLY);
-    if (fd < 0)
-        return fd;
+    struct zdir *z = zdir_open(dir);    /* the records in batches, each with its lstat where given (DESIGN D49) */
+    if (!z)
+        return -zerrno;
     l->dir = strdup(dir);
     l->cap = 64;
     l->pcap = 2048;
     l->e = malloc((u32)l->cap * sizeof *l->e);
     l->pool = malloc(l->pcap);
     if (!l->dir || !l->e || !l->pool) {
-        sys_close(fd);
+        zdir_close(z);
         list_free(l);
         return -ENOMEM;
     }
-    struct udirent d;
-    int r;
-    while ((r = sys_readdir(fd, &d)) > 0) {
-        d.name[sizeof d.name - 1] = 0;
-        if (d.name[0] == '.' && (!hidden || !d.name[1] || (d.name[1] == '.' && !d.name[2])))
+    const struct udirx *d;
+    while ((d = zdir_next(z))) {
+        if (d->name[0] == '.' && (!hidden || !d->name[1] || (d->name[1] == '.' && !d->name[2])))
             continue;
-        u32 nl = (u32)strlen(d.name) + 1;
+        u32 nl = (u32)strlen(d->name) + 1;
         if (l->n == MAXENT || l->used + nl > MAXPOOL) {
             l->cut = 1;
             break;
@@ -194,14 +192,22 @@ static int list_read(struct list *l, const char *dir)
         struct ent *e = &l->e[l->n];
         memset(e, 0, sizeof *e);
         e->name = l->used;
-        memcpy(l->pool + l->used, d.name, nl);
+        memcpy(l->pool + l->used, d->name, nl);
         l->used += nl;
-        e->type = d.type == 1 || d.type == 2 || d.type == 7 ? (u8)d.type : d.type ? 1 : 0;
-        if (!e->type)
+        e->type = d->type == 1 || d->type == 2 || d->type == 7 ? (u8)d->type : d->type ? 1 : 0;
+        if (d->flags & UDX_STAT) {      /* what ent_stat would ask: no lstat for this row */
+            e->size = d->st.size;
+            e->mtime = d->st.mtime;
+            e->mode = (u16)d->st.mode;
+            e->uid = (u16)d->st.uid;
+            e->fl = F_STAT;
+            if (!e->type)
+                e->type = (d->st.mode & S_IFMT) == S_IFDIR ? 2 : (d->st.mode & S_IFMT) == S_IFLNK ? 7 : 1;
+        } else if (!e->type)
             ent_stat(l, l->n);          /* a filesystem that does not say (ext2 without the file-type feature) */
         l->n++;
     }
-    sys_close(fd);
+    zdir_close(z);
     list_sort(l);
     return 0;
 }

@@ -5,6 +5,7 @@ NAME
 
 SYNOPSIS
     bench
+    bench dir [-q] DIRECTORY
 
 DESCRIPTION
     Times a set of operations with the CIA E-clock (709,379 Hz on PAL, far
@@ -27,6 +28,17 @@ DESCRIPTION
     create and delete lines need a writable /tmp; their files are written
     through to the disk before each call returns (no write-back cache), so
     on a real disk they take milliseconds, not microseconds.
+
+    bench dir DIRECTORY reads the directory both ways (DESIGN D49): one
+    record a call (readdir) and in batches (readdirs, through libz), and
+    checks that both give the same names, inodes and order, that every
+    stat a batch gave is what lstat answers, and the call's own refusals
+    (a buffer under 104 bytes or not 4-aligned). It prints the times of
+    both, of an lstat of every name, the null call, a trip to the
+    directory's server (fstat), a plain message trip (msgpingd), and an
+    lstat of the first and the last name; then "bench dir: identical, N
+    records, S stats" and status 0, or "bench dir: BAD" lines and status
+    1. -q: only the checks.
 
     Numbers taken in an emulator are NOT hardware numbers. Run it on the real
     Amiga and write the result down with the date.

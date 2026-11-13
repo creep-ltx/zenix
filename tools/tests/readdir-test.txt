@@ -1,0 +1,31 @@
+wait zenix:/# 150
+sleep 1
+send mkdir /tmp/big /tmp/mid; for i in $(seq 1 500); do : > /tmp/big/f$i; done; mkdir /tmp/big/sub; ln -s f1 /tmp/big/lnk; echo made-$((40+2))\r
+wait made-42 900
+send for i in $(seq 1 40); do echo $i > /tmp/mid/m$i; done; mkdir /tmp/mid/sub /tmp/mid/mnt; ln -s m1 /tmp/mid/lnk; ln -s /nowhere /tmp/mid/dangle; chmod 750 /tmp/mid/m3; echo mid-$((40+2))\r
+wait mid-42 300
+send svctest reg rd 0 /bin/msgpingd -port rd -fsdir; svctest mount rd /tmp/mid/mnt; echo M-$?-done\r
+wait M-\d+-done 120
+send bench dir /tmp/big; echo B-$?-done\r
+wait B-\d+-done 900
+send bench dir -q /tmp/mid; echo D-$?-done\r
+wait D-\d+-done 300
+send bench dir /tmp/mid/mnt; echo F-$?-done\r
+wait F-\d+-done 300
+send cd /tmp/mid; ls > /tmp/l1; ls -d * > /tmp/l2; cmp /tmp/l1 /tmp/l2; echo C1-$?-done; diff /tmp/l1 /tmp/l2 | head -4\r
+wait C1-\d+-done 300
+send ls -l > /tmp/l3; ls -ld * > /tmp/l4; cmp /tmp/l3 /tmp/l4; echo C2-$?-done; diff /tmp/l3 /tmp/l4 | head -4\r
+wait C2-\d+-done 300
+send ls -laF > /tmp/l5; ls -ldaF . .. * > /tmp/l6; sort /tmp/l5 > /tmp/l5s; sort /tmp/l6 > /tmp/l6s; cmp /tmp/l5s /tmp/l6s; echo C3-$?-done; diff /tmp/l5s /tmp/l6s | head -4\r
+wait C3-\d+-done 300
+send echo W-$(ls /tmp/big | wc -l)-$(ls mnt | wc -l)-$(echo /tmp/big/f* | wc -w)-$(ls -l mnt | grep -c '^-rw-r--r-- ')-done\r
+wait W-[\d-]+-done 600
+send cd /; echo T-ls; time ls /tmp/big > /dev/null\r
+wait real\s+\d+m[\d.]+s 900
+send echo T-lsl; time ls -l /tmp/big > /dev/null\r
+wait real\s+\d+m[\d.]+s 900
+send echo T-find; time find /tmp/big > /dev/null\r
+wait real\s+\d+m[\d.]+s 900
+send umount /tmp/mid/mnt; svctest rm rd; sync; echo END-$((1+1))\r
+wait END-2 120
+stop

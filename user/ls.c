@@ -110,9 +110,12 @@ static void show(struct ent *v, int n)
     }
 }
 static int fill_bad;
-static void fill(struct ent *e, const char *path)
+/* GIVEN: the name's lstat from its directory's listing (DESIGN D49), else 0: asked here */
+static void fill(struct ent *e, const char *path, const struct ustat *given)
 {
-    int le = sys_lstat(path, &e->st);
+    int le = 0;
+    if (given) e->st = *given;
+    else le = sys_lstat(path, &e->st);
     if (le < 0) {
         memset(&e->st, 0, sizeof e->st);
         if (le != -ENOENT) { dprintf(2, "ls: %s: %s\n", path, zstrerror(le)); fill_bad = 1; }   /* there but out of reach (a path too long) */
@@ -129,23 +132,26 @@ static int list(const char *path, int top)
     int isdir = (st.mode & S_IFMT) == S_IFDIR;
     if (!isdir && (st.mode & S_IFMT) == S_IFLNK && !o_l && !o_d) { struct ustat t; if (sys_stat(path, &t) == 0 && (t.mode & S_IFMT) == S_IFDIR) { isdir = 1; st = t; } }
     if (!isdir || o_d) {
-        struct ent *e = xmalloc(sizeof *e); e->name = path; fill(e, path); show(e, 1); free(e); return 0;
+        struct ent *e = xmalloc(sizeof *e); e->name = path; fill(e, path, 0); show(e, 1); free(e); return 0;
     }
     if (multi || o_R) { if (printed_any) oputc('\n'); oprintf("%s:\n", path); }
     printed_any = 1;
     (void)top;
     /* the names come from the heap and grow as needed (libz dir_list): no limit but memory, and running out says so */
-    char **names; int rerr, nn = dir_list_some(path, &names, &rerr);
+    char **names; struct ustat *sts; int rerr, nn = dir_list_stat(path, &names, &sts, &rerr);   /* stats where given (D49) */
     if (nn < 0) { dprintf(2, "ls: %s: %s\n", path, zwhy("cannot open")); return 1; }
     struct ent *v = malloc(((u32)nn + 2) * sizeof(struct ent));
-    if (!v) { dprintf(2, "ls: %s: out of memory (%d names)\n", path, nn); dir_free(names, nn); return 1; }
+    if (!v) { dprintf(2, "ls: %s: out of memory (%d names)\n", path, nn); dir_free(names, nn); free(sts); return 1; }
     int n = 0;
+    u32 plen = (u32)strlen(path) + 1;
     for (int k = o_a ? -2 : 0; k < nn; k++) {          /* -a: . and .. too (dir_list leaves them out) */
         const char *nm = k == -2 ? "." : k == -1 ? ".." : names[k];
         if (k >= 0 && nm[0] == '.' && !o_a && !o_A) continue;
         struct ent *e = &v[n++]; e->name = nm;              /* names lives until v goes */
-        char *full = path_join(path, nm);
-        if (full) fill(e, full); else { memset(&e->st, 0, sizeof e->st); e->islink = 0; e->link[0] = 0; dprintf(2, "ls: %s/%s: %s\n", path, nm, zwhy("cannot read")); }
+        const struct ustat *given = k >= 0 && sts && sts[k].mode ? &sts[k] : 0;
+        if (given && (given->mode & S_IFMT) != S_IFLNK && plen + strlen(nm) < ZPATH_MAX - 1) { fill(e, nm, given); continue; }
+        char *full = path_join(path, nm);   /* (no stat given, a link's target to read, or a path too long: as before) */
+        if (full) fill(e, full, given); else { memset(&e->st, 0, sizeof e->st); e->islink = 0; e->link[0] = 0; dprintf(2, "ls: %s/%s: %s\n", path, nm, zwhy("cannot read")); }
         free(full);
     }
     show(v, n);
@@ -163,6 +169,7 @@ static int list(const char *path, int top)
                 free(full);
             }
     dir_free(names, nn);
+    free(sts);
     free(v);
     return rc;
 }
@@ -198,7 +205,7 @@ int main(int argc, char **argv)
         int isdir = (st.mode & S_IFMT) == S_IFDIR;
         if ((st.mode & S_IFMT) == S_IFLNK && !o_l && !o_d) { struct ustat t; if (sys_stat(a, &t) == 0 && (t.mode & S_IFMT) == S_IFDIR) isdir = 1; }
         struct ent *e = (isdir && !o_d) ? &dirs[nd++] : &files[nf++];
-        e->name = a; fill(e, a);
+        e->name = a; fill(e, a, 0);
     }
     if (nf) { show(files, nf); printed_any = 1; }
     qsort(dirs, (u32)nd, sizeof(struct ent), cmp);

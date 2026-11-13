@@ -183,7 +183,6 @@ static int is_name_c(int c, int first) { return c == '_' || (c >= 'a' && c <= 'z
 static void utoa(u32 v, char *b) { char t[12]; int i = 0; do { t[i++] = (char)('0' + v % 10); v /= 10; } while (v); int k = 0; while (i) b[k++] = t[--i]; b[k] = 0; }
 static int path_is_dir(const char *p) { struct ustat st; return sys_stat(p, &st) == 0 && (st.mode & S_IFMT) == S_IFDIR; }
 static int path_is_file(const char *p) { struct ustat st; return sys_stat(p, &st) == 0 && (st.mode & S_IFMT) == S_IFREG; }
-static int path_exists(const char *p) { struct ustat st; return sys_stat(p, &st) == 0; }
 
 static char *file_slurp(const char *path, u32 *len)
 {
@@ -369,25 +368,27 @@ static int add_match(char **m, int n, int max, const char *s)
 
 static int complete_dir(char **m, int n, int max, const char *dir, const char *base, int dirs_only_slash, int cmd_only_exec)
 {
-    int fd = sys_open(dir[0] ? dir : ".", O_RDONLY);
-    if (fd < 0) return n;
-    struct udirent d;
+    struct zdir *z = zdir_open(dir[0] ? dir : ".");      /* in batches, with each name's lstat (DESIGN D49) */
+    if (!z) return n;
+    const struct udirx *d;
     u32 bl = strlen(base);
     u32 dl = strlen(dir);
-    while (sys_readdir(fd, &d) > 0) {
-        if (strncmp(d.name, base, bl)) continue;
-        if (d.name[0] == '.' && base[0] != '.') continue;
-        u32 nl = strlen(d.name);
+    while ((d = zdir_next(z))) {
+        if (strncmp(d->name, base, bl)) continue;
+        if (d->name[0] == '.' && base[0] != '.') continue;
+        u32 nl = strlen(d->name);
         if (dl + nl + 2 > 200 || nl + 2 > 100) continue;    /* longer than any path a system call takes: not offered */
         char full[200];
-        memcpy(full, dir, dl); memcpy(full + dl, d.name, nl + 1);
-        char cand[100]; memcpy(cand, d.name, nl + 1);
-        int isdir = path_is_dir(full);
-        if (cmd_only_exec && !isdir && !path_is_file(full)) continue;
+        memcpy(full, dir, dl); memcpy(full + dl, d->name, nl + 1);
+        char cand[100]; memcpy(cand, d->name, nl + 1);
+        u32 fmt = d->st.mode & S_IFMT;                  /* a link's (or no stat): asked as before, followed */
+        int known = (d->flags & UDX_STAT) && fmt != S_IFLNK;
+        int isdir = known ? fmt == S_IFDIR : path_is_dir(full);
+        if (cmd_only_exec && !isdir && !(known ? fmt == S_IFREG : path_is_file(full))) continue;
         if (isdir && dirs_only_slash) { u32 l = strlen(cand); cand[l] = '/'; cand[l + 1] = 0; }
         n = add_match(m, n, max, cand);
     }
-    sys_close(fd);
+    zdir_close(z);
     return n;
 }
 
@@ -1400,7 +1401,7 @@ static void glob_rec(const char *pat, const u8 *q, u32 n, u32 pos, const char *p
 {
     if (stack_low()) { errm("wildcard", "nested too deeply"); ex_error = 1; return; }
     while (pos < n && pat[pos] == '/') pos++;
-    if (pos >= n) { if (path_exists(prefix)) wv_push(out, adup(prefix)); return; }
+    if (pos >= n) { struct ustat st; if (sys_lstat(prefix, &st) == 0) wv_push(out, adup(prefix)); return; }   /* (lstat: a dangling link is there) */
     u32 e = pos; while (e < n && pat[e] != '/') e++;
     int last = (e >= n);
     if (!has_glob(pat + pos, q + pos, e - pos)) {
@@ -1411,22 +1412,24 @@ static void glob_rec(const char *pat, const u8 *q, u32 n, u32 pos, const char *p
         glob_rec(pat, q, n, e, np, out);
         return;
     }
-    int fd = sys_open(prefix[0] ? prefix : ".", O_RDONLY);
-    if (fd < 0) return;
-    struct udirent d;
+    struct zdir *z = zdir_open(prefix[0] ? prefix : ".");   /* in batches (DESIGN D49) */
+    if (!z) return;
+    const struct udirx *d;
     struct words found; wv_init(&found, 16);
-    while (sys_readdir(fd, &d) > 0) {
-        if (d.name[0] == '.' && pat[pos] != '.') continue;
-        if (!strcmp(d.name, ".") || !strcmp(d.name, "..")) continue;
-        if (gm(pat + pos, q + pos, (int)(e - pos), d.name)) wv_push(&found, adup(d.name));
+    while ((d = zdir_next(z))) {
+        if (d->name[0] == '.' && pat[pos] != '.') continue;
+        if (!strcmp(d->name, ".") || !strcmp(d->name, "..")) continue;
+        if (gm(pat + pos, q + pos, (int)(e - pos), d->name)) wv_push(&found, adup(d->name));
     }
-    sys_close(fd);
+    zdir_close(z);
     sort_strs(found.v, found.n);
     for (int i = 0; i < found.n; i++) {
         char np[300]; u32 pl = strlen(prefix), fl = strlen(found.v[i]);
         if (pl + fl + 3 > sizeof np) continue;              /* longer than any path a system call takes (63) */
         memcpy(np, prefix, pl); memcpy(np + pl, found.v[i], fl); np[pl + fl] = 0;
-        if (!last) { if (!path_is_dir(np)) continue; np[pl + fl] = '/'; np[pl + fl + 1] = 0; }
+        if (last) { wv_push(out, adup(np)); continue; }   /* a name the listing gave: there (a dangling link too, as bash) */
+        if (!path_is_dir(np)) continue;
+        np[pl + fl] = '/'; np[pl + fl + 1] = 0;
         glob_rec(pat, q, n, e, np, out);
     }
 }

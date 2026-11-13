@@ -68,6 +68,10 @@ NOTES
     one); names are bytes and are printed as they are.
     A directory that cannot be read to its end (a damaged disk) shows what
     could be read, says why on stderr and exits 1.
+    A directory is read in batches, each name with its lstat where the
+    filesystem gives it (DESIGN D49: no second request a name; a symbolic
+    link's target is still read); an older kernel or filesystem server is
+    read one name a call, as before, with the same output.
     A directory of any size is listed: the names are kept in memory, and
     if memory runs out ls says "out of memory" and exits with 1.
     An access the user is not allowed is reported as "permission denied".

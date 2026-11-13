@@ -92,17 +92,20 @@ static void size_checks(void)
     int fd = sys_open("/", O_RDONLY);
     ok = fd >= 0;
     for (u32 big = 0; big <= 100; big += 100) {         /* size 0 (an old program), then one bigger than every struct */
-        ok = ok && !fill() && sys3(13, (u32)"/", (u32)gb, big) == 0 && written(sizeof(struct ustat));
-        ok = ok && !fill() && sys3(57, (u32)"/", (u32)gb, big) == 0 && written(sizeof(struct ustat));
-        ok = ok && !fill() && sys3(14, (u32)fd, (u32)gb, big) == 0 && written(sizeof(struct ustat));
+        u32 sw = big ? sizeof(struct ustat2) : sizeof(struct ustat);   /* D49 8: a big buffer gets the device too */
+        ok = ok && !fill() && sys3(13, (u32)"/", (u32)gb, big) == 0 && written(sw);
+        ok = ok && !fill() && sys3(57, (u32)"/", (u32)gb, big) == 0 && written(sw);
+        ok = ok && !fill() && sys3(14, (u32)fd, (u32)gb, big) == 0 && written(sw);
         ok = ok && !fill() && sys3(12, (u32)fd, (u32)gb, big) > 0 && written(sizeof(struct udirent));
         ok = ok && !fill() && sys3(43, (u32)gb, 0, big) == 0 && written(sizeof(struct ustatfs));
         ok = ok && !fill() && sys3(71, 0, (u32)gb, big) == 0 && written(sizeof(struct umountinfo));
         ok = ok && !fill() && sys3(22, (u32)gb, big, 0) == 0 && written(16);
     }
     ok = ok && !fill() && sys3(13, (u32)"/", (u32)gb, 4) == -EINVAL && sys3(22, (u32)gb, 4, 0) == -EINVAL && written(0);
+    ok = ok && !fill() && sys3(13, (u32)"/", (u32)gb, 31) == 0 && written(28);   /* D49 8: 29-31 get the 28 */
+    ok = ok && !fill() && sys3(13, (u32)"/", (u32)gb, 32) == 0 && written(32) && ((u32 *)gb)[7] == 1;   /* the root's device 1 */
     if (fd >= 0) sys_close(fd);
-    check("stat, lstat, fstat, readdir, statfs, mountinfo, meminfo: size 0 or bigger writes the struct only; smaller -EINVAL", ok);
+    check("stat, lstat, fstat, readdir, statfs, mountinfo, meminfo: size 0 or bigger writes the struct only; smaller -EINVAL; stat 28 or 32 (the device 1 on the root)", ok);
     int disk = sys_port_find("disk");
     ok = disk >= 0 && !fill() && call(disk, DISK_LIST, 0, (u32)gb, 0x7FFF, 0) == 0 && written(DISKINFO_FIRST);
     ok = ok && !fill() && call(disk, DISK_LISTSZ, 0, (u32)gb, sizeof gb, 0) == 0 && written(sizeof(struct diskinfo));
