@@ -4,7 +4,7 @@ NAME
     term - the terminal window of Zenix Desktop
 
 SYNOPSIS
-    term [-r ROWS] [-c COLUMNS] [-p X,Y] [-e COMMAND [ARGUMENTS]]
+    term [-H] [-r ROWS] [-c COLUMNS] [-p X,Y] [-e COMMAND [ARGUMENTS]]
 
 DESCRIPTION
     A window on the desktop (zdesk(1)) with the user's shell ($SHELL, else
@@ -27,7 +27,11 @@ DESCRIPTION
     costs a few redraws a second, never one a line. Its menu (in the
     bar): Window, New terminal and Close. Closing the window
     hangs the pty up (SIGHUP to the program); the window goes when the
-    program ends.
+    program ends, or with -H (hold, as xterm's -hold) stays, its title
+    saying "(ended: a key closes)", until a key (one that types, or
+    Return or Esc) or the close gadget:
+    files(1) opens text and runs programs that way, so a short text that
+    less just prints, or a program's last words, can be read.
 
 OPTIONS
     -r ROWS     the rows at first (4 to 29, 22 NTSC, 32 interlaced; 24)
@@ -37,6 +41,8 @@ OPTIONS
                 choice); zdesk keeps it inside the screen
     -e COMMAND  run COMMAND instead of a shell (the rest of the line are
                 its arguments)
+    -H          hold: the window stays when the program ends, until a key
+                or the close gadget
 
 NOTES
     At most 80 columns: the console's cell model keeps rows of 80. A wide

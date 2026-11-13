@@ -266,9 +266,10 @@ static void menu(const struct dpyev *e)
 int main(int argc, char **argv)
 {
     char **cmd = 0;
-    int px = -1, py = -1;
+    int px = -1, py = -1, hold = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-e") && i + 1 < argc) { cmd = &argv[i + 1]; break; }
+        if (!strcmp(argv[i], "-H")) { hold = 1; continue; }
         if (!strcmp(argv[i], "-r") && i + 1 < argc) { rows = atoi(argv[++i]); continue; }
         if (!strcmp(argv[i], "-c") && i + 1 < argc) { cols = atoi(argv[++i]); continue; }
         if (!strcmp(argv[i], "-p") && i + 1 < argc && strchr(argv[i + 1], ',')) {
@@ -276,7 +277,7 @@ int main(int argc, char **argv)
             if (px < 0 || py < 0) px = py = -1;
             continue;
         }
-        dprintf(2, "usage: term [-r ROWS] [-c COLUMNS] [-p X,Y] [-e COMMAND [ARGUMENTS]]\n");
+        dprintf(2, "usage: term [-H] [-r ROWS] [-c COLUMNS] [-p X,Y] [-e COMMAND [ARGUMENTS]]\n");
         return 2;
     }
     if (cols < 20) cols = 20;
@@ -371,8 +372,11 @@ int main(int argc, char **argv)
             continue;
         if (p[1].revents & (POLLIN | POLLHUP)) {
             int n = sys_read(m, buf, sizeof buf);
-            if (n <= 0 && n != -EAGAIN)
+            if (n <= 0 && n != -EAGAIN) {
+                if (hold)               /* -H: the window stays until a key or its close gadget (xterm -hold) */
+                    hold = 2;
                 break;                  /* the program ended: the window goes */
+            }
             if (n > 0) {
                 for (int at = 0; at < n; at += 256) {   /* the cells' work in pieces: a showing between them */
                     m_write(buf + at, (unsigned)(n - at < 256 ? n - at : 256));
@@ -415,6 +419,27 @@ int main(int argc, char **argv)
         dpy_flush();
         if (gone || got < 0)
             break;
+    }
+    if (hold == 2) {
+        present();
+        dpy_flush();
+        char t[DPY_TITLE];
+        const char *b = strrchr(av[0], '/');
+        snprintf(t, sizeof t, "%s (ended: a key closes)", b ? b + 1 : av[0]);
+        dpy_title(win, t);
+        for (;;) {
+            struct dpyev e;
+            int got = dpy_next(&e, -1);
+            if (got < 0 || (got && ((e.type == EV_KEY && !(e.code & 0x80) && (e.ch[0] || e.code == 0x44 || e.code == 0x45)) || e.type == EV_CLOSE ||
+                                    (e.type == EV_MENU && e.code == 0 && e.arg == 1))))
+                break;
+            if (got && (e.type == EV_EXPOSE || e.type == EV_RESIZE)) {
+                if (e.type == EV_RESIZE) resize(e.w, e.h);
+                else for (int r = e.y / 8; r <= (e.y + e.h - 1) / 8; r++) dirty(r, e.x / 8, (e.x + e.w + 7) / 8);
+                present();
+                dpy_flush();
+            }
+        }
     }
     sys_close(m);                       /* the pty hangs up: SIGHUP to the program */
     dpy_close();
