@@ -1,0 +1,35 @@
+make, the POSIX make, on Zenix (roadmap block 7, its second item; DESIGN D52, docs/d52-self-hosting.md section 4; the
+user's page is docs/man/make.txt).
+
+What it is: pdpmake 2.0.4 by Ron Yorston (the make of BusyBox for Windows), public domain (the Unlicense), a POSIX.1-2024
+make with GNU-compatible extensions. /bin/make, built by the Makefile (its "make" section) as a program with shared
+code (ZEX2: it uses no floating point), linked with Zenix's C library (picolibc, D27).
+
+upstream/  pdpmake 2.0.4, pinned and never changed: github.com/rmyorston/pdpmake, the tag 2.0.4 (commit 0faaf25,
+           2025-11-27), the archive https://github.com/rmyorston/pdpmake/archive/refs/tags/2.0.4.tar.gz (47,337 bytes,
+           sha256 7e19294d54edf360591d76d3b7a0a511864902ac3a75a0b5b11c7b3cae14c13f). Its *.c, *.h, LICENSE (the
+           Unlicense; the notice that travels with the program: tools/mkroot.sh and the package make put it in
+           /usr/share/licenses/make), pdpmake.1, its Makefile and testsuite/ (the suite tools/make-host-test.sh runs).
+           Left out: README.md (documentation lives in docs/ only).
+
+Zenix's changes: no patch, no flag, no user header. All nine files compile as they are. What they needed from the C
+library was added there (libc/zenix/sys.c, tested by user/libctest.c in tools/libc-test.sh):
+- utimensat with UTIME_NOW and AT_FDCWD (make -t): over SYS_utimes; Zenix keeps one time per file in whole seconds.
+- realpath (make's MAKE macro from a relative argv[0]): over libz's zrealpath, the name must exist.
+Commands are run by system(): /bin/sh -c (posix_spawn, D27), one shell per command line. SHELL is /bin/sh in upstream.
+
+Found while porting (for the record, not changed):
+- The plan (d52 section 4) expected confstr; this release does not use it. It does use realpath.
+- With -k, a target that depends on one that already failed (reached earlier through another target) is still built:
+  upstream's make() returns 0 for a target already done.
+- Recursion: one level of make and make1 per level of prerequisites and one of expand_macros per level of nested
+  macros, no limit but the Makefile's size: STACK_make in the Makefile, measured with the probe build
+  (ports/pdpmake/zenix/stackprobe.c: the linker's --wrap=main, upstream untouched), docs/limits.md.
+
+Tests: tools/make-host-test.sh (the PC: this copy built under AddressSanitizer and UBSan, upstream's testsuite, then
+rootfs/tests/make/run.sh; its output is the reference) and tools/make-test.sh (FS-UAE, an A1200 with 4 MB of fast RAM, in
+make check: the same script's output compared line for line, the stack probe, exit statuses).
+
+To update: put the new release's *.c, *.h, LICENSE, pdpmake.1, Makefile and testsuite/ in upstream/ (without README.md),
+its name, size and sha256 above; build; run both tests; read the release notes for changes to what the C library must
+provide and bring docs/man/make.txt in step.

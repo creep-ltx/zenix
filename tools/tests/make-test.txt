@@ -1,0 +1,10 @@
+wait zenix:/# 120
+send mkdir -p /tmp/mkw; cd /tmp/mkw; sh /tests/make/run.sh /tests/make /tmp/mkw/work ../../../bin/make > /tmp/mk.txt 2>&1; echo mst=$?; echo ==m""out; cat /tmp/mk.txt; echo ==m""end\r
+wait ==mend 1500
+send cd /tmp/mkw/work; /tests/make/makeprobe -f deep.mk 2>&1 | grep --color=never makeprobe; /tests/make/makeprobe -f deepmacro.mk 2>&1 | grep --color=never makeprobe; cd /tmp; echo ==p""end\r
+wait ==pend 300
+send make -f; echo ust=$?; make -z; echo zst=$?; make -f /tests/make/exit5.mk; echo xst=$?\r
+waitecho xst=2 60
+send echo ==m""em; free; cd /tmp/mkw; make -f /tests/make/ps.mk; echo ==m""mend\r
+wait ==mmend 120
+stop

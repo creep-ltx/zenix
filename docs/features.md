@@ -194,6 +194,14 @@ on the PC and in FS-UAE on an A1200 with 4 MB of fast RAM: `tools/lua-host-test.
 of 112 lines of results the same as the PC's line for line, 18 kinds of C recursion stopped by Lua, never by the
 kernel's stack guard, the command line). Not yet on a real Amiga. See man/lua.txt.
 
+`make` (roadmap block 7, DESIGN D52): pdpmake 2.0.4, a POSIX.1-2024 make with the usual extensions (double-colon rules,
+conditionals, chained suffix rules, archive members, pattern macros), pinned unchanged in `ports/pdpmake/upstream`; a
+program with shared code, commands run by `/bin/sh -c`. **verified** on the PC under ASan and UBSan with upstream's own
+suite (66 tests) and in FS-UAE on an A1200 with 4 MB of fast RAM: `tools/make-host-test.sh` and `tools/make-test.sh`
+(Makefiles with dependencies, a rebuild skipped because the target is newer, suffix rules, macros, -n -k -i -q -s -t -e,
+a failing command and its status, a recursive make: the same output as the PC's line for line). Not yet on a real
+Amiga. See man/make.txt.
+
 ## Tooling
 | Feature | Status |
 |---|---|
