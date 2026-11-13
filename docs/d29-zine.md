@@ -2222,6 +2222,60 @@ Sizes (*measured*, the 68020-60 build): the blob's code 122,470 -> 125,908 bytes
 sprites about 2.4 KB, DoPkt and the handler's new actions about 0.8 KB, 48 more file slots 768 bytes of bss);
 `/bin/zine` 46,452 -> 46,520 bytes in memory; the kernel 64 bytes (above).
 
+### 16.20 The CIA resources' own fields, MLISA, the trace build's memory dump (2026-11-13, branch zine10)
+
+**The CIA resources as a program finds them without calling them.** Loonies' replayer (Impossible, The Morning
+Trip) never calls `OpenResource` or `AddICRVector` to find its timer. Read from its own code (dumped from memory, below):
+between `Forbid` and `Permit` it takes the first node of ExecBase's EXTER chain (`IntVects[13].iv_Data`'s `lh_Head`),
+steps back 42 bytes to the resource's base, and takes timers A and B as free when bits 0 and 1 of the byte 40 bytes
+in are clear; then it writes CIA-B's registers and calls `AddICRVector` through that base. In its timer B interrupt it
+writes a new handler straight into the resource's vector for bit 1 (80 bytes in). So ZINE's `ciaa.resource` and
+`ciab.resource` (`user/zine/blibs.c`) now hold, after the Library: at 40 the mask of the bits that have a handler,
+at 42 the resource's own Interrupt (`zs_goon`, which leaves the interrupt to the next server), first in the PORTS
+(CIA-A) and EXTER (CIA-B) chains, at 64 the five vectors as exec's IntVector (data, code, node). `AddICRVector`
+fills a vector, `RemICRVector` clears it, the mask follows both, and the level 2 and 6 dispatchers call the code and
+data in the vector, so a handler written there is the one called. 124 bytes after the Library (was 34). Before, the
+first EXTER node was the list's tail: the byte read as the mask was not 0 and both intros printed "CIA-timer could
+not be allocated!". Both now play (The Morning Trip on the 68030 and 68060 machines, Impossible on the 68060; on
+the 68030 machine Impossible asks for 8,790 KB in one piece, and that machine's fast RAM is two blocks of 8 MB). Its clouds are hardware sprites (16.19): in a
+scratch build that showed only the null sprite they were gone from the same scene.
+
+**MLISA** (round 9's open question on Nerve Axis' Relic). Relic's own check reads GfxBase's `ChipRevBits0` and
+wants more than 15: `GFXF_AA_MLISA` (16) besides ALICE and LISA. A real A1200 shows `$1F` after SetPatch's
+`SetChipRev(SETCHIPREV_BEST)` (knowledge base `amiga/iff-ilbm-viewer.md`, *verified* on the A1200 2026-10-09);
+ZINE gave `$0F`. On AGA it is `$1F` now; `SetChipRev` answers it.
+
+**The trace build's memory dump.** Packed productions unpack into memory the file does not show (16.19). The trace
+build now writes, on the way back, the ring of the program's last 16 library calls (`L`: the slot and the caller's
+return address), 1 KB around each of the last 8 callers, 2 KB around a crash's PC, and then the program's hunks
+(`H` the address and size, the first 512 KB) as `D` lines (an address and 8 longs). A host script turns them into
+binaries for `objdump`. Lines can be lost on the serial line (a few gaps of 1.5 KB in 300 KB were seen).
+
+**What the dumps showed** (zine-top100-findings.md "Round 10"):
+- **destroy fascism** (68020): not a memory problem. Its unpacked code (at `$50000`, which is in the program's free
+  chip RAM already) sets its stack to `$1000` (the end of ZINE's low page, where nothing of ZINE's lies above
+  `$B90`), then copies five routines one after the other to `$2000` and calls each without flushing the instruction
+  cache. The 68020's cache still holds the previous routine: it crashes. With the instruction cache off (a scratch
+  build) it runs to the limit. A 1993 68000 intro: a real A1200 with its cache on does the same. Not changed (a
+  question for the owner: start such programs with the cache off?).
+- **Lupus Reditus** (68060): it plays its whole show and its end part, which waits for the Esc key. Its timeline
+  table (frame ranges and routines, walked by its own vertical-blank handler) has no end mark: some 7 minutes after
+  the last entry the walk reaches the code after the table and calls a value from there. Its own fault, the same on
+  a real machine.
+- **Beam Riders** (68060): reads the VBR, puts its own level 3 handler there (FSAVE/FMOVEM around a callback in an
+  unpacked part); the crash is a jump to `$100` from there. The callback's code fell in a gap of the dump. Not
+  settled.
+- **Jesus Christ Motocross** (68060): the crash is an `rts` to 0 at the end of its sine and square-root precalc: the
+  user stack is 12 bytes short, as if `fmove.x (sp)+,fp7` (or the `fmove.x fp7,-(sp)` at the routine's start) had
+  not moved it. A test program doing the same (an unnormalized and a zero value, in user mode, under the 68060
+  package) moves it right. Not settled.
+
+*Verified* in FS-UAE: `tools/zine-emu-test.sh` (zlibs: the first nodes of EXTER and PORTS 42 bytes into the
+resources, the mask 40 bytes in, a handler written into timer A's vector called by CIA-B's interrupt and the old one
+not, the mask clear after `RemICRVector`; zcalls: `SetChipRev` `$1F` on AGA). Sizes (*measured*, the 68020-60 build):
+the blob's code 125,908 -> 126,588 bytes (the dump about 0.4 KB, called only in the trace build), its bss 8,963 ->
+8,923; the two resources take 180 bytes more of the ZINE block.
+
 ## 17. Questions for the owner (what ZINE should be)
 
 1. Owner answer 1 allowed "the Amiga's own console or through Wasabi". Typing into the console through Wasabi counts

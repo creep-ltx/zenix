@@ -3332,7 +3332,7 @@ F(SetTaskPri); F(SetSignal); F(Wait); F(Signal); F(AllocSignal); F(FreeSignal); 
 F(CloseLibrary); F(TaggedOpenLibrary); F(StackSwap); F(OpenResource); F(OpenDevice); F(CloseDevice); F(SetFunction); F(RawDoFmt); F(TypeOfMem); F(CopyMem);
 F(CacheControl); F(AllocVec); F(FreeVec); F(CreatePool); F(DeletePool); F(AllocPooled); F(FreePooled);
 F(InitRastPort); F(InitBitMap); F(AllocRaster); F(FreeRaster); F(AllocBitMap); F(FreeBitMap);
-F(Cause); F(AddICRVector); F(RemICRVector); F(AbleICR); F(SetICR);
+F(Cause); F(AddICRVector); F(RemICRVector); F(AbleICR); F(SetICR); F(goon);
 F(Open); F(Close); F(Seek); F(LoadSeg); F(UnLoadSeg);
 F(DoIO); F(SendIO); F(CheckIO); F(WaitIO); F(AbortIO);
 F(TimerBeginIO); F(TimerAbortIO); F(AddTime); F(SubTime); F(CmpTime); F(ReadEClock); F(GetSysTime);
@@ -3738,20 +3738,40 @@ void c_GetSysTime(u32 *tv) { tv_now(tv); }
  * AbleICR -18, SetICR -24): a handler for each of a CIA's five interrupt bits, called from the level 2 (CIA-A) and
  * level 6 (CIA-B) interrupts with a1 its is_Data, as exec's own does. ICR reads clear the chip's bits, so what was
  * read is kept in `pend` for SetICR. ---- */
-static struct zint *icr_vec[2][5];
 static u8 icr_en[2], icr_pend[2];
 static volatile u8 *cia_icr(int c) { return c ? &CIAB(CIA_ICR) : &CIAA(CIA_ICR); }
 static int which(u32 base) { return base == cia_base[1]; }
+/* round 10: what a program finds without calling the resource. Loonies' replayer (Impossible, The Morning Trip)
+ * takes the first node of ExecBase's EXTER chain (IntVects[13].iv_Data's lh_Head) as ciab.resource's own Interrupt,
+ * 42 bytes into the resource, and the byte 40 bytes in as the resource's mask of the interrupt bits that have a
+ * handler: timers A and B are free when bits 0 and 1 are clear. Then, in its timer B interrupt, it writes a new
+ * handler into the resource's vector for bit 1 (80 bytes in): the five vectors follow the Interrupt, 64 bytes in,
+ * each an IntVector as ExecBase's (data, code, node). So the handlers live there and are called from there. */
+#define CIA_INUSE 40
+#define CIA_INT   42
+#define CIA_IVS   64
+#define CIA_POS   (CIA_IVS + 5 * 12)
+static struct ziv *cia_iv(int c, u32 bit) { return (struct ziv *)(cia_base[c] + CIA_IVS) + bit; }
+static void cia_mark(int c)
+{
+    u8 m = 0;
+    for (u32 i = 0; i < 5; i++)
+        if (cia_iv(c, i)->node)
+            m |= (u8)(1u << i);
+    *(u8 *)(cia_base[c] + CIA_INUSE) = m;
+}
 
 u32 c_AddICRVector(u32 base, u32 bit, struct zint *iv)
 {
     int c = which(base);
     if (bit > 4)
         return (u32)iv;
-    if (icr_vec[c][bit])
-        return (u32)icr_vec[c][bit];
-    icr_vec[c][bit] = iv;
+    struct ziv *v = cia_iv(c, bit);
+    if (v->node)
+        return (u32)v->node;
+    v->data = iv->data, v->code = iv->code, v->node = &iv->node;
     icr_en[c] |= (u8)(1u << bit);
+    cia_mark(c);
     *cia_icr(c) = (u8)(0x80 | 1u << bit);
     return 0;
 }
@@ -3762,8 +3782,10 @@ void c_RemICRVector(u32 base, u32 bit, struct zint *iv)
     (void)iv;
     if (bit > 4)
         return;
-    icr_vec[c][bit] = 0;
+    struct ziv *v = cia_iv(c, bit);
+    v->data = v->code = 0, v->node = 0;
     icr_en[c] &= (u8)~(1u << bit);
+    cia_mark(c);
     *cia_icr(c) = (u8)(1u << bit);
 }
 
@@ -3805,12 +3827,14 @@ u32 zb_cia_irq(int c, u32 icr)
 {
     icr_pend[c] |= (u8)(icr & 0x1F);
     u32 done = 0;
-    for (int b = 0; b < 5; b++)
-        if ((icr_pend[c] & icr_en[c] & (1u << b)) && icr_vec[c][b]) {
+    for (u32 b = 0; b < 5; b++) {
+        struct ziv *v = cia_iv(c, b);
+        if ((icr_pend[c] & icr_en[c] & (1u << b)) && v->node && v->code) {
             icr_pend[c] &= (u8)~(1u << b);
-            zb_call(icr_vec[c][b]->code, icr_vec[c][b]->data, 0);
+            zb_call(v->code, v->data, 0);
             done |= 1u << b;
         }
+    }
     return done;
 }
 
@@ -3951,13 +3975,19 @@ void zb_libs_init(void)
         static const u16 clvo[] = { 6, 12, 18, 24 };
         static void (*const cfn[])(void) = { zs_AddICRVector, zs_RemICRVector, zs_AbleICR, zs_SetICR };
         static const char *const cname[2] = { "ciaa.resource", "ciab.resource" };
-        u32 base = take(4 * 6 + 34) + 4 * 6;
+        u32 base = take(4 * 6 + CIA_POS) + 4 * 6;     /* (take clears) */
         zb_jumptable(base, 4, clvo, cfn, 4);
         struct zlib *l = (struct zlib *)base;
         l->node.type = 8;               /* NT_RESOURCE */
         l->node.name = (char *)cname[c];
         l->negsize = 24;
-        l->possize = 34;
+        l->possize = CIA_POS;
+        struct zint *in = (struct zint *)(base + CIA_INT);  /* its own server, first in its chain (below) */
+        in->node.type = NT_INTERRUPT;
+        in->node.pri = 127;
+        in->node.name = (char *)cname[c];
+        in->data = base;
+        in->code = (u32)zs_goon;
         l->version = 40;
         cia_base[c] = base;
     }
@@ -3998,6 +4028,8 @@ void zb_libs_init(void)
         IV(n)->code = (u32)zx_chain;
         IV(n)->node = &chainint[n].node;
     }
+    for (int c = 0; c < 2; c++)         /* the CIA resources' own servers head PORTS and EXTER (round 10) */
+        c_AddHead(&chains[c ? 13 : 3], (struct znode *)(cia_base[c] + CIA_INT));
     /* the blitter's vector holds GfxBase as its data, as graphics' own handler has it there: take-over code reads
      * GfxBase from ExecBase->IntVects[INTB_BLIT].iv_Data instead of opening the library (no handler: its interrupt
      * stays off until a program sets one) */
@@ -4084,8 +4116,10 @@ void zb_libs_init(void)
     u8 crb = Z.ecs ? 1 : 0;             /* GFXF_HR_AGNUS; GFXF_HR_DENISE: an ECS Denise answers $FC, Lisa $F8 */
     if ((DENISEID & 0xFF) == 0xFC || Z.aga)
         crb |= 2;
-    if (Z.aga)
-        crb |= 4 | 8;                   /* GFXF_AA_ALICE, GFXF_AA_LISA (the NDK's graphics/gfxbase.h) */
+    if (Z.aga)                          /* GFXF_AA_ALICE, GFXF_AA_LISA and GFXF_AA_MLISA (the NDK's graphics/gfxbase.h):
+                                         * $1F, as a real A1200 shows after SetPatch's SetChipRev (round 10: Nerve
+                                         * Axis' Relic takes $0F as "AGA chipset ... Failed"; it wants more than 15) */
+        crb |= 4 | 8 | 16;
     *(u8 *)(gb + ZO_GfxBase_ChipRevBits0) = crb;
     zb_more_init(take);                 /* utility, the math libraries, topaz 8 (bmore.c, 16.12) */
     *(volatile u32 *)4 = ZEXEC;         /* only now does address 4 point at an ExecBase (7.3 step 3) */
