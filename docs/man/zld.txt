@@ -83,8 +83,8 @@ NOTES
     most 32 address table entries reached with 8-bit offsets and 8192 with
     16-bit ones. A reference to a symbol whose section is left out
     (.comment, .note) is refused. An absolute symbol (a number given by
-    --defsym, .set) is written as it is, without a relocation entry
-    (tools/mkzexe.py would add the load address to it).
+    --defsym, .set) is written as it is, without a relocation entry,
+    as tools/mkzexe.py does.
 
     Memory: zld keeps the symbol tables and relocations of the objects it
     uses and the program's image in memory, and reads archives through

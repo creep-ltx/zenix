@@ -13,7 +13,8 @@ ZEXE = flat image + relocation table, loadable at any address:
   +28  u32 stage0   file offset of position-independent code the bootblock calls (0 = none)
 After the image: nreloc big-endian u32 offsets of 32-bit words that hold
 link-time (base 0) addresses; the loader adds the load address to each.
-Only R_68K_32 needs relocating; PC-relative references stay valid.
+Only R_68K_32 needs relocating; PC-relative references stay valid, and so
+does an R_68K_32 to an absolute symbol (a number: --defsym, .set).
 
 The kernel image (--delta, kernel.bin only; start.S relocates it): the table is a byte stream of the distances
 between successive relocated words, in units of 2 bytes, from offset 0: a byte 1-127 is one distance; a byte with
@@ -43,7 +44,6 @@ PC-relative reference between the parts (shared-to-data), a value equal to text_
 or an absolute symbol, a table slot no relocation names.
 """
 import os
-import re
 import struct
 import subprocess
 import sys
@@ -90,39 +90,27 @@ def main():
         sys.exit("no ZEXE header at offset 4 (start.S header missing)")
 
     syms = {}
-    undef = set()
     for line in run(PFX + "nm", elf).splitlines():
         p = line.split()
         if len(p) == 3:
             syms[p[2]] = int(p[0], 16)
-        elif len(p) == 2:
-            undef.add(p[1])                 # undefined, weak (w, v): address 0
     bss_end = syms["__bss_end"]
 
+    # the relocations of the loaded sections (those of .debug, .comment... are no addresses), by their symbols
     relocs = []
-    cur = None
-    for line in run(PFX + "readelf", "-r", "-W", elf).splitlines():
-        m = re.match(r"Relocation section '(\S+)'", line)
-        if m:
-            cur = m.group(1)
-            continue
-        m = re.match(r"([0-9a-f]{8})\s+[0-9a-f]+\s+(R_68K_\w+)(?:\s+[0-9a-f]+\s+(\S+))?", line)
-        if not m:
-            continue
-        off, typ = int(m.group(1), 16), m.group(2)
-        if cur and cur.startswith((".rela.debug", ".rela.eh_frame", ".rela.comment")):
-            continue                        # not loaded: its offsets are not addresses
-        if typ == "R_68K_32" and m.group(3) in undef:
-            # an undefined weak symbol is address 0; relocated, it would be the program's own start (as ZEX2: refused)
-            sys.exit(f"{elf}: undefined (weak) symbol {m.group(3)} at {off:#x}: its address would be 0")
-        if typ == "R_68K_32":
+    for sec, off, typ, sym, add in Elf(elf).relas():
+        if typ == 1:
+            if sym["shndx"] == SHN_UNDEF and sym["name"]:
+                # an undefined weak symbol is address 0; relocated, it would be the program's own start (as ZEX2:
+                # refused)
+                sys.exit(f"{elf}: undefined (weak) symbol {sym['name']} at {off:#x}: its address would be 0")
+            if sym["shndx"] == SHN_ABS:
+                continue                    # a number (--defsym, .set): the load address is not added (as zld)
             if off + 4 > len(img):
                 continue                    # inside bss: nothing to patch
             relocs.append(off)
-        elif typ in ("R_68K_PC32", "R_68K_PC16", "R_68K_PC8"):
-            pass
-        else:
-            sys.exit(f"unsupported relocation {typ} at {off:#x} in {cur}")
+        elif typ not in (4, 5, 6):          # R_68K_PC32, PC16, PC8: valid wherever the program is
+            sys.exit(f"unsupported relocation R_68K_{R_NAMES.get(typ, typ)} at {off:#x} in .rela{sec['name']}")
     relocs.sort()
 
     while len(img) % 4:

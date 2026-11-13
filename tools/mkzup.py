@@ -225,7 +225,7 @@ FAMILIES = [
     ("ctop", "ctop, a monitor in the way of btop: memory, disks, network, processes", "ctop"),
     ("lua", "Lua 5.4, the scripting language (DESIGN D52)", "lua"),
     ("make", "make, the POSIX make (pdpmake, public domain; DESIGN D52)", "make"),
-    ("devel", "zld, the linker, with the C library, crt0 and the headers (DESIGN D52)", "zld"),
+    ("devel", "zld, zas: linker and assembler, the C library, crt0, headers (D52)", "zld zas"),
     ("shadow", "users and passwords: su, sudo, passwd, useradd", "su sudo passwd useradd userdel gpasswd"),
     ("disktools", "disks and filesystems: fdisk, mkfs, fsck, dd, umount", "dd fdisk mkfs_ext2 fsck_ext2 mkfs_zenixfs "
                   "fsck_zenixfs umount"),

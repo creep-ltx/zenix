@@ -1,0 +1,16 @@
+wait zenix:/# 120
+send cd /root/zas; free; echo ==z""go\r
+wait ==zgo 30
+send time zas -v -m68020 -o prog.o prog.s; echo p""st=$?\r
+wait pst= 600
+send zld -o prog crt0.o prog.o libz.o libgcc.a; echo l""st=$?\r
+wait lst= 600
+send ./prog; echo r""un=$?\r
+wait run= 120
+send zas -m68040 -mno-float -o sort.o sort.s & p=$!; while ps | grep -v zombie | grep -q ' zas$'; do ps | grep --color=never ' zas$'; sleep 1; done; wait $p; echo s""st=$?\r
+wait sst= 1800
+send zas -o bad.o bad.s; echo b""st=$?; ls bad.o; echo ==b""end\r
+wait ==bend 120
+send sync; echo ==d""one\r
+wait ==done 60
+stop

@@ -211,6 +211,18 @@ build (192) linked by zld is the build's (ld + mkzexe.py) byte for byte, refused
 UBSan (`tools/zld-host-test.sh`); in FS-UAE on an A1200 with 4 MB of fast RAM zld links libctest, hello and sh on
 Zenix, each the PC's byte for byte, and they run (`tools/zld-test.sh`). Not yet on a real Amiga. See man/zld.txt.
 
+`zas` (roadmap block 7, DESIGN D52 section 6): the assembler, ours: GNU as's 68k syntax (what gcc writes and the
+sources use, with the MIT forms) to an ELF object; the 68000-68060 integer set, the 68881/68882 and 68040/68060 FPU,
+the 68030/68851 MMU and the 68040/68060 cache and MMU instructions; gas's branch and operand relaxation, sections,
+symbols, numbered local labels, expressions, macros, `.rept`/`.irp`, `.if`, `.include`, `.incbin`, the GOT and PLT
+references of programs with shared code; no debugging information. In the development package `devel`. **verified**
+on the PC: every assembler input of the build (2,166: gcc's output for every C file and every .S) gives the build's
+object byte for byte, debug sections aside; tools/zas-table.py's instruction table (about 250,000 lines a CPU, eight
+CPU settings) is refused and assembled exactly as GNU as does; damaged sources under ASan and UBSan
+(`tools/zas-host-test.sh`); in FS-UAE on an A1200 with 4 MB of fast RAM zas assembles a program in assembly and gcc's
+output for sort.c on Zenix, the PC's objects byte for byte, and zld links the program, which runs (`tools/zas-test.sh`).
+Not yet on a real Amiga. See man/zas.txt.
+
 ## Tooling
 | Feature | Status |
 |---|---|
