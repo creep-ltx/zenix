@@ -752,10 +752,11 @@ static void t_spawn(void)
     close(f);
     unlink(tf);
     checks("popen w", b, "into the command\n");
-    /* fflush(NULL): every stream open for writing, read streams left alone (DESIGN D52 9: picolibc's took NULL as
-     * a stream; Lua's io.popen calls it) */
+    /* fflush(NULL): every stream with output waiting; a stream being read is left alone (DESIGN D52 9: picolibc's
+     * took NULL as a stream; Lua's io.popen calls it). The read stream is a pipe: one that was flushed would seek
+     * back over its buffered input, which a pipe cannot, and lose the rest of the line. */
     tmpname(tf, ".ff");
-    FILE *fw = fopen(tf, "w"), *fr = fopen("/etc/passwd", "r");
+    FILE *fw = fopen(tf, "w"), *fr = popen("echo abc", "r");
     if (fw) fputs("flushed by NULL\n", fw);
     int fr0 = fr ? getc(fr) : EOF;
     checki("fflush(NULL): 0", fflush(0), 0);
@@ -764,9 +765,10 @@ static void t_spawn(void)
     slurp(f, b, sizeof b);
     close(f);
     checks("fflush(NULL): the written stream's bytes are in the file", b, "flushed by NULL\n");
-    check("fflush(NULL): a read stream goes on where it was", fr && fr0 == 'r' && getc(fr) == 'o', "");
+    int fr1 = fr ? getc(fr) : EOF, fr2 = fr ? getc(fr) : EOF;
+    check("fflush(NULL): a pipe being read keeps its buffered input", fr0 == 'a' && fr1 == 'b' && fr2 == 'c', "");
     if (fw) fclose(fw);
-    if (fr) fclose(fr);
+    if (fr) pclose(fr);
     unlink(tf);
     check("getppid", getppid() > 0 && getppid() != getpid(), "");
     /* system ignores SIGINT and SIGQUIT while it waits (POSIX: ^C is the command's), puts the caller's handlers
