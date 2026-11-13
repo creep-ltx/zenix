@@ -396,6 +396,7 @@ struct uproc {                  /* returned by SYS_procinfo */
  * grows with the struct): what a caller passing size 0 (every program built before D15) gets. Checked against the
  * structs' first fields in syscall.c (_Static_assert) and by tools/usize-test.sh */
 #define USTAT_FIRST      28     /* ino .. links */
+#define USTAT_SIZE       32     /* D49 8: and the device the kernel writes at offset 28 (the servers write the 28) */
 #define UDIRENT_FIRST    72     /* ino, type, name[64] */
 #define UMOUNTINFO_FIRST 88     /* path[48] .. type[8] */
 #define UUPDATE_FIRST    32     /* addr .. kver[16] */
@@ -771,8 +772,8 @@ void seg_stats(u32 *bytes, u32 *saved);         /* shared code in memory, and wh
 void seg_crash(struct proc *p, u32 pc);         /* a process running shared code faulted: is the code intact? */   /* SVC_OPENS: the inodes held open on that mount */
 /* the paths: FS_PATHMAX-byte buffers of the kernel's, each the walk's own: their contents change */
 long vfs_open(char *path, int flags);
-long vfs_stat(char *path, struct ustat *st);
-long vfs_fstat(struct file *f, struct ustat *st);
+long vfs_stat(u32 op, char *path, struct ustat *st, u32 n);   /* FS_STAT or FS_LSTAT; n >= USTAT_SIZE: the device too (D49) */
+long vfs_fstat(struct file *f, struct ustat *st, u32 n);   /* n >= USTAT_SIZE: the device too (D49 8) */
 long vfs_chdir(char *path);
 long vfs_lseek(struct file *f, s32 off, u32 whence);
 long vfs_statfs(void *out, u32 mount);
@@ -793,6 +794,7 @@ long vfs_unlink(char *path);
 long vfs_rmdir(char *path);
 long vfs_rename(char *from, char *to);
 long vfs_readdir(struct file *f, struct udirent *out);
+long vfs_readdirs(struct file *f, u32 buf, u32 size);    /* D49: SYS_readdirs */
 long vfs_pipe(int fds[2], u32 flags);   /* flags: 0 or O_NONBLOCK (both ends) */
 
 /* tty.c */
@@ -1105,6 +1107,9 @@ struct upeermem { u32 addr, len; };
 struct upostbuf { u32 addr, size; s32 from; };
 struct upost { u32 off, src, len; };
 #define SYS_atapi       98   /* struct uatapi * (diskproto.h): a packet to the ATAPI CD drive (disk server only; DESIGN D44) */
+#define SYS_readdirs    99   /* fd, buffer, size (>= UDIRX_MAX): the directory's next records (kernel/udirx.h), as many
+                              * whole ones as fit -> their bytes, 0 at the end; -ENOSYS: its server lacks FS_READDIRS
+                              * (DESIGN D49, docs/d49-readdir.md 3.1) */
 struct uatapi;
 int ide_atapi(struct uatapi *q);
 long ipc_peer(u32 msg, u32 op, u32 arg);
