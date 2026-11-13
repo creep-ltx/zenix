@@ -817,9 +817,9 @@ pattern (section 6).
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 95 system calls (the numbers and
-a line on each are in `kernel/kernel.h`; numbers 1-97, of which 39, 40 and 68 are unused; the next free number is
-claimed in CLAUDE.md first): the network (`sock`, `netsrv`, `drv`: section 11, "Sockets" and "The network's drivers"), files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 96 system calls (the numbers and
+a line on each are in `kernel/kernel.h`; numbers 1-99, of which 39, 40 and 68 are unused; the next free number is
+claimed in CLAUDE.md first): the network (`sock`, `netsrv`, `drv`: section 11, "Sockets" and "The network's drivers"), files (`open close read write lseek readdir readdirs stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
 index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority setpgid`),
 events and signals (`evwait sigaction sigprocmask sigreturn alarm`, section 6), the machine (`reboot`,
@@ -835,7 +835,7 @@ ones, refused (-EPERM) to all but privileged processes, i.e. the disk server (`b
 **Every user pointer is validated** against the process's own span and its `memalloc` regions. A bad
 pointer makes the call return -EFAULT; the process lives. Since D13 there are two checks: `user_ok_wr` (its own memory
 only) where the kernel, or a server answering for it, writes into the caller's memory - `read`, `statfs`, `mountinfo`,
-`blk_ram`, `envget`, `lstat`, `readlink`, `readdir`, `stat`, `fstat`, `input`, `klog`, `getcwd`, `pipe`, `procinfo`,
+`blk_ram`, `envget`, `lstat`, `readlink`, `readdir`, `readdirs`, `stat`, `fstat`, `input`, `klog`, `getcwd`, `pipe`, `procinfo`,
 `meminfo`, the message of `call` (the server answers into it), `svc`'s `SVC_LOAD` and `SVC_OPENS` - and `user_ok_rd`
 (its own memory or its code: a ZEX2 program's string literals lie in its shared code) where it only reads - `write`,
 `envset`, `mount`'s request, `svc`'s `SVC_SAVE`, every string copied in (`copy_str`) and `spawn`'s argument vector and
@@ -849,7 +849,11 @@ the struct's first size - a frozen constant in kernel.h (`USTAT_FIRST` 28, `UDIR
 `UUPDATE_FIRST` 32, `UPROC_FIRST` 32, `USTATFS_FIRST` 20, `UMEMINFO_FIRST` 16), checked against the structs' first
 fields by `_Static_assert` and by the host test `tools/usize-test.sh` (audit3 B3: four calls passed `sizeof`, which
 would have grown with the struct); a size below it is -EINVAL; a bigger one gets at most the kernel's own struct (`usize` in
-syscall.c). The disk server does the same for `DISK_INFOSZ`/`DISK_LISTSZ` (size in `a[2]`; the old `DISK_INFO` and
+syscall.c). `stat`, `lstat` and `fstat` give 32 bytes to a buffer of 32 or more (`USTAT_SIZE`, DESIGN D49 8): after the
+28 the server wrote, the kernel writes the device, the mount's instance number (the same for every file of one
+mounted volume, never reused while the system runs; the root's 1; 0 for the kernel's own devices and sockets), so
+`cp` and `mv` tell "the same file" by device and inode (libz's `same_file`, the C library's `st_dev`); the servers'
+`struct ustat` stays 28 bytes (it is in the message protocol). The disk server does the same for `DISK_INFOSZ`/`DISK_LISTSZ` (size in `a[2]`; the old `DISK_INFO` and
 `DISK_LIST` write the first 80 bytes of `struct diskinfo`, their callers never set `a[2]`). Tested by `badptr` (memtest):
 an old 40-byte `uproc` buffer with a guard after it gets 32 bytes; the old kernel wrote 44.
 `SYS_procinfo` fills `struct uproc` (32 bytes at first: pid to name; D10 appended `nice` and `pri`, D13 `shared`; a
@@ -1363,7 +1367,26 @@ mount refuses a changing request only after its walk. A permission failure met b
 its own volume as before (an old kernel, a root program's raw request). Verified by the host tests
 (`tools/ext2-host-test.sh`, `zenixfs/tests/zfsd-test.sh`, nfs-sim-test's `links`, `nfs-fuzz`).
 
-## 10. The filesystem
+### Directories in batches (DESIGN D49, docs/d49-readdir.md; `kernel/udirx.h`, `FS_READDIRS`, `SYS_readdirs`)
+`SYS_readdirs(fd, buffer, size)` asks the directory's server for as many whole records as fit (`FS_READDIRS`: the
+inode, the position, the caller's buffer written in place, `struct fsrdx` for the size and the position after them);
+the kernel checks the buffer (104-65,535 bytes, 4-aligned, the caller's own), refuses an answer longer than asked
+or one that does not move the position (-EIO), and moves the descriptor's position. Each record (`struct udirx`)
+carries the name, the inode and the type `SYS_readdir` gives and, with `UDX_STAT`, the name's lstat as its server's
+`FS_LSTAT` makes it, given when the caller may search the directory (the rule of Linux's `fstatat` on an open
+directory: the directories above were checked when it was opened). Every local server fills it from the entry it
+just read (fsd from the inode, read in place by `ext2_istat`, inode table blocks read ahead; zfsd from the library's
+attributes; fatd, exfatd, ffsd, pfs3d and iso9660d from their entries, by the functions their `FS_LSTAT` uses; a
+Rock Ridge link gets none: its size is read only by a walk); nfscd lists names only (its attributes keep their own
+cache rules). None on `.` and `..` (their lstat is the path's text), on a name a server cut to 63 bytes, or on a name
+that is a mount point: that one's server gives the directory underneath, libz's `zdir` takes the stat out by the
+mount table's names. A killed client gets what was written. A server without the request answers -ENOSYS and libz
+reads one record a call (`zdir`: a 2 KB buffer a directory; `dir_list_some`, `dir_list_stat`, the C library's
+`readdir` with `d_type`, `ls`, `files`, `sh`'s globbing read through it). Measured in FS-UAE (emulator figures):
+500 names, a record 1.04 ms one a call, 0.58 ms in batches, an lstat 10 ms (the server walks the directory to the
+name); `ls` 5.66 -> 1.05 s, `ls -l` 6.83 -> 2.19 s, the file view 6.6 -> 1.7 s.
+
+## 10. The filesystem## 10. The filesystem
 
 - **ext2**, revision 0/1, inodes of 128 bytes or more, 1, 2 or 4 KB blocks, read **and write** (bitmaps, group
   descriptors, direct/indirect/double-indirect blocks, growing directories, rename, hard and symbolic links, fast

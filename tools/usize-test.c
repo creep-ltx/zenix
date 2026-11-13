@@ -32,7 +32,9 @@ int main(void)
     EXPECT(UUPDATE_FIRST == 32 && offsetof(struct uupdate, kver) + 16 == 32, "uupdate: first size 32");
     EXPECT(UPROC_FIRST == 32 && offsetof(struct uproc, name) + 16 == 32, "uproc: first size 32");
     EXPECT(USTATFS_FIRST == 20 && UMEMINFO_FIRST == 16, "ustatfs 20, meminfo 16");
-    one("ustat", USTAT_FIRST, sizeof(struct ustat));
+    one("ustat", USTAT_FIRST, USTAT_SIZE);             /* D49 8: and the device the kernel writes at 28 */
+    EXPECT(USTAT_SIZE == 32 && usize_n(29, USTAT_FIRST, USTAT_SIZE) == 29 && usize_n(100, USTAT_FIRST, USTAT_SIZE) == 32,
+           "ustat: 32 with the device, a bigger buffer gets 32");
     one("udirent", UDIRENT_FIRST, sizeof(struct udirent));
     one("umountinfo", UMOUNTINFO_FIRST, sizeof(struct umountinfo));
     one("uupdate", UUPDATE_FIRST, sizeof(struct uupdate));

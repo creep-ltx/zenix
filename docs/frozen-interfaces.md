@@ -272,6 +272,24 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
 - **D48 (the file view, branch files, 2026-11-13):** the keys file `~/.config/files/keys` (Ahiru.keys's format: `KEYS
   ACTION [ARGUMENT]`, the key names in `<>`, `[main]`, `none`) and its action names; `files`' options (`-v`, a folder);
   zdesk's menu and icon lines name `files`. No message type, struct or error number is new.
+- **D49 (directories in batches, the device in `stat`, branch readdir, 2026-11-13):** `SYS_readdirs` 99 (fd, buffer,
+  size: size 104 `UDIRX_MAX` .. 65,535, its bits 16-31 reserved for request flags (0 today, else -EINVAL), the buffer
+  4-aligned and the caller's (-EINVAL, -EFAULT); answers the bytes of whole records, 0 at the end, the server's
+  -errno, -ENOSYS when the directory's server lacks the request (nothing written, the position kept); the position
+  shared with `SYS_readdir`). `FS_READDIRS` 27 (a0 the inode, a1 the position, a2 the buffer, a3 `struct fsrdx`
+  {size, next}: the records written, `next` the position after them; an error after one record or more answers
+  those). The record `struct udirx` (`kernel/udirx.h`): size (u16), type (u8, `udirent`'s numbers, ext2's file
+  types), flags (u8: `UDX_STAT` 1), ino, next, a `struct ustat` of 28 bytes, the name (1-63 bytes, a 0, zeros to
+  size); the growth rule: a reader steps by size (at least 44, a multiple of 4, inside the answer) and ignores flags
+  it does not know and bytes after the name's 0; a longer record only when a request's flags ask for it.
+  `UDX_STAT`'s meaning: st is what the server's `FS_LSTAT` gives for this entry, as `fstatat(dirfd, NAME,
+  AT_SYMLINK_NOFOLLOW)` (the caller's search right on this directory checked, those above at the open); never on
+  `.`, `..` or a name the server cut; a name that is a mount point keeps the directory underneath's (libz takes it
+  out). `stat`, `lstat`, `fstat` with a size of 32 or more (`USTAT_SIZE`): the device at offset 28, the mount's
+  instance number (never reused while the system runs; the root's 1), 0 for the kernel's own devices and sockets;
+  the servers still write 28 bytes (`struct ustat` in the protocol is unchanged). `udirent`'s type from zfsd is
+  ext2's numbers (1, 2, 7) as every other server's (it gave the library's 4, 8, 10: a fix). `cp`'s and `mv`'s refusal
+  "'A' and 'B' are the same file" (status 1, GNU's text).
 - **D22 (zpkg, 2026-10-28):** `UPD_F_TRIAL` 2 in the bootinfo and `uupdate` flags; the manifest line `takes OTHER`;
   zup's journal line `live 1 NAME` and the live-only operations `S`, `M`, `X`; `/var/cache/zpkg/live/` and
   `/var/lib/zpkg/lock` (a pid and a newline, linked whole from `lock.PID`); zpkg's `/etc/zpkg.conf` (the words

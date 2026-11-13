@@ -98,6 +98,9 @@
 # 2026-11-12 (d29 16.19, SYS_memalloc's MEMA_LOW: a region below 16 MB for ZINE's loader): mem 4,167 -> 4,207, budget
 # 4,200 -> 4,250 (MEM_LOW16M; a limited block with protection on now also from the low end), syscall + 24; kernel.bin
 # 193,948 -> 194,012, TOTAL 194,000 -> 194,050; merged with D46 above: TOTAL 197,500.
+# 2026-11-13 (DESIGN D49, directories in batches and stat's device): syscall 10,150 -> 10,300, vfs 11,450 -> 11,750
+# (SYS_readdirs, the device), embed 48,600 -> 49,600 (the built-in fsd's FS_READDIRS, ext2's istat and inode read-ahead), TOTAL 197,500 -> 198,800; the
+# mount tests' RAM disk 685 -> 684 KB for the floppy's ROOM.
 start     4850   8200
 main      5950   1100
 serial    6100   6500
@@ -111,8 +114,8 @@ a3000     2400    100
 blk        460     16
 rtc       1550      4
 proc      9400  21500
-syscall  10150      0
-vfs      11450   1600
+syscall  10300      0
+vfs      11750   1600
 tty       5900    100
 gfx       8900   2450
 term     14500    256
@@ -130,6 +133,6 @@ zine      1600     16
 cache     1800     32
 gcon      3600     16
 mmu       5700    160
-embed    48600      0
-TOTAL   197500
+embed    49600      0
+TOTAL   198800
 ROOM       800

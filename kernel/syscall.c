@@ -42,6 +42,9 @@ static __attribute__((noinline)) int copy_str(char *dst, u32 uptr, u32 max)
  * kernel's own size. sizes = first << 16 | now. The bytes the caller gets, or -EINVAL / -EFAULT */
 _Static_assert(__builtin_offsetof(struct ustat, links) + 4 == USTAT_FIRST, "ustat's first size is frozen");
 _Static_assert(__builtin_offsetof(struct udirent, name) + 64 == UDIRENT_FIRST, "udirent's first size is frozen");
+_Static_assert(__builtin_offsetof(struct udirx, name) == UDIRX_HEAD && UDIRX_SIZE(63) == UDIRX_MAX &&
+               __builtin_offsetof(struct udirx, st) == 12 && sizeof(((struct udirx *)0)->st) == USTAT_FIRST,
+               "the batch record's layout is frozen (D49)");
 _Static_assert(__builtin_offsetof(struct umountinfo, type) + 8 == UMOUNTINFO_FIRST, "umountinfo's first size is frozen");
 _Static_assert(__builtin_offsetof(struct uupdate, kver) + 16 == UUPDATE_FIRST, "uupdate's first size is frozen");
 _Static_assert(__builtin_offsetof(struct uproc, name) + 16 == UPROC_FIRST, "uproc's first size is frozen");
@@ -236,10 +239,10 @@ static __attribute__((noinline)) s32 sys_path1(u32 nr, u32 a1, u32 a2, u32 a3)
     case SYS_readlink:
         return user_ok_wr(current, a2, a3) ? (s32)vfs_path1(FS_READLINK, path, a2, a3) : -EFAULT;
     case SYS_stat: case SYS_lstat: {                /* the buffer checked after the path, as always */
-        s32 n = usize(a2, a3, USTAT_FIRST << 16 | sizeof(struct ustat));
+        s32 n = usize(a2, a3, USTAT_FIRST << 16 | USTAT_SIZE);
         if (n <= 0)
             return n;
-        return (s32)(nr == SYS_stat ? vfs_stat(path, (struct ustat *)a2) : vfs_path1(FS_LSTAT, path, a2, 0));
+        return (s32)vfs_stat(nr == SYS_stat ? FS_STAT : FS_LSTAT, path, (struct ustat *)a2, (u32)n);
     }
     }
     return -ENOSYS;
@@ -536,8 +539,12 @@ void syscall_c(u32 *rb)
             r = (s32)vfs_readdir(f, (struct udirent *)a2);
         break;
     case SYS_fstat:
-        if (GETFD(f, a1) && UOKS(n, a2, a3, USTAT_FIRST, sizeof(struct ustat)))
-            r = (s32)vfs_fstat(f, (struct ustat *)a2);
+        if (GETFD(f, a1) && UOKS(n, a2, a3, USTAT_FIRST, USTAT_SIZE))
+            r = (s32)vfs_fstat(f, (struct ustat *)a2, (u32)n);
+        break;
+    case SYS_readdirs:                  /* D49: whole records into the caller's buffer (vfs_readdirs checks it) */
+        if (GETFD(f, a1))
+            r = (s32)vfs_readdirs(f, a2, a3);
         break;
     case SYS_blk_read: case SYS_blk_write:
         /* raw disk: only the disk server (trusted; the buffer is a client's, so

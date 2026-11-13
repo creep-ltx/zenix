@@ -22,7 +22,7 @@ SYS_meminfo UMEMINFO_FIRST
 SYS_update UUPDATE_FIRST
 EOF
 # stat and lstat in sys_path1: the size checked after the path is copied in
-grep -q 'case SYS_stat: case SYS_lstat: {' kernel/syscall.c && grep -q 'usize(a2, a3, USTAT_FIRST << 16 | sizeof(struct ustat))' kernel/syscall.c &&
+grep -q 'case SYS_stat: case SYS_lstat: {' kernel/syscall.c && grep -q 'usize(a2, a3, USTAT_FIRST << 16 | USTAT_SIZE)' kernel/syscall.c &&
     echo "ok:   SYS_stat, SYS_lstat: a size-0 caller gets USTAT_FIRST" || { echo "FAIL: SYS_stat, SYS_lstat: USTAT_FIRST"; rc=1; }
 n=$(grep -c "UOKS(n, " kernel/syscall.c)
 [ "$n" = 7 ] && echo "ok:   7 + stat and lstat: 9 calls write a struct (all checked)" || { echo "FAIL: $n UOKS calls in syscall.c, the test knows 7"; rc=1; }

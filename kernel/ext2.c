@@ -170,6 +170,7 @@ static int bget(u32 blk, int load)
 }
 
 #define bfind(blk) bget(blk, 1)
+static __attribute__((noinline)) void bfill_run(u32 blk, u32 k);
 
 /* pointer to the cached block: valid only until the next bfind/bread/bwrite */
 static const u8 *bptr(u32 blk)
@@ -367,28 +368,53 @@ int ext2_mount(void)
 
 /* Errors are the negative errno numbers of kernel/errno.h (audit E): -ENOENT, -EEXIST, -ENOTDIR, -EISDIR, -ENOTEMPTY,
  * -ENOSPC, -EIO (a damaged volume or the disk), -EROFS ... */
-int ext2_iget(u32 ino, struct inode *out)
+/* DESIGN D49: while set (fsd's FS_READDIRS: a directory's inodes read in a row), an inode table block not cached comes
+ * with the blocks after it in one read (as many as ext2_read takes ahead), not one disk request a block */
+int ext2_iget_ahead;
+
+/* the cached bytes of inode INO (valid until the next cache use), 0 on an error. With ext2_iget_ahead (D49) an inode
+ * table block not cached comes with the blocks after it */
+static const u8 *iraw(u32 ino)
 {
     if (!mounted || ino == 0 || ino > ninodes)
-        return -EIO;
-    u32 grp = (ino - 1) / ninodes_per_group;
-    u32 idx = (ino - 1) % ninodes_per_group;
-    u32 gd[2];
-    u32 gdoff = grp * 32;
-    if (bread_copy(gd_blk + gdoff / bsize, gdoff % bsize + 8, gd, 4))
-        return -EIO;
-    u32 itable = le32(gd[0]);
-    u32 pos = idx * inode_size;
-    u8 raw[128];
-    if (bread_copy(itable + pos / bsize, pos % bsize, raw, 128))
+        return 0;
+    u32 grp = (ino - 1) / ninodes_per_group, idx = (ino - 1) % ninodes_per_group, gdoff = grp * 32;
+    const u8 *g = bptr(gd_blk + gdoff / bsize);
+    if (!g)
+        return 0;
+    u32 pos = idx * inode_size, b = rd32(g + gdoff % bsize + 8) + pos / bsize;
+    if (ext2_iget_ahead && b < total_blocks && buf[hashslot[b & 63]].blk != b)
+        bfill_run(b, total_blocks - b < nbuf / 4 ? total_blocks - b : nbuf / 4);
+    const u8 *p = bptr(b);
+    return p ? p + pos % bsize : 0;
+}
+/* D49: the inode's numbers a stat shows (ino, mode, uid, size, mtime, gid, links), as ext2_iget reads them, nothing else */
+int ext2_istat(u32 ino, struct inode *out)
+{
+    const u8 *raw = iraw(ino);
+    if (!raw)
         return -EIO;
     out->ino = ino;
-    out->mode = le16(*(u16 *)(raw + 0));
-    out->uid = le16(*(u16 *)(raw + 2));
+    out->mode = (u16)rd16(raw + 0);
+    out->uid = (u16)rd16(raw + 2);
     out->size = rd32(raw + 4);
     out->mtime = rd32(raw + 16);
-    out->gid = le16(*(u16 *)(raw + 24));
-    out->links = le16(*(u16 *)(raw + 26));
+    out->gid = (u16)rd16(raw + 24);
+    out->links = (u16)rd16(raw + 26);
+    return 0;
+}
+int ext2_iget(u32 ino, struct inode *out)
+{
+    const u8 *raw = iraw(ino);
+    if (!raw)
+        return -EIO;
+    out->ino = ino;
+    out->mode = (u16)rd16(raw + 0);
+    out->uid = (u16)rd16(raw + 2);
+    out->size = rd32(raw + 4);
+    out->mtime = rd32(raw + 16);
+    out->gid = (u16)rd16(raw + 24);
+    out->links = (u16)rd16(raw + 26);
     out->nblocks = rd32(raw + 28);
     out->flags = rd32(raw + 32);
     out->acl = rd32(raw + 104);
@@ -442,9 +468,15 @@ __attribute__((noinline)) u32 ext2_bmap(const struct inode *in, u32 n)
  * writes update one.) */
 static __attribute__((noinline)) void bfill(const struct inode *in, u32 lb, u32 blk)
 {
-    u32 i, j, k, w = 0, wmax = 0xFFFFFFFF;
+    u32 k;
     for (k = 1; k < nbuf / 4 && blk + k < total_blocks && ext2_bmap(in, lb + k) == blk + k; k++)
         ;                               /* (past the file's end: unmapped, 0) */
+    bfill_run(blk, k);
+}
+/* blk and up to k - 1 blocks after it (all on the volume) into the cache in one read, the run ending at a cached one */
+static __attribute__((noinline)) void bfill_run(u32 blk, u32 k)
+{
+    u32 i, j, w = 0, wmax = 0xFFFFFFFF;
     for (i = 0; i < nbuf; i++)
         if (buf[i].blk - blk < k)
             k = buf[i].blk - blk;       /* a cached one ends the run (blk itself: k 0) */

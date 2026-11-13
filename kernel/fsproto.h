@@ -57,6 +57,12 @@
 #define FS_HEALTH  26  /* -> bit 0: the server can only read: it was asked to (-fsck), or the volume could only be mounted
                         * from a state too old to build on (ZenixFS, more than one commit back: its older files' data may have been
                         * overwritten). Root only (raw IPC), for boot (DESIGN D34). A server without it says -ENOSYS */
+#define FS_READDIRS 27 /* DESIGN D49 (docs/d49-readdir.md 3.3): a0 ino, a1 position, a2 buffer, a3 struct fsrdx* -> the
+                        * bytes of the whole records (kernel/udirx.h) written into the buffer, as many as fit in size, 0
+                        * at the end, or -errno; fsrdx.next the position after the last record. An error after one
+                        * record or more answers those (the error comes again from there). A server without it: -ENOSYS */
+struct fsrdx { unsigned int size, next; };
+#include "udirx.h"
 struct fsinfo { char dev[16]; char type[8]; };
 
 /* DESIGN D26 (symbolic links across mounts, docs/d26-links-across-mounts.md 4; append-only, frozen):

@@ -830,15 +830,23 @@ long vfs_open(char *path, int flags)
     return fd;
 }
 
-long vfs_stat(char *path, struct ustat *st)
+/* stat, lstat (OP FS_STAT, FS_LSTAT); a caller's buffer of N >= USTAT_SIZE bytes gets the device after the 28 bytes the
+ * server wrote (D49 8): the mount's slot + 1, of the mount the walk ended on */
+long vfs_stat(u32 op, char *path, struct ustat *st, u32 n)
 {
     struct pwalk w;
     int e = WSTART(w, path, path);
-    return e ? e : wcall(&w, 0, FS_STAT, (u32)st, 0);
+    long r = e ? e : wcall(&w, 0, op, (u32)st, 0);
+    if (r >= 0 && n >= USTAT_SIZE)
+        ((u32 *)st)[7] = mnt[w.m].inst;    /* never reused while the system runs (D26's instance; the root's is 1) */
+    return r;
 }
 
-long vfs_fstat(struct file *f, struct ustat *st)
+/* N >= USTAT_SIZE: the device too (D49 8; 0 for the kernel's own devices and sockets) */
+long vfs_fstat(struct file *f, struct ustat *st, u32 n)
 {
+    if (n >= USTAT_SIZE && f->type != FT_PIPE_R && f->type != FT_PIPE_W)   /* (a pipe: -EINVAL, nothing written) */
+        ((u32 *)st)[7] = f->type == FT_INODE ? mnt[f->fs].inst : 0;
     if (f->type == FT_TTY || f->type == FT_NULL || f->type == FT_ZERO || f->type == FT_SERIAL || f->type == FT_KLOG ||
         f->type == FT_RANDOM || f->type == FT_PTM) {
         memset(st, 0, sizeof *st);
@@ -1101,6 +1109,28 @@ long vfs_readdir(struct file *f, struct udirent *out)
     long r = fs_call_on(f->fs, FS_READDIR, f->ino, f->off, (u32)out, (u32)&cookie);
     if (r >= 0)
         f->off = cookie;
+    return r;
+}
+
+/* D49: SYS_readdirs. The buffer is the caller's (checked here); the server writes the records into it in place. A
+ * name that is a mount point keeps its server's stat (that of the directory underneath, as its ino always was): libz
+ * takes it out (docs/d49-readdir.md 4.2) */
+long vfs_readdirs(struct file *f, u32 buf, u32 size)
+{
+    struct fsrdx q;
+    if (size < UDIRX_MAX || size > 0xFFFF || (buf & 3))
+        return -EINVAL;                 /* bits 16-31 are for request flags later; records are 4-aligned */
+    if (!user_ok_wr(current, buf, size))
+        return -EFAULT;
+    if (f->type != FT_INODE || !S_ISDIR(f->mode))
+        return -ENOTDIR;
+    q.size = size;
+    q.next = f->off;
+    long r = fs_call_on(f->fs, FS_READDIRS, f->ino, f->off, buf, (u32)&q);
+    if (r > (long)size || (r > 0 && q.next == f->off))
+        return -EIO;                    /* more than asked, or records that do not move on: a loop for ever */
+    if (r >= 0)
+        f->off = q.next;
     return r;
 }
 

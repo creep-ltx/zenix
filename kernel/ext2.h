@@ -46,6 +46,8 @@ int ext2_iget(u32 ino, struct inode *out);
 u32 ext2_bmap(const struct inode *in, u32 n);
 int ext2_read(const struct inode *in, u32 off, void *dst, u32 n);
 int ext2_readdir(const struct inode *dir, u32 *cookie, struct udirent *out);
+int ext2_istat(u32 ino, struct inode *out);   /* D49: only the numbers a stat shows (ino .. links) */
+extern int ext2_iget_ahead;             /* D49: set, ext2_iget reads an uncached inode table block with the next ones */
 int ext2_lookup(const struct inode *dir, const char *name, u32 len, u32 *ino);
 int ext2_namei(const char *path, u32 cwd, struct inode *out, int depth);
 int ext2_iput(const struct inode *in);
