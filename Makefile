@@ -812,7 +812,7 @@ include libc/picolibc/sources.mk
 LIBZ_SHARED := zmalloc zenv zout zerrtab zsig zpoll zsock zhelp zpw zpty
 # the port: the system layer, the start and the end, the streams, strerror, dprintf, directories, the 64-bit division
 # (section 7: libgcc's is not pure), the terminal, processes, users, glob, regcomp (over user/regex.c, the one engine)
-LIBC_PORT = libc/zenix/sys.c libc/zenix/start.c libc/zenix/stdio.c libc/zenix/strerror.c libc/zenix/dprintf.c libc/zenix/dirent.c \
+LIBC_PORT = libc/zenix/sys.c libc/zenix/pathtime.c libc/zenix/start.c libc/zenix/stdio.c libc/zenix/strerror.c libc/zenix/dprintf.c libc/zenix/dirent.c \
              libc/zenix/divdi3.c libc/zenix/termios.c libc/zenix/spawn.c libc/zenix/pwd.c libc/zenix/glob.c libc/zenix/regcomp.c \
              libc/zenix/locale.c \
              user/regex.c $(LIBZ_SHARED:%=user/%.c)
@@ -1025,7 +1025,7 @@ $(BUILD)/lua-probe.zx: $(BUILD)/lua-probe.celf tools/mkzexe.py tools/check-68020
 
 # ---- make (roadmap block 7, DESIGN D52 section 4; ports/pdpmake/README): pdpmake 2.0.4's source (Ron Yorston's POSIX
 # make, the Unlicense) pinned unchanged in ports/pdpmake/upstream, compiled as it is: no patch, no extra flags. What it
-# needed from the C library (utimensat with UTIME_NOW and AT_FDCWD, realpath) is in the C library (libc/zenix/sys.c). /bin/make (UAPPS;
+# needed from the C library (utimensat with UTIME_NOW and AT_FDCWD, realpath) is in the C library (libc/zenix/pathtime.c). /bin/make (UAPPS;
 # no user/make.c: these rules build it) is a program with shared code (ZEX2: it uses no floating point), so a make
 # running another make ($(MAKE)) costs the second only its data. Its stack: STACK_make. ----
 MAKE_SRCS := $(basename $(notdir $(wildcard ports/pdpmake/upstream/*.c)))
