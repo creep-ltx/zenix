@@ -72,6 +72,12 @@ pointers.
   within 64, its glyphs at most 64 KB once converted, its file at most 256 KB and its .font 64 sizes; terminals 8 x 8); zdesk:
   32 windows, 48 keys, 16 menu programs and 16 icons, 12 bar modules; term: 80 columns, 4 to 29 rows;
   a program's event ring 64 records, its order queue 2 KB.
+- TrueType fonts (DESIGN D51, man/ttf2font.txt): TrueType outlines only (no CFF OpenType, no `.ttc`; a variable font's
+  default style), the characters 32-255 on the desktop, sizes 4-64 lines, a glyph at most 64 x 64 pixels and an
+  advance of 255 (a wider one left out and said), 1,024 points a glyph, 2,048 lines and 4,096 crossings a glyph once drawn, a `.ttf` at most 4 MB;
+  256 parts and 16,384 points a glyph with its parts, a size's glyphs at most 64 KB (refused past it);
+  black and white, no hinting, no kerning pairs, drawn for hires pixels (twice as wide in interlace); the cache
+  (`/var/cache/fonts`) system-wide, filled by displayd only; the console's font 8 x 8, at most 4,096 glyphs.
 - `/proc`; more than 8 supplementary groups a process (`NGROUPS`; login, su and sudo say so and keep the first 8);
   a shadow password file (`/etc/passwd` is
   world-readable; the hashes are 1000 rounds of salted SHA-256, a number chosen for a 14 MHz 68020, not measured on

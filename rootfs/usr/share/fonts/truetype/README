@@ -1,1 +1,5 @@
-TrueType fonts (.ttf) go here; Zenix does not read them yet.
+TrueType fonts (NAME.ttf) go here. The desktop uses one when /etc/zdesk/screen has
+"font NAME SIZE" and no AmigaOS font has that name (for example "font go 11"): displayd
+draws it once at that size with ttf2font into /var/cache/fonts and reads that from then
+on (man ttf2font). go.ttf is Go Regular, cut to Western European letters
+(/usr/share/licenses/gofont).

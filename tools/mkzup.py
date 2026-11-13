@@ -235,7 +235,7 @@ FAMILIES = [
     ("sntp", "set the clock from the network", "sntp"),
     ("zine", "ZINE: AmigaOS programs on Zenix (zine PROGRAM)", "zine"),
     ("zinstall", "the installer: put Zenix on a disk; the boot partition's programs", "zinstall"),
-    ("desktop", "Zenix Desktop: the display server, the window manager, the terminal", "zdesk term deskprefs files show"),
+    ("desktop", "Zenix Desktop: the display server, the window manager, the terminal", "zdesk term deskprefs files show ttf2font"),
     ("sound", "the sound server, play (WAV, 8SVX, AIFF) and modplay (modules)", "play modplay"),
     ("usb", "the USB server (USB sticks on a CM4 PiStorm, read-only) and lsusb", "lsusb"),
     ("zenix-tests", "Zenix's test programs and the start-up programs' copies", "hello spin crash badptr msgpingd msgping "
@@ -258,9 +258,12 @@ FAMILY_CONFIG = {"desktop": ["etc/dlogin", "etc/zdesk/keys", "etc/zdesk/menu", "
                              "etc/zdesk/bar", "etc/zdesk/themes/flat.theme", "etc/zdesk/themes/workbench.theme",
                              "etc/zdesk/themes/platinum.theme", "usr/share/fonts/amiga/README",
                              "usr/share/fonts/truetype/README"]}
+# a family's data files from the source tree (DESIGN D51: the TrueType font the desktop ships)
+FAMILY_DATA = {"desktop": [("display/ttf/go.ttf", "/usr/share/fonts/truetype/go.ttf")]}
 FAMILY_FILES = {"zine": [("zine.blob", "/lib/zine/zine.blob"), ("sp060", "/lib/zine/sp060"), ("sp040", "/lib/zine/sp040")],
                 "zinstall": [("bootmenu", "/lib/zinstall/bootmenu"), ("zenixboot", "/lib/zinstall/zenixboot")]}
 FAMILY_LICENSES = {"zine": [("user/zine/msp/060/README", "m68060sp"), ("user/zine/msp/040/README", "m68040fpsp")],
+                   "desktop": [("display/ttf/gofont.LICENSE", "gofont")],
                    "sumi": [("ports/sumi/upstream/LICENSE", "sumi"), ("ports/tui/upstream/LICENSE", "tui")],
                    "maki": [("ports/maki/upstream/LICENSE", "maki"), ("ports/tui/upstream/LICENSE", "maki-tui")],
                    "markdown": [("ports/markdown/upstream/LICENSE", "markdown"),
@@ -366,6 +369,12 @@ def std_packages(build, uapps):
                 ents += [("d", 0o755, 0, 0, None, d) for d in ("/" + "/".join(parts[:i + 1]) for i in range(len(parts)))
                          if d not in have]
                 ents += [("f", 0o644, 0, 0, os.path.join(build, f), dst)]
+            for f, dst in FAMILY_DATA.get(fam, []):
+                have = {e[5] for e in ents}
+                parts = dst.split("/")[1:-1]
+                ents += [("d", 0o755, 0, 0, None, d) for d in ("/" + "/".join(parts[:i + 1]) for i in range(len(parts)))
+                         if d not in have]
+                ents += [("f", 0o644, 0, 0, os.path.join(ROOT, f), dst)]
             for f in FAMILY_CONFIG.get(fam, []):
                 have = {e[5] for e in ents}
                 parts = f.split("/")[:-1]

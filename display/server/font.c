@@ -15,6 +15,7 @@
  * 1 is font 0. */
 #include "dpyd.h"
 #include "amifont.h"
+#include "../ttf/ttfont.h"
 
 static u8 topaz[224 * 8];
 static u8 *zcf;                         /* the file (checked), or 0 */
@@ -104,8 +105,9 @@ COLD static u8 *slurp(const char *path, u32 max, u32 *n, const char **why)
     }
     struct ustat st;
     u8 *b = 0;
-    if (sys_fstat(fd, &st) < 0 || st.size > max) {
-        *why = st.size > max ? "too large" : "cannot be read";
+    int r = sys_fstat(fd, &st);
+    if (r < 0 || st.size > max) {
+        *why = r < 0 ? "cannot be read" : "too large";
         sys_close(fd);
         return 0;
     }
@@ -129,6 +131,51 @@ COLD static u8 *slurp(const char *path, u32 max, u32 *n, const char **why)
     }
     *n = got;
     return b;
+}
+
+/* A TrueType font (DESIGN D51, docs/d51-truetype.md): /usr/share/fonts/truetype/NAME.ttf, drawn once a size by
+ * ttf2font into the Amiga font file /var/cache/fonts/NAME/SIZE, whose stamp names the .ttf's size and time and the
+ * renderer's version. A missing or stale file is made now (ttf2font, waited for: the screen stands still while it
+ * draws, once), then read as any Amiga font. -> the file (free it) and path its name; or 0, *why, path the .ttf's */
+COLD static u8 *ttf_cached(const char *name, int size, char *path, u32 *len, const char **why)
+{
+    char ttf[64], sz[4];
+    struct ustat ts;
+    snprintf(ttf, sizeof ttf, "/usr/share/fonts/truetype/%s.ttf", name);
+    snprintf(path, 64, "/var/cache/fonts/%s/%d", name, size);
+    if (sys_stat(ttf, &ts) < 0) {
+        strcpy(path, "/usr/share/fonts/amiga/");
+        strcat(path, name);
+        strcat(path, ".font");                  /* neither: said as the Amiga font's name, as before D51 */
+        *why = "not there";
+        return 0;
+    }
+    u8 *d = slurp(path, AF_MAXFILE, len, why);
+    if (d && ttf_stamp_ok(d, *len, ts.size, ts.mtime, size))
+        return d;
+    free(d);
+    snprintf(sz, sizeof sz, "%d", size);
+    char *argv[] = { "/bin/ttf2font", "-q", ttf, sz, 0 };
+    int io[3] = { -1, 2, 2 };
+    u32 t0 = sys_ticks();
+    int pid = sys_spawn(argv[0], argv, io);
+    if (pid < 0) {
+        strcpy(path, ttf);
+        *why = "ttf2font cannot be started";
+        return 0;
+    }
+    sys_wait(pid);      /* its status is not the test: the size's file may be written when NAME.font was not */
+    d = slurp(path, AF_MAXFILE, len, why);
+    if (!d || !ttf_stamp_ok(d, *len, ts.size, ts.mtime, size)) {
+        free(d);
+        strcpy(path, ttf);
+        *why = "ttf2font could not draw it";
+        return 0;
+    }
+    if (d)
+        dprintf(1, "displayd: %s drawn at %d lines in %u.%02u s\n", ttf, size, (sys_ticks() - t0) / 100,
+                (sys_ticks() - t0) % 100);
+    return d;
 }
 
 /* said in one line; the font in use stays (at the start the 8 x 8) -> -ENOENT (no such file), -ENOMEM, -EINVAL */
@@ -172,7 +219,8 @@ COLD int font_ui_load(const char *name, int size)
             return refused(path, why);
         strcpy(path + sizeof dir - 1, file);    /* file: at most 255 bytes, checked by af_contents */
         d = slurp(path, AF_MAXFILE, &len, &why);
-    }
+    } else if (!strcmp(why, "not there"))
+        d = ttf_cached(name, size, path, &len, &why);   /* no Amiga font of that name: a TrueType one (D51) */
     if (!d)
         return refused(path, why);
     struct af_font *f = malloc(sizeof *f);

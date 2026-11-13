@@ -4,7 +4,7 @@
 # and Cancel, AmigaOS's four buttons, each checked for what it must do. In FS-UAE through the cage rig (tools/shot.py)
 # on the stock A1200 with 4 MB of fast RAM (a test build with DIWV=0x38), as root. `prefs-test.sh desk` (the default):
 #  - deskprefs from zdesk, clicked with the mouse (gcontest mouse): the font gadget to zbad 11 (a damaged font, the
-#    tools/mkamifont.py test fonts) and Test: refused, said in the window, the 8 x 8 kept; on to ztest 11 and Test:
+#    tools/mkamifont.py test fonts; the TrueType fonts set aside first, so the list holds only these) and Test: refused, said in the window, the 8 x 8 kept; on to ztest 11 and Test:
 #    the font changed live (DPY_FONT_SET): displayd and zdesk say so, the bar and the title bars 3 lines taller in
 #    the screenshot; the mode to interlace and Test: 640 x 512; Cancel: hires and the 8 x 8 again, the bar 11 lines;
 #  - with the keyboard: ztest 11 and the platinum theme, Use: applied, the theme through zdesk's SIGHUP, no file
@@ -58,7 +58,7 @@ sleep 5
 shot columns
 send q
 sleep 2
-send cp -r /tests/fonts/* /usr/share/fonts/amiga/; echo acceleration none > /etc/zdesk/mouse; printf 'right cmd 3600 echo .\\n' > /etc/zdesk/bar\r
+send cp -r /tests/fonts/* /usr/share/fonts/amiga/; mkdir -p /tmp/ttf; mv /usr/share/fonts/truetype/*.ttf /tmp/ttf/; echo acceleration none > /etc/zdesk/mouse; printf 'right cmd 3600 echo .\\n' > /etc/zdesk/bar\r
 sleep 2
 send cp /etc/zdesk/screen /tmp/s0; rm -f /etc/zdesk/theme $HOME/.config/zdesk/theme.use; zdesk -v > /tmp/z.log 2>&1 &\r
 sleep 8

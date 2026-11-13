@@ -387,3 +387,8 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   own.
 - **D35 (the installer, branch install, 2026-11-03):** `/etc/hostname` (one line, 1-63 of `a-z 0-9 -`; login shows it in its prompt and sets `$HOSTNAME`, `hostname` prints it); `zinstall`'s options `--list`, `--undo [FILE]`, `--hostname NAME`, `--root-password-file FILE`, `--user NAME`, `--user-password-file FILE`, `--user-name TEXT`, `--no-user`; `zpkg --fetch DIR [--zfs]`; the copy `/var/lib/zinstall/table-before` (`ZTB1`, read only by the same build's `--undo`). Grown (D35 3b, branch inst2, 2026-11-05): `zinstall`'s options `--startup`, `--root`, `--home` (`keep:NAME`, `format:NAME`, `none`) and `--server URL|none`.
 - **D46 (USB sticks, branch usb, 2026-11-12):** the port `usb` (the service `/sbin/usbd`); `DISK_USBHELLO` 11 and the posted record `struct urec` between usbd and diskd (they only grow at the end); the quiesce step `DRVS_WAIT` 3; the hardware table's `xhci` entry; the device names `usb0`, `usb0pN`; `lsusb`'s options `-v` and `--hold`. Details in docs/claims.md and docs/d46-usb.md.
+- **D51 (TrueType fonts, branch ttf, 2026-11-13):** `/usr/share/fonts/truetype/NAME.ttf` as a source of
+  `font NAME SIZE` (after `/usr/share/fonts/amiga/`); the cache `/var/cache/fonts/NAME/SIZE` and `NAME.font` (AmigaOS's
+  formats) and its stamp, the file's last 28 bytes: `HUNK_DEBUG` (0x3F1), 4, `ZTTF`, the .ttf's size, its time,
+  `TTF_STAMP_VER << 16 | SIZE` (a new renderer raises the version: its files are made again), `HUNK_END`; the command
+  `ttf2font` (`-q`, `-o DIR`, `-n NAME`, `-c`, sizes 4-64, exit statuses 0, 1, 2).

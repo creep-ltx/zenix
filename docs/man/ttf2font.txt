@@ -1,0 +1,69 @@
+TTF2FONT(1)			Zenix manual
+
+NAME
+    ttf2font - draw a TrueType font into an AmigaOS bitmap font
+
+SYNOPSIS
+    ttf2font [-q] [-o DIR] [-n NAME] FONT.ttf SIZE...
+    ttf2font [-q] -c FONT.ttf [OUT.zcf]
+
+DESCRIPTION
+    Draws the characters 32-126 and 160-255 of a TrueType font at each
+    SIZE (4-64 lines, the height of the font as an Amiga font's size is)
+    and writes an AmigaOS bitmap font: DIR/NAME/SIZE and DIR/NAME.font,
+    which lists every size made there. The desktop reads it like any
+    Amiga font, and so does AmigaOS (copy both into its FONTS:).
+
+    The desktop runs it by itself: when /etc/zdesk/screen names a font
+    that is not in /usr/share/fonts/amiga but is
+    /usr/share/fonts/truetype/NAME.ttf, displayd draws that size once
+    into /var/cache/fonts and reads the file from then on. A file whose
+    .ttf has changed (its size or time) is drawn again. The screen stands
+    still while a size is drawn, the first time only.
+
+    The glyphs are black and white, without hinting, and drawn for the
+    desktop's hires pixels (taller than wide, so a glyph takes 1.875
+    times as many columns as its height's scale) so they look as drawn.
+
+    -c  makes the console's Unicode font instead (8 x 8, ZCF1): the
+        letters and symbols past U+00FF the font has, into OUT.zcf
+        (default /usr/share/consolefonts/NAME.zcf), chosen in
+        conprefs(1) or /etc/console. Topaz keeps Latin-1.
+
+OPTIONS
+    -o DIR   where the font goes (default /var/cache/fonts)
+    -n NAME  the font's name (default the file's name without .ttf;
+             1-25 bytes, no spaces, slashes or colons)
+    -q       say only what went wrong
+
+EXAMPLES
+    ttf2font /usr/share/fonts/truetype/go.ttf 11 13
+    ttf2font -o /tmp/fonts -n Go go.ttf 8       (for an Amiga's FONTS:)
+    ttf2font -c /usr/share/fonts/truetype/go.ttf
+
+FILES
+    /usr/share/fonts/truetype/NAME.ttf   the desktop's TrueType fonts
+    /var/cache/fonts/NAME/SIZE           a size drawn (with a stamp: the
+                                         .ttf's size and time)
+    /usr/share/fonts/truetype/go.ttf     Go Regular, cut to Western
+                                         European letters (BSD licence:
+                                         /usr/share/licenses/gofont)
+
+EXIT STATUS
+    0 every size written, 1 a font or size that could not be made (said
+    on standard error), 2 a wrong argument.
+
+NOTES
+    Only TrueType outlines: not PostScript (CFF) OpenType fonts or font
+    collections (.ttc); a variable font gives its default style. No
+    kerning pairs (Amiga fonts have none) and no grey levels. A glyph
+    wider than 64 pixels (or 255 across) at a size is left out and said;
+    the desktop draws such a character, and any the font lacks, with its
+    8 x 8. A size whose glyphs take more than 64 KB together is refused
+    (the desktop's limit: from about 57 lines in wide fonts). A glyph of
+    more than 256 parts or 16,384 points is refused (a damaged font).
+    Sizes are made per system, not per user (~/.fonts is not read).
+    Details: docs/d51-truetype.md.
+
+SEE ALSO
+    deskprefs(1), zdesk(1), conprefs(1)

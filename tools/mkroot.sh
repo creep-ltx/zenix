@@ -68,6 +68,9 @@ lic() { mkdir -p "$T/usr/share/licenses"; cp "$(dirname "$0")/../$1" "$T/usr/sha
 case " $PROGS " in *" netd "*) lic net/lwip/COPYING lwIP;; esac
 case " $PROGS " in *" gzip "*|*" zup "*) lic user/miniz/LICENSE miniz;; esac
 case " $PROGS " in *" rz "*) lic user/xfer/LICENSE zmodem;; esac
+# the TrueType font (DESIGN D51) with its notice (BSD-3), where the images keep the font folders (not the RAM disk's)
+if [ -d "$T/usr/share/fonts/truetype" ]; then cp "$(dirname "$0")/../display/ttf/go.ttf" "$T/usr/share/fonts/truetype/"
+    lic display/ttf/gofont.LICENSE gofont; fi
 # Sumi, Maki, Markdown, Ahiru (ports/PROG): the notices of the owner's MIT code in them, their own and the text-UI library's
 # (named as their packages name them, tools/mkzup.py FAMILY_LICENSES: one file one package)
 case " $PROGS " in *" sumi "*) lic ports/sumi/upstream/LICENSE sumi; lic ports/tui/upstream/LICENSE tui;; esac

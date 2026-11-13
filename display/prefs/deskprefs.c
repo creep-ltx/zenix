@@ -18,7 +18,8 @@
 typedef unsigned char u8;
 
 #define FONTDIR "/usr/share/fonts/amiga"
-#define NF 48
+#define TTFDIR "/usr/share/fonts/truetype"
+#define NF 64
 #define NT 16
 static struct { char name[DPY_FONTNAME]; int size; } fonts[NF];  /* 0: the 8 x 8 */
 static int nfonts = 1;
@@ -42,9 +43,12 @@ static int font_find(const char *name, int size)
             return i;
     return -1;
 }
+static int fdropped;                    /* past the list's room: said, not dropped unseen */
 static void font_add(const char *name, int size)
 {
-    if (nfonts < NF && strlen(name) < DPY_FONTNAME && size > 0 && size <= AF_MAXH && font_find(name, size) < 0) {
+    if (nfonts >= NF)
+        fdropped++;
+    else if (nfonts < NF && strlen(name) < DPY_FONTNAME && size > 0 && size <= AF_MAXH && font_find(name, size) < 0) {
         strcpy(fonts[nfonts].name, name);
         fonts[nfonts++].size = size;
     }
@@ -80,6 +84,25 @@ static void fonts_scan(void)
     }
     if (n > 0)
         dir_free(names, n);
+    /* TrueType fonts (D51): any size, offered in the sizes a desktop uses; displayd draws one the first time it is
+     * chosen. A name an Amiga font has is the Amiga font's (displayd reads that first). */
+    static const u8 tsz[] = { 8, 9, 10, 11, 12, 13, 14, 16 };
+    int namiga = nfonts;
+    n = dir_list(TTFDIR, &names);
+    for (int i = 0; i < n; i++) {
+        int l = (int)strlen(names[i]), dup = 0;
+        if (l < 5 || l - 4 > 25 || strcmp(names[i] + l - 4, ".ttf"))
+            continue;
+        names[i][l - 4] = 0;
+        for (int k = 1; k < namiga; k++)
+            dup |= !strcmp(fonts[k].name, names[i]);
+        for (u32 k = 0; k < sizeof tsz && !dup; k++)
+            font_add(names[i], tsz[k]);
+    }
+    if (n > 0)
+        dir_free(names, n);
+    if (fdropped)
+        dprintf(2, "deskprefs: %d font sizes past the list's %d are not shown\n", fdropped, NF - 1);
     for (int i = 2; i < nfonts; i++)    /* by name and size (a directory's order is the disk's) */
         for (int j = i; j > 1 && (strcmp(fonts[j - 1].name, fonts[j].name) > 0 ||
                                   (!strcmp(fonts[j - 1].name, fonts[j].name) && fonts[j - 1].size > fonts[j].size)); j--) {
