@@ -89,5 +89,7 @@ send zine /tests/zine/ztask; echo ztask-rc=$?\r
 wait ztask-rc= 120
 send zine /tests/zine/zsound; echo zsound-rc=$?\r
 wait zsound-rc= 120
+send zine /tests/zine/zalloc b; echo zallocb-rc=$?\r
+wait zallocb-rc= 60
 send date; echo zine-null-done\r
 wait zine-null-done 20
