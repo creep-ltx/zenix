@@ -177,7 +177,73 @@ Candidates (68k, Motorola syntax, an output Zenix's linker can read, i.e. ELF re
 **For the partner:** our own `zas` (free, small, takes longer) or vasm (the best one, ready, but only as a separate
 package with Volker Barthelmann's written consent, which the partner would ask for). Recommended: `zas`; it is what
 the free compiler route (item 5, tcc) needs anyway, since tcc writes machine code itself and needs an assembler only
-for `.S` files.
+for `.S` files. (The partner chose `zas`, 2026-11-13.)
+
+### As built (2026-11-13)
+
+**The syntax: GNU as's, not Motorola's.** What feeds an assembler on Zenix is the repository's own `.S` files and gcc's
+style of output, all in gas's m68k syntax (`%` registers, `move.l` and `movel`, `(d,%a0,%d1.l*4)`, and the MIT forms
+gcc still writes, `%pc@(2,%d0:w)`, `%a6@(8)`); tcc's back end (item 5) will write machine code itself and use an
+assembler for `.S` files only. Reading gas's syntax gives a test corpus for free: the whole build. Motorola's syntax
+(Devpac, vasm) would be a second front end; it is not built.
+
+`user/zas.c` (5,400 lines of standard C and POSIX, the same file for the PC and, as a C library program with shared
+code, for Zenix): 58 KB of its own code, `/bin/zas` 74 KB on the disk with the C library's parts, 22 KB of bss; man/zas.txt.
+More than the 30-50 KB estimated: the whole 68000-68060, FPU and MMU set and gas's every choice copied. No floating
+point (a ZEX2 program cannot take libgcc's soft float): `.double` and `#0r1.5` are converted with a bignum (correctly
+rounded, denormals too).
+
+**The rule: gas's object, byte for byte** (GNU as 2.45, read from binutils' source, `gas/write.c`, `gas/read.c`,
+`gas/config/tc-m68k.c`, `gas/config/obj-elf.c`, `bfd/elf.c`, `bfd/elf-strtab.c`, and probed). What that took:
+
+- **Mnemonics as gas looks them up:** the dot removed (`move.l` is `movel`, so `add.x` is `addx` and `move.s` is
+  `moves`), then a name and a size letter; each mnemonic takes gas's sizes only (`exg.l`, `fmove` unsized, `fbeq.w`
+  are refused, `abcd.b` too while `sbcd.b` is taken). `divs.l %d0,%d1:%d2` is the 64-bit divide, `divsl.l` the one
+  with a remainder.
+- **gas's own optimisations:** `add`/`sub #1-8` to `addq`/`subq`, `move.l #n,%dn` to `moveq` (32-bit values too:
+  `#0xffffffff`), `0(%a0)` to `(%a0)`, a number that fits to `abs.w`/`(d16,%an)`/the brief index format, an index
+  without a size taken as `.l`.
+- **Relaxation, as gas's `relax_segment`:** pass 1 finds the symbols, pass 2 is gas's first estimate (a target in
+  another section takes the long form at once), then items only grow; a target not reached yet in a pass moves with
+  the "stretch" unless an alignment lies between (gas's regions; a forward target that then seems behind leaves the
+  size alone); a byte branch to the next instruction, or to a label that begins the next frag with only alignment
+  between, takes a word. Unsized `bra`/`bsr`/`b<cc>`/`fb<cc>` are fixed words; `jra`/`jbsr`/`j<cc>` relax (byte,
+  word, long; a jump on a 68000); `dbcc` grows to dbcc over `bra.l`; `d(%pc)` and `(d,%pc,%xn)` grow to the full
+  format; an absolute address of this section becomes `(d16,%pc)` where the operand allows PC-relative modes.
+- **What gas decides where a statement stands:** a value is a constant only if it was known there (a `.set` later
+  in the file gives the long forms); a difference of labels only within one frag.
+- **Relocations:** against the section's symbol for local and global symbols alike (m68k's gas keeps no global
+  symbol), against the symbol for undefined, weak, GOT and PLT references and for a local symbol in a merged section
+  with an addend (gas then keeps that `.L` symbol, also when only debugging data names it); fixed instructions'
+  relocations first, then those of relaxed ones, as gas creates them.
+- **The ELF file:** the sections in order of creation with each `.rela` after its own, `.text/.data/.bss` first
+  (aligned 4); symbols in order of creation, the `FILE` symbol first, each section's symbol where the section was
+  made, `.L` and numbered labels left out, locals then globals; string tables in bfd's order with its suffix merging;
+  sections at their alignment (at most 4) in the file, then the symbols, strings, relocations, section names and
+  headers; `EF_M68K_M68000` for a 68000/68010.
+
+**Differences on purpose**, where gas writes wrong code or takes what the CPU has not (man/zas.txt lists them):
+`fmove.x #0r1.5` (gas shifts the mantissa), a `movep` displacement's symbol (gas drops it), `movem`/`fsave` to an
+address in this section (gas makes it PC-relative), a short branch to another file (gas: an 8-bit relocation).
+
+**Tests:** `tools/zas-host-test.sh` (the PC, in `make check`'s host list): the whole build made again with an `as`
+that keeps every input (2,166: gcc's output for every C file and every `.S`), each assembled by zas: 84 objects byte
+for byte, the other 2,082 byte for byte once `objcopy --strip-debug` has run over both (they have debugging data,
+which zas does not make) and byte for byte as written when the source's debugging data is left out for both; `tools/zas-table.py`'s instruction table (every mnemonic, size and operand combination of a
+pool that covers every addressing mode in both syntaxes, for the 68000, 68010, 68020, 68030, 68040, 68060, the 68040
+with `-mno-float` and the 68020 with 68881 and 68851: about two million lines, 150,000 of them valid):
+the same lines refused as gas refuses, the same object for the rest, whole and in pieces; the cases in
+`tools/tests/zas` (relaxation near and far, every directive, macros, conditionals, relocations); sources that must
+fail, with their messages and no object (among them the independent review's crashes and hangs); 400 damaged and
+generated sources under AddressSanitizer and UBSan. **The review** (2026-11-13, one independent reviewer): eight
+crashes or hangs on hostile input (an expression or an alias chain nested past the 16 KB stack, `.incbin` past 4 GB, a
+backslash at a line's end, missing operands, `.file ""`, an unclosed `.rept` inside a `.rept`), all fixed and tested;
+gas differences fixed (a `.set` counter in `.rept`, aliases of undefined symbols, `.exitm` inside `.if`, `.lcomm` after
+`.bss`, `.cpu` in later passes, `.previous` after `.popsection`, `jsr f@PLTPC`, a branch over `.skip`/`.fill`, limits
+that dropped data silently now errors); the others are man/zas.txt's "Differences from GNU as". `tools/zas-test.sh`
+(FS-UAE, an A1200 with 4 MB of fast RAM): zas on Zenix assembles `tools/tests/zas/prog.s` (macros from an included
+file) and gcc's output for `sort.c`, each the PC's object byte for byte, zld links the program and it runs; a source
+with errors is refused with each error's line. **Verified in FS-UAE 2026-11-13; not yet on a real Amiga.**
 
 ## 7. The C compiler (item 5)
 

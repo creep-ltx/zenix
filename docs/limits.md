@@ -274,6 +274,16 @@ pointers.
   (`-fno-common`); the relocations gcc's 68k code uses (`R_68K_32`, `PC32/16/8`, in ZEX2 also `GOT32O/16O/8O` and
   `PLT32/16/8`); at most 32 address-table entries reached with 8-bit offsets and 8192 with 16-bit ones (ld's own limits); archives need GNU
   ar's symbol index. It holds the used objects' symbols and relocations and the whole program image in memory.
+- The assembler, zas (DESIGN D52 section 6, man/zas.txt): GNU as's syntax only (not Motorola's), no C preprocessor (a
+  `.S` file needs cpp first), no debugging information (`.loc`, `.cfi_*` and `.debug_*` sections read and dropped), no
+  common symbols, no section groups, no subsections (`.text 1`), no listing, no packed-decimal immediates; macros nest
+  and include at most 100 deep, `.if` 64 deep, `.pushsection` 16 deep, an expression 24 levels of parentheses or signs,
+  `.set` aliases 100 deep; a macro takes 32 parameters, a line 64 values (`.float`, `.globl`, `.uleb128`...; data
+  directives any number), `.rept` at most 100,000 times, `.skip`/`.fill` 256 MB, a section 1 GB; a numbered local
+  label's first 20 digits count; a mnemonic of at most 23 characters, a directive's name 23, an `.include` name 255,
+  an `-I` path with the name 512; a decimal number for `.double` and the like up to 600 32-bit words (`number too
+  large`). Each limit, when hit, is an error. The source, its included files, the symbols and the sections' bytes stay
+  in memory, and the source is read again for every pass (at most 100, then it stops: the sizes do not settle).
 - The text-UI library (roadmap block 3, `ports/tui/README`; the owner's tui.library linked in, used by
   `/tests/tuitest`, `sumi`, `maki`, `markdown` and `ahiru`): UTF-8 output and the C library's widths since the console's UTF-8
   (DESIGN D28; `make TUI_UTF8=0` the Latin-1 build), no composing of a separate accent onto its letter; no mouse, no pastes, no resize events, no second screen (closing clears it); `TuiSignal` bit 8 (the

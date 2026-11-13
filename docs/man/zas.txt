@@ -1,0 +1,124 @@
+ZAS(1)			Zenix manual
+
+NAME
+    zas - assemble 68k assembly into an ELF object
+
+SYNOPSIS
+    zas [-v] [-mCPU] [-m68881|-mno-float] [--pcrel]
+        [--register-prefix-optional] [-I dir] [-o object] [file]
+
+DESCRIPTION
+    Reads 68k assembly in GNU as's syntax, the one gcc writes and the
+    Zenix sources use, and writes an ELF relocatable object that zld (and
+    GNU ld) link. Without a file it reads standard input; without -o it
+    writes a.out. For everything the Zenix build assembles (gcc's output
+    for every C file, every .S file) it writes the object the PC's GNU as
+    2.45 writes, byte for byte (tools/zas-host-test.sh checks all of
+    them); debugging information is the one difference: .loc, .file
+    numbers and .cfi_* are read and left out, and .debug_* sections are
+    not written.
+
+    The syntax: registers with % (%d0, %a7 or %sp, %fp for %a6, %pc,
+    %zpc, %za0, %ccr, %sr, %usp, the control registers, %fp0-%fp7, %fpcr,
+    %fpsr, %fpiar); sizes as move.l or movel; addressing modes as
+    (d,%a0), d(%a0), (d,%a0,%d1.l*4), ([bd,%a0,%d1],od), (d,%pc), abs.w
+    and abs.l, #immediates (#0r1.5 for floating point), and the MIT forms
+    %a0@, %a0@+, %a0@-, %a0@(d), %a0@(d,%d1:l:4), %a0@(bd)@(od); register
+    lists %d0-%d3/%a0, pairs %d0:%d1, bit fields {off:width}; comments
+    after |, a # or * line, or /* */; ; between statements.
+
+    Instructions: the integer set of the 68000 to the 68060, the 68881,
+    68882 and 68040/68060 FPU, the 68030 and 68851 MMU (pmove, pflush,
+    pload, ptest) and the 68040/68060 cache and MMU instructions (cinv,
+    cpush, pflush, ptest, plpa, move16, movec's registers). An
+    instruction the chosen CPU has not is refused.
+
+    Sizes as gas chooses them: jra, jbsr and j<cc> become the shortest
+    branch that reaches (a long one, or on a 68000 a jmp, when the target
+    is in another section or file); dbcc too far becomes dbcc over a long
+    branch; d(%pc) and (d,%pc,%xn) grow to the full format when the
+    target is far or elsewhere; an absolute address of this section in an
+    operand that can be PC-relative becomes (d16,%pc); a number that fits
+    takes the short form (abs.w, (d16,%an), the brief index format);
+    add/sub #1-8 becomes addq/subq and move.l #n,%dn moveq. Unsized
+    bra, bsr, b<cc> and fb<cc> are words.
+
+    Directives: .text .data .bss .section .pushsection .popsection
+    .previous; .byte .word .short .2byte .long .int .4byte .8byte .quad
+    .ascii .asciz .string .base64 .float .single .double .extend .zero
+    .space .skip .fill .uleb128 .sleb128 .incbin; .align (in bytes)
+    .balign .balignw .balignl .p2align .even .org; .globl .global .weak
+    .local .hidden .internal .protected .type .size .set .equ .equiv = .lcomm
+    .file .ident; .macro .endm .exitm .purgem (arguments by position or
+    name, defaults, :vararg, \@, \()), .rept .irp .irpc .endr; .if .ifdef
+    .ifndef .ifeq .ifne .ifgt .ifge .iflt .ifle .ifb .ifnb .ifc .ifnc
+    .elseif .else .endif; .include (the current directory, then -I);
+    .err .error .warning .print .end; .chip, .cpu, .arch. Numbered local
+    labels (1: ... 1b, 1f), .L names kept out of the symbol table,
+    expressions with gas's operators and 64-bit arithmetic,
+    symbol@GOT(%a5), symbol@GOT.w(%a5) and symbol@PLTPC for programs with
+    shared code.
+
+OPTIONS
+    -o object        the file to write; nothing is written (and an old
+                     file of that name is removed) when there was an error
+    -m68000 ... -m68060, -mcpu=68020 ...
+                     the CPU (default 68020 with a 68881 and a 68851;
+                     -m68020-60 is -m68020, as gcc's code for it is)
+    -m68881, -m68882 the FPU; -mno-float takes it away (the 68040's and
+                     68060's own FPU stays, as in gas)
+    -m68851          the 68851 MMU
+    --pcrel          never turn an absolute address into (d16,%pc)
+    --register-prefix-optional
+                     registers also without %
+    -I dir           look for .include and .incbin files in dir too
+    -v               print the object's sizes at the end
+
+EXAMPLES
+    Assemble a program written in assembly whose main calls the C
+    library, and link it (the development package, zpkg -S devel):
+        zas -m68020 -o prog.o prog.s
+        zld -o prog --defsym=vfprintf=__l_vfprintf \
+            --defsym=vfscanf=__l_vfscanf /usr/lib/crt0.o prog.o -lc -lgcc
+
+EXIT STATUS
+    0 when the object was written, 1 on any error: every error is shown
+    with its file and line, then nothing is written.
+
+NOTES
+    GNU as's syntax only: Motorola's (Devpac, vasm: dc.l, xdef, $ hex,
+    registers without %) is not read. No C preprocessor: a .S file needs
+    cpp first (on the PC, gcc -E). No common symbols (.comm; use .bss or
+    .lcomm), no section groups, no listing. The output is big-endian
+    ELF32 with RELA relocations: R_68K_32, 16, 8, PC32, PC16, PC8,
+    GOT32O, GOT16O, GOT8O, PLT32, PLT16, PLT8.
+
+    Differences from GNU as, each where gas writes something wrong or
+    takes what the CPU has not: zas writes an extended-precision
+    immediate (fmove.x #0r1.5) correctly, a movep displacement's symbol as
+    a relocation, and movem or fsave to an address of this section as an
+    absolute address (gas makes them PC-relative, a mode those
+    instructions do not have); it refuses a short branch (.s) to a symbol
+    in another section or file, a packed immediate, %dn with .d, .x or .p
+    operands, %fpcr or %fpsr with %an, and bfins with its operands the
+    other way round. It does not range-check a word or byte relocation's
+    unused field as gas does (gas refuses bra to another file 32 KB into a
+    section). Floating-point numbers are rounded correctly (a tie to
+    even); gas's own conversion of a long decimal sometimes differs in the
+    last bit. .cpu and .arch take effect where they stand; gas refuses them
+    after the first instruction. jsr (f@PLTPC,%pc) to a local f is
+    (d16,%pc) where gas takes the full format. Branch sizes are gas's in
+    every case the build, the tests and a review's thousands of random
+    programs met, but not proven for every layout (one random program in
+    300, with odd addresses on a 68000, differed: gas wrapped a
+    displacement that zas refuses as out of range).
+
+    Memory: the source and every file it includes stay in memory, with
+    the symbols, the sections' bytes and their relocations; the source is
+    read again for every pass (three to a dozen, while sizes settle).
+    Assembling gcc's output for sort.c (106 KB with its debugging data)
+    took at most 267 KB in FS-UAE (emulator figures, an A1200 with 4 MB of
+    fast RAM).
+
+SEE ALSO
+    zld(1), make(1); docs/d52-self-hosting.md section 6
