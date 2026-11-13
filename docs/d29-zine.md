@@ -2171,7 +2171,10 @@ chip RAM and its other hunks together a piece below 16 MB, or at least the large
 for the largest one below 16 MB from an allocator that gives big blocks from the top, which on the 68030 machine left
 lux aeterna, You are Lucy, Outside Planet Earth and Concrete on path A, where their big AllocMem failed). Found on
 the way: round 8's last commit had lost the line that sends a lean program to path B, so the rule of 16.18 was not
-used at all on main; it is back, and `zlean` (below) tests it.
+used at all on main; it is back, and `zlean` (below) tests it. And `zh_lean` now also needs memory to be short: the
+program's file and hunks leave less than 16 MB of the free memory (on the 68060 test machine, with 72 MB, Kilofix and
+Norwegian Kindness crashed late on path B where they had run on path A; the file is kept there as before, which
+costs nothing a program misses). Host-tested (`tools/host/zine-test.sh`, two more zh_lean cases).
 
 **Sprites** (graphics; the RKRM Libraries' sprite chapter and the NDK 3.2's autodocs for what each call does,
 graphics/sprite.h for the structures, the AHRM and the AGA documents for SPRxPOS/SPRxCTL and FMODE; `user/zine/bnext.c`).
