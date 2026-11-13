@@ -49,7 +49,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet \
           rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs files show ttf2font \
-          play modplay lsusb
+          play modplay lsusb lua
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -64,6 +64,10 @@ STACK_awk := 65536
 # Markdown (ports/markdown): upstream's renderer recurses once per container inside a container, about 1 KB a level, to
 # MAXDEPTH 24 (md.c), and upstream itself runs on a 32 KB stack (its STACKSZ): the same here
 STACK_markdown := 32768
+# Lua (ports/lua, DESIGN D52 section 9 "The C stack"): Lua stops a script at LUAI_MAXCCALLS (100) nested C calls or
+# parser levels (110 while it handles that error); the deepest kind (string.gsub calling itself, a traceback made at
+# the bottom) needed more than 96 KB and at most 112 KB in FS-UAE (rootfs/tests/lua/cstack.lua): 128 KB
+STACK_lua := 131072
 # boot (pid 1, built into the kernel image) lives for ever: its frames are under 500 bytes (-fstack-usage, 2026-10-26),
 # so 4 KB, the loader's least; it gave back the memory D15 cost in 1 MB of chip RAM (three sessions again)
 STACK_boot := 4096
@@ -93,7 +97,7 @@ NETDRVZX := $(NETDRVS:%=$(BUILD)/drv-%.zx)
 TESTPZX := $(BUILD)/hello.pzx $(BUILD)/crash.pzx $(BUILD)/sigtest.pzx
 # the C library's test program (DESIGN D27 section 11, tools/libc-test.sh), in the test images' /tests: its ZEXE
 # build and its ZEX2 one (libctestpure)
-TESTLIBC := $(BUILD)/libctest.zx $(BUILD)/libctest.pzx $(BUILD)/tuitest.zx
+TESTLIBC := $(BUILD)/libctest.zx $(BUILD)/libctest.pzx $(BUILD)/tuitest.zx $(BUILD)/lua-probe.zx
 
 all: $(BUILD)/zenix.adf $(BUILD)/zenix.hdf $(TESTDRVS:%=$(BUILD)/drv-%.zx) $(BUILD)/libc-pure.a
 
@@ -976,6 +980,44 @@ $$(BUILD)/$(1).zx: $$(BUILD)/$(1).pzx
 	cp $$< $$@
 endef
 $(foreach p,$(TEXTTOOLS),$(eval $(call TEXTTOOL_RULES,$(p))))
+
+# ---- Lua (roadmap block 7, DESIGN D52, docs/d52-self-hosting.md section 9; ports/lua/README): Lua 5.4.9's source
+# pinned unchanged in ports/lua/upstream, Zenix's settings as flags and upstream's user-header hook (no patch):
+# LUA_USE_POSIX (popen, mkstemp, fseeko), _setjmp/_longjmp named setjmp/longjmp (picolibc's save no signal mask), the
+# C levels LUAI_MAXCCALLS and ports/lua/zenix/luauser.h's smaller buffers against the stack (STACK_lua, d52 9 "The C
+# stack"). /bin/lua (UAPPS), a plain ZEXE program: libgcc's soft float (lb1sf68) reaches
+# its data by absolute addresses, which a program with shared code cannot have (d52 9). Linked with the C library's
+# floating-point printf and scanf (%g, tonumber). luac is not built. ----
+LUA_SRCS := $(filter-out lua,$(basename $(notdir $(wildcard ports/lua/upstream/src/*.c)))) lua
+LUA_MAXCCALLS := 100
+LUA_CFLAGS := $(LIBC_PFLAGS) -DLUA_USE_POSIX -D_setjmp=setjmp -D_longjmp=longjmp -DLUAI_MAXCCALLS=$(LUA_MAXCCALLS) \
+              -Iports/lua/zenix '-DLUA_USER_H="luauser.h"' \
+              -Wno-sign-compare -Wno-unused-parameter
+$(BUILD)/lua/%.o: ports/lua/upstream/src/%.c $(LIBC_HDRS) $(wildcard ports/lua/upstream/src/*.h) ports/lua/zenix/luauser.h \
+                  Makefile
+	@mkdir -p $(dir $@)
+	$(CC) $(LUA_CFLAGS) -c $< -o $@
+$(BUILD)/lua.celf: $(LUA_SRCS:%=$(BUILD)/lua/%.o) $(BUILD)/crt0.o $(BUILD)/libc.a link/user.ld
+	$(CC) $(LIBC_PFLAGS) $(ULDFLAGS) $(LIBC_FLOATLD) $(BUILD)/crt0.o $(LUA_SRCS:%=$(BUILD)/lua/%.o) \
+	    $(BUILD)/libc.a $(LIBGCC) -o $@
+$(BUILD)/lua.zx: $(BUILD)/lua.celf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ $(STACK_lua)
+# the test build with the stack probe (ports/lua/zenix/stackprobe.c): /tests/lua/luaprobe on the test images, a 256 KB
+# stack of which 240 KB are painted, so it measures what /bin/lua's stack must hold (tools/lua-test.sh)
+$(BUILD)/luap/%.o: ports/lua/upstream/src/%.c $(LIBC_HDRS) $(wildcard ports/lua/upstream/src/*.h) ports/lua/zenix/luauser.h \
+                   Makefile
+	@mkdir -p $(dir $@)
+	$(CC) $(LUA_CFLAGS) -DZENIX_LUA_STACKPROBE -c $< -o $@
+$(BUILD)/luap/stackprobe.o: ports/lua/zenix/stackprobe.c $(LIBC_HDRS) Makefile
+	@mkdir -p $(dir $@)
+	$(CC) $(LIBC_PFLAGS) -DZX_PROBE_BYTES=245760 -c $< -o $@
+$(BUILD)/lua-probe.celf: $(LUA_SRCS:%=$(BUILD)/luap/%.o) $(BUILD)/luap/stackprobe.o $(BUILD)/crt0.o $(BUILD)/libc.a link/user.ld
+	$(CC) $(LIBC_PFLAGS) $(ULDFLAGS) $(LIBC_FLOATLD) $(BUILD)/crt0.o $(LUA_SRCS:%=$(BUILD)/luap/%.o) $(BUILD)/luap/stackprobe.o \
+	    $(BUILD)/libc.a $(LIBGCC) -o $@
+$(BUILD)/lua-probe.zx: $(BUILD)/lua-probe.celf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ 262144
 
 # ---- Ahiru, the owner's file manager (roadmap block 3; ports/ahiru/README): its upstream files and the CFile core's
 # under it (the owner's CFile repository: ahiru/src, core/, fs/), pinned in ports/ahiru/upstream (tools/ahiru-vendor.sh,

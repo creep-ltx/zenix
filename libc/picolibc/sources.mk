@@ -3,7 +3,8 @@
 # (LIBC_SRCS) and by tools/libc-vendor.sh (which copies these and every file they include). Left out on purpose:
 # the allocator (nano-malloc: libz's, user/zmalloc.c), regex (one engine, user/regex.c), the environment, system,
 # strerror, clock and exit (the port's, libc/zenix), arc4random (no getentropy yet), the Berkeley hash/ndbm files,
-# pathconf, fdevopen, fdopen and picolibc's POSIX console (the port's streams, libc/zenix/stdio.c).
+# pathconf, fdevopen, fdopen, fflush (picolibc's takes no NULL: C's "every output stream", DESIGN D52 9) and
+# picolibc's POSIX console (the port's streams, libc/zenix/stdio.c).
 LIBC_SRCS := \
     newlib/libc/machine/m68k/memcpy.S \
     newlib/libc/machine/m68k/memset.S \
@@ -337,7 +338,6 @@ LIBC_SRCS := \
     newlib/libc/tinystdio/fcvt_r.c \
     newlib/libc/tinystdio/feof.c \
     newlib/libc/tinystdio/ferror.c \
-    newlib/libc/tinystdio/fflush.c \
     newlib/libc/tinystdio/fgetc.c \
     newlib/libc/tinystdio/fgets.c \
     newlib/libc/tinystdio/fgetwc.c \

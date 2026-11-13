@@ -752,6 +752,24 @@ static void t_spawn(void)
     close(f);
     unlink(tf);
     checks("popen w", b, "into the command\n");
+    /* fflush(NULL): every stream with output waiting; a stream being read is left alone (DESIGN D52 9: picolibc's
+     * took NULL as a stream; Lua's io.popen calls it). The read stream is a pipe: one that was flushed would seek
+     * back over its buffered input, which a pipe cannot, and lose the rest of the line. */
+    tmpname(tf, ".ff");
+    FILE *fw = fopen(tf, "w"), *fr = popen("echo abc", "r");
+    if (fw) fputs("flushed by NULL\n", fw);
+    int fr0 = fr ? getc(fr) : EOF;
+    checki("fflush(NULL): 0", fflush(0), 0);
+    b[0] = 0;
+    f = open(tf, O_RDONLY);
+    slurp(f, b, sizeof b);
+    close(f);
+    checks("fflush(NULL): the written stream's bytes are in the file", b, "flushed by NULL\n");
+    int fr1 = fr ? getc(fr) : EOF, fr2 = fr ? getc(fr) : EOF;
+    check("fflush(NULL): a pipe being read keeps its buffered input", fr0 == 'a' && fr1 == 'b' && fr2 == 'c', "");
+    if (fw) fclose(fw);
+    if (fr) pclose(fr);
+    unlink(tf);
     check("getppid", getppid() > 0 && getppid() != getpid(), "");
     /* system ignores SIGINT and SIGQUIT while it waits (POSIX: ^C is the command's), puts the caller's handlers
      * back after, and the command itself gets the defaults */

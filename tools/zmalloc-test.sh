@@ -50,6 +50,8 @@ o=$($Z bad 2>&1)
 case "$o" in "bad: "*) echo "PASS stray and double frees reported and ignored, a damaged header stops (134)" ;; *) fail "the bad pointers" ;; esac
 o=$($Z quick -r 16 2>&1)
 case "$o" in "quick: "*) echo "PASS $o" ;; *) fail "$o" ;; esac
+o=$($Z grow -r 16 2>&1)
+case "$o" in "grow: a block"*) echo "PASS $o" ;; *) fail "$o" ;; esac
 for s in 1 7 1234; do
     o=$($Z stress -r 16 $s); echo "     $o"
     case "$o" in *"every block kept"*"0 calls out of regions"*) ;; *) fail "stress, seed $s: $o" ;; esac

@@ -978,7 +978,10 @@ slots); the kernel's region loops (a pointer check in a region, `SYS_memalloc`, 
 - A request of 8 KB or more gets a region of its own while the allocator holds fewer than 10 regions (6 stay for the
   heap and the program's own `SYS_memalloc`); `free` gives it back at once. Past that, big blocks go into the chunks,
   so a program runs out of memory before it runs out of regions.
-- `realloc` grows in place when the block, or the free block after it, is big enough.
+- `realloc` grows in place when the block, or the free block after it, is big enough; of that free block it takes
+  only what it needs, the rest staying free (until 2026-11-13 it took all of it: a block grown next to a new chunk's
+  untouched rest swallowed the rest, and Lua ran out of regions parsing a 5 KB script; DESIGN D52 9, `zmalloc-host
+  grow`).
 - Safety stays: a pointer `malloc` did not give out, or one freed twice, is reported on standard error and ignored
   (as before); a damaged header found on the way (a free block's tag, a neighbour's when joining: a program wrote
   past its block) stops the program with status 134 and the header's address, since the lists cannot be trusted.

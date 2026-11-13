@@ -2070,7 +2070,9 @@ region the allocator holds (from 10 regions on at least the heap so far, at most
 A request of 8 KB or more gets a region of its own while the allocator holds fewer than 10, and `free` gives it back.
 `free` and `realloc` check the tag: a pointer `malloc` did not give out, or one freed twice, is reported on standard
 error and ignored; a damaged header found while joining stops the program (status 134, its address said). `realloc`
-grows in place when the block or the free block after it is big enough, else copies only the old block's bytes. `xmalloc` ends the program with "NAME: out of memory".
+grows in place when the block or the free block after it is big enough (taking only what it needs of that free block:
+until 2026-11-13 it took all of it, once a new chunk's megabytes into one small block, DESIGN D52 9), else copies only
+the old block's bytes. `xmalloc` ends the program with "NAME: out of memory".
 
 **The shell's arena** (`user/sh.c`, fixed 2026-10-25: it was a fixed region of an eighth of free memory, 64-256 KB per
 shell, and a script was read and parsed whole). Tokens, the parsed tree and expansions come from a stack of chunks

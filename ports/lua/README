@@ -1,0 +1,36 @@
+Lua, the scripting language, on Zenix (roadmap block 7, its first item; DESIGN D52, docs/d52-self-hosting.md section
+9; the user's page is docs/man/lua.txt).
+
+What it is: the reference Lua 5.4 interpreter from lua.org, /bin/lua, with every standard library. Built from this
+copy by the Makefile (its "Lua" section) as a plain program (ZEXE), linked with Zenix's C library (picolibc, D27)
+and its floating-point printf and scanf.
+
+upstream/  Lua 5.4.9, pinned and never changed: lua.org's lua-5.4.9.tar.gz (2026-08-10, 373,429 bytes, sha256
+           2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6), its src/*.c and src/*.h (luac.c
+           left out: luac is not built); LICENSE is the MIT notice at the end of src/lua.h, word for word (the
+           notice that travels with the program: tools/mkroot.sh and the package lua put it in
+           /usr/share/licenses/lua).
+
+Zenix's changes: no patch. What Zenix needs is set from outside, by the Makefile's LUA_CFLAGS and by upstream's own
+hook for a user header (lua.h includes the file LUA_USER_H names after luaconf.h):
+- LUA_USE_POSIX: io.popen (the C library's popen, through /bin/sh -c), os.tmpname (mkstemp), fseeko.
+- _setjmp and _longjmp named setjmp and longjmp: picolibc has only those, and they save no signal mask, which is
+  what the underscore forms mean.
+- LUAI_MAXCCALLS (the Makefile's LUA_MAXCCALLS) and zenix/luauser.h's LUAL_BUFFERSIZE: the C stack is fixed (no
+  MMU) and Lua's limit on nested C calls and parser levels is what keeps a script inside it; d52 section 9, "The C
+  stack", has the measurements behind the numbers and STACK_lua.
+- No dynamic libraries (upstream's default without LUA_USE_DLOPEN): require loads Lua modules only.
+
+Found while porting (for the record, not changed):
+- libgcc's soft float on m68k (lb1sf68) keeps its state in data reached by absolute addresses, so a program using
+  doubles cannot be a program with shared code (ZEX2) today: Lua is a plain program, each running Lua has its own
+  copy of the code. A pure soft float would make it ZEX2 (d52 section 9).
+
+Tests: tools/lua-host-test.sh (the PC: this copy built with the same settings under AddressSanitizer and UBSan, the
+test scripts in rootfs/tests/lua run; its output is the reference) and tools/lua-test.sh (FS-UAE, an A1200 with 4 MB
+of fast RAM, in make check: the same script's output compared line for line, every C recursion stopped by Lua's
+limit and never by the kernel's stack guard, the command line).
+
+To update: put the new release's src/*.c and src/*.h here (without luac.c), the LICENSE from its lua.h, its name,
+size and sha256 above; build; run both tests; read the release's notes for changes to luaconf.h's settings named
+above, and bring docs/man/lua.txt and d52 section 9 in step.

@@ -12,6 +12,7 @@
  *   zmalloc-host speed [TRACE...]               the time of a small malloc/free pair (the hot path), a medium one,
  *                                               and each trace's calls replayed 200 times, in ns
  *   zmalloc-host room [SIZE]                    how much the regions hold in blocks of SIZE (100) bytes
+ *   zmalloc-host grow                           a block grown in place takes only what it needs (DESIGN D52 9)
  *   zmalloc-host bad                            the checks: a pointer not given out and a double free are reported
  *                                               and ignored; a corrupt header next to a freed block stops
  * Every block is filled with its own byte when given and checked when freed or moved: an allocator that hands out
@@ -340,6 +341,24 @@ static int quicktest(void)
     return 0;
 }
 
+/* a block grown in place into the free block after it takes only what it needs (DESIGN D52 9: it took the whole free
+ * rest of a new chunk, so a 16-byte block grown by 8 bytes held megabytes, and Lua ran out of regions parsing a 5 KB
+ * script): a small block at the start of the heap grown 8 bytes at a time while small blocks are taken after it */
+static int growtest(void)
+{
+    static void *keep[3000];
+    for (int i = 0; i < 3000; i++) {   /* a new block, at once grown by 8 bytes: it lies before the chunk's free rest */
+        char *q = zm_malloc(16);
+        if (!q || !(q = zm_realloc(q, 24))) { printf("grow: out of memory at block %d (%u regions)\n", i, nreg); return 1; }
+        keep[i] = q;
+    }
+    uint32_t r = nreg;
+    for (int i = 0; i < 3000; i++) zm_free(keep[i]);
+    if (r > 8) { printf("grow: %u regions for 70 KB asked\n", r); return 1; }
+    printf("grow: a block grown in place takes only what it needs (%u regions for 70 KB asked)\n", r);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2) { fprintf(stderr, "usage: zmalloc-host MODE [-r N] ...: replay TRACE... | stress [SEED] | speed | room [SIZE] | bad\n"); return 2; }
@@ -363,5 +382,6 @@ int main(int argc, char **argv)
     }
     if (!strcmp(argv[1], "bad")) return badtest();
     if (!strcmp(argv[1], "quick")) return quicktest();
+    if (!strcmp(argv[1], "grow")) return growtest();
     return 2;
 }

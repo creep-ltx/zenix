@@ -24,6 +24,28 @@ static ssize_t zx_write(int fd, const void *buf, size_t n)
 struct zx_file { struct __file_bufio bf; struct zx_file *next; char buf[BUFSIZ]; };
 static struct zx_file *open_files;
 
+/* C's fflush: a stream, or with NULL every stream with output waiting (picolibc's own fflush took NULL as a stream
+ * and called through address 0's neighbours: found by Lua's io.popen, which flushes everything first, DESIGN D52 9).
+ * A stream last read (an "r+" one too) is left alone, as glibc does: flushing it would seek back over its buffered
+ * input, which a pipe or a terminal cannot do, and lose it. fmemopen and funopen streams are not in the list (nor
+ * flushed at exit). */
+int fflush(FILE *stream)
+{
+    if (!stream) {
+        int r = 0;
+        if (((struct __file_bufio *)stdout)->dir == __SWR && fflush(stdout)) r = EOF;
+        if (((struct __file_bufio *)stderr)->dir == __SWR && fflush(stderr)) r = EOF;
+        for (struct zx_file *z = open_files; z; z = z->next)
+            if (z->bf.dir == __SWR && fflush(&z->bf.xfile.cfile.file)) r = EOF;
+        return r;
+    }
+    int ret = 0;
+    __flockfile(stream);
+    if (stream->flush)
+        ret = (stream->flush)(stream);
+    __funlock_return(stream, ret);
+}
+
 static void flush_all(void)
 {
     fflush(stdout);
