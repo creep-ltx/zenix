@@ -3,7 +3,8 @@
 # zld on the PC (DESIGN D52 section 5, docs/man/zld.txt): user/zld.c built for the PC, then
 #  - every program the build links with link/user.ld or link/pure.ld and tools/mkzexe.py (the command lines read from
 #    `make -n -B`, tools/zld-links.py) linked again by zld from the same objects and archives: each must be the
-#    build's .zx/.pzx byte for byte;
+#    build's .zx/.pzx byte for byte. A program that is missing, older than one of its inputs or has an input missing
+#    was not linked from these files: the test names those as stale (run make) instead of comparing them;
 #  - links that must fail, each with its message naming the symbol and the object: an undefined reference, a
 #    duplicate definition, a common symbol, a 16-bit PC-relative branch out of reach, a relocation a program cannot
 #    carry, no crt0, --defsym's limits, ZEX2's refusals (tools/mkzexe.py's), a crt0 shorter than its header, a
@@ -34,18 +35,34 @@ make -n -B BUILD="$B" TOOLPREFIX="$P" all >"$T/make.txt" 2>"$T/make.err"
 check $? "make -n -B (the build's commands)" "$(head -3 "$T/make.err")"
 python3 tools/zld-links.py <"$T/make.txt" >"$T/links.tsv"
 check $? "the program links found (tools/zld-links.py)"
-n=0; same=0; diffs=""
+n=0; same=0; diffs=""; stale=""; nst=0
 while IFS=$'\t' read -r -a a; do
     out=${a[0]}
     n=$((n + 1))
-    if "$T/zld" -o "$T/p.zx" "${a[@]:1}" 2>"$T/e.txt" && cmp -s "$T/p.zx" "$out"; then
+    # a program missing, older than one of its inputs or with an input missing was not linked from these files: the
+    # build is out of date (make), not a difference of zld's
+    old=""
+    [ -e "$out" ] || old=1
+    prev=""
+    for f in "${a[@]:1}"; do
+        if [ "$prev" != -s ]; then
+            case $f in -*) ;; *) { [ ! -e "$f" ] || [ "$out" -ot "$f" ]; } && old=1 ;; esac
+        fi
+        prev=$f
+    done
+    if [ -n "$old" ]; then
+        stale="$stale $(basename "$out")"
+        nst=$((nst + 1))
+    elif "$T/zld" -o "$T/p.zx" "${a[@]:1}" 2>"$T/e.txt" && cmp -s "$T/p.zx" "$out"; then
         same=$((same + 1))
     else
         diffs="$diffs $(basename "$out")"
     fi
 done <"$T/links.tsv"
-[ "$n" -ge 150 ] && [ "$same" = "$n" ]
-check $? "$same of $n programs linked by zld are the build's byte for byte" "differ:$diffs $(head -2 "$T/e.txt")"
+[ -z "$stale" ]
+check $? "the build is up to date (every program newer than its objects and archives)" "run make first; stale:$stale"
+[ "$n" -ge 150 ] && [ "$same" = $((n - nst)) ]
+check $? "$same of $((n - nst)) programs linked by zld are the build's byte for byte ($nst stale not compared)" "differ:$diffs $(head -2 "$T/e.txt")"
 for p in sh.pzx lua.zx libctest.pzx make-probe.zx; do
     grep -q "^$B/$p	" "$T/links.tsv"
     check $? "among them $p"

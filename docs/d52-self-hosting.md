@@ -137,7 +137,8 @@ only one of each. So the port's are `/usr/include`, the first on the list, and p
 `/usr/include/pico` in the Makefile's `LIBC_INC` order (man/zld.txt lists it for a compiler's `-I`). Accepted by the
 main session 2026-11-13.
 
-**Tests:** `tools/zld-host-test.sh` (the PC, in `make check`'s host list): the 192 links compared byte for byte;
+**Tests:** `tools/zld-host-test.sh` (the PC, in `make check`'s host list): the 192 links compared byte for byte (a
+build that is out of date, a program older than its objects or archives, is named as such: run `make` first);
 links that must fail (an undefined reference, a duplicate definition, a common symbol, a `bsr.w` out of reach, an
 `R_68K_16`, no crt0, not an object, a missing library) with their messages and no output file; 400 damaged objects and
 archives (3,000 in a longer run) under AddressSanitizer and UBSan, each linked or refused, never a crash.
