@@ -136,10 +136,16 @@ void exc_c(u32 *rb)
     u32 faddr = (fmt == 0xA || fmt == 0xB) ? *(u32 *)(frame + 16) : fmt == 7 ? *(u32 *)(frame + 0x14) :
                 fmt == 4 && vec == 2 ? *(u32 *)(frame + 8) : 0;    /* 030; 040 and 060 access errors (D41) */
 
+    /* D54 section 8: the trace a step over a group 2 exception (TRAP #0, CHK, a division by zero) can raise in
+     * supervisor mode, at the handler's first instruction: harmless, whoever runs */
+    if (vec == 9 && (sr & 0x2000) && (pc == (u32)trap0_entry || pc == (u32)exc_common))
+        return;
     if (!(sr & 0x2000) && current->pid != 0) {
         /* user-mode fault: kill just this process, free what it owned (an overflowed stack is the likely cause, and
          * then says so first) */
         int bad = stack_bad(current, (u32)rb, get_usp());
+        if (bad != STK_KERNEL && (current->dbgf || vec == 9) && dbg_exc(rb, vec, pc, faddr))
+            return;                     /* D54: a step, a breakpoint (a fault is held first, then ends below) */
         if (bad && !current->killed)
             kprintf("\n[kernel] pid %d (%s) overflowed its %s stack\n", current->pid, current->name,
                     bad == STK_KERNEL ? "kernel" : "user");
@@ -148,6 +154,8 @@ void exc_c(u32 *rb)
         if (current->csize && pc - current->code < current->csize)
             kprintf(" (code+%x)", pc - current->code);     /* D13: where in the program, wherever its code is */
         kprintf("\n");
+        if (bad != STK_KERNEL)
+            dbg_crash(current, rb);     /* D54 section 17: the registers and the frame chain */
         seg_crash(current, pc);         /* shared code: was it damaged? (before proc_exit drops the reference) */
         proc_exit(139);
     }
