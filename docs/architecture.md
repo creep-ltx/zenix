@@ -599,6 +599,21 @@ that it is DAMAGED, is not used again, and which processes still run it (nothing
 crt0, libz, `pw.po` and `sha.po`); every other program and the built-in servers stay ZEXE. A program that sends raw
 messages must stay ZEXE (limits.md); `sh` and `login` send none.
 
+**Files that are not Zenix programs** (`proc_spawn`, `spawn1` in `kernel/proc.c`). `spawn1` opens the file (the caller
+needs its x bit) and reads its header; two kinds start another program instead of being loaded:
+- **An AmigaOS program** (the long word `0x3F3`, `HUNK_HEADER`, DESIGN D29 12.1) runs as `/bin/zine PATH ARGS...`.
+- **A script** (the bytes `#!`, DESIGN D53, docs/d53-shebang.md): its first 128 bytes are read into a block of the
+  kernel heap (zeros after a shorter file) and `shebang_parse` (`kernel/shebang.h`) cuts the first line: the
+  interpreter's path and at most one argument (the rest of the line, its inner spaces kept, the ones at its end cut). A
+  line over 127 bytes, or one naming no interpreter, is -ENOEXEC and a kernel log line (`exec: PATH refused: WHY`). The
+  program started is the interpreter, with the list `INTERPRETER [ARG] PATH ARGS...` (the original `argv[0]` dropped,
+  as on Linux) on the kernel heap, checked against spawn's limits (`SPAWN_ARGC`, `SPAWN_ARGBYTES` in `kernel/kernel.h`:
+  -E2BIG beyond). The interpreter must be a Zenix program (a script or an AmigaOS program there is -ENOEXEC: one level);
+  its set-user-id bit is not honoured, and the script's is never looked at (the script is not loaded). On success the
+  process takes the script's name (`ps`). A script may be of any size (the 256 KB limit is a program's). Both blocks
+  are freed on every path; the two `spawn1` calls run one after the other (not inlined), so the kernel stack is as deep
+  as before.
+
 ## 5. Memory (`kernel/mem.c`)
 
 Nothing can be moved once handed out (no MMU, no paging), so fragmentation is the enemy. Rules:
@@ -795,10 +810,10 @@ pattern (section 6).
   memory, no memory) before the usual line and exit 139. ZINE: translation off around the session (`mmu_hand`); a
   software reset: off before `RESET` (`mmu_before_reset`).
 - **No `fork`.** Without an MMU a copy of a process cannot be given the same addresses. The only way to make a
-  process is `spawn(path, argv, stdio)`: load a ZEXE, give it the parent's cwd and environment, and pass only file
+  process is `spawn(path, argv, stdio)` (a script by its `#!` line and an AmigaOS program through ZINE: section 4): load a ZEXE, give it the parent's cwd and environment, and pass only file
   descriptors 0-2 (so a pipe's write end can't leak into a reader and prevent end-of-file). At most 256 arguments
   and 8 KB of argument text (`SPAWN_ARGC`, `SPAWN_ARGBYTES`, syscall.c; copied through the kernel heap, not the
-  4 KB kernel stack); more is refused with -E2BIG.
+  4 KB kernel stack); more is refused with -E2BIG. A script's rewritten list is held to the same limits.
 - **Controlling tty** (`struct proc` `ctty`, audit E): a process's terminal is the tty of its fd 0 at spawn
   when that is a tty (a console: init starting `login` on `/dev/ttyN`; a pty's slave: `term` starting the shell,
   DESIGN D20 7.2), else its parent's. `/dev/tty`, `SYS_ttymode`,
@@ -2204,7 +2219,8 @@ outputs (`tools/cmds-test.sh`).
   `id` prints them as `groups=`; libz's `in_group`/`in_group_named` (sudo's wheel, zine's group zine) and the C
   library's `access`, `getgroups` and `setgroups` read the kernel's list.
 - A program file with the **set-user-id bit** (mode 04000) runs with its owner's effective uid (`proc_spawn`): this
-  is how `su` and `passwd` work for ordinary users.
+  is how `su` and `passwd` work for ordinary users. Not for scripts (DESIGN D53): neither the script's bit nor its
+  interpreter's is honoured when a script is started.
 - `ipc_call` stamps every message with the caller's uid, gid and umask (`struct umsg`), and the kernel's own requests
   (vfs.c) also with the supplementary groups (`UMSG_GROUPS`: a `struct umsg_groups` right after the message), so the
   **filesystem server decides**; a group matches when it is the gid or any of those (`fsp_in_group`). The rules are in one dependency-free header, `kernel/fsperm.h`, that every filesystem server

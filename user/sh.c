@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
+#include "../kernel/shebang.h"       /* a script's #! line, read as the kernel reads it (DESIGN D53) */
 
 /* sh - the Zenix shell.
  *
@@ -1963,13 +1964,40 @@ static int find_program(const char *name, char *out, u32 max)
     return 0;
 }
 
+/* a spawn of PATH failed with E: why, and for a script (DESIGN D53 5) what its #! line names. The file is read only
+ * now, after the failure, so a start costs nothing more. Only -ENOENT, -ENOEXEC and -EFBIG are the interpreter's or
+ * the line's; -EACCES is the script's own x bit as often as the interpreter's: said plainly, as the rest. */
+static void why_not_run(const char *name, const char *path, int e)
+{
+    char b[SHEBANG_MAX], *in, *arg;
+    const char *bad = "";
+    int fd = e == -EACCES ? -1 : sys_open(path, O_RDONLY);
+    memset(b, 0, sizeof b);
+    if (fd >= 0) { sys_read(fd, b, sizeof b); sys_close(fd); }
+    if (e != -ENOENT && e != -ENOEXEC && e != -EFBIG)
+        b[0] = 0;                       /* not the interpreter's fault (E2BIG, ENOMEM, EIO...): said plainly */
+    if (b[0] != '#' || b[1] != '!' || (bad = shebang_parse(b, &in, &arg)) != 0) {
+        const char *t = zstrerror(e);
+        errm(name, *bad ? bad : t ? t : "cannot run");
+        return;
+    }
+    u32 l = strlen(in);
+    if (e == -ENOENT && l && in[l - 1] == '\r') {   /* a DOS or Windows file: say so (the kernel keeps the CR) */
+        errm(name, "its #! line ends in a carriage return (a DOS file?)");
+        return;
+    }
+    errs("sh: "); errs(name); errs(": #! interpreter "); errs(in); errs(": ");
+    errs(e == -ENOEXEC ? "not a Zenix program (a script, an AmigaOS program?)" : zstrerror(e) ? zstrerror(e) : "cannot run");
+    errs("\n");
+}
+
 static int start_program(char **argv)
 {
     char path[ZPATH_MAX];
     if (!find_program(argv[0], path, sizeof path)) { errm(argv[0], "command not found"); return -127; }
     if (env_dirty) { env_sync(); env_dirty = 0; }
     int pid = sys_spawn(path, argv, 0);
-    if (pid < 0) { errm(argv[0], zwhy("cannot run")); return -126; }
+    if (pid < 0) { why_not_run(argv[0], path, pid); return -126; }
     return pid;
 }
 

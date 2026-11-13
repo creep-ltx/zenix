@@ -120,7 +120,7 @@ pointers.
   than its image and BSS; a span that finds no free range slot (16) stays.
 
 - 32 processes, 28 message ports (12 held for services, 16 ordinary), 64 open files, 16 fds per process, 16 extra memory regions per process, 8 mounts
-  (the root included), 1 KB environment, argv of at most 256 arguments / 8 KB (-E2BIG beyond; `xargs` splits into runs that fit), paths of
+  (the root included), 1 KB environment, argv of at most 256 arguments / 8 KB (-E2BIG beyond, also for a script's list with its interpreter's words added; `xargs` splits into runs that leave room for those: 253 / 7,808 bytes), a script's `#!` line of at most 127 bytes with one argument, one level of interpreter (DESIGN D53), paths of
   at most 255 bytes, in a system call and once made absolute (the working directory included when anything but the
   root is mounted; the working directory's own text too; -ENAMETOOLONG beyond, never cut; also where a link's target
   plus the rest of a path would be longer, DESIGN D26; architecture.md section 7, "Paths"), names in a folder of at most

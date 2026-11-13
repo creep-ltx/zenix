@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
 #include "mmu.h"
+#include "shebang.h"
 
 /* Processes. No MMU: all processes share one address space, so the
  * kernel never trusts a user pointer (user_ok_rd/wr) and contains a crashing
@@ -315,6 +316,18 @@ struct proc *proc_by_pid(int pid)
     return 0;
 }
 
+/* a process's name (ps, pgrep): the last part of PATH, at most 15 bytes */
+static void set_name(struct proc *p, const char *path)
+{
+    const char *b = path;
+    for (const char *q = path; *q; q++)
+        if (*q == '/')
+            b = q + 1;
+    for (int i = 0; i < 15; i++)
+        p->name[i] = b[i] ? b[i] : 0;
+    p->name[15] = 0;
+}
+
 /* Create a process from a ZEXE image in memory. `argv` points to kernel
  * memory. stdio[i] (parent's fd numbers, -1 = same number) picks the
  * child's fds 0-2; the child gets no other fds. */
@@ -476,7 +489,7 @@ static int fill_v2(struct exec_src *x, u8 *data, const struct zex2 *h, u32 pid, 
     return 0;
 }
 
-static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *fillctx, const char *path,
+static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *fillctx, const char *path, const char *name,
                      char *const *argv, int argc, struct proc *parent, const int *stdio, int tty, int priv, int suid)
 {
     const struct zexe *h = &hu->v1;
@@ -612,18 +625,7 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
         memcpy(p->cwd, parent->cwd, sizeof p->cwd);
     else
         p->cwd[0] = '/';
-    for (int i = 0; i < 15 && path[i]; i++)
-        p->name[i] = path[i];
-    /* name = last path component */
-    {
-        const char *b = path;
-        for (const char *q = path; *q; q++)
-            if (*q == '/')
-                b = q + 1;
-        for (int i = 0; i < 15; i++)
-            p->name[i] = b[i] ? b[i] : 0;
-        p->name[15] = 0;
-    }
+    set_name(p, name);                 /* (a script's interpreter: the script's, D53 3.8) */
 
     /* file descriptors and the controlling tty */
     if (parent) {
@@ -670,7 +672,12 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
 }
 
 #define SPAWN_HUNK (-4096)                  /* not an errno: spawn1 found an AmigaOS program */
-static int spawn1(const char *path, char *const *argv, int argc, struct proc *parent, const int *stdio, int tty)
+#define SPAWN_SCRIPT (-4097)                /* not an errno: spawn1 found a #! script, its first line in *LINE */
+/* load the program PATH, the process named after NAME. LINE 0 (an interpreter, ZINE): a script or an AmigaOS program is -ENOEXEC. NOSUID: a
+ * script's interpreter, whose set-user-id bit is not honoured (D53 3.7). Not inlined:
+ * its frame (exec_src, the header) is on the stack once, whichever call proc_spawn makes (D53 4). */
+static __attribute__((noinline)) int spawn1(const char *path, const char *name, char *const *argv, int argc,
+                                            struct proc *parent, const int *stdio, int tty, char **line, int nosuid)
 {
     struct exec_src x;
     union zhdr h;                       /* a ZEXE header, or the longer ZEX2 one */
@@ -679,44 +686,91 @@ static int spawn1(const char *path, char *const *argv, int argc, struct proc *pa
         return (int)r;
     memset(&h, 0, sizeof h);
     u32 hn = x.st.size < sizeof h ? x.st.size : sizeof h;
-    if (x.st.size >= 4 && fs_exec_read(&x, 0, &h, hn)) {      /* shorter: proc_load says why it is refused */
+    if (x.st.size >= 2 && fs_exec_read(&x, 0, &h, hn)) {      /* shorter: proc_load says why it is refused */
         fs_exec_close(&x);
         return -EIO;
     }
-    if (*(const u32 *)&h == 0x3F3) {   /* HUNK_HEADER: an AmigaOS program (proc_spawn below runs zine) */
+    r = 0;
+    if (*(const u32 *)&h == 0x3F3)      /* HUNK_HEADER: an AmigaOS program (proc_spawn below runs zine) */
+        r = SPAWN_HUNK;
+    else if (*(const u16 *)&h == 0x2321) {     /* "#!": a script (D53): its first SHEBANG_MAX bytes for proc_spawn */
+        r = SPAWN_SCRIPT;
+        if (line) {
+            u32 n = x.st.size < SHEBANG_MAX ? x.st.size : SHEBANG_MAX;
+            char *b = *line = kmalloc(SHEBANG_MAX);
+            if (!b)
+                r = -ENOMEM;
+            else {
+                memset(b, 0, SHEBANG_MAX);              /* a shorter file's line ends at its end */
+                if (fs_exec_read(&x, 0, b, n))
+                    r = -EIO;
+            }
+        }
+    } else if (x.st.size > 256u * 1024) /* the largest Zenix program (an AmigaOS one may be bigger: zine reads it) */
+        r = -EFBIG;
+    if (r && !line && r < -4095)        /* an interpreter, or zine itself, that is not a Zenix program (D53 3.5) */
+        r = -ENOEXEC;
+    if (r) {
         fs_exec_close(&x);
-        return SPAWN_HUNK;
+        return (int)r;
     }
-    if (x.st.size > 256u * 1024) {      /* the largest Zenix program (an AmigaOS one may be bigger: zine reads it) */
-        fs_exec_close(&x);
-        return -EFBIG;
-    }
-    int pid = proc_load(&h, x.st.size, fill_fs, &x, path, argv, argc, parent, stdio, tty, 0,
-                        (x.st.mode & 04000) ? (int)x.st.uid : -1);    /* set-user-id: runs as its owner (su, passwd) */
+    int pid = proc_load(&h, x.st.size, fill_fs, &x, path, name, argv, argc, parent, stdio, tty, 0,
+                        (x.st.mode & 04000) && !nosuid ? (int)x.st.uid : -1);  /* set-user-id: runs as its owner (su,
+                                                                                * passwd) */
     fs_exec_close(&x);                  /* the image is in memory: the server may forget this open */
     return pid;
 }
 
 /* D29 12.1, running by name: an executable AmigaOS program (an x bit, the file starts with HUNK_HEADER 0x3F3) runs as
- * `/bin/zine PATH ARGS...` (frozen behaviour); without /bin/zine it is -ENOEXEC, said in the kernel log */
+ * `/bin/zine PATH ARGS...` (frozen behaviour); without /bin/zine it is -ENOEXEC, said in the kernel log.
+ * D53: a script (an x bit, the file starts with "#!") runs as `INTERPRETER [ARG] PATH ARGS...`, the interpreter and
+ * its one argument from the script's first line (kernel/shebang.h); the process is named after the script (before it
+ * is made ready). */
 int proc_spawn(const char *path, char *const *argv, int argc, struct proc *parent, const int *stdio, int tty)
 {
-    int pid = spawn1(path, argv, argc, parent, stdio, tty);
-    if (pid != SPAWN_HUNK)
+    char *line = 0, *interp = "/bin/zine", *arg = 0;
+    int pid = spawn1(path, path, argv, argc, parent, stdio, tty, &line, 0);
+    if (pid != SPAWN_HUNK && pid != SPAWN_SCRIPT) {
+        kfree(line);                    /* a script's line read, then -EIO / -ENOMEM: given back */
         return pid;
-    char **v = kmalloc((u32)(argc + 2) * 4);
-    if (!v)
-        return -ENOMEM;
-    v[0] = "zine", v[1] = (char *)path;
+    }
+    char **v = 0;
+    if (line) {
+        const char *bad = shebang_parse(line, &interp, &arg);
+        if (bad) {
+            kprintf("exec: %s refused: %s\n", path, bad);
+            pid = -ENOEXEC;
+            goto out;
+        }
+    }
+    pid = -ENOMEM;
+    if (!(v = kmalloc((u32)(argc + 3) * 4)))
+        goto out;
+    int n = 0;
+    u32 bytes = 0;
+    v[n++] = line ? interp : "zine";
+    if (arg)
+        v[n++] = arg;
+    v[n++] = (char *)path;
     for (int i = 1; i < argc; i++)
-        v[i + 1] = argv[i];
-    v[argc + 1] = 0;
-    pid = spawn1("/bin/zine", v, argc + 1, parent, stdio, tty);
-    kfree(v);
-    if (pid == -ENOENT || pid == SPAWN_HUNK) {
+        v[n++] = argv[i];
+    v[n] = 0;
+    for (int i = 0; i < n; i++)
+        for (const char *q = v[i]; ; q++, bytes++)
+            if (!*q) { bytes++; break; }
+    if (line && (n > SPAWN_ARGC || bytes > SPAWN_ARGBYTES))   /* a script's rewritten list keeps spawn's limits
+                                                                 * (D53 3.10; ZINE's as it was) */
+        pid = -E2BIG;
+    else
+        pid = line && current->killed ? -EINTR : spawn1(interp, line ? path : interp, v, n, parent, stdio, tty, 0,
+                                                        line != 0);
+    if (!line && (pid == -ENOENT || pid == -ENOEXEC)) {     /* (-ENOEXEC: /bin/zine is not a Zenix program) */
         kprintf("exec: %s is an AmigaOS program: ZINE is not installed\n", path);
         pid = -ENOEXEC;
     }
+out:
+    kfree(v);
+    kfree(line);
     return pid;
 }
 
@@ -724,7 +778,7 @@ int proc_spawn(const char *path, char *const *argv, int argc, struct proc *paren
  * (0: the kernel log, a service's server) */
 int proc_spawn_image(const void *img, u32 len, char *const *argv, int argc, int priv, int tty)
 {
-    return proc_load((const union zhdr *)img, len, fill_mem, img, argv[0], argv, argc, 0, 0, tty, priv, -1);
+    return proc_load((const union zhdr *)img, len, fill_mem, img, argv[0], argv[0], argv, argc, 0, 0, tty, priv, -1);
 }
 
 #pragma GCC pop_options

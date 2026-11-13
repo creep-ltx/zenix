@@ -65,6 +65,11 @@ LINE EDITING
 LANGUAGE
     Commands:   name arg...   a program found in $PATH, a builtin, a
                 function or an alias
+    Scripts:    a file whose first line is #!INTERPRETER [ARG] runs as
+                INTERPRETER [ARG] FILE ARGS... (./build.sh, ./game.lua
+                with #!/bin/lua, ./x.mk with #!/bin/make -f; $0 is the
+                path it was started by). The kernel does this, so make,
+                xargs, env and find -exec start scripts too (DESIGN D53).
     Variables:  NAME=value    $NAME ${NAME} ${NAME:-default}
                 ${NAME:=default} ${NAME:+other} ${#NAME}
                 ${NAME#pat} ${NAME##pat} ${NAME%pat} ${NAME%%pat}  remove a
@@ -186,7 +191,15 @@ NOTES
     history expansion (!!), here-strings, process substitution, getopts.
     An error says why: "permission denied", "no such file or directory",
     "argument list too long" (a program takes at most 256 arguments and
-    8 KB of them) ...
+    8 KB of them) ... (status 126; 127 for "command not found"). For a
+    script that cannot start, the shell reads its #! line and names it:
+    "sh: ./x: #! interpreter /bin/bash: no such file or directory",
+    "#! line over 127 bytes", "#! line without an interpreter", or "not a
+    Zenix program" for an interpreter that is itself a script (one level
+    only), "its #! line ends in a carriage return (a DOS file?)": the
+    kernel keeps the carriage return in the interpreter's name, as Linux.
+    A file with neither a program's header nor #! is not run as a shell
+    script ("not a Zenix program"); sh FILE runs it.
     No silent limits: the number of arguments, wildcard matches, words in a
     command, pipeline stages and for-loop items grows as needed (in the
     shell's work area, which starts at 8 KB, grows while a command needs more

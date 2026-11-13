@@ -1,0 +1,4 @@
+#!/bin/env lua
+-- SPDX-License-Identifier: GPL-2.0-only
+-- DESIGN D53: a #!/bin/env line
+print("env0=" .. arg[0] .. " n=" .. #arg .. " 1=" .. tostring(arg[1]))

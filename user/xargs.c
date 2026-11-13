@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "libz.h"
 /* xargs [-n N] [-I STR] [command [args]]: arguments from standard input (words, with quotes) appended to the command,
- * run in batches. A batch holds at most -n words, and never more than one spawn takes (256 arguments, 8 KB of text):
+ * run in batches. A batch holds at most -n words, and never more than one spawn takes (253 arguments, 7.6 KB of text: room left for a script's #! line):
  * more words make more batches, none is dropped. The command is found through $PATH, as the shell does. */
-#define ARGC_MAX  256           /* the kernel's spawn limits (kernel/syscall.c SPAWN_ARGC, SPAWN_ARGBYTES) */
-#define ARGB_MAX  8192
+/* the kernel's spawn limits (kernel/kernel.h SPAWN_ARGC, SPAWN_ARGBYTES), less the room a script's #! line adds to
+ * the list (DESIGN D53 3.10: its interpreter and one argument, 2 more words, and the script's path in argv[0]'s place;
+ * 3 words and 128 + 256 bytes kept free, a word more than needed),
+ * so a full batch also starts a script */
+#define ARGC_MAX  (256 - 3)
+#define ARGB_MAX  (8192 - 384)
 
 /* s with every occurrence of pat (not empty) replaced by with */
 static char *subst(const char *s, const char *pat, const char *with)

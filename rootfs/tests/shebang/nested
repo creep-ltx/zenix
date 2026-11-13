@@ -1,0 +1,2 @@
+#!/tests/shebang/args.sh
+echo never

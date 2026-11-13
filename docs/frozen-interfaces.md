@@ -392,3 +392,13 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   formats) and its stamp, the file's last 28 bytes: `HUNK_DEBUG` (0x3F1), 4, `ZTTF`, the .ttf's size, its time,
   `TTF_STAMP_VER << 16 | SIZE` (a new renderer raises the version: its files are made again), `HUNK_END`; the command
   `ttf2font` (`-q`, `-o DIR`, `-n NAME`, `-c`, sizes 4-64, exit statuses 0, 1, 2).
+- **D53 (scripts by their `#!` line, branch shebang, 2026-11-13):** a file a program spawns that has the x bit and
+  starts with the bytes `#!` runs as `INTERPRETER [ARG] PATH ARGS...`: the interpreter's path as written on the first
+  line (no `$PATH` search; relative to the caller's working directory), at most one argument (the rest of the line,
+  inner spaces kept, spaces and tabs at its end removed), the path the spawn was given, then the original arguments
+  after `argv[0]`. The line (from `#!` to the newline) is at most 127 bytes; a longer one, or one with no interpreter,
+  is -ENOEXEC, never cut. A carriage return is not removed. The interpreter must be a Zenix program (a script or an
+  AmigaOS program there: -ENOEXEC). The list keeps spawn's limits (-E2BIG). Set-user-id: neither the script's bit nor
+  its interpreter's is honoured. The process's name is the script's file name. A script may be of any size. A file with
+  no program header, no `HUNK_HEADER` and no `#!` stays -ENOEXEC. These may only become more permissive (a longer line,
+  more levels), never change meaning.
