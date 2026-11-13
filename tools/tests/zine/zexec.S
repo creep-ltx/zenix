@@ -9,7 +9,9 @@
  *   5  "zpart loop": parts inside parts, the ninth refused: DOSTRUE
  *   6  "nosuchpart x": DOSFALSE, IoErr() ERROR_OBJECT_NOT_FOUND (205)
  *   7  "stack 20000": not run, DOSTRUE
- *   8  the marks deleted, AvailMem as at the start (every part's segments and stack freed)
+ *   9  "zpart hand": a part that puts another segment list in cli_Module, as a decruncher does: DOSTRUE, 0
+ *   8  the marks deleted, AvailMem as at the start (every part's segments and stack freed: for "hand" the list in
+ *      cli_Module when it ended, as the Shell unloads it)
  * Exit 0 when everything held; else the return code names the step (and a line says it). PC-relative code. */
 #include "zt.i"
 #define LVO_Open        -30
@@ -117,6 +119,13 @@ main:
     lea     c_stack(%pc),%a0
     bsr     exec
     bne     fail
+    /* 9: a part that hands its segments over in cli_Module (a decruncher) */
+    moveq   #9,%d6
+    lea     c_hand(%pc),%a0
+    bsr     exec
+    bne     fail
+    tst.l   %d0
+    bne     fail
     /* 8: the marks deleted, the memory as at the start */
     moveq   #8,%d6
     lea     f_one(%pc),%a0
@@ -207,6 +216,7 @@ c_nest:   .asciz "zpart nest"
 c_loop:   .asciz "zpart loop"
 c_none:   .asciz "nosuchpart x"
 c_stack:  .asciz "stack 20000"
+c_hand:   .asciz "zpart hand"
 f_one:    .asciz "RAM:zpart.one"
 f_deep:   .asciz "RAM:zpart.deep"
 a_one:    .ascii "one  \"two words\"\n"

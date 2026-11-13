@@ -2276,6 +2276,21 @@ not, the mask clear after `RemICRVector`; zcalls: `SetChipRev` `$1F` on AGA). Si
 the blob's code 125,908 -> 126,588 bytes (the dump about 0.4 KB, called only in the trace build), its bss 8,963 ->
 8,923; the two resources take 180 bytes more of the ZINE block.
 
+### 16.21 A part's hunks handed over in cli_Module, the trace dump made whole (2026-11-13, branch zine11)
+
+**Execute unloads what cli_Module holds** (`user/zine/blibs.c`, 16.11's run of a command). The Black Lotus' Tint
+and Captured Dreams run their parts through dos Execute; each part is packed with CrunchMania, whose first hunk (432
+bytes) decrunches the rest, puts the list of the other hunks in the CLI's `cli_Module` and unlinks itself from it. A
+Shell unloads what `cli_Module` holds when a command ends (the AmigaDOS manual's CLI structure: the loaded command); ZINE
+unloaded the list it had loaded, of which only the decruncher was left, so every part's hunks stayed: by the fourth
+part of Tint chip RAM was down to 45 KB (each part takes 300-985 KB of it) and the part was "not started". Now the
+list in `cli_Module` is unloaded (none when it is 0: a command that keeps itself), as the Shell does; the 432-byte
+first hunk stays, as it would there.
+
+*Verified* in FS-UAE: `tools/zine-emu-test.sh` (zexec runs `zpart hand`, which makes a 64 KB block a segment linked
+to its own list and puts it in `cli_Module`; zexec's AvailMem is as at its start only when that list is unloaded:
+without the fix zexec ends with 8).
+
 ## 17. Questions for the owner (what ZINE should be)
 
 1. Owner answer 1 allowed "the Amiga's own console or through Wasabi". Typing into the console through Wasabi counts

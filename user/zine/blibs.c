@@ -1723,6 +1723,10 @@ static u32 run_file(const struct zx_cmd *c, const char *line, const char *where,
     zb_segsp = osp;
     cur_name = caller;
     u32 res2 = Z.ioerr;
+    /* as the Shell: what cli_Module holds now is unloaded, not the seglist loaded. A decruncher hands its unpacked
+     * hunks over there and unlinks its own first hunk (CrunchMania's, The Black Lotus' Tint and Captured Dreams: their
+     * parts' hunks stayed and the fourth found no chip RAM); 0 when the command keeps itself */
+    u32 mod = *(u32 *)(cli + ZO_CommandLineInterface_cli_Module);
     for (u32 i = 0; i < NPOFS; i++)
         *(u32 *)(pr + pofs[i]) = sv[i];
     for (u32 i = 0; i < NCOFS; i++)
@@ -1732,7 +1736,8 @@ static u32 run_file(const struct zx_cmd *c, const char *line, const char *where,
         zmemcpy(&assigns.a[pi], &old, sizeof old);
     else
         za_set(&assigns, "PROGDIR", 7, 0, 0, 0);
-    c_UnLoadSeg(seg);
+    if (mod && c_TypeOfMem(mod << 2))
+        c_UnLoadSeg(mod);
     zx_FreeMem(sp, size);
     zx_FreeMem(blk, 256 + c->arglen + 2);
     if (fin)
