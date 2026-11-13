@@ -176,6 +176,46 @@ def test_refusals():
     check("... and the new name has the renamed file", mget(img, "B") == b"aaaa")
 
 
+def test_readonly():
+    """D30 read-only mode (-o ro, and a device that says DISKCAP_RO): every change answers EROFS, nothing is written."""
+    calls = ("open /F.TXT w\nopen /F.TXT rw\nopen /F.TXT wt\nopen /n wc\nopen /F.TXT r\nwrite %1 0 abc\nmkdir /m\nunlink /F.TXT\nrmdir /Z\n"
+             "rename /F.TXT /n\nrename /D /E\nchmod /F.TXT 444\nchmod /F.TXT 644\nchmod /D 755\nutimes /F.TXT 5\nutimes /F.TXT now\nutimes /D 5\n"
+             "sync\nstatfs\nstat /F.TXT\nstat /D\nls /\nread %1 0 3\nsync\n")
+    for bits, mb in ((12, 1), (16, 8), (32, 40)):
+        for how in ("ro", "caps"):
+            tag = f"FAT{bits} {'-o ro' if how == 'ro' else 'read-only device'}"
+            img = mkimg(bits, mb=mb)
+            mput(img, "F.TXT", b"hello")
+            sh("mmd", "-i", img, "::D").check_returncode()
+            mput(img, "D/IN.TXT", b"in")
+            sh("mmd", "-i", img, "::Z").check_returncode()
+            before = open(img, "rb").read()
+            env = {"HOSTDISK_COUNT": "1"}
+            if how == "caps":
+                env["HOSTDISK_CAPRO"] = "1"
+            _, o = run(img, ("mount ro\n" if how == "ro" else "mount\n") + calls + "umount\n", env=env)
+            check(f"{tag}: mounts read-only", "mount -> 0 readonly" in o, o)
+            check(f"{tag}: the 16 changes answer EROFS", o.count("-> -30") == 16, o)
+            check(f"{tag}: df, stat, ls and read still work", "statfs -> 0" in o and "read -> 3 hel" in o and "stat -> 0" in o and "IN.TXT" not in o and "F.TXT" in o, o)
+            check(f"{tag}: not one sector written, the image is byte for byte the same", "hostdisk-writes 0" in o and "hostdisk-write-attempts 0" in o and open(img, "rb").read() == before, o)
+            ok, fo = fsck(img)
+            check(f"{tag}: fsck.fat finds nothing", ok, fo)
+    # a device that says read-only refuses -o rw; plain "rw" on a writable device still works
+    img = mkimg(32, mb=40)
+    _, o = run(img, "mount rw\numount\n", env={"HOSTDISK_CAPRO": "1"})
+    check("a read-only device: -o rw is refused", "mount -> -1" in o and "-o rw is refused" in o, o)
+    _, o = run(img, "mount rw\nopen /n wc\numount\n")
+    check("a writable device: -o rw still writes", "mount -> 0\n" in o and "readonly" not in o and "open -> -30" not in o, o)
+    # a volume left dirty by a "-o force" mount never changes when asked for ro, even with FSInfo and the dirty bit
+    img = mkimg(32, mb=40)
+    _, o = run(img, "mount\nopen /A wc\nwrite %1 0 abc\nunlink /A\nunclean\n")
+    before = open(img, "rb").read()
+    _, o = run(img, "mount\numount\n")
+    check("... the volume really is not clean", "was not unmounted cleanly" in o, o)
+    _, o = run(img, "mount ro,force\nstatfs\numount\n", env={"HOSTDISK_COUNT": "1"})
+    check("a dirty volume mounted -o ro,force: nothing written", "readonly" in o and "hostdisk-writes 0" in o and open(img, "rb").read() == before, o)
+
+
 def test_limits():
     # a FAT12 root is full at its size; a subdirectory grows
     img = mkimg(12, kb=1440, extra=("-r", "16"))
@@ -594,9 +634,10 @@ def main():
     if subprocess.run(["gcc"] + CF + SAN + ["-o", os.path.join(T, "fatd-asan")] + SRC).returncode:
         print("FAIL build (asan)")
         return 1
-    only = os.environ.get("FAT_ONLY", "readwrite refusals limits dirty cuts fuzz").split()
+    only = os.environ.get("FAT_ONLY", "readwrite refusals readonly limits dirty cuts fuzz").split()
     if "readwrite" in only: test_readwrite()
     if "refusals" in only: test_refusals()
+    if "readonly" in only: test_readonly()
     if "limits" in only: test_limits()
     if "dirty" in only: test_dirty()
     if "cuts" in only: test_cuts()

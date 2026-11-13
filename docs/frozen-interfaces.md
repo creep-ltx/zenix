@@ -349,6 +349,7 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `euid=`), Linux's form.
 - **D30 (FAT, branch fat, 2026-10-31):** `/etc/fstab`'s type `fat` and mount's FAT options (`uid=`, `gid=`, `fmode=`,
   `dmode=`, `ro`, `rw`, `force`); `fsinfo.type` `fat`; the program text `/sbin/fatd DEV -id START,SIZE [-o OPTIONS]`.
+- **D30 read-only mode (branch fatro, 2026-11-13):** added only: fatd reads `DISKCAP_RO` and then mounts read-only; `-o ro` writes nothing (no clean mark, FSInfo or date) and every change answers `-EROFS`; on a `DISKCAP_RO` device `mount` accepts type `fat` (as `iso9660` and `exfat`) and refuses `-o rw` (mount's and fatd's own message). No option, message type or error number is new; a writable device is as before.
 - **D31 (OFS, FFS, branch ffs, 2026-10-31):** `/etc/fstab`'s type `ffs` and mount's FFS options (`uid=`, `gid=`, `fmode=`,
   `dmode=`, `ro`, `rw`, `blocksize=`, `reserved=`); `fsinfo.type` `ffs`; the program text `/sbin/ffsd DEV -id START,SIZE [-o OPTIONS]`.
 - **D32 (PFS3, branch pfs3, 2026-10-31):** `/etc/fstab`'s type `pfs3` and mount's PFS3 options (`uid=`, `gid=`, `fmode=`, `dmode=`, `ro`, `blocksize=`; `rw` is refused); `fsinfo.type` `pfs3`; the program text `/sbin/pfs3d DEV -id START,SIZE [-o OPTIONS]`.

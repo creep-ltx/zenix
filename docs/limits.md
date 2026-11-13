@@ -155,7 +155,7 @@ pointers.
   inode numbers from the kernel (more than the 64 open files and 32 program loads there can be).
 - FAT (DESIGN D30, `docs/d30-fat.md`): 512-byte sectors only; 64 open files a mount, 16 chains waiting for a commit (more
   forces one), a 24-sector cache; a long name over 63 bytes of UTF-8 is listed by its 8.3 name; a FAT mount's options at
-  most about 30 characters (the service text); no `fsck.fat` on Zenix.
+  most about 30 characters (the service text); no `fsck.fat` on Zenix. On a read-only device (a USB stick) FAT is mounted read-only and `-o rw` is refused.
 - OFS and FFS (DESIGN D31, `docs/d31-ffs.md`): only DOS\0-DOS\3 with 512-byte blocks are written; files under 2 GB; 64 open files a mount, 16 removed entries waiting for a commit (more
   forces one), a cache of 24 blocks at 512 bytes (8 at 2 KB and over); a long name over 63 bytes of UTF-8 is listed by its start and block number; comments are not shown; options at
   most about 30 characters (the service text).

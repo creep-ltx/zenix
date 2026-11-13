@@ -261,6 +261,7 @@ uwant "a hello from a process that does not own port usb refused" "usb hello-oth
 uwant "the server's hello answered" "^usb hello -> 0"
 uwant "the stick listed with its label, read-only (caps 8)" "list -> usb0 h[0-9]* start 0 sectors 20000 type 00000000 mounted 0 caps 8"
 uwant "its FAT32 partition (MBR type 0x0C)" "list -> usb0p1 h$H start 2048 sectors 8192 type 4d42520c"
+uwant "its FAT32 partition says read-only too (caps 8: fatd mounts it -o ro by itself, D30)" "list -> usb0p1 h$H start 2048 sectors 8192 type 4d42520c mounted 0 caps 8"
 uwant "its Linux partition (ext2)" "list -> usb0p2 h[0-9]* start 10240 sectors 9760 type 4c4e5800"
 upart 2048 128 $T/u1 && check "usb0p1: 128 sectors at once are the stick's" ok || check "usb0p1: 128 sectors" bad
 upart 10148 92 $T/u2 && check "usb0p1: its last 92 sectors" ok || check "usb0p1: the last sectors" bad

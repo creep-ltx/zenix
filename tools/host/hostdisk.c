@@ -33,9 +33,10 @@ int hostdisk_use(const char *path, u32 start, u32 sectors)
     return 0;
 }
 
+unsigned long hostdisk_attempts;               /* DISK_WRITEs a read-only device (HOSTDISK_CAPRO) refused */
 unsigned long hostdisk_reads;                   /* sectors read so far */
 unsigned long hostdisk_calls;                   /* DISK_READ requests so far (D47: a contiguous read is one request) */
-static void say_writes(void) { fprintf(stderr, "hostdisk-writes %lu\nhostdisk-reads %lu\n", hostdisk_writes, hostdisk_reads); }
+static void say_writes(void) { fprintf(stderr, "hostdisk-writes %lu\nhostdisk-reads %lu\nhostdisk-write-attempts %lu\n", hostdisk_writes, hostdisk_reads, hostdisk_attempts); }
 static void lazy_open(void)
 {
     if (fd >= 0) return;
@@ -66,6 +67,7 @@ int sys_call(int port, struct umsg *m)
         strcpy(d.name, "ide0");
         d.sectors = nsec;
         d.maxsect = 256;
+        if (getenv("HOSTDISK_CAPRO")) d.caps = DISKCAP_RO;     /* a read-only device (D46): DISK_WRITE answers -EROFS */
         memcpy((void *)m->a[1], &d, n < sizeof d ? n : sizeof d);
         return 0;
     }
@@ -85,6 +87,7 @@ int sys_call(int port, struct umsg *m)
             if (hostdisk_die) _exit(99);        /* a whole request is written or none of it */
             return -1;
         }
+        if (getenv("HOSTDISK_CAPRO")) { hostdisk_attempts++; return -30; }
         hostdisk_writes += n;
         if (be) for (u32 i = 0; i < n * 128; i++) w[i] = __builtin_bswap32(w[i]);
         int r = pwrite(fd, (const void *)m->a[3], (size_t)n * 512, off) == (ssize_t)n * 512 ? 0 : -1;

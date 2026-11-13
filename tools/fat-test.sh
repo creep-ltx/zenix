@@ -67,6 +67,7 @@ has "... the copy whole" '^(.*# )?fd5=9$'
 hasnot "fatd did not crash" 'fatd.*(exception|crash|bus error|address error)'
     echo "--- FAT$bits: back on the PC"
     dd if=$CARD of=$P bs=512 skip=2048 count=32768 status=none
+    cp $P $OUT/before-ro.img
     fsck.fat -n $P > $OUT/fsck.log 2>&1 && check "fsck.fat finds nothing" ok || { check "fsck.fat finds nothing" bad; head -20 $OUT/fsck.log; }
     g() { mtype -i $P "::$1" 2>/dev/null; }
     [ "$(g 'Mappen/räksmörgås långt namn.txt')" = svenska ] && check "Linux reads the Swedish long name" ok || check "Linux reads the Swedish long name" bad
@@ -86,8 +87,23 @@ if fatsz16: v = struct.unpack_from("<H", d, res * 512 + 2)[0] & 0x8000
 else: v = struct.unpack_from("<I", d, res * 512 + 4)[0] & 0x08000000
 sys.exit(0 if v else 1)
 PY
+    # D30: the same card again, the FAT partition mounted -o ro, every change tried; the partition byte for byte the same
+    L=$OUT/fat$bits-ro.log
+    tools/run-test.sh $OUT/fat.fs-uae 200 tools/tests/fat-ro-test.txt > $L 2>&1
+    echo "--- FAT$bits: mounted -o ro"
+    has "ro: the script ran to the end" '^(.*# )?fat-ro-done$'
+    has "ro: mounted" 'ide0p1 +/mnt +fat '
+    has "ro: reads a file" '^fake config$'
+    has "ro: reads what was written before" '^still-writable$'
+    has "ro: df works" 'ide0p1 +[0-9]+'
+    for i in 1 2 3 4 5 6 7 8 9 10; do has "ro: change $i refused" "^(.*# )?ro$i=[1-9]"; done
+    has "ro: the message says read-only" 'read-only file system'
+    hasnot "ro: fatd did not crash" 'fatd.*(exception|crash|bus error|address error)'
+    dd if=$CARD of=$OUT/after-ro.img bs=512 skip=2048 count=32768 status=none
+    cmp -s $OUT/before-ro.img $OUT/after-ro.img && check "ro: the FAT partition is byte for byte unchanged" ok || check "ro: the FAT partition is byte for byte unchanged" bad
+    fsck.fat -n $OUT/after-ro.img > $OUT/fsck-ro.log 2>&1 && check "ro: fsck.fat finds nothing" ok || { check "ro: fsck.fat finds nothing" bad; head -20 $OUT/fsck-ro.log; }
     fsck.fat -n $F > $OUT/fsck-f.log 2>&1 && check "the floppy image: fsck.fat finds nothing" ok || { check "the floppy image: fsck.fat finds nothing" bad; head -20 $OUT/fsck-f.log; }
     [ "$(mtype -i $F ::skriven.txt 2>/dev/null)" = written-on-floppy ] && check "the floppy image: Linux reads what was written" ok || check "the floppy image: Linux reads what was written" bad
 done
-rm -f $OUT/fat.fs-uae $BD/fat-card.hdf $OUT/part.img
+rm -f $OUT/fat.fs-uae $BD/fat-card.hdf $OUT/part.img $OUT/before-ro.img $OUT/after-ro.img
 exit $((1 - pass))

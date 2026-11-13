@@ -18,6 +18,12 @@ DESCRIPTION
     volume not marked clean ("mounted read-only"), a bad option, a write
     that failed.
 
+    With -o ro, or when the device says it is read-only (a USB stick,
+    DESIGN D46), it never writes: create, write, truncate, unlink,
+    rename, mkdir, rmdir, chmod and utimes answer "read-only file
+    system", and nothing reaches the disk, not even the clean mark, the
+    free count or an access date. -o rw on such a device is refused.
+
     A damaged volume answers errors, never a crash: a file whose chain
     loops or leaves the volume answers an I/O error when it is opened;
     opening it with truncation still works, and so does removing it.

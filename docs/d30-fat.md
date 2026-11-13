@@ -48,6 +48,15 @@ whole device; it already tells a bare FAT volume from an MBR: `tools/mbr-test.sh
   rule; FAT has only a 4-byte serial and `vol_look` must not grow, it is in the kernel's fsd), so a floppy is refused at a restart.
   `mount` hands the option text through and `fatd` checks it, so `mount` stays small; a bad option is a line in dmesg.
 
+## Read-only mode (2026-11-13, for USB sticks, D46)
+`-o ro` mounts any FAT volume read-only, and so does a device that reports `DISKCAP_RO` (a USB stick: `usb0p1`; found
+the way `iso9660d` finds it, in `DISK_INFOSZ`'s caps). Then `fatd` never writes the disk: not the clean mark in `FAT[1]`,
+not FSInfo, not a date, not a cache sector (`dio` itself refuses `DISK_WRITE` with `EROFS`, a second wall behind the
+checks). Create, write, truncate (open with `O_TRUNC`), unlink, rename, mkdir, rmdir, chmod and utimes answer `EROFS`
+(an error a writable volume would give for the same call, `ENOENT`, `EACCES`, `EEXIST`, still comes first, as
+`exfatd`); `df`, `stat`, `ls` and reads work. `mount` lets `-t fat` onto a read-only device and refuses `-o rw` there
+(`fatd` refuses it too). No `-o force` can undo it. The same mode already served a volume that was not marked clean.
+
 ## Limits
 Primary MBR partitions (`diskd`); 512-byte logical sectors; files under 4 GB (the format's own limit); no sparse
 files (a write past the end writes zeros); access dates are never written; no `fsck.fat` on Zenix; times are stored as
@@ -56,4 +65,4 @@ UTC. An Amiga floppy drive reads only the 880 KB Amiga track format, so a real P
 
 ## Tests
 `fat-host-test` (the server on the PC against `mkfs.fat` images, `fsck.fat` and `mtools`; power cuts after each sector
-written; a fuzz run with ASAN and UBSAN), `fat-test` (FS-UAE, an MBR partition and a superfloppy).
+written; a fuzz run with ASAN and UBSAN), `fat-test` (FS-UAE, an MBR partition and a superfloppy; then the same card mounted `-o ro`, every change tried, the partition compared byte for byte and `fsck.fat -n`). The host test mounts FAT12, FAT16 and FAT32 `-o ro` and on a device that says `DISKCAP_RO` (`HOSTDISK_CAPRO`), tries 16 changes, and compares the image.

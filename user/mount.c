@@ -105,7 +105,8 @@ static int mount_one(const char *dev, const char *dir, const char *type, const c
     if (opts && !f && !fsck) { dprintf(1, "mount: -o is for FAT, exFAT, FFS, PFS3, ISO 9660 and NFS mounts only\n"); return 1; }
     if (!z && !f && strcmp(type, "ext2")) { dprintf(1, "mount: unknown type %s (ext2, zenixfs, fat, exfat, ffs, pfs3, iso9660 or nfs)\n", type); return 1; }
     if ((p3 || iso || ex) && opt_has(opts, "rw")) { dprintf(1, "mount: %s volumes are read-only on Zenix: -o rw is refused\n", p3 ? "PFS3" : iso ? "ISO 9660" : "exFAT"); return 1; }
-    if ((di.caps & DISKCAP_RO) && !iso && !ex) { dprintf(1, "mount: %s is read-only: only -t iso9660 or -t exfat for it\n", dev); return 1; }
+    if ((di.caps & DISKCAP_RO) && !iso && !ex && strcmp(type, "fat")) { dprintf(1, "mount: %s is read-only: only -t iso9660, -t exfat or -t fat for it\n", dev); return 1; }
+    if ((di.caps & DISKCAP_RO) && !strcmp(type, "fat") && opt_has(opts, "rw")) { dprintf(1, "mount: %s is a read-only device: -o rw is refused (FAT is mounted read-only there)\n", dev); return 1; }
     strcpy(pname, "fs."); strncpy(pname + 3, dev, 12); pname[15] = 0;
     for (u32 i = 0; sys_mountinfo(i, &mi) == 0; i++)
         if (!strcmp(mi.port, pname)) { dprintf(1, "mount: %s is already mounted on %s\n", dev, mi.path); return 1; }

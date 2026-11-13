@@ -1,0 +1,45 @@
+wait zenix:/# 90
+sleep 1
+send mkdir /mnt\r
+sleep 2
+send mount -o ro ide0p1 /mnt\r
+sleep 5
+send mount\r
+sleep 3
+send cat /mnt/config.txt\r
+sleep 2
+send cat /mnt/after-clean.txt\r
+sleep 2
+send ls -l /mnt\r
+sleep 3
+send df /mnt\r
+sleep 3
+send echo x > /mnt/ro-new.txt; echo ro1=$?\r
+sleep 3
+send echo x > /mnt/config.txt; echo ro2=$?\r
+sleep 3
+send echo x >> /mnt/config.txt; echo ro3=$?\r
+sleep 3
+send rm /mnt/config.txt; echo ro4=$?\r
+sleep 3
+send mkdir /mnt/ro-dir; echo ro5=$?\r
+sleep 3
+send mv /mnt/config.txt /mnt/ro-moved.txt; echo ro6=$?\r
+sleep 3
+send chmod 444 /mnt/config.txt; echo ro7=$?\r
+sleep 3
+send cp /mnt/config.txt /mnt/Mappen/copy.txt; echo ro8=$?\r
+sleep 3
+send rm -r /mnt/Mappen; echo ro9=$?\r
+sleep 3
+send cp /bin/ls /mnt/ro-ls.bin; echo ro10=$?\r
+sleep 4
+send ls -l /mnt/Mappen\r
+sleep 3
+send sync\r
+sleep 3
+send umount /mnt\r
+sleep 3
+send echo fat-ro-done\r
+sleep 2
+stop

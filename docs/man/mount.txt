@@ -67,9 +67,14 @@ DESCRIPTION
       fmode=OCT      the mode of files (default 644: no program runs from
                      the volume unless the mount says so).
       dmode=OCT      the mode of directories (default 755).
-      ro             read-only; not one sector is written.
+      ro             read-only; not one sector is written (not even the
+                     clean mark, the free count or a date), every change
+                     answers "read-only file system", df and stat work.
       force          mount writable a volume not marked clean.
-      rw, defaults, noauto: accepted.
+      rw, defaults, noauto: accepted. On a read-only device (a USB
+                     stick) rw is refused.
+    A FAT volume on a read-only device (usb0p1, a stick) is mounted
+    read-only by itself; mount asks for no -o ro there.
     A wrong option stops the server: "did not start (see dmesg)".
     Refused, because FAT cannot hold them: ln and ln -s, chown to anyone
     else, chmod other than taking away or giving back the write bits
@@ -245,7 +250,8 @@ NOTES
     service is removed again.
     ZenixFS names longer than 63 bytes (possible on a volume written
     elsewhere) are not listed by ls; they can still be opened by name.
-    FAT: 512-byte sectors only (others are refused by name); files below
+    FAT: read-only on a read-only device (a USB stick); 512-byte sectors
+    only (others are refused by name); files below
     4 GB, the format's own limit; a write past the end writes zeros; times
     are stored as UTC with 2-second steps; access dates are never written;
     no fsck.fat on Zenix. A long name over 63 bytes of UTF-8 is listed by

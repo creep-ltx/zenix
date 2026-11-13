@@ -46,7 +46,7 @@ static u32 fat_start, fat_secs, nfats, active, root_start, root_secs, data_start
 static int mirror = 1;
 /* options */
 static u32 m_uid, m_gid, m_fmode = 0644, m_dmode = 0755;
-static int readonly, force;
+static int readonly, force, want_rw;
 /* state */
 static u32 free_cnt = 0xFFFFFFFFu, next_free = 2;
 static int marked, dirty, info_dirty;
@@ -85,6 +85,7 @@ static int dio(u32 type, u32 lba, u32 n, void *buf)
     u8 *p = buf;
     if (lba >= total_secs || n > total_secs - lba) return -EIO;
     if (type == DISK_WRITE) {
+        if (readonly) return -EROFS;              /* belt and braces: a read-only mount never writes the disk */
         if (!lba) return -EIO;                    /* the boot sector is never written (d30) */
         need_flush = 1;
     }
@@ -1348,11 +1349,12 @@ static int handle1(struct umsg *m)
         return 0;
     }
     case FS_SYNC:
-        if (readonly) return dflush();
+        if (readonly) return 0;                   /* nothing was written: nothing to flush */
         return go_clean();
     case FS_CHMOD: {
         if ((r = namei(m->a[1], (const char *)m->a[0], &n))) return r;
         if (!fsp_owner_or_root(cuid, m_uid)) return -EPERM;
+        if (readonly) return -EROFS;
         u32 w = m->a[2] & 07777;
         if (is_dir(&n)) return w == m_dmode ? 0 : -EPERM;
         if (w != m_fmode && w != (m_fmode & ~0222u)) return -EPERM;
@@ -1377,6 +1379,7 @@ static int handle1(struct umsg *m)
         int given = m->a[2] != FS_UTIME_NOW;
         unsigned md = is_dir(&n) ? m_dmode : file_mode(n.e[11]);
         if (!fsp_utimes_ok(cuid, m_uid, given, fsp_access(cuid, cgid, cng, cgs, md, m_uid, m_gid, FSP_W))) return -EACCES;
+        if (readonly) return -EROFS;
         if (n.isroot || !n.lba) return 0;         /* the root, or the working directory given as ".": no entry here */
         if ((r = touch())) return r;
         u8 *e = entry_w(n.lba, n.byte);
@@ -1489,8 +1492,10 @@ static int try_mount(const char *name, int restart)
     m.type = DISK_INFOSZ; m.a[0] = (u32)dh; m.a[1] = (u32)&di; m.a[2] = sizeof di;
     if (disk_call(dport, &m) < 0) return why("cannot read the device");
     maxsect = di.maxsect ? di.maxsect : 1;
-    if (!(di.caps & (DISKCAP_FLUSH | DISKCAP_RAM)))
+    if (!(di.caps & (DISKCAP_FLUSH | DISKCAP_RAM)) && !(di.caps & DISKCAP_RO))
         why("the disk cannot flush its write cache: a power cut may damage the volume if the disk reorders writes");
+    if ((di.caps & DISKCAP_RO) && want_rw) { why("is on a read-only device: -o rw is refused"); goto no; }
+    if (di.caps & DISKCAP_RO) readonly = 1;       /* a read-only device (a USB stick, D46): nothing is ever written (D30) */
     total_secs = di.sectors;
     if (dio(DISK_READ, 0, 1, b)) return why("cannot read the boot sector");
     if (check_bpb(b, di.sectors)) goto no;
@@ -1543,8 +1548,9 @@ static int options(const char *o)
         else if (!strncmp(o, "fmode=", 6)) m_fmode = optnum(o + 6, 8, &bad) & 0777;
         else if (!strncmp(o, "dmode=", 6)) m_dmode = optnum(o + 6, 8, &bad) & 0777;
         else if (!strncmp(o, "ro", 2) && (o[2] == ',' || !o[2])) readonly = 1;
+        else if (!strncmp(o, "rw", 2) && (o[2] == ',' || !o[2])) want_rw = 1;
         else if (!strncmp(o, "force", 5) && (o[5] == ',' || !o[5])) force = 1;
-        else if (!((!strncmp(o, "rw", 2) && (o[2] == ',' || !o[2])) || (!strncmp(o, "defaults", 8) && (o[8] == ',' || !o[8])) ||
+        else if (!((!strncmp(o, "defaults", 8) && (o[8] == ',' || !o[8])) ||
                    (!strncmp(o, "noauto", 6) && (o[6] == ',' || !o[6])))) bad = 1;
         if (bad) { dprintf(1, "fatd: bad option at: %s (uid=, gid=, fmode=, dmode=, ro, rw, force)\n", o); return -1; }
         while (*o && *o != ',') o++;
