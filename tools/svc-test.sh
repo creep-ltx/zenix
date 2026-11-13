@@ -159,7 +159,7 @@ if [ "$(grep -acx 'svctest raw ide0: -16' "$OUT/d.log")" -ge 2 ]; then echo "PAS
 line d "... and mount says the root's device is in use" "mount: ide0 is already in use"
 rx   d "a floppy probed on demand (df1) keeps its handle across the restart" ".*svctest hold df1: handle [0-9]+, read 0, after the wait 0"
 rx   d "diskd killed twice during a copy ends at once" "svc: disk: diskd \(pid [0-9]+\) ended, status 143(, during request [0-9]+ for pid [0-9]+)?"
-line d "... the copy is right (cmp)" "cmp-ok"
+rx   d "... the copy is right (cmp)" "cmp-ok.?"   # the next command's first letter may share the line
 line d "the script ran to the end" "svc-d-done"
 if e2fsck -fn "$OUT/root.hdf" > "$OUT/e2fsck.log" 2>&1; then echo "PASS the host's e2fsck finds the root clean after the restarts"; else echo "FAIL the host's e2fsck finds the root clean after the restarts (see $OUT/e2fsck.log)"; pass=0; fi
 rm -f "$OUT/root.hdf" "$OUT/df1.adf"
