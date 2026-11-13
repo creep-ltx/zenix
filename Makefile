@@ -49,7 +49,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet \
           rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs files show ttf2font \
-          play modplay lsusb lua make
+          play modplay lsusb lua make zld
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -1056,6 +1056,25 @@ $(BUILD)/make-probe.zx: $(BUILD)/make-probe.cpuelf tools/mkzexe.py tools/check-6
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ 262144
 
+# ---- zld, the linker (roadmap block 7, DESIGN D52 section 5, docs/d52-self-hosting.md): ELF objects and archives
+# straight to a ZEXE or ZEX2 program, the same bytes as ld + tools/mkzexe.py (tools/zld-host-test.sh). Ours, written in
+# standard C, so the same file builds for the PC (the host test); on Zenix a C library program with shared code.
+$(BUILD)/zld/zld.o: user/zld.c $(LIBC_HDRS) tools/purecc.sh
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(LIBC_PFLAGS) -c $< -o $@
+$(BUILD)/zld.cpuelf: $(BUILD)/zld/zld.o $(BUILD)/crt0-pure.o $(BUILD)/libc-pure.a link/pure.ld
+	$(CC) $(LIBC_PFLAGS) $(PULDFLAGS) $(LIBC_LDFLAGS) $(BUILD)/crt0-pure.o $(BUILD)/zld/zld.o $(BUILD)/libc-pure.a \
+	    $(LIBGCC) -o $@
+$(BUILD)/zld.pzx: $(BUILD)/zld.cpuelf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ $(or $(STACK_zld),$(STACK_DEFAULT))
+$(BUILD)/zld.zx: $(BUILD)/zld.pzx
+	cp $< $@
+# the development package's other files (DESIGN D52 section 2), staged for tools/mkzup.py's family devel
+$(BUILD)/devel/usr/lib/libc.a: $(BUILD)/libc.a $(BUILD)/libc-pure.a $(BUILD)/crt0.o $(BUILD)/crt0-pure.o link/user.ld \
+                               link/pure.ld $(LIBC_HDRS) tools/mkdevel.sh
+	tools/mkdevel.sh $(BUILD) $(LIBGCC)
+
 # ---- Ahiru, the owner's file manager (roadmap block 3; ports/ahiru/README): its upstream files and the CFile core's
 # under it (the owner's CFile repository: ahiru/src, core/, fs/), pinned in ports/ahiru/upstream (tools/ahiru-vendor.sh,
 # unchanged but for the MIT notice Zenix's copy adds), compiled over the AmigaOS layer of the owner's programs
@@ -1345,7 +1364,7 @@ $(BUILD)/cp437-8x8.psf: tools/font_8x8.c tools/mkpsf.py | $(BUILD)
 UFONT_SRC := tools/font_8x8.c tools/mkconfont.py $(wildcard tools/consolefont/*)
 $(BUILD)/zenix-8x8.zcf: $(UFONT_SRC) | $(BUILD)
 	python3 tools/mkconfont.py font $@
-$(BUILD)/pkg/list: $(BUILD)/bootmenu $(BUILD)/zenixboot $(BUILD)/cp437-8x8.psf $(BUILD)/zine.blob $(BUILD)/sp060 $(BUILD)/sp040 $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
+$(BUILD)/pkg/list: $(BUILD)/devel/usr/lib/libc.a $(BUILD)/bootmenu $(BUILD)/zenixboot $(BUILD)/cp437-8x8.psf $(BUILD)/zine.blob $(BUILD)/sp060 $(BUILD)/sp040 $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
 	NETDRVS="$(NETDRVS)" python3 tools/mkzup.py packages $(BUILD) "$(UAPPS)"
 # the system bundle: the kernel and the base group only (DESIGN D22 3.1 and 4.4: everything else is installed live,
 # zup -f; copied to BOOT:Zenix/zenix-update.zup, docs/man/zenixboot.txt)
