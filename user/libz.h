@@ -30,6 +30,19 @@ const char *zstrerror(int e);         /* strerror: the text of an error number (
 char *path_join(const char *dir, const char *name);   /* malloc'd "dir/name"; NULL: too long (zerrno 36) or no memory (12) */
 int dir_list(const char *path, char ***names);  /* malloc'd, NULL-terminated names without . and ..; count or -1 */
 int dir_list_some(const char *path, char ***names, int *err);  /* the same, but a failure part way: the names so far, and *err */
+/* DESIGN D49: and each name's lstat where the server gave it (*stats one a name, malloc'd or NULL; mode 0: not given) */
+int dir_list_stat(const char *path, char ***names, struct ustat **stats, int *err);
+/* a directory read in batches (D49): zdir_next gives the next record (kernel/udirx.h), NULL at the end or on an
+ * error (zdir_err: 0 or the errno); the old one-a-call path by itself where the kernel or the server lacks the batch */
+struct zdir;
+struct zdir *zdir_open(const char *path);     /* NULL and zerrno: cannot open */
+const struct udirx *zdir_next(struct zdir *d);
+int zdir_err(const struct zdir *d);
+int zdir_fd(const struct zdir *d);
+void zdir_rewind(struct zdir *d);             /* forget the buffered records (the caller put the descriptor back at 0) */
+void zdir_close(struct zdir *d);              /* also the descriptor */
+/* D49 8: is PATH (links followed) the file open on FD, the same device and inode? (cp, mv: never copy onto itself) */
+int same_file(int fd, const char *path);
 void dir_free(char **names, int n);
 /* the absolute name of a path with ., .. and symbolic links resolved as the kernel follows them (DESIGN D26: at most
  * 40 links; the path need not exist): 0 and out (cap bytes, at most ZPATH_MAX used), -1 when it cannot be resolved (a loop,
