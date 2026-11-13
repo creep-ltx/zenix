@@ -402,6 +402,16 @@ void zb_run(void)
     for (int i = 25; i < 32; i++)
         v[i] = (u32)zv_irq;
     zmemset((void *)0x400, 0, 0xC00);
+    /* the user vectors (64-255: no Amiga device gives a vector number) point at a stub in the low page, as AmigaOS's
+     * point at a "no handler" stub in the ROM: their high word is 0 (the ROM's is $00F8 or so). A program that has
+     * cleared address 4 and reads ExecBase's fields through it reads these: Three Men and a Glenz Vector's replayer
+     * tests AttnFlags' 68010 bit at 297 ($129) and, when it is set, calls Supervisor through a base of 0. With the
+     * ZINE block's address there (on the 68020 machine $0093xxxx) the bit was set; with a low address it is clear,
+     * as with the ROM's. */
+    *(volatile u16 *)ZUSERVEC = 0x4EF9;             /* jmp abs.l */
+    *(volatile u32 *)(ZUSERVEC + 2) = (u32)zv_crash;
+    for (int i = 64; i < 256; i++)
+        v[i] = ZUSERVEC;
     sp_install(v);
     zb_libs_init();                     /* the memory lists, ExecBase, the libraries, the process (blibs.c) */
     chips_for_program();
@@ -1113,8 +1123,16 @@ void zx_FreeMem(u32 p, u32 size)
     u32 n = (size + (p & 7) + 7) & ~7u;
     p &= ~7u;
     struct zmh *h = header_of(p, n);
-    if (!h)
+    if (!h) {                           /* say which block before the alert: the address tells whose it was */
+        static const char hx[] = "0123456789abcdef";
+        char t[] = "ZINE: FreeMem of 00000000 bytes at 00000000, in no memory list\n";
+        for (int i = 0; i < 8; i++) {
+            t[17 + i] = hx[(size >> (28 - 4 * i)) & 15];
+            t[35 + i] = hx[(p >> (28 - 4 * i)) & 15];
+        }
+        zb_out(t, sizeof t - 1);
         c_Alert(AT_DeadEnd | AN_BadFreeAddr);
+    }
     hdr_free(h, p, n);
 }
 
@@ -1209,44 +1227,86 @@ void c_CopyMem(u32 s, u32 d, u32 n)
     zmemcpy((void *)d, (const void *)s, n);
 }
 
-/* pools (V39, the NDK's exec_lib.fd): each piece a separate AllocMem, listed in the pool so DeletePool frees all */
-struct zpool { u32 req, first; };
+/* pools (V39; the NDK 3.2's exec autodoc, CreatePool): as exec keeps them, puddles of puddleSize bytes, each with its
+ * own MemHeader, the small allocations (threshSize or less) made in them with Allocate, so a pooled block has no
+ * bookkeeping of its own next to it; an allocation above threshSize gets a puddle of its own. A puddle whose blocks are
+ * all freed goes back to AllocMem. Round 13 (16.22): ZINE kept each pooled block as its own AllocMem with its link and
+ * size in the 8 bytes before it; Haujobb's Signals writes 4 bytes before one of its blocks (in exec's puddles that is
+ * the padding at the end of the block before), which overwrote that size, and DeletePool's FreeMem of a size of about
+ * 3 GB ended it with AN_BadFreeAddr. */
+struct zpud { struct zpud *next; u32 total; struct zmh h; };     /* 40 bytes: the blocks after it 8-byte aligned */
+struct zpool { u32 req, puddle, thresh; struct zpud *first; };
 u32 c_CreatePool(u32 req, u32 puddle, u32 thresh)
 {
-    (void)puddle;
-    (void)thresh;
+    if (thresh > puddle || puddle > (1u << 30))
+        return 0;                       /* the autodoc: CreatePool fails when threshSize is above puddleSize */
     struct zpool *pl = (struct zpool *)zx_AllocMem(sizeof *pl, MEMF_PUBLIC);
     if (pl)
-        pl->req = req, pl->first = 0;
+        pl->req = req, pl->puddle = (puddle + 7) & ~7u, pl->thresh = thresh, pl->first = 0;
     return (u32)pl;
+}
+
+static struct zpud *pud_new(struct zpool *pl, u32 bytes, int own)
+{
+    u32 total = sizeof(struct zpud) + bytes;
+    struct zpud *d = (struct zpud *)zx_AllocMem(total, own ? pl->req : pl->req & ~MEMF_CLEAR);
+    if (!d)
+        return 0;
+    d->total = total;
+    zmemset(&d->h, 0, sizeof d->h);
+    if (!own) {                         /* a puddle: one free chunk of its whole size */
+        struct zchunk *c = (struct zchunk *)(d + 1);
+        c->next = 0;
+        c->bytes = bytes;
+        d->h.first = c;
+        d->h.lower = (u32)c;
+        d->h.upper = (u32)c + bytes;
+        d->h.free = bytes;
+    }                                   /* an allocation's own puddle: lower = upper = 0 */
+    d->next = pl->first;
+    pl->first = d;
+    return d;
 }
 
 u32 c_AllocPooled(u32 pool, u32 size)
 {
     struct zpool *pl = (struct zpool *)pool;
-    if (!pl || size + 8 < size)
+    if (!pl || !size || size > (1u << 30))
         return 0;
-    u32 p = zx_AllocMem(size + 8, pl->req);
-    if (!p)
-        return 0;
-    ((u32 *)p)[0] = pl->first;
-    ((u32 *)p)[1] = size + 8;
-    pl->first = p;
-    return p + 8;
+    if (size > pl->thresh) {
+        struct zpud *d = pud_new(pl, size, 1);
+        return d ? (u32)(d + 1) : 0;
+    }
+    u32 r = 0;
+    for (struct zpud *d = pl->first; d && !r; d = d->next)
+        if (d->h.upper)
+            r = c_Allocate(&d->h, size);
+    if (!r) {
+        struct zpud *d = pud_new(pl, pl->puddle, 0);
+        r = d ? c_Allocate(&d->h, size) : 0;
+    }
+    if (r && (pl->req & MEMF_CLEAR))
+        zmemset((void *)r, 0, (size + 7) & ~7u);
+    return r;
 }
 
 void c_FreePooled(u32 pool, u32 mem, u32 size)
 {
     struct zpool *pl = (struct zpool *)pool;
-    (void)size;
     if (!pl || !mem)
         return;
-    for (u32 *pp = &pl->first; *pp; pp = (u32 *)*pp)
-        if (*pp == mem - 8) {
-            *pp = ((u32 *)(mem - 8))[0];
-            zx_FreeMem(mem - 8, ((u32 *)(mem - 8))[1]);
-            return;
+    for (struct zpud **pp = &pl->first, *d; (d = *pp); pp = &d->next) {
+        if (d->h.upper ? mem < d->h.lower || mem >= d->h.upper : mem != (u32)(d + 1))
+            continue;
+        if (d->h.upper) {
+            c_Deallocate(&d->h, mem, size);
+            if (d->h.free != d->h.upper - d->h.lower)
+                return;                 /* the puddle still holds blocks */
         }
+        *pp = d->next;
+        zx_FreeMem((u32)d, d->total);
+        return;
+    }
 }
 
 void c_DeletePool(u32 pool)
@@ -1255,9 +1315,9 @@ void c_DeletePool(u32 pool)
     if (!pl)
         return;
     while (pl->first) {
-        u32 p = pl->first;
-        pl->first = ((u32 *)p)[0];
-        zx_FreeMem(p, ((u32 *)p)[1]);
+        struct zpud *d = pl->first;
+        pl->first = d->next;
+        zx_FreeMem((u32)d, d->total);
     }
     zx_FreeMem(pool, sizeof *pl);
 }

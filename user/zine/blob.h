@@ -98,6 +98,7 @@ struct ziv { u32 data, code; struct znode *node; };
 #define ZEXEC_SLOTS 152u                /* exec's vectors up to -912 (the NDK 3.2's exec_lib.fd) */
 #define ZBLANK     0x0B00u              /* the blank Copper list */
 #define ZNULLSPR   0x0B80u              /* 16 zero bytes */
+#define ZUSERVEC   0x0BA0u              /* round 13: "jmp zv_crash", where the user vectors 64-255 point */
 #define EB(o, t)   (*(volatile t *)(ZEXEC + (o)))
 
 /* the session's state (blob.c); everything else is in the ZINE block */
