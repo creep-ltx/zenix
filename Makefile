@@ -49,7 +49,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet \
           rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs files show ttf2font \
-          play modplay lsusb lua
+          play modplay lsusb lua make
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -68,6 +68,10 @@ STACK_markdown := 32768
 # parser levels (110 while it handles that error); the deepest kind (string.gsub calling itself, a traceback made at
 # the bottom) needed more than 96 KB and at most 112 KB in FS-UAE (rootfs/tests/lua/cstack.lua): 128 KB
 STACK_lua := 131072
+# make (ports/pdpmake, DESIGN D52 section 4): upstream recurses once per level of prerequisites (make and make1, about
+# 100 bytes a level in the probe build's measurement) and once per level of nested macros (expand_macros), bounded only by
+# the Makefile's size: measured with the stack probe build (tools/make-test.sh, docs/limits.md)
+STACK_make := 32768
 # boot (pid 1, built into the kernel image) lives for ever: its frames are under 500 bytes (-fstack-usage, 2026-10-26),
 # so 4 KB, the loader's least; it gave back the memory D15 cost in 1 MB of chip RAM (three sessions again)
 STACK_boot := 4096
@@ -97,7 +101,7 @@ NETDRVZX := $(NETDRVS:%=$(BUILD)/drv-%.zx)
 TESTPZX := $(BUILD)/hello.pzx $(BUILD)/crash.pzx $(BUILD)/sigtest.pzx
 # the C library's test program (DESIGN D27 section 11, tools/libc-test.sh), in the test images' /tests: its ZEXE
 # build and its ZEX2 one (libctestpure)
-TESTLIBC := $(BUILD)/libctest.zx $(BUILD)/libctest.pzx $(BUILD)/tuitest.zx $(BUILD)/lua-probe.zx
+TESTLIBC := $(BUILD)/libctest.zx $(BUILD)/libctest.pzx $(BUILD)/tuitest.zx $(BUILD)/lua-probe.zx $(BUILD)/make-probe.zx
 
 all: $(BUILD)/zenix.adf $(BUILD)/zenix.hdf $(TESTDRVS:%=$(BUILD)/drv-%.zx) $(BUILD)/libc-pure.a
 
@@ -1016,6 +1020,38 @@ $(BUILD)/lua-probe.celf: $(LUA_SRCS:%=$(BUILD)/luap/%.o) $(BUILD)/luap/stackprob
 	$(CC) $(LIBC_PFLAGS) $(ULDFLAGS) $(LIBC_FLOATLD) $(BUILD)/crt0.o $(LUA_SRCS:%=$(BUILD)/luap/%.o) $(BUILD)/luap/stackprobe.o \
 	    $(BUILD)/libc.a $(LIBGCC) -o $@
 $(BUILD)/lua-probe.zx: $(BUILD)/lua-probe.celf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ 262144
+
+# ---- make (roadmap block 7, DESIGN D52 section 4; ports/pdpmake/README): pdpmake 2.0.4's source (Ron Yorston's POSIX
+# make, the Unlicense) pinned unchanged in ports/pdpmake/upstream, compiled as it is: no patch, no extra flags. What it
+# needed from the C library (utimensat with UTIME_NOW and AT_FDCWD, realpath) is in the C library (libc/zenix/sys.c). /bin/make (UAPPS;
+# no user/make.c: these rules build it) is a program with shared code (ZEX2: it uses no floating point), so a make
+# running another make ($(MAKE)) costs the second only its data. Its stack: STACK_make. ----
+MAKE_SRCS := $(basename $(notdir $(wildcard ports/pdpmake/upstream/*.c)))
+MAKE_CFLAGS := $(LIBC_PFLAGS) -Wno-sign-compare -Wno-unused-parameter -Wno-implicit-fallthrough
+$(BUILD)/make/%.o: ports/pdpmake/upstream/%.c $(LIBC_HDRS) $(wildcard ports/pdpmake/upstream/*.h) tools/purecc.sh Makefile
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(MAKE_CFLAGS) -c $< -o $@
+$(BUILD)/make.cpuelf: $(MAKE_SRCS:%=$(BUILD)/make/%.o) $(BUILD)/crt0-pure.o $(BUILD)/libc-pure.a link/pure.ld
+	$(CC) $(LIBC_PFLAGS) $(PULDFLAGS) $(LIBC_LDFLAGS) $(BUILD)/crt0-pure.o $(MAKE_SRCS:%=$(BUILD)/make/%.o) \
+	    $(BUILD)/libc-pure.a $(LIBGCC) -o $@
+$(BUILD)/make.pzx: $(BUILD)/make.cpuelf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ $(or $(STACK_make),$(STACK_DEFAULT))
+$(BUILD)/make.zx: $(BUILD)/make.pzx
+	cp $< $@
+# the test build with the stack probe (ports/pdpmake/zenix/stackprobe.c, upstream's main wrapped by the linker):
+# /tests/make/makeprobe on the test images, a 256 KB stack of which 240 KB are painted, so it measures what
+# /bin/make's stack must hold (tools/make-test.sh)
+$(BUILD)/make/stackprobe.o: ports/pdpmake/zenix/stackprobe.c $(LIBC_HDRS) tools/purecc.sh Makefile
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(LIBC_PFLAGS) -DZX_PROBE_BYTES=245760 -c $< -o $@
+$(BUILD)/make-probe.cpuelf: $(MAKE_SRCS:%=$(BUILD)/make/%.o) $(BUILD)/make/stackprobe.o $(BUILD)/crt0-pure.o \
+                            $(BUILD)/libc-pure.a link/pure.ld
+	$(CC) $(LIBC_PFLAGS) $(PULDFLAGS) $(LIBC_LDFLAGS) -Wl,--wrap=main $(BUILD)/crt0-pure.o \
+	    $(MAKE_SRCS:%=$(BUILD)/make/%.o) $(BUILD)/make/stackprobe.o $(BUILD)/libc-pure.a $(LIBGCC) -o $@
+$(BUILD)/make-probe.zx: $(BUILD)/make-probe.cpuelf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ 262144
 
