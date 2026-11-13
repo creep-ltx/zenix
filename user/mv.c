@@ -3,11 +3,13 @@
 /* mv [-f] [-v] source... dest : rename. Only when the rename cannot be done because the target is on another
  * filesystem (EXDEV: another mount, or ext2 moving a directory to another parent) is the source copied and removed;
  * any other refusal (permission, a busy target) is reported and nothing is copied. */
-static int o_v;
+static int o_v, same;                  /* same: the copy was refused as "the same file" (said once, D49 8) */
 /* a file's copy buffer lives here, not in copy_tree(), which recurses once per directory level */
 static int __attribute__((noinline)) copy_file(const char *src, const char *dst, const struct ustat *st)
 {
-    int in = sys_open(src, O_RDONLY), out = in < 0 ? -1 : sys_open(dst, O_WRONLY | O_CREAT | O_TRUNC), bad = in < 0 || out < 0;
+    int in = sys_open(src, O_RDONLY);
+    if (in >= 0 && same_file(in, dst)) { dprintf(2, "mv: '%s' and '%s' are the same file\n", src, dst); sys_close(in); same = 1; return -1; }   /* D49 8 */
+    int out = in < 0 ? -1 : sys_open(dst, O_WRONLY | O_CREAT | O_TRUNC), bad = in < 0 || out < 0;
     char b[1024]; int n; while (!bad && (n = sys_read(in, b, sizeof b)) > 0) if (sys_write(out, b, (u32)n) != n) bad = 1;
     if (in >= 0) sys_close(in);
     if (out >= 0) sys_close(out);
@@ -61,7 +63,8 @@ int main(int argc, char **argv)
         if (!target) { dprintf(2, "mv: %s: %s\n", argv[i], zwhy("cannot move")); rc = 1; continue; }
         int r = sys_rename(argv[i], target);
         if (r == -EXDEV) {
-            if (copy_tree(argv[i], target) < 0 || remove_tree(argv[i]) < 0) { dprintf(2, "mv: cannot move %s to %s: %s\n", argv[i], target, zwhy("copy failed")); rc = 1; free(target); continue; }
+            same = 0;
+            if (copy_tree(argv[i], target) < 0 || remove_tree(argv[i]) < 0) { if (!same) dprintf(2, "mv: cannot move %s to %s: %s\n", argv[i], target, zwhy("copy failed")); rc = 1; free(target); continue; }
         } else if (r < 0) {
             dprintf(2, "mv: cannot move %s to %s: %s\n", argv[i], target, zwhy("failed")); rc = 1; free(target); continue;
         }

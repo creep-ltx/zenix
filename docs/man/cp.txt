@@ -28,6 +28,10 @@ EXIT STATUS
 
 NOTES
     Symbolic links are followed (the file they point to is copied).
+    A destination that is the source itself (the same name, another path
+    to it, a hard link, a symbolic link to it, on any mount) is refused
+    before anything is opened for writing: "cp: 'A' and 'B' are the same
+    file", status 1 (GNU's text; the device and inode decide).
     An access the user is not allowed is reported as "permission denied".
     Directories with any number of entries are walked, as deep as paths go. A
     path longer than 255 bytes (what a system call takes) is reported

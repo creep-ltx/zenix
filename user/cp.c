@@ -5,6 +5,7 @@ static int o_r, o_f, o_p, o_v, rc;
 static int __attribute__((noinline)) copy_file(const char *src, const char *dst, const struct ustat *st)   /* not in the recursion */
 {
     int in = sys_open(src, O_RDONLY); if (in < 0) { dprintf(2, "cp: %s: %s\n", src, zwhy("cannot open")); return 1; }
+    if (same_file(in, dst)) { dprintf(2, "cp: '%s' and '%s' are the same file\n", src, dst); sys_close(in); return 1; }   /* D49 8 */
     int out = sys_open(dst, O_WRONLY | O_CREAT | O_TRUNC);
     if (out < 0) { dprintf(2, "cp: %s: %s\n", dst, zwhy("cannot write")); sys_close(in); return 1; }
     char b[1024]; int n, bad = 0;
