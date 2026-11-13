@@ -62,6 +62,11 @@ static inline int sys_close(int fd) { return sys3(9, (u32)fd, 0, 0); }
 static inline int sys_read(int fd, void *p, u32 n) { return sys3(10, (u32)fd, (u32)p, n); }
 static inline int sys_lseek(int fd, int off, int whence) { return sys3(11, (u32)fd, (u32)off, (u32)whence); }
 static inline int sys_readdir(int fd, struct udirent *d) { return sys3(12, (u32)fd, (u32)d, sizeof *d); }
+/* DESIGN D49: the open directory's next records (kernel/udirx.h) into buf, as many whole ones as fit in size (at least
+ * UDIRX_MAX): their bytes, 0 at the end, -errno; -ENOSYS: this kernel or the directory's server does not know it (read
+ * with sys_readdir then: libz's zdir does) */
+#include "../kernel/udirx.h"
+static inline int sys_readdirs(int fd, void *buf, u32 size) { return sys3(99, (u32)fd, (u32)buf, size); }
 static inline int sys_stat(const char *p, struct ustat *s) { return sys3(13, (u32)p, (u32)s, sizeof *s); }
 static inline int sys_fstat(int fd, struct ustat *s) { return sys3(14, (u32)fd, (u32)s, sizeof *s); }
 static inline int sys_chdir(const char *p) { return sys3(15, (u32)p, 0, 0); }
@@ -140,6 +145,13 @@ static inline int sys_symlink(const char *t, const char *p) { return sys3(54, (u
 static inline int sys_readlink(const char *p, char *buf, u32 max) { return sys3(55, (u32)p, (u32)buf, max); }
 static inline int sys_utimes(const char *p, u32 t) { return sys3(56, (u32)p, t, 0); }
 static inline int sys_lstat(const char *p, struct ustat *st) { return sys3(57, (u32)p, (u32)st, sizeof *st); }
+/* DESIGN D49 8: the same with the device after the 28 bytes the server writes (struct ustat stays 28: the servers write
+ * it into the kernel's buffers). dev: the mount's slot + 1, the same for every file of one mount; 0 the kernel's own
+ * devices and sockets, and every answer of a kernel before D49 (which writes only the 28 bytes: dev is set to 0 first) */
+struct ustat2 { u32 ino, mode, size, mtime, uid, gid, links, dev; };
+static inline int sys_stat2(const char *p, struct ustat2 *st) { st->dev = 0; return sys3(13, (u32)p, (u32)st, sizeof *st); }
+static inline int sys_lstat2(const char *p, struct ustat2 *st) { st->dev = 0; return sys3(57, (u32)p, (u32)st, sizeof *st); }
+static inline int sys_fstat2(int fd, struct ustat2 *st) { st->dev = 0; return sys3(14, (u32)fd, (u32)st, sizeof *st); }
 static inline u32 sys_time(void) { return (u32)sys3(58, 0, 0, 0); }
 static inline int sys_settime(u32 t) { return sys3(59, t, 0, 0); }
 /* from a checked source (sntp): the kernel marks the clock CLOCK_NET (D21 8.3) */
