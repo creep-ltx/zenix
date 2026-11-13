@@ -11,6 +11,10 @@
  *      DOSTRUE with IoErr() 7; returns 3
  *   l  ("loop"): Executes "zpart loop" again: ZINE runs 8 inside one another, the next is refused (DOSFALSE), said
  *   d  ("deep"): see n
+ *   h  ("hand"): hands its segments over in cli_Module as a decruncher does (CrunchMania's first hunk, The Black
+ *      Lotus' Tint: d29 16.21): a 64 KB block made a segment (its size, then the link to the old cli_Module's list)
+ *      is cli_Module now; the Shell unloads what cli_Module holds when the command ends, so zexec's AvailMem is as
+ *      at its start only when that list is unloaded, not the one loaded; returns 0
  * A failed check returns 40 + the step and says so. PC-relative code, one hunk. */
 #include "zt.i"
 #define LVO_Open        -30
@@ -78,6 +82,8 @@ main:
     beq     loop
     cmp.b   #0x64,%d0           /* d */
     beq     deep
+    cmp.b   #0x68,%d0           /* h */
+    beq     hand
     moveq   #45,%d3
     bra     fail
 
@@ -171,6 +177,26 @@ loop:
 1:  moveq   #0,%d0
     bra     done
 
+hand:
+    moveq   #51,%d3
+    move.l  4.w,%a6
+    move.l  #65536,%d0
+    moveq   #1,%d1              /* MEMF_PUBLIC */
+    jsr     LVO_AllocMem(%a6)
+    move.l  V_dos(%a4),%a6
+    tst.l   %d0
+    beq     fail
+    move.l  %d0,%a0
+    move.l  #65536,(%a0)        /* a segment as LoadSeg makes it: the size, then the link (BPTR) */
+    move.l  60(%a3),4(%a0)      /* to zpart's own list: unloading the new list frees both */
+    addq.l  #4,%d0
+    lsr.l   #2,%d0
+    move.l  %d0,60(%a3)         /* cli_Module */
+    lea     m_hand(%pc),%a0
+    bsr     puts
+    moveq   #0,%d0
+    bra     done
+
 f41: moveq  #41,%d3
 fail:
     lea     m_fail(%pc),%a0
@@ -235,6 +261,7 @@ m_two:    .asciz "zpart: two ran from its subfolder, PROGDIR:here its own; its c
 m_nl:     .asciz "\n"
 m_nest:   .asciz "zpart: the nested part ended with Exit(7), its return code from IoErr()\n"
 m_limit:  .asciz "zpart: the ninth loop refused at ZINE's limit\n"
+m_hand:   .asciz "zpart: its segments handed over in cli_Module, a 64 KB segment first\n"
 m_fail:   .asciz "zpart: failed (the return code names the step)\n"
     .even
 vars:   .space  V_end

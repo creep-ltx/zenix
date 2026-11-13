@@ -3,7 +3,7 @@
 # ZINE's input for programs (docs/d29-zine.md 16.17) in FS-UAE: the test program zinput (tools/tests/zine/zinput.S)
 # runs under ZINE while keys are pressed on the emulated keyboard (wtype in the headless cage rig, tools/shot.py's
 # `shot key-NAME`): a, b, c, F1, the fire button of a joystick in port 0 (the left mouse button's line: FS-UAE's
-# keyboard joystick, Right Ctrl) and q. The window is on a screen of its own (IntuitionBase's FirstScreen checked). zinput writes what reached it each way (a window's IDCMP through gadtools,
+# keyboard joystick, Right Ctrl) and q (zinput ends at q's key-up). The window is on a screen of its own (IntuitionBase's FirstScreen checked). zinput writes what reached it each way (a window's IDCMP through gadtools,
 # console.device's reads, an input.device handler, keyboard.device, keymap.library, lowlevel.library's interrupts,
 # GetKey and ReadJoyPort); the line is compared.
 # The machine: the A1200 with 4 MB fast RAM (68EC020); MACH=060 the 68060 one. ZENIX_SERIAL=/tmp/name gives the run

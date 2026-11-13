@@ -305,9 +305,13 @@ zs_setsr:
     moveq   #0,%d0
     move.w  %d2,%d0
     move.l  (%sp)+,%d2
-    .globl  zs_rts, zx_chain, zs_catch
+    .globl  zs_rts, zx_chain, zs_catch, zs_goon
 zs_rts:
 zx_chain:                               /* the server chains' handler in IntVects (blob.c runs the chain itself) */
+    rts
+zs_goon:                                /* a server that leaves the interrupt to the next one (Z set): the CIA
+                                         * resources' own nodes in the PORTS and EXTER chains (round 10) */
+    moveq   #0,%d0
     rts
 /* SuperState() (-150): from user mode by the privilege violation (above); in supervisor mode it does nothing and
  * answers 0 (the RKRM autodoc) */
@@ -1236,6 +1240,20 @@ zb_attn:
     .globl  zb_irq_pc
 zb_irq_pc:
     .long   0
+#ifndef ZINE_TRACE
+    .globl  ztr_ring, ztr_ri        /* the trace build's ring of calls (below); read only when zb_tracing is 1 */
+    .globl  ztr_fn, ztr_fstub, ztr_fvec, ztr_ftgt, ztr_fcnt, ztr_fring, ztr_fri    /* and its FPSP counts (below) */
+ztr_ring:
+ztr_ri:
+ztr_fn:
+ztr_fstub:
+ztr_fvec:
+ztr_ftgt:
+ztr_fcnt:
+ztr_fring:
+ztr_fri:
+    .long   0
+#endif
     .globl  zb_tracing              /* 1 in the trace build: zb_back also writes the code before a bad call */
 zb_tracing:
 #ifdef ZINE_TRACE
@@ -1251,12 +1269,22 @@ zb_tracing:
     .even
 ztr_n:   .space 4
 ztr_tab: .space 8 * ZTR_MAX
+    .globl  ztr_ring, ztr_ri
+ztr_ri:  .space 4                   /* round 10: the last 16 calls (slot, the caller's return address), for the dump */
+ztr_ring: .space 8 * 16
     .text
 zx_trace:
     movem.l %d0-%d3/%a0-%a1,-(%sp)
     move.l  24(%sp),%d1             /* our return address: the slot + 6 */
     subq.l  #6,%d1
     move.l  %d1,%a1                 /* the slot */
+    move.l  ztr_ri,%d0              /* round 10: into the ring of the last calls */
+    and.w   #15,%d0
+    lsl.w   #3,%d0
+    lea     ztr_ring,%a0
+    move.l  %a1,0(%a0,%d0.w)
+    move.l  28(%sp),4(%a0,%d0.w)    /* the program's return address (its jsr to the slot) */
+    addq.l  #1,ztr_ri
     moveq   #'Z',%d0
     bsr.s   ztr_put
     moveq   #7,%d2
@@ -1292,4 +1320,49 @@ ztr_put:                            /* d0: a byte to the serial port, waiting fo
     rts
 ztr_hex: .ascii "0123456789abcdef"
     .even
+
+/* round 11: the trace build counts each entry into the CPU support package (sp_install puts these stubs in its
+ * vectors, the package's entries in ztr_ftgt) and keeps the last 32 (the stub's number << 16 | the stacked SR, the
+ * stacked PC) in ztr_fring; then it goes on into the package with every register and the stack as the CPU left them
+ * (a slot under the frame takes the entry, rts jumps there) */
+    .data
+    .globl  ztr_fn, ztr_fvec, ztr_ftgt, ztr_fcnt, ztr_fring, ztr_fri
+ztr_fn:    .long 16
+    .bss
+ztr_fvec:  .space 4 * 16
+ztr_ftgt:  .space 4 * 16
+ztr_fcnt:  .space 4 * 16
+ztr_fri:   .space 4
+ztr_fring: .space 8 * 32
+    .text
+    .globl  ztr_fstub
+    .balign 16
+ztr_fstub:
+    .irp    i, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+    .balign 16
+    subq.l  #4,%sp                  /* the slot for the entry */
+    move.l  %d0,-(%sp)
+    moveq   #\i,%d0
+    bra.w   ztr_fcom
+    .endr
+ztr_fcom:                           /* (sp) d1, a0, d0, the slot, then the frame: SR at 16, PC at 18 */
+    movem.l %d1/%a0,-(%sp)
+    lsl.w   #2,%d0
+    lea     ztr_fcnt,%a0
+    addq.l  #1,0(%a0,%d0.w)
+    lea     ztr_ftgt,%a0
+    move.l  0(%a0,%d0.w),12(%sp)
+    move.l  ztr_fri,%d1
+    and.w   #31,%d1
+    lsl.w   #3,%d1
+    lea     ztr_fring,%a0
+    lsr.w   #2,%d0
+    swap    %d0
+    move.w  16(%sp),%d0
+    move.l  %d0,0(%a0,%d1.w)
+    move.l  18(%sp),4(%a0,%d1.w)
+    addq.l  #1,ztr_fri
+    movem.l (%sp)+,%d1/%a0
+    move.l  (%sp)+,%d0
+    rts
 #endif

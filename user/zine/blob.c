@@ -338,9 +338,17 @@ static void sp_install(u32 *v)
     extern void zv_crash(void), zv_linef(void);
     ((u32 *)h[10])[0] = (u32)zv_linef;
     ((u32 *)h[10])[1] = (u32)zv_crash;
+    extern u32 zb_tracing, ztr_fn, ztr_fvec[], ztr_ftgt[];
+    extern u8 ztr_fstub[];
     for (u32 i = 0; i < n; i++)
-        if (!(h[12 + 2 * i] & 0x100) || fpu)
-            v[h[12 + 2 * i] & 0xFF] = h[13 + 2 * i];
+        if (!(h[12 + 2 * i] & 0x100) || fpu) {
+            u32 vec = h[12 + 2 * i] & 0xFF;
+            v[vec] = h[13 + 2 * i];
+            if (zb_tracing && i < ztr_fn) {     /* round 11, the trace build: each entry counted (blobs.S) */
+                ztr_fvec[i] = vec, ztr_ftgt[i] = v[vec];
+                v[vec] = (u32)ztr_fstub + 16 * i;
+            }
+        }
     if (fpu)                            /* 16.15: AttnFlags say the FPU, as 68040/68060.library make them say
                                          * (AFF_68881, AFF_68882, AFF_FPU40): Elude's demos look for it there */
         Z.attn |= 0x0070;
@@ -666,6 +674,90 @@ void zb_serial_hex(char tag, const u32 *v, int n)
     }
 }
 
+/* the trace build (round 10): the code a packed program unpacked, read from memory before Zenix's comes back, as
+ * 'D' lines (the address, then 8 longs, then a check long: each of the nine rotated into it, tools/zine-dump.py): 1 KB
+ * around each of the last 8 distinct callers' return addresses and 2 KB around a crash's PC, with 'L' (the ring of
+ * the last 16 calls: slot, return address; the oldest first). Round 11: lines were lost on the way to the PC (a gap
+ * can also join two halves into one line that reads right), so each line has its check and the dump is sent twice
+ * ('G' 1 and 2 before each pass), paced: a line lost or damaged in one pass is whole in the other. */
+static void zb_dump(u32 a, u32 n)
+{
+    a &= ~31u;
+    for (u32 o = 0; o < n; o += 32) {
+        u32 v[10];
+        if (!c_TypeOfMem(a + o) || !c_TypeOfMem(a + o + 31))
+            continue;
+        v[0] = a + o;
+        for (int k = 0; k < 8; k++)
+            v[1 + k] = ((const u32 *)(a + o))[k];
+        u32 c = 0;
+        for (int k = 0; k < 9; k++)
+            c = (c << 1 | c >> 31) ^ v[k];
+        v[9] = c;
+        zb_serial_hex('D', v, 10);
+        zb_wait_lines(64);              /* about 4 ms a line, 23 KB/s: FS-UAE's port does not wait for the baud rate,
+                                         * and the PC's reader of its pty lost lines above about 0.5 MB/s (measured) */
+    }
+}
+static void zb_trace_pass(void)
+{
+    extern u32 ztr_ring[32], ztr_ri;    /* blobs.S: the trace build's ring (the other builds: one long, unused) */
+    u32 ring[32], seen[8], ns = 0;
+    for (u32 i = 0; i < 16; i++) {
+        u32 j = (ztr_ri + i) & 15;
+        ring[2 * i] = ztr_ring[2 * j], ring[2 * i + 1] = ztr_ring[2 * j + 1];
+    }
+    zb_serial_hex('L', ring, 32);
+    if (zr_how == ZH_CRASH && Z.blk->pc >= 0x400)
+        zb_dump(Z.blk->pc - 1024, 2048);
+    for (int i = 15; i >= 0 && ns < 8; i--) {
+        u32 r = ring[2 * i + 1], k;
+        for (k = 0; k < ns && (seen[k] > r ? seen[k] - r : r - seen[k]) >= 512; k++)
+            ;
+        if (k < ns || r < 0x400 || (r & 1))
+            continue;
+        seen[ns++] = r;
+        zb_dump(r - 512, 1024);
+    }
+    u32 left = 512u << 10;              /* then the program's hunks themselves (a packed one unpacks into them), the
+                                         * first 512 KB: 'H' (the hunk's address and size) before each */
+    u32 s = Z.seglist;
+    for (int n = 0; s && n < 32 && left; n++) {
+        u32 a = s << 2, sz = c_TypeOfMem(a) ? *(const u32 *)(a - 4) : 0;
+        if (!sz || sz > (64u << 20))
+            break;
+        u32 h[2] = { a + 4, sz - 8 };
+        zb_serial_hex('H', h, 2);
+        u32 d = h[1] < left ? h[1] : left;
+        zb_dump(a + 4, d);
+        left -= d;
+        s = *(const u32 *)a;
+    }
+}
+static void zb_trace_dump(void)
+{
+    extern u32 ztr_fn, ztr_fvec[], ztr_fcnt[], ztr_fring[], ztr_fri;
+    for (u32 i = 0; i < ztr_fn && i < 16; i++)  /* 'F': a package vector and how often it was taken */
+        if (ztr_fvec[i]) {
+            u32 f[2] = { ztr_fvec[i], ztr_fcnt[i] };
+            zb_serial_hex('F', f, 2);
+        }
+    if (ztr_fn) {                       /* 'Q': the last 32 entries, the oldest first (the stub's number << 16 | SR, PC) */
+        u32 q[64];
+        for (u32 i = 0; i < 32; i++) {
+            u32 j = (ztr_fri + i) & 31;
+            u32 vec = ztr_fring[2 * j] >> 16;
+            q[2 * i] = !ztr_fring[2 * j + 1] ? 0 : (vec < 16 ? ztr_fvec[vec] : 0) << 16 | (ztr_fring[2 * j] & 0xFFFF);
+            q[2 * i + 1] = ztr_fring[2 * j + 1];
+        }
+        zb_serial_hex('Q', q, 64);
+    }
+    for (u32 pass = 1; pass <= 2; pass++) {
+        zb_serial_hex('G', &pass, 1);
+        zb_trace_pass();
+    }
+}
+
 /* the way back, path A (9.1 steps 1, 4-6; the sums of step 3 come with build step 5; the 040/060 MMU and PCR first,
  * zb_mmu_back): everything off, Zenix's memory back with low memory last, the chips' register
  * set and the CIAs from Zenix's records (9.2), then the kernel's resume */
@@ -675,8 +767,10 @@ void zb_back(void)
     if (Z.attn & 0x0088)
         zb_mmu_back(Z.mmu);             /* first: a program's translation must not stand while Zenix's memory returns */
     extern u32 zb_tracing;
-    if (zb_tracing)
+    if (zb_tracing) {
         zb_screen_report();
+        zb_trace_dump();
+    }
     b->how = zr_how;
     if (zr_how == ZH_RETURN || zr_how == ZH_EXIT)
         b->code = (s32)zr_code;

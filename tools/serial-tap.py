@@ -130,11 +130,24 @@ def wait_for(pattern, timeout, echo=False, optional=False):
         pending = None
 
 
+# Each search covers only what is new, plus WINDOW bytes before it from a line start (no test waits for a match
+# longer than that). Searching everything since the wait began on every read, and copying the whole log for the
+# greeting's search, cost time that grows with the log: on a trace build's megabytes the reader fell behind and the
+# lines FS-UAE wrote to the full pty were lost (zine round 11, measured: tools/tap-test.sh's last case).
+WINDOW = 256 << 10
+
+
 def wait_loop(rx, pattern, t0, end, timeout, echo, optional):
+    done = None                 # where the log ended at the last search (it starts once and stays)
     with cond:
         while True:
             start = wait_start(echo)
-            text = b"" if start is None else SGR.sub(b"", bytes(received[start:]).replace(b"\r", b""))
+            frm = start
+            if start is not None and done is not None and done - WINDOW > start:
+                lf = received.rfind(b"\n", start, done - WINDOW)
+                frm = start if lf < 0 else lf + 1
+            text = b"" if start is None else SGR.sub(b"", bytes(received[frm:]).replace(b"\r", b""))
+            done = None if start is None else len(received)
             if start is not None and rx.search(text):
                 if TRACE:
                     with open(TRACE, "a") as f:
@@ -156,16 +169,18 @@ send_lock = threading.Lock()    # a `send` line and the greeting never interleav
 
 def greet():
     """0x1D '.' after each boot's "tick latch" line: the kernel then knows someone listens (kernel/serial.c)."""
-    seen = 0
+    seen = scan = 0
     while True:
         with cond:
             while True:
                 # at a line start: the previous boot's lines, replayed early in the next boot (before its receive
-                # interrupt is on), hold the same text after "> "
-                m = TICK_LINE.search(bytes(received), seen)
+                # interrupt is on), hold the same text after "> ". Only the new part (and 256 bytes before it) is
+                # searched, in place (WINDOW above)
+                m = TICK_LINE.search(received, max(seen, scan - 256))
                 if m:
-                    seen = m.end()
+                    seen = scan = m.end()
                     break
+                scan = len(received)
                 cond.wait(1)
         time.sleep(0.5)
         with send_lock:
