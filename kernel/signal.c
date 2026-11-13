@@ -43,13 +43,16 @@ void sig_send(struct proc *p, int sig)
     u32 b = SIGBIT(sig);
     if (p->state == P_FREE || p->state == P_ZOMBIE || p->exiting || p->pid == 0)
         return;
+    if (sig == SIGINT && (p->dbgf & DBGF_TRACED) && dbg_sigint(p))
+        return;                         /* D54 section 6: ^C stops a debugged program for its debugger */
     if (sig == SIGKILL || sig == SIGSTOP) {
         sig_default(p, sig);            /* never caught, blocked or ignored */
         return;
     }
     if (sig == SIGCONT) {               /* continues it always, then (if caught) runs its handler */
         p->sig_pend &= ~STOPSIGS;
-        proc_cont(p);
+        if (!(p->dbgf & DBGF_TRACED) || !dbg_held(p))
+            proc_cont(p);               /* (a debugger's stop is the debugger's to end, D54 section 5) */
     }
     if (STOPSIGS & b)
         p->sig_pend &= ~SIGBIT(SIGCONT);
@@ -281,7 +284,7 @@ long sig_return(u32 *rb, u32 f)
     u8 *fr = (u8 *)(rb + 15);
     memcpy(rb, sf->regs, 60);
     set_usp(sf->regs[15]);
-    *(u16 *)fr = (u16)(sf->ccr & 0x1F);
+    *(u16 *)fr = (u16)((*(u16 *)fr & 0xC000) | (sf->ccr & 0x1F));    /* the trace bits stay (a debugger's, D54 6) */
     *(u32 *)(fr + 2) = sf->pc;
     c->sig_block = sf->blocked & ~SIG_UNCATCHABLE & ~1u;
     sig_unblocked(c);

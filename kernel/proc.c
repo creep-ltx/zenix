@@ -208,7 +208,6 @@ static void wake_sleepers(void)
 static int slice;
 #define KSTACK 4096u
 #define USTACK_DEFAULT 16384u
-#define FILE_MAX (256u * 1024)
 
 /* ---- the stack guard (future-ideas.md section 3, a fix since 2026-10-23) ----
  * Without an MMU nothing stops a stack from growing past its bottom into the memory below (the program's own bss for a
@@ -362,7 +361,7 @@ static int fill_mem(const void *ctx, u8 *base, const struct zexe *h)
     return 0;
 }
 /* ... or straight from the file system: no buffer holding the whole file, so a spawn needs only the process's own
- * memory (plus the relocation table, a few KB) */
+ * memory (plus the relocation table on the kernel heap: a few KB for most programs, never more than half the image) */
 static int fill_fs(const void *ctx, u8 *base, const struct zexe *h)
 {
     const struct exec_src *x = ctx;
@@ -397,6 +396,9 @@ static const char *zexe_bad(const struct zexe *h, u32 fsize)
         return "relocation table outside the file";
     if (h->nreloc && h->image_size < 4)
         return "relocations in an empty image";
+    if (h->nreloc > h->image_size / 2)  /* each names its own even word: more is no linker's (the table's kernel-heap
+                                         * block is never bigger than the image) */
+        return "too many relocations";
     if (h->mem_size < h->image_size || h->mem_size > ZEXE_MEM_MAX)
         return "memory size impossible";
     if (h->stack_size && (h->stack_size < ZEXE_STACK_MIN || h->stack_size > ZEXE_STACK_MAX))
@@ -419,6 +421,8 @@ static const char *zex2_bad(const struct zex2 *h, u32 fsize)
     u32 room = (fsize - h->reloc_off) / 4;
     if (h->nrel_code > room || h->nrel_data > room - h->nrel_code)
         return "relocation table outside the file";
+    if (h->nrel_code + h->nrel_data > h->data_size / 2)    /* (as zexe_bad's; the sum cannot wrap: both fit room) */
+        return "too many relocations";
     if (h->mem_size < h->data_size || h->mem_size > ZEXE_MEM_MAX)
         return "memory size impossible";
     if (h->stack_size && (h->stack_size < ZEXE_STACK_MIN || h->stack_size > ZEXE_STACK_MAX))
@@ -448,7 +452,7 @@ static int rel2_ok(const u32 *rel, const struct zex2 *h, const u8 *data)
  * (seg_enter), else kept private (owned by pid, freed with the process). *codep: where the code is. Nobody waits on a
  * half-loaded segment: each spawn that finds none loads its own copy; it is listed only when complete. */
 static int fill_v2(struct exec_src *x, u8 *data, const struct zex2 *h, u32 pid, const char *path, struct seg **segp,
-                   u32 *codep)
+                   u32 *codep, int nolist)
 {
     u32 ts = h->text_size, nrel = h->nrel_code + h->nrel_data, rsz = nrel * 4;     /* checked: no wrap */
     u8 *own = 0;
@@ -474,7 +478,7 @@ static int fill_v2(struct exec_src *x, u8 *data, const struct zex2 *h, u32 pid, 
         kfree(rel);
         return -ENOEXEC;
     }
-    if (own) {
+    if (own && !nolist) {               /* (nolist: started under a debugger, a private copy: D54 section 10) */
         int made;
         struct seg *s = seg_enter(x, (u32)own, ts, seg_sum((u32)own, ts), path, &made);
         if (s && !made)
@@ -490,7 +494,8 @@ static int fill_v2(struct exec_src *x, u8 *data, const struct zex2 *h, u32 pid, 
 }
 
 static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *fillctx, const char *path, const char *name,
-                     char *const *argv, int argc, struct proc *parent, const int *stdio, int tty, int priv, int suid)
+                     char *const *argv, int argc, struct proc *parent, const int *stdio, int tty, int priv, int suid,
+                     int rdok)
 {
     const struct zexe *h = &hu->v1;
     int v2 = h->magic == ZEX2_MAGIC && fill == fill_fs;    /* the programs built into the kernel stay ZEXE */
@@ -501,8 +506,18 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
     }
     u32 img = v2 ? hu->v2.data_size : h->image_size, memsz = v2 ? hu->v2.mem_size : h->mem_size;
     struct exec_src *x = v2 ? (struct exec_src *)fillctx : 0;
+    struct dbg *dd = 0;
+    if (parent && (parent->dbgf & DBGF_NEXT)) {     /* D54 section 11: started under its debugger - the parent's bit,
+                                                     * never current's (a service's server); any attempt takes it */
+        parent->dbgf &= (u8)~DBGF_NEXT;
+        if (!rdok)
+            return -EACCES;             /* a program the caller may not read is not dumped through a debugger */
+        if (!(dd = dbg_pending(parent)))
+            return -EAGAIN;
+        suid = -1;                      /* set-user-id not honoured */
+    }
     /* a segment of this file already in memory: the reference is taken now, before anything below can block */
-    struct seg *seg = v2 ? seg_find(x, hu->v2.text_size, path) : 0;
+    struct seg *seg = v2 && !dd ? seg_find(x, hu->v2.text_size, path) : 0;
     u32 code = 0;
 
     u32 strsz = 0;
@@ -530,7 +545,7 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
     }
     /* Reading the image can block (messages to the filesystem server), and another process may spawn meanwhile: so the
      * process slot is chosen only afterwards, and nothing below blocks. */
-    int fr = v2 ? fill_v2(x, base, &hu->v2, (u32)pid, path, &seg, &code) : fill(fillctx, base, h);
+    int fr = v2 ? fill_v2(x, base, &hu->v2, (u32)pid, path, &seg, &code, dd != 0) : fill(fillctx, base, h);
     if (fr) {
         if (fr == -ENOEXEC)
             kprintf("exec: %s refused: a relocation points outside the program\n", path);
@@ -542,6 +557,8 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
     u32 ustk = (u32)base + ((memsz + 15) & ~15u);               /* the user stack starts above image and bss */
     guard_set(ustk);
     guard_set((u32)ks);
+    if (dd)
+        dbg_entry(dd, v2 ? code : (u32)base);     /* D54: an ILLEGAL at its entry, before the flush */
     cache_flush_code();         /* the image is code the CPU has not seen: no stale I-cache lines or Emu68 translations
                                  * (another program ran at this address before) may run instead */
     struct proc *p = 0;
@@ -658,6 +675,10 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
     if (parent)
         tty_spawned(p, parent->ctty);   /* the session leader rule (D20 7.2) */
     p->priv = priv;
+    if (suid >= 0 || !rdok)
+        p->dbgf |= DBGF_NODEBUG;        /* D54 section 4: only root may debug it */
+    if (dd)
+        dbg_link(dd, p);
     p->state = P_READY;
     {
         u16 s = irq_save();
@@ -706,8 +727,11 @@ static __attribute__((noinline)) int spawn1(const char *path, const char *name, 
                     r = -EIO;
             }
         }
-    } else if (x.st.size > 256u * 1024) /* the largest Zenix program (an AmigaOS one may be bigger: zine reads it) */
+    } else if (x.st.size > ZEXE_FILE_MAX) {    /* the largest Zenix program file, as the most memory one may ask for
+                                                 * (an AmigaOS one may be bigger: zine reads it) */
+        kprintf("exec: %s refused: %s\n", path, "larger than 16 MB");
         r = -EFBIG;
+    }
     if (r && !line && r < -4095)        /* an interpreter, or zine itself, that is not a Zenix program (D53 3.5) */
         r = -ENOEXEC;
     if (r) {
@@ -715,8 +739,9 @@ static __attribute__((noinline)) int spawn1(const char *path, const char *name, 
         return (int)r;
     }
     int pid = proc_load(&h, x.st.size, fill_fs, &x, path, name, argv, argc, parent, stdio, tty, 0,
-                        (x.st.mode & 04000) && !nosuid ? (int)x.st.uid : -1);  /* set-user-id: runs as its owner (su,
+                        (x.st.mode & 04000) && !nosuid ? (int)x.st.uid : -1,   /* set-user-id: runs as its owner (su,
                                                                                 * passwd) */
+                        dbg_readable(x.st.mode, x.st.uid, x.st.gid, parent));
     fs_exec_close(&x);                  /* the image is in memory: the server may forget this open */
     return pid;
 }
@@ -732,6 +757,8 @@ int proc_spawn(const char *path, char *const *argv, int argc, struct proc *paren
     int pid = spawn1(path, path, argv, argc, parent, stdio, tty, &line, 0);
     if (pid != SPAWN_HUNK && pid != SPAWN_SCRIPT) {
         kfree(line);                    /* a script's line read, then -EIO / -ENOMEM: given back */
+        if (parent)
+            parent->dbgf &= (u8)~DBGF_NEXT;     /* D54 11: any attempt takes it (a failed open too) */
         return pid;
     }
     char **v = 0;
@@ -771,6 +798,8 @@ int proc_spawn(const char *path, char *const *argv, int argc, struct proc *paren
 out:
     kfree(v);
     kfree(line);
+    if (parent)
+        parent->dbgf &= (u8)~DBGF_NEXT;         /* (the interpreter's spawn took it, or nothing did) */
     return pid;
 }
 
@@ -778,7 +807,7 @@ out:
  * (0: the kernel log, a service's server) */
 int proc_spawn_image(const void *img, u32 len, char *const *argv, int argc, int priv, int tty)
 {
-    return proc_load((const union zhdr *)img, len, fill_mem, img, argv[0], argv[0], argv, argc, 0, 0, tty, priv, -1);
+    return proc_load((const union zhdr *)img, len, fill_mem, img, argv[0], argv[0], argv, argc, 0, 0, tty, priv, -1, 1);
 }
 
 #pragma GCC pop_options
@@ -846,13 +875,16 @@ void schedule(void)
      * (G5, D11): kill_now */
     if (current->killed && current->state == P_READY && current->pid != 0 && kill_now(current))
         proc_exit(kill_status(current));
-    if (current->stop_req && current->state == P_READY && current->pid != 0 && !current->wait_msg) {
+    if (current->stop_req && current->state == P_READY && current->pid != 0 && !current->wait_msg &&
+        !current->svc_depth && !(current->dbgf & DBGF_INEXC)) {     /* D54 5: never while loading a service; one held
+                                                                     * in exc_c stops there (its own block) */
         struct proc *p = current;                       /* stopped: not runnable until proc_cont */
         p->stop_req = 0;
         p->stop_rep = 0;
         p->state = P_STOP;
-        struct proc *par = proc_by_pid(p->ppid);
-        if (par) {                                      /* the parent's wait sees it; SIGCHLD (D16 4) */
+        struct proc *par = (p->dbgf & DBGF_TRACED) && dbg_stopped(p) ? 0 : proc_by_pid(p->ppid);
+        if (par) {                                      /* the parent's wait sees it (not a debugger's stop, D54);
+                                                         * SIGCHLD (D16 4) */
             ev_post(par, EV_CHILD);
             sig_send(par, SIGCHLD);
         }
@@ -892,8 +924,11 @@ void resched(void)
 
 void proc_stop(struct proc *p)
 {
-    if (p->pid == 0 || p->priv || p->state == P_ZOMBIE || p->state == P_FREE || p->state == P_STOP)
+    if (p->pid == 0 || p->priv || p->state == P_ZOMBIE || p->state == P_FREE || p->state == P_STOP) {
+        if (p->state == P_STOP && (p->dbgf & DBGF_TRACED))
+            dbg_jobstop(p);             /* D54 5: remembered while its debugger holds it */
         return;
+    }
     p->stop_req = 1;
     if (p->state == P_EV || p->state == P_SLEEP ||
         (p->state == P_MSG && !p->wait_msg))            /* wake it so that it notices */
@@ -937,6 +972,8 @@ void proc_exit(int code)
     ints_off();
     struct proc *p = current;
     p->exiting = 1;
+    if (ndbg)
+        dbg_exit(p, code);              /* D54 13-14: as a debugger and as a debugged process */
     mmu_forget(p);                      /* D41: its view never applied again (before seg_put drops its code) */
     drv_exit(p);                        /* D19 2.4: a device it claimed is stopped before anything of it is freed */
     gcon_proc_exit(p->pid);             /* D38: a console it grabbed is given back (its chip RAM goes with it) */
@@ -1023,7 +1060,7 @@ int proc_wait(int pid, int flags)
                 (pid != -1 && c->pid != pid))
                 continue;
             have++;
-            if (c->state == P_STOP && (flags & WAIT_UNTRACED) && !c->stop_rep) {
+            if (c->state == P_STOP && (flags & WAIT_UNTRACED) && !c->stop_rep && !(c->dbgf && dbg_held(c))) {
                 c->stop_rep = 1;
                 return ST_STOPPED;
             }

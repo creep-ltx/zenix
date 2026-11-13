@@ -361,8 +361,10 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   -ENOEXEC).
 - **D29 12.1, running by name (branch zine04, 2026-10-31):** a file a program spawns that has the x bit and starts with
   the longword `0x000003F3` (AmigaOS's `HUNK_HEADER`) is run as `/bin/zine PATH ARGS...` (argv[0] "zine"); without
-  `/bin/zine` the spawn is -ENOEXEC (the kernel log names the file). Such a file may be larger than 256 KB (Zenix
-  programs still are refused above that, -EFBIG).
+  `/bin/zine` the spawn is -ENOEXEC (the kernel log names the file). Such a file may be larger than 16 MB (Zenix
+  programs are refused above that, -EFBIG; the limit was 256 KB until 2026-11-13: it only grows). Since the same day the
+  loader also refuses more relocations than half the image's bytes (ZEXE: `image_size / 2`; ZEX2: the two lists
+  together, `data_size / 2`): each names its own even word, so no linker writes such a file.
 - **Audit block 3 B3-12 (`SYS_envset`, 2026-10-30):** a block whose last byte is not 0 is refused with -EINVAL
   (checked on the kernel's own copy; the old environment kept); a block of 0 bytes still empties it. An addition only:
   every caller in the tree ends its block with a 0, and before, such a block was taken and every child's `strlen` ran
@@ -402,3 +404,15 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   its interpreter's is honoured. The process's name is the script's file name. A script may be of any size. A file with
   no program header, no `HUNK_HEADER` and no `#!` stays -ENOEXEC. These may only become more permissive (a longer line,
   more levels), never change meaning.
+- **D54 (the debugger, branch debugger, 2026-11-13):** system call 100 `debug(op, pid, arg)` and its ops 1-14 with
+  their argument meanings (`kernel/dbgproto.h`); `DBGW_*` 1-9; the structs `udbgregs`, `udbgstop`, `udbginfo` (each
+  starting with the caller's size, 0 the first size: 76, 24, 28; they grow only at the end) and `udbgmem` (12 bytes);
+  `DBG_CONT`/`DBG_STEP`'s argument a signal (0 none). The rules: only one's own processes (same effective and real id,
+  not `nodebug`: a set-user-id start, an unreadable file, a `setuid`), root any; never pid 0/1, a process without a
+  parent, a system process, `priv`; a program started under the debugger stopped at its entry (`DBGW_EXEC`, PC = the
+  entry) with a private copy of shared code and without its set-user-id; the breakpoint is `ILLEGAL` (0x4AFC), only in
+  the image; `SIGINT` to a traced process stops it for the debugger; a fault stops it, then it ends as before (139);
+  `sigreturn` keeps the trace bits; a stray trace exception is harmless; the debugger's death detaches what it
+  attached to and kills what it started; a target's end is reported once by `DBG_WAIT` (`DBGW_EXIT`). The crash lines
+  `[kernel] pid N regs: base B code C sr S pc P d0..d7 X*8 a0..a7 X*8` and `[kernel] pid N frames: K R1 .. RK` (zdb
+  reads them; not for root's or a `nodebug` process): words may be added at the end of each, never moved. `zld -M`'s map is `nm -n`'s format.

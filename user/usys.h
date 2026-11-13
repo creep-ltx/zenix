@@ -67,6 +67,9 @@ static inline int sys_readdir(int fd, struct udirent *d) { return sys3(12, (u32)
  * with sys_readdir then: libz's zdir does) */
 #include "../kernel/udirx.h"
 static inline int sys_readdirs(int fd, void *buf, u32 size) { return sys3(99, (u32)fd, (u32)buf, size); }
+/* DESIGN D54: the debugger's call, debug(op, pid, arg) (kernel/dbgproto.h: the ops, the structs, DBGW_*) */
+#include "../kernel/dbgproto.h"
+static inline int sys_debug(u32 op, int pid, u32 arg) { return sys3(100, op, (u32)pid, arg); }
 static inline int sys_stat(const char *p, struct ustat *s) { return sys3(13, (u32)p, (u32)s, sizeof *s); }
 static inline int sys_fstat(int fd, struct ustat *s) { return sys3(14, (u32)fd, (u32)s, sizeof *s); }
 static inline int sys_chdir(const char *p) { return sys3(15, (u32)p, 0, 0); }

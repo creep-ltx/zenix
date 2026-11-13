@@ -349,6 +349,7 @@ struct zex2 {
 #define ZEX2_MAGIC 0x5a455832u
 union zhdr { struct zexe v1; struct zex2 v2; };
 #define ZEXE_MEM_MAX   (16u << 20)     /* the loader refuses a program asking for more (image + bss) */
+#define ZEXE_FILE_MAX  (16u << 20)     /* ... or a program file larger than this (-EFBIG; was 256 KB until 2026-11-13) */
 #define ZEXE_STACK_MIN 4096u            /* a stack size in the header, if not 0, lies in this range */
 #define ZEXE_STACK_MAX (1u << 20)
 
@@ -534,6 +535,7 @@ struct proc {                   /* start.S relies on the first three: */
     int killed;
     u8 exiting;                 /* in proc_exit: its own calls (FS_CLOSE) must not end it a second time */
     u8 stop_req, stop_rep;      /* stop asked for (acted on when the process next runs); the parent has been told it is stopped */
+    u8 dbgf;                    /* D54 (kernel/dbg.c), DBGF_*: in the gap before priv (no BSS growth) */
     int priv;                   /* may use the raw disk (the filesystem server) */
     u16 uid, ruid, gid, umask;  /* effective and real user id, group id (inherited; a set-user-id program changes only uid); the filesystem server enforces the permissions */
     char *env;                  /* environment: NAME=value NUL ... NUL NUL, envlen bytes (at most ENVMAX) in a block
@@ -769,6 +771,7 @@ struct seg *seg_find(const struct exec_src *x, u32 size, const char *path);   /*
 struct seg *seg_enter(const struct exec_src *x, u32 code, u32 size, u32 sum, const char *path, int *made);   /* list
                                  * it, or the one listed meanwhile (made 0: the caller frees its copy); 0: private */
 void seg_put(struct seg *s);                    /* drop a reference; the last one frees the code */
+void seg_disown(struct proc *p);                /* D54: the segment only p runs becomes its private copy */
 void seg_unlist(int m, long ino);               /* file ino (-1: every file) of mount m may have changed */
 int seg_busy(int m, const struct ustat *st);    /* a segment of that file exists (ETXTBSY) */
 int seg_any(void);                              /* a segment loaded from any mount exists (D26: name_ino) */
@@ -1114,8 +1117,31 @@ struct upost { u32 off, src, len; };
 #define SYS_readdirs    99   /* fd, buffer, size (>= UDIRX_MAX): the directory's next records (kernel/udirx.h), as many
                               * whole ones as fit -> their bytes, 0 at the end; -ENOSYS: its server lacks FS_READDIRS
                               * (DESIGN D49, docs/d49-readdir.md 3.1) */
+#define SYS_debug      100   /* op, pid, arg: the debugger's call (DESIGN D54, kernel/dbgproto.h, kernel/dbg.c) */
 struct uatapi;
 int ide_atapi(struct uatapi *q);
+/* dbg.c (DESIGN D54, docs/d54-debugger.md): the live debugger's kernel part. struct proc's dbgf: */
+#define DBGF_TRACED  1                  /* it has a debugger (a block in dbgs[]) */
+#define DBGF_NEXT    2                  /* the next spawn it makes starts traced */
+#define DBGF_NODEBUG 4                  /* only root may attach; no register lines at a crash (sticky: section 4) */
+#define DBGF_INEXC   8                  /* held inside exc_c: schedule()'s stop branch leaves stops to exc_c */
+#define NDBG 4                          /* traced processes at once, the whole system */
+#define NBP 16                          /* breakpoints a process */
+extern u8 ndbg;                         /* debug blocks in use: 0 = nothing to do at an exit */
+long dbg_sys(u32 op, u32 pid, u32 arg);
+int dbg_exc(u32 *rb, u32 vec, u32 pc, u32 faddr); /* exc_c: 1 = handled (return through exc_common's rte) */
+int dbg_stopped(struct proc *p);        /* schedule()'s stop branch: 1 = a debugger's stop (the parent is not told) */
+int dbg_held(const struct proc *p);     /* held by its debugger: SIGCONT and wait leave it */
+int dbg_sigint(struct proc *p);         /* SIGINT to a traced process: 1 = made a debugger's stop */
+void dbg_jobstop(struct proc *p);       /* a job-control stop while held: remembered */
+void dbg_sysmark(struct proc *p);       /* it became a system process: detached */
+void dbg_exit(struct proc *p, int code);/* proc_exit (ndbg or dbgf set): as a debugger and as a target */
+struct dbg;
+struct dbg *dbg_pending(const struct proc *parent);  /* proc_load, the parent's DBGF_NEXT: the block DBG_NEXT reserved */
+void dbg_entry(struct dbg *d, u32 entry);           /* ... an ILLEGAL at its entry (before the loader's cache flush) */
+void dbg_link(struct dbg *d, struct proc *p);       /* ... the new process traced */
+int dbg_readable(u32 mode, u32 uid, u32 gid, const struct proc *c);  /* may c's real id read a file of this mode? */
+void dbg_crash(const struct proc *p, const u32 *rb); /* exc_c: the register and frame lines (section 17) */
 long ipc_peer(u32 msg, u32 op, u32 arg);
 long ipc_post(u32 op, u32 port, u32 arg);
 long zine_sys(u32 op, u32 a, u32 b);

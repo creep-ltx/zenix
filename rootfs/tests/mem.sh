@@ -54,6 +54,24 @@ done
 n=$(dmesg | grep -c 'exec: /tests/badzexe.* refused')
 [ $n -eq 11 ] && echo "mem: the kernel named all 11 refusals ok" || echo "mem: the kernel named $n of 11 refusals FAILED"
 hello 1 | grep -q 'hello from pid' && echo "mem: a good program still runs ok" || echo "mem: a good program still runs FAILED"
+# the size of a program file (2026-11-13: 16 MB, was 256 KB). tools/memtest.sh puts five files on its image (the
+# test floppies have no room): hello padded past 256 KB runs; hello cut short inside its image is refused; a file
+# over 16 MB (a hole after hello's bytes) is refused with "file too large" and the kernel's reason; more relocations than
+# half the image (ZEXE) or the data image (ZEX2) are refused
+if [ -f /tests/bigzexe ]; then
+    /tests/bigzexe 1 | grep -q 'hello from pid' && echo "mem: a 300 KB program runs ok" || echo "mem: a 300 KB program FAILED"
+    { ! /tests/cutzexe 1 2>/dev/null && dmesg | grep -q 'exec: /tests/cutzexe refused: image size outside'; } &&
+        echo "mem: a cut-short program refused ok" || echo "mem: a cut-short program FAILED"
+    /tests/hugezexe 2>$T/huge.err; rc=$?
+    { [ $rc -ne 0 ] && grep -q 'too large' $T/huge.err && dmesg | grep -q 'exec: /tests/hugezexe refused: larger than 16 MB'; } &&
+        echo "mem: a 17 MB program file refused ok" || echo "mem: a 17 MB program file (rc $rc) FAILED"
+    /tests/relzexe 2>/dev/null; /tests/relzex2 2>/dev/null
+    [ $(dmesg | grep -c 'exec: /tests/relzex[e2] refused: too many relocations') -eq 2 ] &&
+        echo "mem: more relocations than the image has words refused (ZEXE, ZEX2) ok" ||
+        echo "mem: more relocations than the image has words FAILED"
+else
+    echo "mem: the program size files are not on this disk (tools/memtest.sh adds them): not checked"
+fi
 # awk: its fixed 64 KB stack (no MMU, nothing grows it). Endless recursion and a deeply nested expression stop with
 # awk's own message and status 2, not with the kernel's stack guard killing it; a long loop does not lose memory
 # (20000 x 1 KB strings would need 20 MB if each one leaked).

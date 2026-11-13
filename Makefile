@@ -39,7 +39,7 @@ UDIAG   ?=
 # 68060 multilib's do not and run on every 68020+, so that one is linked (the check below covers it too)
 LIBGCC  := $(shell $(CC) -mcpu=68060 -msoft-float -print-libgcc-file-name 2>/dev/null)
 
-KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/floppy.o $(BUILD)/input.o $(BUILD)/audio.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/confont.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/svc.o $(BUILD)/seg.o $(BUILD)/event.o $(BUILD)/signal.o $(BUILD)/random.o $(BUILD)/sock.o $(BUILD)/drv.o $(BUILD)/zine.o $(BUILD)/cache.o $(BUILD)/mmu.o $(BUILD)/gcon.o $(BUILD)/embed.o
+KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/floppy.o $(BUILD)/input.o $(BUILD)/audio.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/confont.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/svc.o $(BUILD)/seg.o $(BUILD)/event.o $(BUILD)/signal.o $(BUILD)/random.o $(BUILD)/sock.o $(BUILD)/drv.o $(BUILD)/zine.o $(BUILD)/cache.o $(BUILD)/mmu.o $(BUILD)/gcon.o $(BUILD)/dbg.o $(BUILD)/embed.o
 
 UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash badptr boot \
           mkdir rmdir rm cp mv touch msgpingd msgping socktestd socktest bench fdisk mkfs_ext2 fsck_ext2 df sync termtest \
@@ -49,7 +49,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet \
           rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs files show ttf2font \
-          play modplay lsusb lua make zld zas tcc
+          play modplay lsusb lua make zld zas tcc zdb
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -262,8 +262,9 @@ RAMDISK_K := 640
 # revision 3 (2026-11-12, memory protection's code in a span of its own: 200 bytes of kernel.bin). 685 since DESIGN D46
 # (2026-11-12, USB sticks: 3.4 KB of kernel.bin: the built-in diskd's usb0 2.3 KB, stage0's boot-only lookup 0.7 KB).
 # 684 since DESIGN D49 (2026-11-13, directories in batches: 1.1 KB of kernel.bin, the built-in fsd's 0.7 KB). 683
-# since DESIGN D53 (2026-11-13, scripts started by their #! line: 712 bytes of kernel.bin).
-RAMDISK_MOUNT_K := 683
+# since DESIGN D53 (2026-11-13, scripts started by their #! line: 712 bytes of kernel.bin). 678 since DESIGN D54
+# (2026-11-13, the live debugger: 4.9 KB of kernel.bin, kernel/dbg.c and its hooks).
+RAMDISK_MOUNT_K := 678
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/check-init.py tools/ksize-check.sh tools/ksize-budget
@@ -1226,6 +1227,9 @@ $(BUILD)/libz-main.po: user/libz.c user/libz.h user/zshare.h user/usys.h kernel/
 	tools/purecc.sh $(CC) $(UCFLAGS) -I$(BUILD) -c $< -o $@
 $(BUILD)/libz.po: $(BUILD)/libz-main.po $(LIBZ_SHARED:%=$(BUILD)/%.po)
 	$(CC) -m68020-60 -nostdlib -r $^ -o $@
+# DESIGN D54: the program tools/zdb-test.sh debugs keeps a frame pointer (zdb's bt walks a6), its ZEX2 build too
+$(BUILD)/dbgtest.uo $(BUILD)/dbgtest.po: UCFLAGS += -fno-omit-frame-pointer -fno-optimize-sibling-calls
+$(BUILD)/zdb.uo $(BUILD)/dbgtest.uo $(BUILD)/dbgcheck.uo: kernel/dbgproto.h
 $(BUILD)/%.uo: user/%.c user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -c $< -o $@
 $(BUILD)/%.uelf: $(BUILD)/%.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld

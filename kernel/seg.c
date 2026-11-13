@@ -91,6 +91,18 @@ void seg_put(struct seg *s)
     }
 }
 
+/* DESIGN D54 section 10: p is the only process running its segment (refs 1): the code becomes p's own copy (owned
+ * by its pid, freed with it), the slot is freed, and the same program started later loads a fresh shared copy */
+void seg_disown(struct proc *p)
+{
+    struct seg *s = p->seg;
+    mem_set_owner((void *)s->code, (u32)p->pid);
+    s->code = 0;
+    s->listed = 0;
+    s->refs = 0;
+    p->seg = 0;
+}
+
 void seg_unlist(int m, long ino)
 {
     for (int i = 0; i < NSEG; i++)
