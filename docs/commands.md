@@ -1,6 +1,6 @@
 # Command reference
 
-Zenix has 159 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
+Zenix has 160 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
 page in `docs/man/NAME.txt`; a few more pages are for names that start the same program (`gunzip`, `zcat`, `chgrp`,
 `more`, `pkill`, `ifup`, `ifdown`, `unlzx`). The pages use the exact format that Zenix's own `man` reads (plain text of at most 78 columns, a
 `NAME(section)` header, `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`, `EXAMPLES`, `EXIT STATUS`, `SEE ALSO`); the
@@ -38,6 +38,7 @@ spot-checked against the code that day.
 | [lua](man/lua.txt) | the Lua 5.4 scripting language (Lua 5.4.9 from lua.org, `ports/lua`; DESIGN D52) |
 | [zld](man/zld.txt) | link ELF objects and archives into a Zenix program, the same bytes as the PC's ld + mkzexe.py (ours; package devel; DESIGN D52) |
 | [zas](man/zas.txt) | assemble 68k assembly (GNU as's syntax) into an ELF object, the same bytes as the PC's GNU as (ours; package devel; DESIGN D52) |
+| [tcc](man/tcc.txt) | the C compiler: TinyCC with Zenix's 68k code generator, gcc's calling rules, links with zld (`ports/tcc`; package devel; DESIGN D52) |
 | [sort](man/sort.txt), [uniq](man/uniq.txt), [cut](man/cut.txt), [tr](man/tr.txt), [tee](man/tee.txt) | filters |
 | [head](man/head.txt), [tail](man/tail.txt), [tac](man/tac.txt), [rev](man/rev.txt), [nl](man/nl.txt), [wc](man/wc.txt) | parts, reversed, numbered, counts |
 | [fold](man/fold.txt), [expand](man/expand.txt), [paste](man/paste.txt), [comm](man/comm.txt) | wrap, tabs, merge, compare sorted |
@@ -118,7 +119,7 @@ spot-checked against the code that day.
 
 ## Run on AmigaOS, not on Zenix
 [zenixboot](man/zenixboot.txt) starts Zenix from files on a hard disk, CF or SD card partition, so that no floppy is
-needed (not one of the 159 programs: it is an AmigaOS program on the AmigaDOS boot partition).
+needed (not one of the 160 programs: it is an AmigaOS program on the AmigaDOS boot partition).
 [bootmenu](man/bootmenu.txt) is the boot menu of a disk with AmigaOS and Zenix on it (the SD card of
 `tools/mkdualcard.sh`): it boots a chosen AmigaOS partition or runs zenixboot.
 

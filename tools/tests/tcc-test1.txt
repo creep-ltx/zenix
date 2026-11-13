@@ -1,0 +1,6 @@
+wait zenix:/# 120
+send cd /root/tcc; free; sh run.sh; echo ==r""un\r
+wait ==run 5400
+send sync; echo ==d""one\r
+wait ==done 60
+stop

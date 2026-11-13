@@ -223,6 +223,14 @@ CPU settings) is refused and assembled exactly as GNU as does; damaged sources u
 output for sort.c on Zenix, the PC's objects byte for byte, and zld links the program, which runs (`tools/zas-test.sh`).
 Not yet on a real Amiga. See man/zas.txt.
 
+`tcc` (roadmap block 7, DESIGN D52 section 7): the C compiler, TinyCC with a 68k code generator of ours (`ports/tcc`):
+C99 and much of C11 for every 68020+, gcc's m68k-elf calling rules and struct layouts (its objects link with the C
+library and libgcc gcc builds), floating point through libgcc's soft float, GNU C's inline asm with a subset of the
+68k instructions (enough for `user/usys.h`'s system calls), `tcc -o prog` linking with zld, `.s`/`.S` through zas. In
+the development package `devel`. **verified** on the PC: upstream's test suite's programs compile under ASan and
+UBSan, its compile-time diagnostics as upstream's, damaged sources never crash it (`tools/tcc-host-test.sh`); in
+FS-UAE on an A1200 with 4 MB of fast RAM (`tools/tcc-test.sh`): the test suite (110 of its programs, built by the cross compiler) prints upstream's expectation or, where that is a little-endian PC's, what gcc's build prints; tcc's and gcc's code call each other right (the ABI test's four pairings); random programs print what gcc's builds print; libctest built by tcc passes all its checks and coreutils over libz built by tcc (their system calls through inline asm) behave as /bin's; `/bin/tcc` on Zenix compiles three sources into the cross compiler's objects byte for byte and `tcc -o` programs run. Not yet on a real Amiga. See man/tcc.txt.
+
 ## Tooling
 | Feature | Status |
 |---|---|

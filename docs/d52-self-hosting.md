@@ -18,7 +18,7 @@ How the facts were found: licences read from each project's own files or pages (
 | 2 | make | pdpmake (POSIX make) | Unlicense (public domain): in the repo | about 25 KB + C library, about 40 KB (part measured, section 4) | no |
 | 3 | linker | `zld`, our own: ELF objects and archives straight to `.zx`/`.pzx` | ours, GPL-2.0-only | 22 KB of its own code, 30 KB as a program with the C library (measured) | no: **built** (section 5) |
 | 4 | assembler | `zas`, our own, Motorola syntax, ELF objects (or vasm) | ours GPL-2 (vasm: not GPL-compatible) | about 30-50 KB (estimate); vasm 303 KB (measured) | **yes**: vasm only with its author's consent |
-| 5 | C compiler | tcc with a new 68k back end (or vbcc) | tcc LGPL-2.1: GPL-2-compatible (vbcc: not) | about 180-220 KB (tcc measured 176 KB for i386) | **yes**: the choice |
+| 5 | C compiler | tcc with a new 68k back end (or vbcc) | tcc LGPL-2.1: GPL-2-compatible (vbcc: not) | about 180-220 KB (tcc measured 176 KB for i386); `/bin/tcc` 257 KB (measured) | **yes**: the choice (tcc); **built** (section 7) |
 | 6 | debugger | stage 1 `zdb` after a crash (no kernel change); stage 2 live | ours | stage 1 about 15 KB (estimate) | **yes** for stage 2 (a kernel change) |
 | 7 | fun | Lua's display and sound module, terminal games, a text-adventure player | ours; BSD; GPL-2+ | small each | **yes**: which ones |
 | 8 | audit | the whole system | | | release 1.0 with the owner's yes |
@@ -278,6 +278,73 @@ separate package with its authors' written consent (Volker Barthelmann for vbcc 
 best code, least work, not free software in the
 partner's sense: "I do not like proprietary software"). Both could exist later: vbcc as an optional package if
 consent is given.
+
+### As built (2026-11-13)
+
+**The partner chose tcc** (docs/decisions.md, "Block 7's choices"). `ports/tcc` (its README has the details):
+TinyCC's mob branch pinned unchanged (`ports/tcc/upstream`, commit f830a169 of 2026-11-13, 0.9.28rc: the compiler's
+sources, its headers, its test suite), Zenix's part beside it (`ports/tcc/zenix`, LGPL-2.1-or-later like tcc so it
+can be offered upstream): the 68k code generator `m68k-gen.c` (1,440 lines), the ELF relocations `m68k-link.c`, a
+subset inline assembler `m68k-asm.c` (1,060 lines), the driver `zenix-driver.c`, the build's `config.h`, and
+`tcc.patch` (upstream's files, about 700 changed lines, a third of them predefined macros). The Makefile builds it
+twice: the PC's cross compiler `build/tcc/m68k-tcc` (the tests compile with it) and `/bin/tcc` (257 KB on the disk), gcc-built, in the
+development package `devel` beside zld and zas (its own headers in `/usr/lib/tcc/include`).
+
+- **The calling rules are gcc's m68k-elf,** read from gcc's output and checked by a test that crosses them (below):
+  arguments on the stack, a value of fewer than 4 bytes at the end of its 4-byte slot; the result in d0, a 64-bit one
+  (long long, double) in d0 (high) and d1; a struct result in d0 or d0:d1 only when gcc gives it an integer mode
+  (1, 2, 4 or 8 bytes, aligned to 2 unless 1 byte, and no member of a size other than those: gcc's
+  `compute_record_mode` and `m68k_return_in_memory`), else through a buffer whose address the caller passes in a0;
+  d2-d7 and a2-a5 kept (the prolog saves the ones the function uses), a6 the frame; scalars aligned to 2.
+- **Code:** 68020 instructions that every 68020+ has (no 64-bit `mulu.l`/`divu.l`, which the 68060 lacks: a 64-bit
+  multiply calls libgcc's `__muldi3`); values in d0-d4; a0/a1 for addresses; `link.l`, `bsr.l` (no relocation in
+  the program), long branches (no relaxation). No optimiser: the code is about 1.6 times gcc -Os's size.
+- **Floating point in software:** a float in one data register, a double in two (like a long long), every operation
+  a call to libgcc (`__adddf3`, `__ltdf2` ...). long double is double (gcc's is 12 bytes: not compatible).
+- **A big-endian target** (tcc had none): a two-word value's high word first in memory (lexpand, the register
+  loads and stores of pairs, the spills), a narrower read of a wider value at its last bytes, bitfields numbered from
+  the high bit as gcc does, the ELF file's structures turned around when the PC writes them.
+- **Inline assembly** (GNU C's `asm` with constraints and register variables, which `user/usys.h`'s system calls
+  use): a subset of the instructions in gas's syntax, each form checked against GNU as's bytes; `.s` and `.S` files go
+  to zas.
+- **The driver:** `tcc -o prog a.c b.s c.o` compiles to temporary objects (TMPDIR), runs zas, then zld with crt0, the
+  C library, libgcc and the floating-point printf (man/tcc.txt).
+- **The fixed stack:** the parser recurses per level of nesting (about 350 bytes a level of brackets); its recursive
+  functions stop with "nested too deeply for tcc's stack" once 48 KB of `STACK_tcc` (64 KB) are used. Compiling
+  tcc's own source took under 6 KB.
+- **Memory:** tcc's token allocators grow by 32 KB (upstream reserves 2 x 256 KB) and its identifier table has 4096
+  slots: on the PC's 68k runner hello.c took 194 KB of heap, user/zld.c (2,200 lines) 1.1 MB, all of tcc (30,000
+  lines in one file) 3.8 MB. In FS-UAE: compiling user/zld.c (2,200 lines with the C library's headers) /bin/tcc owned at most 1,181 KB in FS-UAE (an A1200 with 4 MB of fast RAM, 3,469 KB free: emulator figures, `ps`), so a file of that size compiles on the minimum; hello.c took 4.7 s and the 1,200-line random program 8.2 s there (emulator time, not hardware speed).
+
+Found and fixed on the way: **upstream's tcc on a big-endian host** saved an int constant in a token string from its
+union's first word, which on a big-endian host is the high half: every number inside a macro became 0 (`tccpp.c`
+`tok_str_add2`). **A move sets the 68k's flags:** tccgen spills registers between a compare and its branch (x86's
+mov leaves them), so while a compare's flags wait the back end keeps the condition codes across its loads and
+stores. **The development package's headers** (`sys/errno.h`, `sys/socket.h`) included `../../../../kernel/...`
+paths of the source tree: `tools/mkdevel.sh` now ships those two files under `/usr/include/zenix`. **The independent
+review** (one reviewer, 2026-11-13) found: picolibc's `sys/cdefs.h` drops `__packed`, `__aligned` and `_Alignas`
+without `__has_attribute` (now predefined), a struct with a flexible array member returned in d0 where gcc uses a0,
+PC-relative values in the assembler's data, the 64-bit mul/div pair forms assembled as 32-bit ones (now refused),
+operands gas refuses that were assembled as other instructions, needless flag saves after a compare whose branch was
+never made; all fixed, each with a check in the tests.
+
+**Tests:** `tools/tcc-host-test.sh` (the PC, `make check`'s host list): the cross compiler built under ASan and UBSan
+compiles the test suite's programs (110) to the plain build's objects; upstream's compile-time tests give upstream's
+errors and warnings; the objects are big-endian 68k ELF binutils reads; 54 inline-asm forms give GNU as's bytes and
+18 wrong ones are refused; the ABI test's sources and random programs (200) compile; 400 damaged sources are compiled
+or refused, never a crash. `tools/tcc-test.sh` (FS-UAE, an A1200 with 4 MB of fast RAM, three runs as the files do not
+fit one image): the test suite's programs built by the cross compiler (110) print upstream's expectation (106) or, where that is a little-endian PC's, gcc's build's output (4); the ABI test's four pairings (150 functions of random signatures, 29 struct shapes, variadic calls: tcc's and gcc's code calling each other) find nothing wrong; random programs (20) print what gcc's builds print; libctest built by tcc passes all its 184 checks; 21 runs of programs over libz built by tcc (20 of them) (cat, wc, sort, sed, grep, expr ...: their system calls through inline asm) print and end as /bin's; `/bin/tcc` on Zenix compiles hello.c, a random program and user/zld.c into the cross compiler's objects byte for byte, `tcc -o` links with zld and the programs run, 400 levels of brackets are refused with the stack's message. During development a PC-side 68k runner (Musashi) also ran tcc compiled by tcc
+compiling tcc's own source into the cross compiler's object byte for byte (self-hosting), random integer programs (400)
+against gcc's builds, and Lua built by tcc running `rootfs/tests/lua/zenix.lua` as gcc's Lua does (that
+Lua is 387 KB, over the loader's 256 KB for a program, so it does not run on Zenix: d52's open point below).
+**Verified in FS-UAE 2026-11-13; not yet on a real Amiga** (the first run there should time a compile on the stock
+A1200 and the 1260).
+
+**Not done:** C11 atomics (the `__atomic_*` helpers need a small library), `tcc -run`, long double as gcc's, an
+optimiser, debugging information checked with a debugger. **For the partner:** a program over 256 KB is refused by
+the loader (`kernel/proc.c`); tcc's code being larger than gcc's, a big program built with tcc (Lua: 387 KB) cannot
+run; raising that limit is a kernel decision. tcc's files are LGPL-2.1-or-later (tcc's licence) rather than
+GPL-2.0-only so they can go upstream; say if they should be GPL-2.0-only.
 
 ## 8. The debugger (item 6) and the fun (item 7)
 
