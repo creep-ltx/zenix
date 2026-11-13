@@ -6,6 +6,7 @@
 #   /usr/lib/libgcc.a              gcc's helpers (the 68060 multilib, soft float: what the Makefile links), stripped
 #   /usr/lib/crt0.o, crt0-pure.o   the start-up code (ZEXE, ZEX2)
 #   /usr/lib/zenix/user.ld, pure.ld  the two layouts, for reference (zld has them built in)
+#   /usr/lib/tcc/include           tcc's own headers (ports/tcc, the Makefile's patched copy in BUILD/tcc/src)
 #   /usr/include                   the port's headers (libc/zenix/include), then under /usr/include/pico the rest of
 #                                  the Makefile's LIBC_INC in its order: gen (the generated constants), m68k, stdio
 #                                  (tinystdio), locale, picolibc.h itself, include (newlib's), libm
@@ -22,6 +23,12 @@ for f in libc.a libc-pure.a crt0.o crt0-pure.o; do
 done
 "${P}objcopy" --strip-debug "$LIBGCC" "$D.new/usr/lib/libgcc.a"
 cp link/user.ld link/pure.ld "$D.new/usr/lib/zenix/"
+# tcc's own headers (stdarg.h, stddef.h, float.h, ...; tccdefs.h is built into the program), from the Makefile's patched
+# copy of ports/tcc: /usr/lib/tcc/include, the first directory tcc searches
+mkdir -p "$D.new/usr/lib/tcc/include"
+for h in "$B"/tcc/src/include/*.h; do
+    [ "$(basename "$h")" = tccdefs.h ] || cp "$h" "$D.new/usr/lib/tcc/include/"
+done
 # a header tree, its directories as they are (the headers include each other by these paths)
 tree() {
     (cd "$1" && find . -name '*.h' -type f) | sort | while read -r h; do
