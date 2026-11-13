@@ -28,8 +28,8 @@ budget "a raw program (read/write only)" ${Z[raw]} 600
 budget "hello without streams (dprintf)" ${Z[hellofd]} 2800
 budget "hello without streams (oputs)" ${Z[hellooputs]} 2800
 # (2026-10-30, the allocator of docs/d27-c-library.md "The allocator": about 0.7 KB more of malloc's code in each)
-budget "hello with printf" ${Z[hello]} 8100   # +380 B: audit B3-11 (the allocator keeps its quick lists after growing) and the environment fix (2026-10-30)
-budget "a stdio + malloc + qsort tool" ${Z[sort]} 11700
+budget "hello with printf" ${Z[hello]} 8300   # +164 B: fflush(NULL) done right, the exit flush walks the open streams (D52 9, 2026-11-13); +380 B: audit B3-11 (the allocator keeps its quick lists after growing) and the environment fix (2026-10-30)
+budget "a stdio + malloc + qsort tool" ${Z[sort]} 11900   # +188 B: the same fflush (D52 9, 2026-11-13)
 budget "the time functions, over hello" $((Z[time] - Z[hello])) 14300
 budget "floating point, over hello" $((Z[float] - Z[hello])) 16300
 budget "the UTF-8 functions, over hello" $((Z[utf8] - Z[hello])) 6700   # D28: setlocale reads the environment
