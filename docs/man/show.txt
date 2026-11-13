@@ -1,0 +1,83 @@
+SHOW(1)				Zenix manual
+
+NAME
+    show - the picture viewer of Zenix Desktop
+
+SYNOPSIS
+    show [-v] [-n | -f] PICTURE
+
+DESCRIPTION
+    Opens a window on Zenix Desktop showing PICTURE, an IFF ILBM (the
+    Amiga's own format: 1 to 8 planes, Extra Half-Brite, HAM6, HAM8,
+    24 planes; lores, hires, super-hires, interlaced; compressed or not)
+    or a GIF (its first image). The file view, files(1), starts it for a
+    picture.
+
+    The picture has the shape it has on the glass: a lores picture is
+    twice as wide in the desktop's hires pixels, an interlaced one or a
+    GIF (square pixels) half as tall on a 256-line screen. A picture
+    bigger than the window is shrunk to fit it; z shows it at its real
+    size, moved with the arrows.
+
+    The window draws in the desktop's 16 colours (8 on OCS/ECS: the
+    theme's). A picture with other colours is dithered into them with a
+    fixed 4 x 4 pattern, as strong as the colour is far from the
+    nearest one (so a picture made of the theme's own colours shows
+    exactly). d switches to Floyd-Steinberg (the error spread to the
+    pixels right and below: finer, and slower), then to the nearest
+    colour for each pixel, then back.
+
+    n and p go to the next and the previous picture in the folder, by
+    name without case; files that are not pictures and hidden names are
+    passed over. A damaged picture is shown as its name and the reason
+    in the window. The title is the name, the size and the mode
+    ("ham.iff 320x64 HAM6").
+
+KEYS
+    n, Space               the next picture
+    p, Backspace           the previous picture
+    gg  G                  the first, the last
+    z                      shrunk to fit, or the real size
+    d                      pattern, Floyd-Steinberg, nearest, again
+    h j k l, arrows        move a picture bigger than the window; Left
+                           and Right are the previous and next picture
+                           when the picture's width fits the window
+    ?, Help                the keys (any key goes back)
+    q, Esc                 quit (also the close gadget)
+
+    The keys are read from ~/.config/show/keys, written with the
+    built-in ones when it is missing. Its format is files'(1) and
+    Ahiru's: one key a line, KEYS ACTION; the actions are next, prev,
+    first, last, zoom, dither, left, right, up, down, help, quit and
+    none (a key taken away). A line not understood is said in the title.
+
+MOUSE
+    A left click shows the next picture, Shift and a click the
+    previous. The bar's menu Show has Next, Previous, Fit or real size,
+    Dither, Keys and Quit.
+
+OPTIONS
+    -n      the nearest colour from the start (no dithering)
+    -f      Floyd-Steinberg from the start
+    -v      write what it shows to standard output: the picture, its
+            size and mode, where the window is, the rendering's time
+            (the tests read it)
+
+EXIT STATUS
+    0 when the last picture shown could be read, 1 when it could not or
+    there is no desktop, 2 a wrong option.
+
+FILES
+    ~/.config/show/keys    the keys
+
+NOTES
+    Not shown: PNG, JPEG, IFF's PBM, ACBM and DEEP, animations (an
+    animated GIF shows its first frame), colour cycling, transparency.
+    A picture is at most 4096 x 4096 and 4 MB decoded, a file 8 MB.
+    The picture cannot have its own palette or screen mode in a window:
+    a screen of its own, as AmigaOS viewers open, needs a new request in
+    the display protocol (docs/d50-viewers.md section 4). A file cut
+    short shows its whole rows and "cut short" in the title.
+
+SEE ALSO
+    files(1), zdesk(1), docs/d50-viewers.md

@@ -111,6 +111,11 @@ fi
 if [ -z "$NOTESTS" ] && [ -d "$T/usr/share/fonts/amiga" ]; then
     python3 "$(dirname "$0")/mkamifont.py" fonts "$T/tests/fonts"
 fi
+# pictures made for the picture viewer's test (tools/mkpics.py: blocks, ramps and dots worked out from numbers,
+# nobody's pictures) in /tests/pics, read by tools/show-test.sh; in images with the tests and the desktop (show built)
+if [ -z "$NOTESTS" ] && [ -f "$B/show.zx" ] && [ -d "$T/usr/share/fonts/amiga" ]; then
+    python3 "$(dirname "$0")/mkpics.py" pics "$T/tests/pics"
+fi
 # the PC font (DESIGN D20 4.2) on the full images (those with manual pages), with its notice, as the base package;
 # the Unicode font (DESIGN D28 6, made from the same font_8x8.c and Zenix's own glyphs) beside it
 if [ -z "$NOMAN" ] && [ -f "$B/cp437-8x8.psf" ]; then

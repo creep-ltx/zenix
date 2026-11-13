@@ -4,11 +4,13 @@
  * format (~/.config/files/keys, written with the built-in keys when missing), and the mouse (a click picks a row, a
  * double click opens it). Lean: a folder is its readdir records (names and types) sorted, and only the rows on view
  * are lstat-ed. Opening runs a program in a terminal window (term -e): text in less, E the editor, a program after a
- * question, anything else what the user types. Copy, move and delete are the commands themselves (cp -r, mv, rm -r),
- * rename and a new folder the system calls; everything that could lose a file asks first.
+ * question, a picture in show (D50: its own window, no terminal), anything else what the user types. Copy, move and
+ * delete are the commands themselves (cp -r, mv, rm -r), rename and a new folder the system calls; everything that
+ * could lose a file asks first.
  * -v writes every row it draws, the window's place and what it did to its standard output (the tests read it). */
 #include "libz.h"
 #include "../display.h"
+#include "../keys.h"
 typedef unsigned char u8;
 typedef unsigned short u16;
 
@@ -936,6 +938,11 @@ static int kind_of(const char *path, const struct ustat *st)
     if (x && ((n >= 8 && (!memcmp(b + 4, "ZEXE", 4) || !memcmp(b + 4, "ZEX2", 4))) ||
               (n >= 4 && b[0] == 0 && b[1] == 0 && b[2] == 3 && b[3] == 0xF3) || (n >= 2 && b[0] == '#' && b[1] == '!')))
         return 2;                       /* a program */
+    struct ustat sv;
+    if (((n >= 12 && !memcmp(b, "FORM", 4) && !memcmp(b + 8, "ILBM", 4)) ||
+         (n >= 6 && !memcmp(b, "GIF8", 4) && (b[4] == '7' || b[4] == '9') && b[5] == 'a')) &&
+        sys_stat("/bin/show", &sv) == 0)
+        return 4;                       /* a picture show reads (D50): IFF ILBM, GIF */
     int ctl = 0;
     for (int i = 0; i < n; i++) {
         if (!b[i])
@@ -980,6 +987,17 @@ static void open_ent(int viewonly)
     } else if (k == 1) {
         char *av[] = { "/bin/less", opath, 0 };
         in_term(av, 1);
+    } else if (k == 4) {
+        char *av[] = { "/bin/show", opath, 0 };    /* a desktop program: its own window, no terminal */
+        char cwd[ZPATH_MAX];
+        int back = sys_getcwd(cwd, sizeof cwd) >= 0 && L.dir && sys_chdir(L.dir) == 0;
+        int pid = sys_spawn(av[0], av, 0);
+        if (back)
+            sys_chdir(cwd);
+        if (verbose)
+            dprintf(1, "files: start /bin/show %s%s\n", opath, pid < 0 ? " (failed)" : "");
+        if (pid < 0)
+            say("show: %s", zwhy("cannot start"));
     } else if (k == 2) {
         say("Run %s? (y/n)", base_of(opath));
         mode = M_ASK;
@@ -1206,26 +1224,6 @@ static void answer(int yes)
 }
 
 /* ================================================================ keys (Ahiru.keys's format) */
-#define KM_UP 300
-#define KM_DOWN 301
-#define KM_LEFT 302
-#define KM_RIGHT 303
-#define KM_SUP 304
-#define KM_SDOWN 305
-#define KM_SLEFT 306
-#define KM_SRIGHT 307
-#define KM_HELP 308
-#define KM_F1 310
-#define KM_CUP 320
-#define KM_CDOWN 321
-#define KM_CLEFT 322
-#define KM_CRIGHT 323
-static const struct { const char *n; u16 k; } knames[] = {
-    { "Up", KM_UP }, { "Down", KM_DOWN }, { "Left", KM_LEFT }, { "Right", KM_RIGHT },
-    { "S-Up", KM_SUP }, { "S-Down", KM_SDOWN }, { "S-Left", KM_SLEFT }, { "S-Right", KM_SRIGHT },
-    { "C-Up", KM_CUP }, { "C-Down", KM_CDOWN }, { "C-Left", KM_CLEFT }, { "C-Right", KM_CRIGHT },
-    { "Return", 13 }, { "Esc", 27 }, { "Tab", 9 }, { "Space", ' ' }, { "Del", 127 }, { "BS", 8 }, { "Help", KM_HELP },
-};
 enum { A_NONE, A_DOWN, A_UP, A_HALFDOWN, A_HALFUP, A_PAGEDOWN, A_PAGEUP, A_TOP, A_BOTTOM, A_PARENT, A_ENTER, A_VIEW,
        A_EDIT, A_MARK, A_INVERT, A_UNMARK, A_MARKALL, A_YANK, A_CUT, A_PASTE, A_PASTEOVER, A_UNYANK, A_DELETE,
        A_RENAME, A_RENAMEEXT, A_RENAMEEND, A_RENAMESTART, A_MKDIR, A_SEARCH, A_NEXT, A_PREV, A_SORT, A_HIDDEN, A_GO,
@@ -1274,214 +1272,19 @@ static const char defaults[] =
     "? help\n<Help> help\nq quit\n";
 
 #define MAXB 160
-static struct bind { u16 k1, k2; u8 act; char arg[27]; } binds[MAXB];
-static int nbinds;
-static char keybad[80];
-
-/* one key from s (a character or a <Name>) -> its code, s moved past it; 0: not a key */
-static int key_parse(const char **sp)
+static struct kbind kb[MAXB];
+static struct keyset K = { actname, NACT, kb, 0, MAXB, "" };
+#define binds K.b
+#define nbinds K.n
+#define keybad K.bad
+#define key_name keys_name
+#define key_code keys_code
+#define bind_find(a, b) keys_find(&K, a, b)
+#define is_prefix(k) keys_prefix(&K, k)
+static void keys_init(void)
 {
-    const char *s = *sp;
-    if (*s == '<' && s[1] && s[1] != ' ') {
-        const char *e = strchr(s, '>');
-        if (e && e > s + 1) {
-            int n = (int)(e - s - 1);
-            *sp = e + 1;
-            for (u32 i = 0; i < sizeof knames / sizeof knames[0]; i++)
-                if ((int)strlen(knames[i].n) == n && !strncmp(knames[i].n, s + 1, (u32)n))
-                    return knames[i].k;
-            if (n == 3 && s[1] == 'C' && s[2] == '-' && isalpha((u8)s[3]))
-                return s[3] & 0x1F;
-            if ((n == 2 || n == 3) && s[1] == 'F' && atoi(s + 2) >= 1 && atoi(s + 2) <= 10)
-                return KM_F1 + atoi(s + 2) - 1;
-            return 0;
-        }
-    }
-    u8 c = (u8)*s;
-    if (c <= ' ')
-        return 0;
-    if (c < 0x80) {
-        *sp = s + 1;
-        return c;
-    }
-    int cp = 0, n = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : 1;      /* a Latin-1 letter in UTF-8 (å, ö) */
-    cp = c & (0x3F >> n);
-    for (int i = 1; i <= n; i++) {
-        if (((u8)s[i] & 0xC0) != 0x80) return 0;
-        cp = cp << 6 | ((u8)s[i] & 0x3F);
-    }
-    *sp = s + n + 1;
-    return cp < 300 && cp > 127 ? cp : 0;
-}
-static void key_name(int k, char *o)
-{
-    for (u32 i = 0; i < sizeof knames / sizeof knames[0]; i++)
-        if (knames[i].k == k) { snprintf(o, 12, "<%s>", knames[i].n); return; }
-    if (k >= KM_F1 && k < KM_F1 + 10) { snprintf(o, 12, "<F%d>", k - KM_F1 + 1); return; }
-    if (k < 32) { snprintf(o, 12, "<C-%c>", k | 0x60); return; }
-    if (k < 128) { o[0] = (char)k; o[1] = 0; return; }
-    o[0] = (char)(0xC0 | k >> 6);       /* 128 .. 299: two bytes of UTF-8 */
-    o[1] = (char)(0x80 | (k & 0x3F));
-    o[2] = 0;
-}
-static void bad(int line, const char *why)
-{
-    if (!keybad[0])
-        snprintf(keybad, sizeof keybad, "keys: line %d: %s", line, why);
-}
-static void keys_text(const char *t, int file)
-{
-    int line = 0, other = 0;
-    while (*t) {
-        const char *e = strchr(t, '\n');
-        int n = e ? (int)(e - t) : (int)strlen(t);
-        char l[96];
-        line++;
-        const char *f = t;
-        while (f < t + n && (*f == ' ' || *f == '\t'))
-            f++;
-        if (n >= (int)sizeof l) {
-            if (file && *f != ';' && *f != '#') bad(line, "too long");
-            t += n + (e ? 1 : 0);
-            continue;
-        }
-        memcpy(l, t, (u32)n);
-        l[n] = 0;
-        t += n + (e ? 1 : 0);
-        char *s = l;
-        while (*s == ' ' || *s == '\t') s++;
-        if (!*s || *s == ';' || *s == '#' || *s == '\r')
-            continue;
-        if (*s == '[') {
-            other = strncmp(s, "[main]", 6) != 0;      /* Ahiru's [view] and others: not files' keys */
-            continue;
-        }
-        if (other)
-            continue;
-        const char *p = s;
-        int k1 = key_parse(&p), k2 = 0;
-        if (k1 && *p && *p != ' ' && *p != '\t')
-            k2 = key_parse(&p);
-        if (!k1 || (*p && *p != ' ' && *p != '\t')) {
-            if (file) bad(line, "not a key");
-            continue;
-        }
-        while (*p == ' ' || *p == '\t') p++;
-        char an[24];
-        int k = 0;
-        while (p[k] && p[k] != ' ' && p[k] != '\t' && p[k] != '\r' && k < 23) { an[k] = p[k]; k++; }
-        an[k] = 0;
-        p += k;
-        while (*p == ' ' || *p == '\t') p++;
-        int a = -1;
-        for (int i = 0; i < NACT; i++)
-            if (!strcmp(an, actname[i])) a = i;
-        if (a < 0) {
-            if (file) { char w[48]; snprintf(w, sizeof w, "unknown action %s", an); bad(line, w); }
-            continue;
-        }
-        int slot = nbinds;
-        for (int i = 0; i < nbinds; i++)
-            if (binds[i].k1 == k1 && binds[i].k2 == k2) slot = i;
-        if (slot == MAXB) {
-            if (file) bad(line, "too many keys");
-            continue;
-        }
-        if (slot == nbinds) nbinds++;
-        binds[slot].k1 = (u16)k1;
-        binds[slot].k2 = (u16)k2;
-        binds[slot].act = (u8)a;
-        if (strlen(p) >= sizeof binds[slot].arg && file)
-            bad(line, "its argument is too long (26 bytes at most)");
-        snprintf(binds[slot].arg, sizeof binds[slot].arg, "%s", p);
-        char *r = strchr(binds[slot].arg, '\r');
-        if (r) *r = 0;
-    }
-}
-static void keys_load(void)
-{
-    keys_text(defaults, 0);
-    const char *h = getenv("HOME");
-    if (!h || !*h || strlen(h) > 200)
-        return;
-    char path[ZPATH_MAX];
-    snprintf(path, sizeof path, "%s%s", h, KEYFILE);
-    int fd = sys_open(path, O_RDONLY);
-    if (fd < 0) {                       /* none: written with every built-in key (Ahiru's way) */
-        snprintf(path, sizeof path, "%s/.config", h);
-        sys_mkdir(path);
-        strcat(path, "/files");
-        sys_mkdir(path);
-        strcat(path, "/keys");
-        fd = sys_open(path, O_WRONLY | O_CREAT | O_TRUNC);
-        if (fd >= 0) {
-            sys_write(fd, defaults, sizeof defaults - 1);
-            sys_close(fd);
-            if (verbose) dprintf(1, "files: wrote %s\n", path);
-        }
-        return;
-    }
-    struct ustat st;
-    char *t = 0;
-    if (sys_fstat(fd, &st) == 0 && st.size < 16384 && (t = malloc(st.size + 1))) {
-        int n = sys_read(fd, t, st.size);
-        t[n > 0 ? n : 0] = 0;
-        keys_text(t, 1);
-    } else
-        snprintf(keybad, sizeof keybad, "keys: %s is too big (16 KB at most)", path);
-    free(t);
-    sys_close(fd);
-    for (int i = 0; i < nbinds; i++)    /* a key that also starts a prefix is never reached */
-        if (binds[i].act && !binds[i].k2)
-            for (int j = 0; j < nbinds; j++)
-                if (binds[j].act && binds[j].k2 && binds[j].k1 == binds[i].k1) {
-                    char kn[12];
-                    key_name(binds[i].k1, kn);
-                    if (!keybad[0]) snprintf(keybad, sizeof keybad, "keys: %s starts a prefix: its own key is not reached", kn);
-                }
-}
-static int is_prefix(int k)
-{
-    for (int i = 0; i < nbinds; i++)
-        if (binds[i].act && binds[i].k1 == k && binds[i].k2)
-            return 1;
-    return 0;
-}
-static const struct bind *bind_find(int k1, int k2)
-{
-    for (int i = 0; i < nbinds; i++)
-        if (binds[i].act && binds[i].k1 == k1 && binds[i].k2 == k2)
-            return &binds[i];
-    return 0;
-}
-/* a key event -> a key code (0: none) */
-static int key_code(const struct dpyev *e)
-{
-    int c = e->code, sh = e->qual & (GQ_LSHIFT | GQ_RSHIFT), ct = e->qual & GQ_CTRL;
-    if (c >= 0x4C && c <= 0x4F) {
-        static const u16 arrows[4] = { KM_UP, KM_DOWN, KM_RIGHT, KM_LEFT };
-        int a = arrows[c - 0x4C];
-        return a + (sh ? KM_SUP - KM_UP : ct ? KM_CUP - KM_UP : 0);
-    }
-    if (c >= 0x50 && c <= 0x59) return KM_F1 + c - 0x50;
-    switch (c) {
-    case 0x5F: return KM_HELP;
-    case 0x44: case 0x43: return 13;
-    case 0x45: return 27;
-    case 0x42: return 9;
-    case 0x40: return ' ';
-    case 0x46: return 127;
-    case 0x41: return 8;
-    }
-    u8 b = (u8)e->ch[0];
-    if (!b) return 0;
-    if (ct && isalpha(b)) return b & 0x1F;
-    if (b < 0x80) return b;
-    if (b >= 0xC2 && b < 0xE0 && ((u8)e->ch[1] & 0xC0) == 0x80) {
-        int cp = (b & 0x1F) << 6 | ((u8)e->ch[1] & 0x3F);
-        return cp < 300 ? cp : 0;
-    }
-    return 0;
+    if (keys_load(&K, defaults, sizeof defaults - 1, "files") && verbose)
+        dprintf(1, "files: wrote ~%s\n", KEYFILE);
 }
 static void hints(int k1)
 {
@@ -1647,7 +1450,7 @@ static void key(const struct dpyev *e)
         return;
     if (mode == M_ASK) { answer(k == 'y' || k == 'Y'); return; }
     if (mode == M_HELP) { help_key(k); return; }
-    const struct bind *b;
+    const struct kbind *b;
     if (pending) {
         int k1 = pending;
         pending = 0;
@@ -1781,7 +1584,7 @@ int main(int argc, char **argv)
         dprintf(2, "files: the desktop: %s\n", zstrerror(r) ? zstrerror(r) : "not reachable");
         return 1;
     }
-    keys_load();
+    keys_init();
     int maxr = (dpy_h - 32) / 8;
     rows = maxr < 22 ? maxr : 22;
     if (rows < 8) rows = 8;

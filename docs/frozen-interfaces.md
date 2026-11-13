@@ -272,6 +272,10 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
 - **D48 (the file view, branch files, 2026-11-13):** the keys file `~/.config/files/keys` (Ahiru.keys's format: `KEYS
   ACTION [ARGUMENT]`, the key names in `<>`, `[main]`, `none`) and its action names; `files`' options (`-v`, a folder);
   zdesk's menu and icon lines name `files`. No message type, struct or error number is new.
+- **D50 (the picture viewer, branch view, 2026-11-13):** the keys file `~/.config/show/keys` (files' format, D48) and
+  its action names (`next prev first last zoom dither left right up down help quit none`); `show`'s options (`-v`,
+  `-n`, `-f`, a picture); the keys files' parser is one (`display/lib/keys.c`) for `files` and `show`. No message type,
+  struct or error number is new.
 - **D49 (directories in batches, the device in `stat`, branch readdir, 2026-11-13):** `SYS_readdirs` 99 (fd, buffer,
   size: size 104 `UDIRX_MAX` .. 65,535, its bits 16-31 reserved for request flags (0 today, else -EINVAL), the buffer
   4-aligned and the caller's (-EINVAL, -EFAULT); answers the bytes of whole records, 0 at the end, the server's
