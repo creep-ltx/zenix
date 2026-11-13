@@ -361,8 +361,10 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   -ENOEXEC).
 - **D29 12.1, running by name (branch zine04, 2026-10-31):** a file a program spawns that has the x bit and starts with
   the longword `0x000003F3` (AmigaOS's `HUNK_HEADER`) is run as `/bin/zine PATH ARGS...` (argv[0] "zine"); without
-  `/bin/zine` the spawn is -ENOEXEC (the kernel log names the file). Such a file may be larger than 256 KB (Zenix
-  programs still are refused above that, -EFBIG).
+  `/bin/zine` the spawn is -ENOEXEC (the kernel log names the file). Such a file may be larger than 16 MB (Zenix
+  programs are refused above that, -EFBIG; the limit was 256 KB until 2026-11-13: it only grows). Since the same day the
+  loader also refuses more relocations than half the image's bytes (ZEXE: `image_size / 2`; ZEX2: the two lists
+  together, `data_size / 2`): each names its own even word, so no linker writes such a file.
 - **Audit block 3 B3-12 (`SYS_envset`, 2026-10-30):** a block whose last byte is not 0 is refused with -EINVAL
   (checked on the kernel's own copy; the old environment kept); a block of 0 bytes still empties it. An addition only:
   every caller in the tree ends its block with a 0, and before, such a block was taken and every child's `strlen` ran

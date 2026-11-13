@@ -105,6 +105,8 @@
 # "#!" test and its 128-byte read, proc_spawn's rewritten argument list, its limits and the script's name, the parser
 # kernel/shebang.h, set_name); kernel.bin 198,780 -> 199,492, TOTAL 198,800 -> 199,600; the mount tests' RAM disk
 # 684 -> 683 KB for the floppy's ROOM.
+# 2026-11-13 (a program file up to 16 MB, was 256 KB; at most half the image's bytes of relocations): proc 10,066 ->
+# 10,181 (the refusals' log line and the two relocation counts); kernel.bin 199,492 -> 199,608, TOTAL 199,600 -> 199,700.
 start     4850   8200
 main      5950   1100
 serial    6100   6500
@@ -138,5 +140,5 @@ cache     1800     32
 gcon      3600     16
 mmu       5700    160
 embed    49600      0
-TOTAL   199600
+TOTAL   199700
 ROOM       800

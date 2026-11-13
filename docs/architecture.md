@@ -520,14 +520,17 @@ No MMU means no per-process virtual addresses, so a program must run wherever it
 
 **Nothing in the header is trusted** (audit B7): before anything is allocated, `zexe_bad` checks that the image lies
 inside the file and holds the header, the relocation table lies inside the file (`nreloc` is compared with what is
-left after `reloc_off`, so `nreloc * 4` cannot wrap), memory is at least the image and at most `ZEXE_MEM_MAX`
-(16 MB), and a stack size, if given, is between 4 KB and 1 MB; then every relocation offset is checked to name a whole
+left after `reloc_off`, so `nreloc * 4` cannot wrap, and is at most `image_size / 2`, as each names its own even word: the
+table's kernel-heap block is never bigger than the image), memory is at least the image and at most `ZEXE_MEM_MAX`
+(16 MB), the file itself at most `ZEXE_FILE_MAX` (16 MB, -EFBIG and `exec: PATH refused: larger than 16 MB`; it was
+256 KB until 2026-11-13, a leftover of the first loader, which read the whole file into one kernel buffer; Lua built by
+tcc is 387 KB), and a stack size, if given, is between 4 KB and 1 MB; then every relocation offset is checked to name a whole
 word inside the image at an even address before the first one is applied. A program that fails is refused: the
 kernel logs `exec: PATH refused: WHY`, the spawn fails (the shell says "cannot run") and its memory is freed.
 
 The loader (`proc_load` in `kernel/proc.c`) allocates the process's memory, **reads the image straight from the file
 system into it** (`fs_exec_open` / `fs_exec_read`: no buffer holding the whole file, so a spawn needs only the
-process's own memory plus the few-KB relocation table), zeroes the BSS, and adds the load address to every
+process's own memory plus the relocation table, a few KB for most programs and never more than half the image), zeroes the BSS, and adds the load address to every
 word in the relocation table. Reading can block (messages to the file system server), so the process slot is chosen
 only after the image is in place and nothing blocks after that; two programs may be loading at the same time (the two
 stages of a pipeline). Only `R_68K_32` relocations are needed (PC-relative code stays valid), and
@@ -610,7 +613,7 @@ needs its x bit) and reads its header; two kinds start another program instead o
   as on Linux) on the kernel heap, checked against spawn's limits (`SPAWN_ARGC`, `SPAWN_ARGBYTES` in `kernel/kernel.h`:
   -E2BIG beyond). The interpreter must be a Zenix program (a script or an AmigaOS program there is -ENOEXEC: one level);
   its set-user-id bit is not honoured, and the script's is never looked at (the script is not loaded). On success the
-  process takes the script's name (`ps`). A script may be of any size (the 256 KB limit is a program's). Both blocks
+  process takes the script's name (`ps`). A script may be of any size (the 16 MB limit is a program's). Both blocks
   are freed on every path; the two `spawn1` calls run one after the other (not inlined), so the kernel stack is as deep
   as before.
 

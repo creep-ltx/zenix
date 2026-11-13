@@ -217,8 +217,8 @@ pointers.
   (docs/d27-c-library.md "The allocator") keeps blocks in chunks that grow with the request (4 KB, then 1.41 times
   more for each region it holds, at most 4 MB a chunk) and gives a block of 8 KB or more a region of its own while it
   holds fewer than 10; past that big blocks go into the chunks too, so a program runs out of memory, not of regions,
-  first (in the PC's test 16 regions hold over 11 MB of 100-byte blocks); then `malloc` answers NULL. A program file may ask for at most 16 MB (image + BSS) and a
-  stack of 4 KB to 1 MB.
+  first (in the PC's test 16 regions hold over 11 MB of 100-byte blocks); then `malloc` answers NULL. A program file is at most 16 MB (`ZEXE_FILE_MAX`; 256 KB until
+  2026-11-13), may ask for at most 16 MB (image + BSS) and a stack of 4 KB to 1 MB.
 - Paths: the directory tools report a joined path longer than a system call takes (255 bytes) instead of cutting it, and
   one the kernel refuses once made absolute. What a path costs (measured 2026-10-31, `tools/ksize-budget`, -fstack-usage;
   all on the 2 MB stock A1200 too): 3,072 bytes of RAM for the working directories (96 in each of the 32 process slots),
@@ -291,8 +291,7 @@ pointers.
   parser stops a compile with "nested too deeply for tcc's stack" once the stack's use passes 48 KB of its 64 KB
   (`STACK_tcc`): about 135 levels of brackets, fewer of nested calls or initializers. A program linked by `tcc -o`
   is a plain ZEXE program (no shared code). It holds a whole file's code and symbols in memory: about 1.2 MB for a 2,200-line file (d52 section 7). A
-  program it builds is bigger than gcc's (about 1.6 times): the loader's 256 KB for a program comes sooner (Lua: 387
-  KB).
+  program it builds is bigger than gcc's (about 1.6 times: Lua 387 KB against gcc's 244 KB).
 - The text-UI library (roadmap block 3, `ports/tui/README`; the owner's tui.library linked in, used by
   `/tests/tuitest`, `sumi`, `maki`, `markdown` and `ahiru`): UTF-8 output and the C library's widths since the console's UTF-8
   (DESIGN D28; `make TUI_UTF8=0` the Latin-1 build), no composing of a separate accent onto its letter; no mouse, no pastes, no resize events, no second screen (closing clears it); `TuiSignal` bit 8 (the

@@ -73,7 +73,8 @@ in practice), and whose first two bytes are `#!`:
     list: no program is ever given more than the limits promise (without memory protection a program with a fixed
     array of 256 pointers would otherwise be overrun). `xargs` leaves room for a script's three words (253 words,
     7,808 bytes a run), so its full runs start a script too.
-11. **Size.** A script may be of any size: the `#!` test comes before the 256 KB limit, which is a program's.
+11. **Size.** A script may be of any size: the `#!` test comes before the size limit (256 KB then, 16 MB
+    since 2026-11-13, `ZEXE_FILE_MAX`), which is a program's.
 
 What the script file holds after the first line is the interpreter's business. A file with neither a program's
 magic, nor `#!`, nor AmigaOS's `HUNK_HEADER` is refused with `ENOEXEC` as before.

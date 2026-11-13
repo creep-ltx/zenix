@@ -208,7 +208,6 @@ static void wake_sleepers(void)
 static int slice;
 #define KSTACK 4096u
 #define USTACK_DEFAULT 16384u
-#define FILE_MAX (256u * 1024)
 
 /* ---- the stack guard (future-ideas.md section 3, a fix since 2026-10-23) ----
  * Without an MMU nothing stops a stack from growing past its bottom into the memory below (the program's own bss for a
@@ -362,7 +361,7 @@ static int fill_mem(const void *ctx, u8 *base, const struct zexe *h)
     return 0;
 }
 /* ... or straight from the file system: no buffer holding the whole file, so a spawn needs only the process's own
- * memory (plus the relocation table, a few KB) */
+ * memory (plus the relocation table on the kernel heap: a few KB for most programs, never more than half the image) */
 static int fill_fs(const void *ctx, u8 *base, const struct zexe *h)
 {
     const struct exec_src *x = ctx;
@@ -397,6 +396,9 @@ static const char *zexe_bad(const struct zexe *h, u32 fsize)
         return "relocation table outside the file";
     if (h->nreloc && h->image_size < 4)
         return "relocations in an empty image";
+    if (h->nreloc > h->image_size / 2)  /* each names its own even word: more is no linker's (the table's kernel-heap
+                                         * block is never bigger than the image) */
+        return "too many relocations";
     if (h->mem_size < h->image_size || h->mem_size > ZEXE_MEM_MAX)
         return "memory size impossible";
     if (h->stack_size && (h->stack_size < ZEXE_STACK_MIN || h->stack_size > ZEXE_STACK_MAX))
@@ -419,6 +421,8 @@ static const char *zex2_bad(const struct zex2 *h, u32 fsize)
     u32 room = (fsize - h->reloc_off) / 4;
     if (h->nrel_code > room || h->nrel_data > room - h->nrel_code)
         return "relocation table outside the file";
+    if (h->nrel_code + h->nrel_data > h->data_size / 2)    /* (as zexe_bad's; the sum cannot wrap: both fit room) */
+        return "too many relocations";
     if (h->mem_size < h->data_size || h->mem_size > ZEXE_MEM_MAX)
         return "memory size impossible";
     if (h->stack_size && (h->stack_size < ZEXE_STACK_MIN || h->stack_size > ZEXE_STACK_MAX))
@@ -706,8 +710,11 @@ static __attribute__((noinline)) int spawn1(const char *path, const char *name, 
                     r = -EIO;
             }
         }
-    } else if (x.st.size > 256u * 1024) /* the largest Zenix program (an AmigaOS one may be bigger: zine reads it) */
+    } else if (x.st.size > ZEXE_FILE_MAX) {    /* the largest Zenix program file, as the most memory one may ask for
+                                                 * (an AmigaOS one may be bigger: zine reads it) */
+        kprintf("exec: %s refused: %s\n", path, "larger than 16 MB");
         r = -EFBIG;
+    }
     if (r && !line && r < -4095)        /* an interpreter, or zine itself, that is not a Zenix program (D53 3.5) */
         r = -ENOEXEC;
     if (r) {

@@ -1,6 +1,10 @@
 wait zenix:/# 120
 send cd /tests/lua; lua zenix.lua /tmp > /tmp/lz.txt 2>&1; echo zst=$?; echo ==z""out; cat /tmp/lz.txt; echo ==z""end\r
 wait ==zend 900
+send ./tlua zenix.lua /tmp > /tmp/lt.txt 2>&1; echo tst=$?; echo ==t""out; cat /tmp/lt.txt; echo ==t""end\r
+wait ==tend 900
+send ./tlua-cut -v; echo kst=$?; dmesg | grep tlua-cut; echo ==k""end\r
+wait ==kend 60
 send lua cstack.lua > /tmp/cs.txt 2>&1; echo cst=$?; echo ==c""out; cat /tmp/cs.txt; echo ==c""end\r
 wait ==cend 900
 send ./luaprobe cstack.lua 2>&1 | grep -v ok; ./luaprobe zenix.lua /tmp 2>&1 >/dev/null; echo ==p""end\r

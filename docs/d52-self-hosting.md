@@ -336,14 +336,17 @@ or refused, never a crash. `tools/tcc-test.sh` (FS-UAE, an A1200 with 4 MB of fa
 fit one image): the test suite's programs built by the cross compiler (110) print upstream's expectation (106) or, where that is a little-endian PC's, gcc's build's output (4); the ABI test's four pairings (150 functions of random signatures, 29 struct shapes, variadic calls: tcc's and gcc's code calling each other) find nothing wrong; random programs (20) print what gcc's builds print; libctest built by tcc passes all its 184 checks; 21 runs of programs over libz built by tcc (20 of them) (cat, wc, sort, sed, grep, expr ...: their system calls through inline asm) print and end as /bin's; `/bin/tcc` on Zenix compiles hello.c, a random program and user/zld.c into the cross compiler's objects byte for byte, `tcc -o` links with zld and the programs run, 400 levels of brackets are refused with the stack's message. During development a PC-side 68k runner (Musashi) also ran tcc compiled by tcc
 compiling tcc's own source into the cross compiler's object byte for byte (self-hosting), random integer programs (400)
 against gcc's builds, and Lua built by tcc running `rootfs/tests/lua/zenix.lua` as gcc's Lua does (that
-Lua is 387 KB, over the loader's 256 KB for a program, so it does not run on Zenix: d52's open point below).
+Lua is 387 KB, over the loader's 256 KB for a program until 2026-11-13; since the limit is 16 MB it runs on Zenix:
+`tools/lua-test.sh` builds it with the cross compiler and checks its zenix.lua output against the PC's; it needs a
+256 KB stack, as tcc's frames are larger than gcc's: with /bin/lua's 128 KB the 100 C levels of a recursive `__index`
+ran past the stack and the guard killed it).
 **Verified in FS-UAE 2026-11-13; not yet on a real Amiga** (the first run there should time a compile on the stock
 A1200 and the 1260).
 
 **Not done:** C11 atomics (the `__atomic_*` helpers need a small library), `tcc -run`, long double as gcc's, an
-optimiser, debugging information checked with a debugger. **For the partner:** a program over 256 KB is refused by
-the loader (`kernel/proc.c`); tcc's code being larger than gcc's, a big program built with tcc (Lua: 387 KB) cannot
-run; raising that limit is a kernel decision. tcc's files are LGPL-2.1-or-later (tcc's licence) rather than
+optimiser, debugging information checked with a debugger. **Done 2026-11-13 (the main session's decision):** the loader took at most 256 KB a program file, a leftover of
+the first loader that read the whole file into one kernel buffer; it now takes up to 16 MB (`ZEXE_FILE_MAX`, as the
+memory a program may ask for; architecture.md section 4), so Lua built by tcc (387 KB) runs. **For the partner:** tcc's files are LGPL-2.1-or-later (tcc's licence) rather than
 GPL-2.0-only so they can go upstream; say if they should be GPL-2.0-only.
 
 ## 8. The debugger (item 6) and the fun (item 7)

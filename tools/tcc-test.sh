@@ -79,7 +79,10 @@ for n in $LIST; do
     [ "$n" = 46_grep ] && { a="'[^* ]*[:a:d: ]+\\:\\*-/: \$' 46_grep.c"; cp "$U/46_grep.c" "$F/"; cp "$U/46_grep.c" "$F3/"; }
     fl=""; [ "$n" = 76_dollars_in_identifiers ] && fl=-fdollars-in-identifiers
     ex=""; [ "$n" = 120_alias ] && ex=120+_alias.c       # (two files)
-    (cd "$U" && TC $fl -Wl,-s,65536 "$n.c" $ex -o "$F/t/$n") >"$OUT/cc-$n.log" 2>&1 || err "tcc built $n: $(head -2 "$OUT/cc-$n.log")"
+    # 101_cleanup: one function with 65,536 cleanup variables, 1.9 MB of code: over the 256 KB the loader took until
+    # 2026-11-13 (both builds were refused alike and the test "passed"); tcc's frame for it needs more than 64 KB
+    st=65536; [ "$n" = 101_cleanup ] && st=1048576
+    (cd "$U" && TC $fl -Wl,-s,$st "$n.c" $ex -o "$F/t/$n") >"$OUT/cc-$n.log" 2>&1 || err "tcc built $n: $(head -2 "$OUT/cc-$n.log")"
     # gcc's build is the reference where upstream's expectation is not this machine's; some tests are tcc's own C
     # (old-style definitions, its extensions) that gcc 16 refuses: those have none
     GC "$F3/g/$n" -O1 -std=gnu17 $fl "$U/$n.c" ${ex:+"$U/$ex"} >"$OUT/gcc-$n.log" 2>&1 || rm -f "$F3/g/$n"
@@ -135,7 +138,7 @@ for u in $UTILS; do
     echo "./u/$p $a <in.txt >out/u-$i 2>&1; echo \"[status \$?]\" >>out/u-$i; /bin/$p $a <in.txt >out/b-$i 2>&1; echo \"[status \$?]\" >>out/b-$i" >>"$R"
 done
 echo "$i" >"$OUT/nutils"
-# (Lua built by tcc is 387 KB, over the loader's 256 KB for a program: not run here; d52 section 7)
+# (Lua built by tcc, 387 KB, runs in tools/lua-test.sh)
 # for /bin/tcc on Zenix: the sources, and the PC's objects from the same command lines in a directory of the same name
 cat >"$F/src/hello.c" <<'EOF'
 #include <stdio.h>
