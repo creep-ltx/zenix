@@ -257,8 +257,9 @@ RAMDISK_K := 640
 # revision 3 (2026-11-12, memory protection's code in a span of its own: 200 bytes of kernel.bin). 685 since DESIGN D46
 # (2026-11-12, USB sticks: 3.4 KB of kernel.bin: the built-in diskd's usb0 2.3 KB, stage0's boot-only lookup 0.7 KB).
 # 684 since DESIGN D49 (2026-11-13, directories in batches: 1.1 KB of kernel.bin, the built-in fsd's 0.7 KB). 683
-# since DESIGN D53 (2026-11-13, scripts started by their #! line: 712 bytes of kernel.bin).
-RAMDISK_MOUNT_K := 683
+# since DESIGN D53 (2026-11-13, scripts started by their #! line: 712 bytes of kernel.bin). 682 since d29 16.23
+# (2026-11-13, ZINE reads big data files from the disk: 672 bytes of kernel.bin, ZINE_MAP and the built-in fsd's FS_BMAP).
+RAMDISK_MOUNT_K := 682
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/check-init.py tools/ksize-check.sh tools/ksize-budget
