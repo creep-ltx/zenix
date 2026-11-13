@@ -68,41 +68,143 @@ char *path_join(const char *dir, const char *name)
     return p;
 }
 
+/* DESIGN D49 8: is PATH the file open on FD (the same device and inode, links followed as an open follows them)?
+ * Opening it with O_TRUNC would empty that file (cp a a, mv across a link onto its own mount). One lookup: the open
+ * file is asked by its descriptor. A kernel before D49 gives no device (0 in both): then the inode, size, time and
+ * mode together (two empty files of two new volumes may look alike: refused, nothing lost) */
+int same_file(int fd, const char *path)
+{
+    struct ustat2 x, y;
+    if (sys_fstat2(fd, &x) < 0 || sys_stat2(path, &y) < 0 || x.ino != y.ino || x.dev != y.dev) return 0;
+    return x.dev || (x.size == y.size && x.mtime == y.mtime && x.mode == y.mode);
+}
+
+#pragma GCC push_options
+#pragma GCC optimize("Os")              /* (cold enough: about 40 records a call) */
+/* DESIGN D49: a directory read in batches. One malloc: the descriptor, the state, a 2 KB buffer of records (about 42
+ * short names a call). The first SYS_readdirs answering -ENOSYS (an older kernel, a server without FS_READDIRS) puts the
+ * directory in the old mode for good: one SYS_readdir a record, made into a udirx (no UDX_STAT, next 0) */
+#define ZDIR_BUF 2048
+#define ZDIR_MOUNTS 7                   /* NMOUNT 8 (kernel/kernel.h) less the root */
+struct zdir { int fd; unsigned char old, end, mnts, nmn; unsigned short len, pos; int err; char mn[ZDIR_MOUNTS][48]; char buf[ZDIR_BUF]; };
+/* D49 4.2: the last names of the mount points (read once a listing, when a record first has a stat): such a name's
+ * record keeps the stat of the directory underneath, its lstat is the mounted root's. By text, as the kernel picks
+ * mounts; a name that only looks like one loses its stat too, which costs that name one lstat */
+static __attribute__((noinline)) void zdir_unmount(struct zdir *d, struct udirx *x)
+{
+    if (!d->mnts) {
+        struct umountinfo u;
+        d->mnts = 1;
+        for (u32 i = 1; d->nmn < ZDIR_MOUNTS && sys_mountinfo(i, &u) >= 0; i++) {
+            u.path[sizeof u.path - 1] = 0;
+            const char *l = strrchr(u.path, '/');
+            strcpy(d->mn[d->nmn++], l ? l + 1 : u.path);
+        }
+    }
+    for (int i = 0; i < d->nmn; i++)
+        if (!strcmp(d->mn[i], x->name)) { x->flags = 0; memset(&x->st, 0, sizeof x->st); }
+}
+struct zdir *zdir_open(const char *path)
+{
+    int fd = sys_open(path, O_RDONLY);
+    if (fd < 0) return 0;
+    struct zdir *d = malloc(sizeof *d);
+    if (!d) { sys_close(fd); zerrno = ENOMEM; return 0; }
+    d->fd = fd; d->old = d->end = d->mnts = d->nmn = 0; d->len = d->pos = 0; d->err = 0;
+    return d;
+}
+static __attribute__((noinline)) int zdir_fill(struct zdir *d)
+{
+    int r = -ENOSYS;
+    d->pos = d->len = 0;
+    if (!d->old && (r = sys_readdirs(d->fd, d->buf, sizeof d->buf)) == -ENOSYS) d->old = 1;
+    if (d->old) {
+        struct udirent u;
+        if ((r = sys_readdir(d->fd, &u)) > 0) {
+            u.name[sizeof u.name - 1] = 0;
+            u32 used = 0;
+            udirx_put(d->buf, sizeof d->buf, &used, u.name, u.ino, u.type, 0);   /* (an empty name: skipped by zdir_next) */
+            r = (int)used;
+        }
+    }
+    if (r > (int)sizeof d->buf) r = -EIO;
+    if (r <= 0) { d->end = 1; d->err = r < 0 ? -r : 0; return 0; }
+    d->len = (unsigned short)r;
+    return 1;
+}
+/* the next record, NULL at the end or on an error (zdir_err); a record the server got wrong ends the reading, -EIO */
+const struct udirx *zdir_next(struct zdir *d)
+{
+    for (;;) {
+        if (d->end || (d->pos >= d->len && !zdir_fill(d))) return 0;
+        struct udirx *x = (struct udirx *)(d->buf + d->pos);
+        u32 st = udirx_step(x, (u32)(d->len - d->pos));
+        if (!st) { d->end = 1; d->err = EIO; return 0; }   /* cannot step over it: the rest of this answer is lost */
+        d->pos = (unsigned short)(d->pos + st);
+        if (!udirx_named(x)) continue;                  /* a name no program can use: skipped, the rest still listed */
+        if (x->flags & UDX_STAT) zdir_unmount(d, x);
+        return x;
+    }
+}
+int zdir_err(const struct zdir *d) { return d->err; }
+int zdir_fd(const struct zdir *d) { return d->fd; }
+void zdir_rewind(struct zdir *d) { d->end = 0; d->len = d->pos = 0; d->err = 0; }   /* after the descriptor is back at 0 */
+void zdir_close(struct zdir *d) { if (d) { sys_close(d->fd); free(d); } }
+
 /* The names in a directory, without "." and "..", in the order the filesystem gives them: *names is a malloc'd
  * array (as long as needed, NULL-terminated) of malloc'd strings, given back with dir_free. Returns the count, or
  * -1 when the directory cannot be opened (zerrno from the system call) or memory runs out (zerrno 12); *names is
  * then NULL and nothing is left allocated. If reading fails part way (a damaged disk), *err is that error and the
  * names read so far are returned: what can be seen is seen. Without a failure *err is 0. */
-int dir_list_some(const char *path, char ***names, int *err)
+static int dir_list_x(const char *path, char ***names, struct ustat **stats, int *err)
 {
     *names = 0;
     *err = 0;
-    int fd = sys_open(path, O_RDONLY);
-    if (fd < 0) return -1;
-    char **v = 0; int n = 0, cap = 0, r; struct udirent d;
-    while ((r = sys_readdir(fd, &d)) > 0) {
-        if (!strcmp(d.name, ".") || !strcmp(d.name, "..")) continue;
+    if (stats) *stats = 0;
+    struct zdir *d = zdir_open(path);
+    if (!d) return -1;
+    char **v = 0; struct ustat *sv = 0; int n = 0, cap = 0; const struct udirx *x;
+    while ((x = zdir_next(d))) {
+        if (x->name[0] == '.' && (!x->name[1] || (x->name[1] == '.' && !x->name[2]))) continue;
         if (n + 1 >= cap) {
             int nc = cap ? cap * 2 : 32;
             char **nv = realloc(v, (u32)nc * sizeof *nv);
             if (!nv) goto oom;
-            v = nv; cap = nc;
+            v = nv;
+            if (stats) {
+                struct ustat *ns = realloc(sv, (u32)nc * sizeof *ns);
+                if (!ns) goto oom;
+                sv = ns;
+            }
+            cap = nc;
         }
-        if (!(v[n] = strdup(d.name))) goto oom;
+        if (!(v[n] = strdup(x->name))) goto oom;
+        if (stats) {
+            if (x->flags & UDX_STAT) memcpy(&sv[n], &x->st, sizeof sv[n]);
+            else memset(&sv[n], 0, sizeof sv[n]);         /* mode 0: not given (a real file's mode never is 0) */
+        }
         n++;
     }
-    if (r < 0 && r != -ENOTDIR) *err = -r;            /* (not a directory: no names, as it always was) */
-    sys_close(fd);
-    if (!v && !(v = malloc(sizeof *v))) { zerrno = ENOMEM; return -1; }
+    int e = zdir_err(d);
+    if (e && e != ENOTDIR) *err = e;                  /* (not a directory: no names, as it always was) */
+    zdir_close(d);
+    if (!v && !(v = malloc(sizeof *v))) { free(sv); zerrno = ENOMEM; return -1; }
     v[n] = 0;
     *names = v;
+    if (stats) *stats = sv;
     return n;
 oom:
-    sys_close(fd);
+    zdir_close(d);
     dir_free(v, n);
+    free(sv);
     zerrno = ENOMEM;
     return -1;
 }
+int dir_list_some(const char *path, char ***names, int *err) { return dir_list_x(path, names, 0, err); }
+/* DESIGN D49: dir_list_some and each name's lstat where the directory's server gave it (*stats malloc'd, one a name,
+ * NULL when there are none; freed by the caller; mode 0 where it was not given: ask lstat) */
+int dir_list_stat(const char *path, char ***names, struct ustat **stats, int *err) { return dir_list_x(path, names, stats, err); }
+#pragma GCC pop_options
 /* dir_list_some for those who go on to act on the names (copy, remove, archive): all of them, or -1 */
 int dir_list(const char *path, char ***names)
 {

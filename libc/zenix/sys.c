@@ -61,9 +61,10 @@ int isatty(int fd)
 }
 
 /* ---- names */
-static void fill_stat(struct stat *o, const struct ustat *s)
+static void fill_stat(struct stat *o, const struct ustat2 *s)
 {
     memset(o, 0, sizeof *o);
+    o->st_dev = s->dev;                     /* DESIGN D49 8: the mount's instance (0 from an older kernel) */
     o->st_ino = s->ino;
     o->st_mode = s->mode;
     o->st_nlink = s->links;
@@ -76,22 +77,22 @@ static void fill_stat(struct stat *o, const struct ustat *s)
 }
 int stat(const char *path, struct stat *o)
 {
-    struct ustat s;
-    if (sys_stat(path, &s) < 0) return -1;
+    struct ustat2 s;
+    if (sys_stat2(path, &s) < 0) return -1;
     fill_stat(o, &s);
     return 0;
 }
 int lstat(const char *path, struct stat *o)
 {
-    struct ustat s;
-    if (sys_lstat(path, &s) < 0) return -1;
+    struct ustat2 s;
+    if (sys_lstat2(path, &s) < 0) return -1;
     fill_stat(o, &s);
     return 0;
 }
 int fstat(int fd, struct stat *o)
 {
-    struct ustat s;
-    if (sys_fstat(fd, &s) < 0) return -1;
+    struct ustat2 s;
+    if (sys_fstat2(fd, &s) < 0) return -1;
     fill_stat(o, &s);
     return 0;
 }

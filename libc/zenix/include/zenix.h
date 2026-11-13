@@ -17,6 +17,15 @@ const char *zwhy(const char *dflt);     /* the text of errno (the last failure),
 char *path_join(const char *dir, const char *name);  /* malloc'd "dir/name"; 0: too long (ENAMETOOLONG) or ENOMEM */
 int dir_list(const char *path, char ***names);  /* malloc'd, 0-terminated names without . and ..: their count or -1 */
 void dir_free(char **names, int n);
+/* a directory read in batches (DESIGN D49, user/zhelp.c; the records are kernel/udirx.h's) */
+struct zdir;
+struct udirx;
+struct zdir *zdir_open(const char *path);
+const struct udirx *zdir_next(struct zdir *d);
+int zdir_err(const struct zdir *d);
+int zdir_fd(const struct zdir *d);
+void zdir_rewind(struct zdir *d);
+void zdir_close(struct zdir *d);
 int path_find(const char *name, char *out, size_t max);   /* a program through $PATH, as sh finds it: 1 found */
 int zrealpath(const char *in, char *out, size_t cap);     /* ., .. and links resolved: 0, or -1 */
 /* colours (DESIGN D14): auto means fd is a terminal, TERM set and not "dumb", NO_COLOR not set */

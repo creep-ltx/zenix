@@ -242,7 +242,7 @@ pointers.
   (`PATH_MAX` 256), names 63, 16 descriptors (`OPEN_MAX`); `open`'s and `mkdir`'s mode is set by a `chmod` after the
   call (the system calls take none: not atomic); `stat` gives one time (the modification's) for all three; the wall
   clock has whole seconds (`gettimeofday`'s microseconds 0), `CLOCK_MONOTONIC` and the sleeps 10 ms ticks, `clock()`
-  is wall time since the start; `lseek` past 4 GB `EOVERFLOW`; `readdir`'s `d_type` always `DT_UNKNOWN`; the
+  is wall time since the start; `lseek` past 4 GB `EOVERFLOW`; `readdir`'s `d_type` the server's type or the record's stat (DESIGN D49), `DT_UNKNOWN` from a server that gives neither (nfscd on a NAS without READDIRPLUS); the
   environment at most 63 variables and 1 KB; `printf` without a float build prints `%f` as `*float*`; no `fork`,
   `exec`, `mmap`, `sbrk`, threads; `O_CLOEXEC` is 0 (a spawned program gets only descriptors 0-2 anyway), `O_SYNC`
   and `O_NOCTTY` are not defined. The terminal (D27 5.4): `ICANON`, `ECHO` and `ISIG` all on is the kernel's cooked

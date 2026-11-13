@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Directories for the C library (DESIGN D27 section 5), over SYS_readdir's entries (user/usys.h's udirent): a name
+/* Directories for the C library (DESIGN D27 section 5), over libz's zdir (DESIGN D49: SYS_readdirs' records): a name
  * of at most 63 bytes, its inode and type. picolibc's own sys/dirent.h is an #error for systems without one. */
 #ifndef _SYS_DIRENT_H_
 #define _SYS_DIRENT_H_
@@ -7,7 +7,7 @@
 #define MAXNAMLEN 63
 struct dirent {
     ino_t d_ino;
-    unsigned char d_type;               /* always DT_UNKNOWN (portable programs then stat the name) */
+    unsigned char d_type;               /* the server's type, else from the stat (DESIGN D49); DT_UNKNOWN when unknown */
     char d_name[MAXNAMLEN + 1];
 };
 #define DT_UNKNOWN 0
