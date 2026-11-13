@@ -1268,6 +1268,7 @@ $(BUILD)/crt0-pure.o: user/crt0.S | $(BUILD)
 	$(CC) $(ASFLAGS) -DZEX2 $< -o $@
 $(BUILD)/%.po: user/%.c user/libz.h user/usys.h tools/purecc.sh | $(BUILD)
 	tools/purecc.sh $(CC) $(UCFLAGS) -c $< -o $@
+$(BUILD)/sh.po $(BUILD)/sh.uo: kernel/shebang.h     # the shell explains a refused #! line as the kernel reads it (D53)
 $(BUILD)/%.puelf: $(BUILD)/%.po $(BUILD)/crt0-pure.o $(BUILD)/libz.po link/pure.ld
 	$(CC) $(UCFLAGS) $(PULDFLAGS) $(BUILD)/crt0-pure.o $< $(BUILD)/libz.po $(LIBGCC) -o $@
 $(BUILD)/%.pzx: $(BUILD)/%.puelf tools/mkzexe.py tools/check-68020-60.sh Makefile
