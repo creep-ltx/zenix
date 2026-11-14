@@ -1,0 +1,13 @@
+--- a/adventure/wizard.c
++++ b/adventure/wizard.c
+@@ -91,7 +91,9 @@
+ 	delay = (d - saveday) * 1440 + (t - savet);	/* good for about a
+ 							 * month     */
+ 
+-	if (delay >= latency) {
++	/* Zenix: a clock behind the save (or before 1977: an Amiga without a
++	 * clock starts in 1970) is not a game suspended a moment ago */
++	if (delay < 0 || delay >= latency) {
+ 		saved = -1;
+ 		return (FALSE);
+ 	}

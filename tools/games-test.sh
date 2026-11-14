@@ -4,7 +4,8 @@
 # with 4 MB of fast RAM), as root on the serial console (console 1's grid mirrored):
 #  - frotz plays All Things Devours with rootfs/tests/games/devours.in: the transcript is the PC's line for line
 #    (tools/games-host-test.sh makes it from the same pinned source);
-#  - adventure's first room (its scrambled text read back with the C library's random), banner and number: the PC's
+#  - adventure's first room (its scrambled text read back with the C library's random), also with the clock at 1970
+#    (zenix/adventure.patch: an Amiga without a clock is not a suspended game), banner and number: the PC's
 #    output byte for byte; fortune prints one of games/fortunes, lists its file and finds all 40 through the index; wump and arithmetic start and end;
 #  - the curses games on console 1, read from its grid by termtest screen (CON_READ) and driven by its keys: robots
 #    (its field and legend, q and y), hangman (the word's dashes, a guess shown, Ctrl-D), tetris (its key line, q, the
@@ -40,6 +41,8 @@ adv = part("aout", "aend")
 check("You are standing at the end of a road before a small brick building." in adv,
       "adventure's first room, its text read back on Zenix", adv[:300])
 same("adventure's start and quit", adv.splitlines(), exp("adv.out"))
+check(status("a2st") == 0, "adventure with the clock at 1970 (an Amiga without a clock) ended with status 0", status("a2st"))
+same("adventure with the clock at 1970: a new game, not a suspended one", part("a2out", "a2end").splitlines(), exp("adv.out"))
 check(status("bst") == 0 and status("nst") == 0, "banner and number ended with status 0")
 same("banner -w 40 ZENIX", part("bout", "nout").splitlines(), exp("banner.out"))
 same("number 1999", part("nout", "nend").splitlines(), exp("number.out"))
