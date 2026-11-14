@@ -1,0 +1,30 @@
+HANGMAN(1)			Zenix manual
+
+NAME
+    hangman - guess the word before the figure is complete
+
+SYNOPSIS
+    hangman [-d WORDLIST] [-m MINLEN]
+
+DESCRIPTION
+    Guess a hidden word a letter at a time; each wrong letter adds a part
+    to the gallows. The words come from /usr/share/dict/words (300 words
+    of the wired city: terminals, reactors, signals, rust) or the list
+    given with -d, at least MINLEN (6) letters long. Ctrl-D ends, Ctrl-L
+    draws the screen again.
+
+FILES
+    /usr/share/dict/words   the words, one a line, lower case
+
+EXIT STATUS
+    0.
+
+NOTES
+    One of the BSD games (NetBSD 10.2's, pinned unchanged in
+    ports/bsdgames; the BSD licence: /usr/share/licenses/bsdgames), in
+    the games package (zpkg -S games).
+    Drawn with Zenix's own small curses (ports/bsdgames/zenix): the
+    console, a term window and a telnet line alike.
+
+SEE ALSO
+    fortune(1)

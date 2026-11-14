@@ -1,0 +1,12 @@
+All Things Devours, by "half sick of shadows" (Toby Ord), IFComp 2004, release 3 (serial 050325), the
+post-competition release: a story file for the Z-machine (version 5), played on Zenix with frotz (docs/man/frotz.txt).
+
+Licence: public domain. The author's words, from the game's source (games/source/inform/devours.inf at the IF
+Archive) and its banner: "This program was written by Toby Ord (half sick of shadows) and has been released into
+the public domain, so you are legally free to be distribute and modify it as you see fit." and "It is in the public
+domain and may thus be freely copied or modified." The story file carries the Inform 6 library it was compiled with
+(Graham Nelson's); Inform's terms have never restricted the games compiled with it.
+
+devours.z5: https://ifarchive.org/if-archive/games/zcode/devours.z5, 160,768 bytes, sha256
+a0b0569c2f57a975f868242b9a1dfe400a75e6aef92d5480eb51c81a3150eb37 (fetched 2026-11-14), unchanged. On Zenix:
+/usr/share/games/frotz/devours.z5 (the games package); this notice is /usr/share/licenses/devours.

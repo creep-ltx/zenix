@@ -81,6 +81,11 @@ case " $PROGS " in *" ctop "*) lic ports/ctop/upstream/LICENSE ctop; lic ports/t
 case " $PROGS " in *" lua "*) lic ports/lua/upstream/LICENSE lua;; esac
 case " $PROGS " in *" make "*) lic ports/pdpmake/upstream/LICENSE make;; esac
 case " $PROGS " in *" tcc "*) lic ports/tcc/upstream/COPYING tcc;; esac
+# the games (ports/frotz, ports/bsdgames, games/; tools/mkzup.py's family games): their notices, and their data, score
+# files and Lua games as the package holds them (mkzup.py stage), on an image with the games
+case " $PROGS " in *" frotz "*) lic ports/frotz/upstream/COPYING frotz; lic ports/frotz/stories/README devours;; esac
+case " $PROGS " in *" robots "*) lic ports/bsdgames/LICENSE bsdgames;; esac
+case " $PROGS " in *" frotz "*|*" robots "*) python3 "$(dirname "$0")/mkzup.py" stage games "$T" "$B";; esac
 # the C library's notice (picolibc, BSD-style licences file by file, DESIGN D27 3.2) on the full images, as the base
 # package; and its test program in /tests
 [ -z "$NOMAN" ] && lic libc/picolibc/COPYING.picolibc picolibc
@@ -165,6 +170,9 @@ alias_of unlha unlzx                                               # one program
 if [ -n "$PKGDB" ] && [ -f "$B/pkg/list" ]; then
     mkdir -p "$T/var/lib/zpkg" "$T/var/cache/zpkg"
     python3 "$(dirname "$0")/mkzup.py" installdb "$T" "$B/pkg" "$T/var/lib/zpkg"
+    # the games' files are staged above from mkzup.py's own list: a mismatch would leave the package out unseen
+    case " $PROGS " in *" frotz "*) [ -f "$T/var/lib/zpkg/games.manifest" ] ||
+        { echo "mkroot.sh: the games package's files are not on the image as the package has them" >&2; exit 1; };; esac
 fi
 # the demo floppy's root (DESIGN D25 revision 3, 4.1 and 7.2; DEMO=dd or DEMO=hd, from tools/mkdemo.sh): no test
 # files, the demo's own files over the tree (tools/demo/: /etc's differences, the session, the welcome), the manual

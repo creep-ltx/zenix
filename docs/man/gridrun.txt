@@ -1,0 +1,39 @@
+GRIDRUN(1)			Zenix manual
+
+NAME
+    gridrun - a light-cycle duel on a dead city's power grid
+
+SYNOPSIS
+    gridrun
+
+DESCRIPTION
+    A game for Zenix Desktop, written in Lua with the zenix module. You
+    ride the cyan trail, a daemon of the grid rides the magenta one; a
+    cycle that hits the wall or any trail is derezzed, and the other wins
+    the round. The score is in the window's title.
+
+    Keys: the arrows turn, space starts the next round, p pauses, q or
+    Escape ends (so does the window's close gadget).
+
+    Its pictures, its sound effects and its music (a four-channel module
+    played through sndd) are made by the script itself when it starts:
+    no files besides it. The colours are the nearest the desktop's theme
+    has. It needs the desktop (zdesk) and the sound server; without sound
+    it plays silent.
+
+ENVIRONMENT
+    GRIDRUN_SEED    the daemon's random numbers (the time by default)
+    GRIDRUN_LOG     set: a line on standard output for each round, key and
+                    the music (for tests)
+
+FILES
+    /bin/gridrun    the game itself, a Lua script started by its #! line:
+                    read it, change it, run your copy
+
+NOTES
+    In the games package (zpkg -S games), which brings the lua package.
+    Ours, GPL 2. On a 14 MHz 68020 it takes a few seconds to make its
+    sounds and music before the window shows the grid.
+
+SEE ALSO
+    zenix-lua(1), lua(1), worm(1)

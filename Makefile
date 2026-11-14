@@ -49,7 +49,8 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet \
           rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs files show ttf2font \
-          play modplay lsusb lua make zld zas tcc zdb
+          play modplay lsusb lua make zld zas tcc zdb \
+          frotz adventure arithmetic banner fortune hangman number rain robots tetris worm worms wump
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -1009,9 +1010,32 @@ $(BUILD)/lua/%.o: ports/lua/upstream/src/%.c $(LIBC_HDRS) $(wildcard ports/lua/u
                   Makefile
 	@mkdir -p $(dir $@)
 	$(CC) $(LUA_CFLAGS) -c $< -o $@
-$(BUILD)/lua.celf: $(LUA_SRCS:%=$(BUILD)/lua/%.o) $(BUILD)/crt0.o $(BUILD)/libc.a link/user.ld
-	$(CC) $(LIBC_PFLAGS) $(ULDFLAGS) $(LIBC_FLOATLD) $(BUILD)/crt0.o $(LUA_SRCS:%=$(BUILD)/lua/%.o) \
-	    $(BUILD)/libc.a $(LIBGCC) -o $@
+# Lua's "zenix" module (roadmap block 7 item 7, docs/man/zenix-lua.txt): ports/lua/zenix/lzenix.c, with the display's
+# client library, the sound server's and the MOD replayer compiled unchanged for the C library (the header
+# ports/lua/zenix/shim/libz.h stands in for libz's; sndlib.c from a copy in the build, as its own folder has libz.h),
+# registered in package.preload by wrapping luaL_openlibs (Lua's files unchanged). In /bin/lua only, not the probe build.
+LUAZ_CFLAGS := $(LIBC_PFLAGS) -Iports/lua/zenix/shim -Iuser -Idisplay -Iports/lua/upstream/src -Iports/lua/zenix \
+               '-DLUA_USER_H="luauser.h"' -DLUAI_MAXCCALLS=$(LUA_MAXCCALLS) -Wno-unused-parameter -Wno-sign-compare
+LUAZ_OBJS := $(BUILD)/luaz/lzenix.o $(BUILD)/luaz/libdisplay.o $(BUILD)/luaz/sndlib.o $(BUILD)/luaz/modrep.o
+LUAZ_HDRS := ports/lua/zenix/shim/libz.h display/display.h display/proto.h user/sndlib.h user/sndproto.h user/modrep.h \
+             user/usys.h $(LIBC_HDRS) $(wildcard ports/lua/upstream/src/*.h) ports/lua/zenix/luauser.h
+$(BUILD)/luaz/lzenix.o: ports/lua/zenix/lzenix.c $(LUAZ_HDRS) Makefile
+	@mkdir -p $(dir $@)
+	$(CC) $(LUAZ_CFLAGS) -c $< -o $@
+$(BUILD)/luaz/libdisplay.o: display/lib/libdisplay.c $(LUAZ_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(LUAZ_CFLAGS) -c $< -o $@
+$(BUILD)/luaz/sndlib.c: user/sndlib.c
+	@mkdir -p $(dir $@)
+	cp $< $@
+$(BUILD)/luaz/sndlib.o: $(BUILD)/luaz/sndlib.c $(LUAZ_HDRS)
+	$(CC) $(LUAZ_CFLAGS) -c $< -o $@
+$(BUILD)/luaz/modrep.o: user/modrep.c user/modrep.h $(LIBC_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(LUAZ_CFLAGS) -c $< -o $@
+$(BUILD)/lua.celf: $(LUA_SRCS:%=$(BUILD)/lua/%.o) $(LUAZ_OBJS) $(BUILD)/crt0.o $(BUILD)/libc.a link/user.ld
+	$(CC) $(LIBC_PFLAGS) $(ULDFLAGS) $(LIBC_FLOATLD) -Wl,--wrap=luaL_openlibs $(BUILD)/crt0.o \
+	    $(LUA_SRCS:%=$(BUILD)/lua/%.o) $(LUAZ_OBJS) $(BUILD)/libc.a $(LIBGCC) -o $@
 $(BUILD)/lua.zx: $(BUILD)/lua.celf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ $(STACK_lua)
@@ -1130,6 +1154,94 @@ $(BUILD)/tcc.zx: $(BUILD)/tcc.celf tools/mkzexe.py tools/check-68020-60.sh
 $(BUILD)/devel/usr/lib/libc.a: $(BUILD)/libc.a $(BUILD)/libc-pure.a $(BUILD)/crt0.o $(BUILD)/crt0-pure.o link/user.ld \
                                link/pure.ld $(LIBGCC) $(LIBC_HDRS) tools/mkdevel.sh $(TCC_SRC)/.patched
 	tools/mkdevel.sh $(BUILD) $(LIBGCC)
+
+# ---- Frotz, the text-adventure player (roadmap block 7 item 7, "fun"; DESIGN D52 section 8; ports/frotz/README):
+# Frotz 2.55's core and its dumb front end (plain text in and out, no screen positioning: it fits the console, term,
+# a telnet line and a script alike) pinned unchanged in ports/frotz/upstream; the two headers upstream's Makefile
+# writes (defs.h, hash.h) are ports/frotz/zenix's, without Blorb; -fwrapv for its random numbers (README). /bin/frotz
+# (UAPPS, the games package), a plain program (ZEXE): the dumb front end's speed factor is a float (soft float). ----
+FROTZ_SRCS := $(addprefix common/,buffer err fastmem files getopt hotkey input main math missing object process \
+              quetzal random redirect screen sound stream table text variable) \
+              $(addprefix dumb/,dblorb dinit dinput doutput dpic)
+FROTZ_CFLAGS := $(LIBC_PFLAGS) -std=gnu99 -fwrapv -Iports/frotz/zenix -Wno-unused-parameter -Wno-sign-compare \
+                -Wno-char-subscripts -Wno-implicit-fallthrough -Wno-missing-field-initializers \
+                -Wno-unterminated-string-initialization
+FROTZ_HDRS := $(wildcard ports/frotz/upstream/src/*/*.h ports/frotz/zenix/*.h)
+$(BUILD)/frotz/%.o: ports/frotz/upstream/src/%.c $(FROTZ_HDRS) $(LIBC_HDRS) Makefile
+	@mkdir -p $(dir $@)
+	$(CC) $(FROTZ_CFLAGS) -c $< -o $@
+$(BUILD)/frotz.celf: $(FROTZ_SRCS:%=$(BUILD)/frotz/%.o) $(BUILD)/crt0.o $(BUILD)/libc.a link/user.ld
+	$(CC) $(LIBC_PFLAGS) $(ULDFLAGS) $(LIBC_FLOATLD) $(BUILD)/crt0.o $(FROTZ_SRCS:%=$(BUILD)/frotz/%.o) \
+	    $(BUILD)/libc.a $(LIBGCC) -o $@
+$(BUILD)/frotz.zx: $(BUILD)/frotz.celf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ $(or $(STACK_frotz),$(STACK_DEFAULT))
+
+# ---- The BSD games (roadmap block 7 item 7; DESIGN D52 section 8; ports/bsdgames/README): twelve of NetBSD 10.2's
+# games pinned unchanged in ports/bsdgames/upstream, compiled with NetBSD's macros and the BSD calls Zenix's C library
+# lacks (ports/bsdgames/zenix: zgames.h included first, compat.c), a small curses of Zenix's own (curses.c) and
+# tetris's terminfo (term.c), in libzgames.a; one patch (wump.patch: no fork). /bin/NAME (UAPPS, the games package),
+# plain programs (ZEXE); arithmetic and hangman print floats (the float printf). On the PC: adventure's mkdata (its
+# text "encrypted" with random(), so built with the C library's own generator, zenix/zrandom.c, and the game decrypts
+# it on Zenix) and fortune's strfile (the fortunes' index, big-endian on any host). ----
+BSDGAMES := adventure arithmetic banner fortune hangman number rain robots tetris worm worms wump
+BG_SRCS_adventure := $(addprefix adventure/,main init done save subr vocab wizard io crc)
+BG_SRCS_fortune := fortune/fortune/fortune
+BG_SRCS_hangman := $(addprefix hangman/,endgame extern getguess getword main playgame prdata prman prword setup)
+BG_SRCS_robots := $(addprefix robots/,auto extern init_field main make_level move move_robs play_level query rnd_pos \
+                  score flush_in)
+BG_SRCS_tetris := $(addprefix tetris/,input screen shapes scores tetris)
+BG_FLOAT := arithmetic hangman
+BG_SRC := $(BUILD)/bg/src
+BG_CFLAGS := $(LIBC_PFLAGS) -std=gnu99 -D_DEFAULT_SOURCE -Iports/bsdgames/zenix/include \
+             -include ports/bsdgames/zenix/include/zgames.h -I$(BG_SRC)/fortune/strfile \
+             -DMAX_PER_UID=5 -DFANCY -Wno-unused-parameter -Wno-sign-compare -Wno-unused-variable \
+             -Wno-implicit-fallthrough -Wno-missing-field-initializers -Wno-char-subscripts -Wno-format-truncation \
+             -Wno-unused-but-set-variable -Wno-old-style-declaration -Wno-type-limits
+BG_HDRS := $(wildcard ports/bsdgames/zenix/include/*.h ports/bsdgames/zenix/include/*/*.h) $(LIBC_HDRS)
+$(BG_SRC)/.patched: $(shell find ports/bsdgames/upstream -type f) $(wildcard ports/bsdgames/zenix/*.patch)
+	rm -rf $(BG_SRC) && mkdir -p $(BG_SRC) && cp -r ports/bsdgames/upstream/. $(BG_SRC)/
+	for p in ports/bsdgames/zenix/*.patch; do (cd $(BG_SRC) && patch -p1 -s --no-backup-if-mismatch) <$$p || exit 1; done
+	touch $@
+$(BUILD)/bg/%.o: $(BG_SRC)/.patched $(BG_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(BG_CFLAGS) -c $(BG_SRC)/$*.c -o $@
+$(BUILD)/bg/z/%.o: ports/bsdgames/zenix/%.c $(BG_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(BG_CFLAGS) -c $< -o $@
+$(BUILD)/libzgames.a: $(BUILD)/bg/z/compat.o $(BUILD)/bg/z/curses.o $(BUILD)/bg/z/term.o tools/check-68020-60.sh
+	rm -f $@
+	$(TOOLPREFIX)ar rcs $@ $(filter %.o,$^)
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $@
+# the PC's tools
+$(BUILD)/bg/mkdata: $(BG_SRC)/.patched ports/bsdgames/zenix/zrandom.c ports/bsdgames/zenix/host.h
+	cc -O2 -include ports/bsdgames/zenix/host.h -Drandom=zx_random -Dsrandom=zx_srandom -o $@ \
+	    $(BG_SRC)/adventure/setup.c ports/bsdgames/zenix/zrandom.c
+$(BUILD)/bg/strfile: $(BG_SRC)/.patched ports/bsdgames/zenix/host.h
+	cc -O2 -include ports/bsdgames/zenix/host.h -o $@ $(BG_SRC)/fortune/strfile/strfile.c
+$(BUILD)/bg/adventure/data.c: $(BUILD)/bg/mkdata
+	@mkdir -p $(dir $@)
+	$(BUILD)/bg/mkdata $(BG_SRC)/adventure/glorkz >$@
+$(BUILD)/bg/adventure/data.o: $(BUILD)/bg/adventure/data.c
+	$(CC) $(BG_CFLAGS) -c $< -o $@
+BG_OBJS_adventure := $(BUILD)/bg/adventure/data.o
+# the fortunes (Zenix's own, games/fortunes: no third-party collection) and their index
+$(BUILD)/bg/fortunes.dat: games/fortunes $(BUILD)/bg/strfile
+	cp games/fortunes $(BUILD)/bg/fortunes
+	$(BUILD)/bg/strfile -s $(BUILD)/bg/fortunes $@
+# what the games package and the full images hold beside the programs (tools/mkzup.py FAMILY_EXTRA)
+GAMESDATA := $(BUILD)/bg/fortunes.dat games/gridrun.lua games/words ports/frotz/stories/devours.z5 \
+             ports/frotz/stories/README ports/bsdgames/LICENSE
+define BSDGAME_RULES
+$$(BUILD)/$(1).celf: $$(patsubst %,$$(BUILD)/bg/%.o,$$(or $$(BG_SRCS_$(1)),$(1)/$(1))) $$(BG_OBJS_$(1)) \
+                     $$(BUILD)/libzgames.a $$(BUILD)/crt0.o $$(BUILD)/libc.a link/user.ld
+	$$(CC) $$(LIBC_PFLAGS) $$(ULDFLAGS) $$(if $$(filter $(1),$$(BG_FLOAT)),$$(LIBC_FLOATLD),$$(LIBC_LDFLAGS)) \
+	    $$(BUILD)/crt0.o $$(filter-out $$(BUILD)/crt0.o,$$(filter %.o,$$^)) $$(BUILD)/libzgames.a $$(BUILD)/libc.a $$(LIBGCC) -o $$@
+$$(BUILD)/$(1).zx: $$(BUILD)/$(1).celf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$$(TOOLPREFIX) tools/check-68020-60.sh $$<
+	tools/mkzexe.py $$< $$@ $$(or $$(STACK_$(1)),$$(STACK_DEFAULT))
+endef
+$(foreach g,$(BSDGAMES),$(eval $(call BSDGAME_RULES,$(g))))
 
 # ---- Ahiru, the owner's file manager (roadmap block 3; ports/ahiru/README): its upstream files and the CFile core's
 # under it (the owner's CFile repository: ahiru/src, core/, fs/), pinned in ports/ahiru/upstream (tools/ahiru-vendor.sh,
@@ -1423,7 +1535,7 @@ $(BUILD)/cp437-8x8.psf: tools/font_8x8.c tools/mkpsf.py | $(BUILD)
 UFONT_SRC := tools/font_8x8.c tools/mkconfont.py $(wildcard tools/consolefont/*)
 $(BUILD)/zenix-8x8.zcf: $(UFONT_SRC) | $(BUILD)
 	python3 tools/mkconfont.py font $@
-$(BUILD)/pkg/list: $(BUILD)/devel/usr/lib/libc.a $(BUILD)/bootmenu $(BUILD)/zenixboot $(BUILD)/cp437-8x8.psf $(BUILD)/zine.blob $(BUILD)/sp060 $(BUILD)/sp040 $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
+$(BUILD)/pkg/list: $(GAMESDATA) $(BUILD)/devel/usr/lib/libc.a $(BUILD)/bootmenu $(BUILD)/zenixboot $(BUILD)/cp437-8x8.psf $(BUILD)/zine.blob $(BUILD)/sp060 $(BUILD)/sp040 $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
 	NETDRVS="$(NETDRVS)" python3 tools/mkzup.py packages $(BUILD) "$(UAPPS)"
 # the system bundle: the kernel and the base group only (DESIGN D22 3.1 and 4.4: everything else is installed live,
 # zup -f; copied to BOOT:Zenix/zenix-update.zup, docs/man/zenixboot.txt)
@@ -1445,7 +1557,7 @@ $(BUILD)/zenix-update.zup: $(BUILD)/kernel.bin $(BUILD)/pkg/list tools/mkzup.py 
 # 1,024 left 2.7 MB free on 2026-11-05, and a test filling it failed without a word on 2026-11-04; 512 inodes ran out
 # with the network's files in D19 step 8: cmds2-test makes 150 files). The test images and zenix-boot.hdf's root only:
 # the floppies, the demo floppies, the installer and the SD card's root-card.img are built apart and do not change
-$(BUILD)/zenix.hdf: $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(TESTLIBC) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list $(if $(BOX),$(BUILD)/box.zx)
+$(BUILD)/zenix.hdf: $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(GAMESDATA) $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(TESTLIBC) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list $(if $(BOX),$(BUILD)/box.zx)
 	PKGDB=1 $(if $(BOX),BOX="$(BOXAPPS)") tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 16M 2048
 
 # the same disk wrapped in an RDB, as a real hard disk or CF card has it
@@ -1470,7 +1582,7 @@ $(BUILD)/zenix-boot.hdf: $(BUILD)/zenix-bootfs.img $(BUILD)/zenix.hdf tools/mkca
 	python3 tools/mkcard.py ide $@ $(BUILD)/zenix-bootfs.img $(BUILD)/zenix.hdf
 # the SD card of an Emu68 Amiga: MBR, p1 FAT for Emu68 (empty here), p2 0x76 RDB with the boot volume, p3 a 512 MB
 # ext2 root with every program (written to a card by tools/write-card.sh)
-$(BUILD)/root-card.img: $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(TESTLIBC) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
+$(BUILD)/root-card.img: $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(GAMESDATA) $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(TESTLIBC) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
 	PKGDB=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 512M 8192
 $(BUILD)/zenix-card.img: $(BUILD)/zenix-bootfs.img $(BUILD)/root-card.img tools/mkcard.py tools/mkrdb-multi.py
 	python3 tools/mkcard.py sd $@ $(BUILD)/zenix-bootfs.img $(BUILD)/root-card.img

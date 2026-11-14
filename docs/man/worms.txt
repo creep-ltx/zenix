@@ -1,0 +1,24 @@
+WORMS(1)			Zenix manual
+
+NAME
+    worms - worms crawling over the screen
+
+SYNOPSIS
+    worms [-ft] [-d DELAY] [-l LENGTH] [-n NUMBER] [-S SEED]
+
+DESCRIPTION
+    Worms crawl over the screen until Ctrl-C. -n NUMBER worms (3) of
+    -l LENGTH (16), -d DELAY between steps (0-1000); -f fills the
+    screen with the word WORM for them to eat, -t leaves a trail of dots,
+    -S SEED makes the same worms again.
+
+EXIT STATUS
+    0.
+
+NOTES
+    One of the BSD games (NetBSD 10.2's, pinned unchanged in
+    ports/bsdgames; the BSD licence: /usr/share/licenses/bsdgames), in
+    the games package (zpkg -S games).
+
+SEE ALSO
+    rain(1)

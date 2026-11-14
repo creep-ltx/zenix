@@ -1,0 +1,33 @@
+WUMP(1)			Zenix manual
+
+NAME
+    wump - hunt the Wumpus in its cave
+
+SYNOPSIS
+    wump [-h] [-a ARROWS] [-b BATS] [-p PITS] [-r ROOMS] [-t TUNNELS]
+
+DESCRIPTION
+    A dark cave of rooms joined by tunnels; somewhere in it the Wumpus.
+    You smell it when it is near, feel the draught of a pit, hear the
+    rustle of the bats that carry you off. Move (m) or shoot (s) a
+    crooked arrow through a list of rooms; wake the Wumpus and it may
+    move, or eat you. "Instructions?" at the start shows the whole story
+    through less(1). -h is the hard cave; the other options set how many
+    of each there are.
+
+FILES
+    /usr/share/games/wump.info   the instructions
+
+EXIT STATUS
+    0.
+
+NOTES
+    One of the BSD games (NetBSD 10.2's, pinned unchanged in
+    ports/bsdgames; the BSD licence: /usr/share/licenses/bsdgames), in
+    the games package (zpkg -S games).
+    One Zenix patch (ports/bsdgames/zenix/wump.patch): the instructions
+    are shown with the shell's "less < wump.info" (no fork on Zenix),
+    $PAGER or less.
+
+SEE ALSO
+    adventure(1)

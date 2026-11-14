@@ -1,0 +1,33 @@
+Frotz, the Z-machine interpreter, on Zenix (roadmap block 7 item 7, "fun"; DESIGN D52 section 8; the user's page is
+docs/man/frotz.txt): plays Infocom-style story files. /bin/frotz in the games package, built by the Makefile (its
+"Frotz" section) as a plain program (ZEXE), linked with Zenix's C library (picolibc, D27).
+
+upstream/  Frotz 2.55, pinned and never changed: gitlab.com/DavidGriffith/frotz, the tag 2.55 (commit acf20558,
+           2025-02-01), the archive https://gitlab.com/DavidGriffith/frotz/-/archive/2.55/frotz-2.55.tar.gz (444,588
+           bytes, sha256 a8c4c4d79a2aa9b39e0efbbd3e0803f1dc5ef36f75f2c2945e295d190575eb09). Its src/common (the
+           interpreter) and src/dumb (the plain-text front end), COPYING (GPL 2; the files say "version 2 of the
+           License, or (at your option) any later version": GPL-2-compatible; the notice that travels with the
+           program, /usr/share/licenses/frotz), AUTHORS, doc/dfrotz.6. Left out: the curses, SDL, X11 and DOS front
+           ends, Blorb, the test stories, the Makefiles.
+zenix/     defs.h and hash.h, the two headers upstream's Makefile writes at build time (src/common/defs.h, hash.h):
+           upstream's values for a Unix build, with NO_BLORB.
+stories/   devours.z5, All Things Devours (public domain) and its notice, README (/usr/share/licenses/devours).
+
+Why the dumb front end: plain text in and out, no cursor addressing, so it works the same on a console, in a term
+window, over telnet and with redirected input and output (the tests play a script of moves). Its status line is
+printed above each answer. The curses front end needs a full curses (colours, wide characters, timed input); Zenix
+has the small one of ports/bsdgames, which is not enough for it.
+
+Settings: -std=gnu99 (upstream's -std=c99; gcc 16's default C23 makes bool a keyword, which frotz.h typedefs) and
+-fwrapv: the random-number generator (common/random.c, z_random) multiplies a signed long until it overflows, which C
+leaves undefined; with -fwrapv it wraps, as upstream means, and the PC's build (64-bit long) and Zenix's (32-bit) give
+the same numbers, since only the low 31 bits are used (tools/games-host-test.sh compares the transcripts). Found by
+UBSan on the PC; upstream's, not changed.
+
+Tests: tools/games-host-test.sh (the PC: this copy under AddressSanitizer and UBSan plays rootfs/tests/games/devours.in;
+its transcript is the reference) and tools/games-test.sh (FS-UAE, an A1200 with 4 MB of fast RAM: Zenix's transcript
+the same line for line).
+
+To update: put the new release's src/common/*.c, *.h and src/dumb/*.c, *.h, COPYING, AUTHORS and doc/dfrotz.6 here,
+its tag, size and sha256 above; bring zenix/defs.h in step with the new Makefile's defaults; build; run both tests;
+read the release notes for changed options (docs/man/frotz.txt).

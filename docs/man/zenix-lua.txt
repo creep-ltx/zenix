@@ -1,0 +1,103 @@
+ZENIX-LUA(1)			Zenix manual
+
+NAME
+    zenix-lua - Lua's zenix module: a window, pictures, sound and time
+
+SYNOPSIS
+    local z = require "zenix"
+
+DESCRIPTION
+    A module built into /bin/lua for small games and toys on Zenix
+    Desktop: a window to draw in, pictures, keys and the mouse as events,
+    samples and a ProTracker module through the sound server, and the
+    time for a game's loop. Nothing is opened before it is used: a
+    script that never makes a window never talks to the desktop.
+
+    The window (the display server, D38):
+    z.window(TITLE, W, H [, {x =, y =, motion = true}])
+        a window W x H pixels inside (hires: a pixel is twice as tall as
+        it is wide); returns it, or nil and why (no desktop). motion =
+        true also sends the mouse's moves without a button held.
+    win:fill(X, Y, W, H, PEN)      a rectangle in a pen (0-15)
+    win:clear([PEN])               the whole window (pen 0)
+    win:line(X0, Y0, X1, Y1, PEN)  a line
+    win:text(X, Y, TEXT, FG [, BG])  text (UTF-8, at most 1024 bytes a
+                                   call) in the 8 x 8 font
+    win:blit(PIC, X, Y [, SX, SY, W, H])  a picture, or part of it
+    win:flush()                    send what was drawn and start the
+                                   samples asked for (z.event and
+                                   z.sleep do both themselves)
+    win:size() -> W, H             win:title(TEXT)   win:close()
+    Drawing outside the window is cut off; coordinates are the window's.
+
+    Pens and pictures:
+    z.pen(0xRGB) -> the pen whose colour is nearest (12-bit colour):
+        the screen's 16 colours are the desktop theme's, so a game asks
+        for colours and draws with the pens it gets
+    z.palette() -> {[0] = 0xRGB, ...} the 16 colours
+    z.screen() -> W, H, DEPTH of the screen
+    z.image({LINE, LINE, ...}) -> a picture: one string a line, one
+        character a pixel: 0-9 and a-f (or A-F) a pen, "." (or a space)
+        see-through; at most 640 x 256 (the display server's limit).
+        pic:size() -> W, H    pic:free()
+    z.image, z.pen, z.palette and z.screen raise an error when there is
+    no desktop; z.window answers nil and why.
+
+    Events and time:
+    z.event([MS]) -> an event, or nil when none came within MS
+        milliseconds (no MS: wait for one). Every event has type and
+        window. type "key": key (the character, or up down left right
+        escape return space backspace tab delete help f1-f10), char,
+        up (true when the key is let go), code (the raw key), qual (the
+        qualifiers). "button": button (1 left, 2 right, 3 middle), up,
+        x, y. "motion": x, y. "close": the close gadget (the script
+        decides). "expose": x, y, w, h to draw again. "resize": the new w,
+        h. "focus" and "minimised": on. "menu", "screen" and "other" are
+        the desktop's rarer events. An event with lost = true came after
+        the event ring was full: some events (a key let go) were dropped.
+    z.time() -> milliseconds since the module was loaded (10 ms steps)
+    z.sleep(MS)    wait; the music goes on
+
+    Sound (the sound server sndd, D40, one stream of Paula's four
+    channels; while a script has it, another program gets "busy"):
+    z.sample(BYTES [, RATE]) -> a sample: BYTES a string of 8-bit signed
+        samples (2 - 131070 bytes), RATE in Hz (1000 - 28000, 8000). At
+        most 64 samples, kept for the script's life; with the module's
+        samples at most 1 MB (the server's bank in chip RAM).
+    z.play(SAMPLE [, VOL [, CHANNEL]])  play it once from the next wait or
+        flush, VOL 0-64 (64), on CHANNEL 0-3 (by turns): it has the channel
+        for its length, a module's notes there wait; true, or false and
+        why (no sound: tried again a few seconds later)
+    z.music(MODULE [, VOL])  play a ProTracker module (the file's bytes
+        as a string: io.open(f, "rb"):read("a"), or made by the script)
+        from its start, looping; true, or false and why
+    z.music(nil)   stop it (its samples leave the bank)
+    When the sound server restarts (after ZINE), the module starts again
+    from its beginning at the next wait.
+    Make the samples before the music starts: a new sample sends every
+    sample to the server again, which stops the channels a moment.
+
+EXAMPLES
+    local z = require "zenix"
+    local win = z.window("dot", 160, 80)
+    local red = z.pen(0xE22)
+    while true do
+      local e = z.event()
+      if e.type == "close" or e.type == "key" and e.key == "q" then
+        break end
+      if e.type == "button" and not e.up then
+        win:fill(e.x, e.y, 8, 4, red) end
+    end
+
+    /bin/gridrun is a whole game: read it.
+
+NOTES
+    The module costs /bin/lua 22 KB (its code, the display's and the
+    sound server's client libraries and modplay's replayer). Floats are
+    slow on a 68020 without an FPU: make sounds with whole numbers. The
+    frames of a module are made a tenth of a second ahead whenever the
+    script waits (z.event, z.sleep): a script that computes for longer
+    without waiting makes the music stall. No full screen yet (D50).
+
+SEE ALSO
+    lua(1), gridrun(1), play(1), modplay(1), zdesk(1)
