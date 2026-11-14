@@ -172,9 +172,10 @@ zpkg-new kept out of a user's list (done 2026-11-05: --all shows them, man zpkg)
    `/sbin/iso9660d` with Rock Ridge and Joliet; never with a real drive, its section 9 says what to check). Audit (done 2026-11-12: docs/audit-2026-11-12-block6.md; its size savings built as D45, docs/d45-boot-memory.md).
 7. **Zenix builds itself, and fun:** assembler, C compiler, `make`, debugger, Lua; games and demos on Zenix. A full
    audit of the whole system, then release 1.0 with the owner's yes. (The plan, 2026-11-13: docs/d52-self-hosting.md,
-   in the order Lua, `make`, our own linker, the assembler, the C compiler, the debugger, the fun; the assembler's
-   and the compiler's licence choices and a live debugger's kernel change are questions for the partner. Lua built
-   2026-11-13 on branch block7, in FS-UAE: d52 section 9.)
+   in the order Lua, `make`, our own linker, the assembler, the C compiler, the debugger, the fun; the partner's
+   answers 2026-11-13 in docs/decisions.md. Built in FS-UAE 2026-11-13/14: Lua, `make` (pdpmake), `#!` scripts
+   (D53), the linker `zld`, the assembler `zas`, the C compiler `tcc` with our own 68k back end, the debugger `zdb`
+   (D54) and programs up to 16 MB; the `devel` package. Next: the fun, then the audit.)
 
 ## Versions and updates (approved by the owner 2026-10-25)
 - **Every part is a package with its own version** (the kernel, `sh`, `awk`, a driver ...); `zpkg -Syu` fetches what
