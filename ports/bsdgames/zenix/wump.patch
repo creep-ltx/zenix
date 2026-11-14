@@ -1,0 +1,38 @@
+--- a/wump/pathnames.h
++++ b/wump/pathnames.h
+@@ -31,5 +31,5 @@
+  *	@(#)pathnames.h	8.1 (Berkeley) 5/31/93
+  */
+ 
+-#define	_PATH_PAGER	"/usr/bin/more"
++#define	_PATH_PAGER	"less"
+ #define	_PATH_WUMPINFO	"/usr/share/games/wump.info"
+--- a/wump/wump.c
++++ b/wump/wump.c
+@@ -768,19 +768,13 @@
+ 		if (!(pager = getenv("PAGER")) || (*pager == 0))
+ 			pager = _PATH_PAGER;
+ 	}
+-	switch (pid = fork()) {
+-	case 0: /* child */
+-		if ((fd = open(_PATH_WUMPINFO, O_RDONLY)) == -1)
+-			err(1, "open %s", _PATH_WUMPINFO);
+-		if (dup2(fd, STDIN_FILENO) == -1)
+-			err(1, "dup2");
+-		(void)execl("/bin/sh", "sh", "-c", pager, (char *) NULL);
+-		err(1, "exec sh -c %s", pager);
+-	case -1:
+-		err(1, "fork");
+-	default:
+-		(void)waitpid(pid, &status, 0);
+-		break;
++	/* Zenix: no fork; the shell runs the pager with the file as its input */
++	{
++		char cmd[256];
++
++		(void)pid; (void)status; (void)fd;
++		(void)snprintf(cmd, sizeof(cmd), "%s < %s", pager, _PATH_WUMPINFO);
++		(void)system(cmd);
+ 	}
+ }
+ 

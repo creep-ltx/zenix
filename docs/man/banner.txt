@@ -1,0 +1,26 @@
+BANNER(1)			Zenix manual
+
+NAME
+    banner - print a message in large letters
+
+SYNOPSIS
+    banner [-dt] [-w WIDTH] [MESSAGE...]
+
+DESCRIPTION
+    Prints the message (the arguments, or a line read from the standard
+    input) down the page in letters made of #, each letter turned on its
+    side, for a printout as long as you like. -w WIDTH sets the letters'
+    height across the page (132 columns by default; at most 132). -d and
+    -t print the program's own debugging and tracing output.
+
+EXIT STATUS
+    0, 1 for a message too long (more than 1024 characters).
+
+NOTES
+    One of the BSD games (NetBSD 10.2's, pinned unchanged in
+    ports/bsdgames; the BSD licence: /usr/share/licenses/bsdgames), in
+    the games package (zpkg -S games).
+    Letters outside ASCII are left out with a warning.
+
+SEE ALSO
+    figlet is not here; fortune(1)

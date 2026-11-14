@@ -1,0 +1,49 @@
+The BSD games on Zenix (roadmap block 7 item 7, "fun"; DESIGN D52 section 8; the user's pages are docs/man/NAME.txt):
+adventure, arithmetic, banner, fortune, hangman, number, rain, robots, tetris, worm, worms, wump. /bin/NAME in the
+games package, built by the Makefile (its "BSD games" section) as plain programs (ZEXE), linked with Zenix's C library
+(picolibc, D27) and libzgames.a (below).
+
+upstream/  NetBSD 10.2's src/games, those twelve directories (fortune: its fortune and strfile programs, README and
+           Notes; not its datfiles), pinned and never changed: NetBSD 10.2's source set src.tgz
+           (https://cdn.netbsd.org/pub/NetBSD/NetBSD-10.2/source/sets/src.tgz, 234,916,515 bytes, SHA512
+           136a61273c69c03d18aa4ff6b7ff7658df7571cb7852aaaeb26325dc3b730eee3d79abd6d1c89bc4e06e8fb6652c67c5ca977b8a81415f35559c4879f42482e7
+           as the release's SHA512 file says), usr/src/games/NAME without the CVS folders.
+LICENSE    the three licences of those files, gathered (the University of California's BSD 3-clause, the NetBSD
+           Foundation's 2-clause in robots/auto.c, Christos Zoulas's 2-clause in adventure/extern.h): no advertising
+           clause, GPL-2-compatible. The notice that travels with the programs: /usr/share/licenses/bsdgames.
+zenix/     Zenix's own files (GPL-2.0-only):
+           include/zgames.h  included first in every file (-include): NetBSD's <sys/cdefs.h> macros picolibc lacks
+                             (__RCSID, __dead, __arraycount ...), the headers NetBSD's bring along, the BSD calls below
+           include/err.h, include/sys/ttydefaults.h  BSD's headers Zenix has not
+           compat.c          err/warn, getprogname, arc4random from /dev/urandom, tcflush's input half, getlogin,
+                             setegid (to a group already held), and flock and ftruncate as ENOSYS (Zenix has neither)
+           include/curses.h, curses.c  a small curses: the calls the games use (windows as character grids, a
+                             refresh writes only the cells that differ from what the terminal shows, the attributes
+                             bold, underline, standout, keypad's arrows), over the xterm escapes Zenix's console reads
+           include/term.h, term.c  the terminfo calls tetris makes, the console's capabilities built in
+           wump.patch        the one patch: wump showed its instructions by fork and exec; on Zenix the shell runs
+                             "PAGER < wump.info" (system), and the pager is less
+           host.h, zrandom.c the PC's side of the build: NetBSD's macros over glibc; Zenix's C library's random()
+                             for adventure's mkdata (below)
+
+What the build does (the Makefile): copies upstream/ into the build, applies zenix/*.patch, compiles each game with
+-D_DEFAULT_SOURCE (BSD's types) and robots's -DMAX_PER_UID=5 -DFANCY. On the PC it builds two of the games' tools:
+adventure's setup (mkdata), which writes the game's text into data.c scrambled with random() seeded by a fixed number,
+which the game undoes with random() on Zenix, so mkdata is built with zrandom.c, the same generator as picolibc's
+(tools/games-host-test.sh checks the first room reads right); and fortune's strfile, which indexes the fortunes
+(games/fortunes, Zenix's own: no third-party collection) into fortunes.dat, its numbers big-endian on any host.
+
+Left out, and why: rogue (its notice forbids selling: not GPL-compatible), hack and larn (big), primes and factor
+(their prime tables are 50-90 KB), trek, sail, phantasia and the rest: a lean set, not forty.
+
+Data on the disk (tools/mkzup.py FAMILY_EXTRA, the same list on the images): /usr/share/games/fortune/fortunes and
+fortunes.dat, /usr/share/games/wump.info (upstream's), /usr/share/dict/words (games/words: 300 words of Zenix's own
+for hangman), /var/games (1777) with robots_roll and tetris.scores (0666: every user's scores; nothing on Zenix is
+set-group-id).
+
+Tests: tools/games-host-test.sh (the PC: adventure, banner and number under ASan and UBSan, strfile's index, the curses
+against a decoder of its own output frame by frame) and tools/games-test.sh (FS-UAE: every game started; the text ones'
+output as the PC's, the curses ones' screens read from the console's grid and quit by their keys).
+
+To update: put the new release's directories here as above (fortune without its datfiles), its name, size and hash
+above; check LICENSE against the files' notices; build (a patch that no longer applies stops it); run both tests.

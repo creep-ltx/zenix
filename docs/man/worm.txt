@@ -1,0 +1,26 @@
+WORM(1)			Zenix manual
+
+NAME
+    worm - the growing worm game
+
+SYNOPSIS
+    worm [LENGTH]
+
+DESCRIPTION
+    Steer the worm to the numbers; each one eaten makes it that much
+    longer and scores it. Do not run into the wall or into yourself.
+    Keys: h left, j down, k up, l right; the capitals move until you
+    stop; Ctrl-L redraws, Ctrl-C ends. LENGTH is the worm's length at
+    the start (7). The score is printed when the game is over.
+
+EXIT STATUS
+    0.
+
+NOTES
+    One of the BSD games (NetBSD 10.2's, pinned unchanged in
+    ports/bsdgames; the BSD licence: /usr/share/licenses/bsdgames), in
+    the games package (zpkg -S games).
+    Drawn with Zenix's own small curses (ports/bsdgames/zenix).
+
+SEE ALSO
+    gridrun(1), robots(1)

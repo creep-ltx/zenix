@@ -243,6 +243,17 @@ names. Symbols from a map in `nm -n`'s format (`zld -M`, or the PC's nm). In the
 permissions and edges by `dbgcheck`); `zld -M`'s map is nm's on the PC (`tools/zld-host-test.sh`). Not yet on a real
 Amiga. See man/zdb.txt.
 
+`games` (roadmap block 7 item 7, DESIGN D52 section 8 "As built: the fun"; the package games): **Frotz** 2.55 (the
+Z-machine player, dumb front end, GPL 2+) with All Things Devours (public domain); twelve **BSD games** of NetBSD 10.2
+(adventure, wump, robots, worm, tetris, hangman, rain, worms, fortune with Zenix's own fortunes, banner, number,
+arithmetic) over a small curses of our own; Lua's **zenix module** in `/bin/lua` (a desktop window, pictures, keys
+and mouse, samples and ProTracker modules through sndd, time; man/zenix-lua.txt) and **gridrun**, a light-cycle duel
+written with it. **verified** on the PC (`tools/games-host-test.sh`: Frotz's transcript, the curses frame by frame,
+gridrun against a stand-in module) and in FS-UAE on an A1200 with 4 MB of fast RAM (`tools/games-test.sh`: the
+transcript and the text games' output as the PC's, the curses games read from the console's grid;
+`tools/luagame-test.sh`: gridrun's window and trails on the screen, its music in sndd's state). Not yet on a real
+Amiga. See man/frotz.txt, man/gridrun.txt and the games' pages.
+
 ## Tooling
 | Feature | Status |
 |---|---|

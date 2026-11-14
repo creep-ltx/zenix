@@ -1,0 +1,24 @@
+NUMBER(1)			Zenix manual
+
+NAME
+    number - write a number in words
+
+SYNOPSIS
+    number [-l] [NUMBER...]
+
+DESCRIPTION
+    Writes each number given (or each line read) in English words:
+    number 1999 says "one thousand. nine hundred ninety-nine." Numbers
+    may be negative and have a fraction; up to 65 digits. -l writes each
+    number on one line.
+
+EXIT STATUS
+    0, 1 for something that is not a number.
+
+NOTES
+    One of the BSD games (NetBSD 10.2's, pinned unchanged in
+    ports/bsdgames; the BSD licence: /usr/share/licenses/bsdgames), in
+    the games package (zpkg -S games).
+
+SEE ALSO
+    arithmetic(1)

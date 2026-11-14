@@ -1,0 +1,62 @@
+FROTZ(1)			Zenix manual
+
+NAME
+    frotz - play interactive fiction (Infocom-style Z-machine stories)
+
+SYNOPSIS
+    frotz [-m] [-q] [-p] [-w COLS] [-h ROWS] [-s SEED] [-u SLOTS] [-L SAVE]
+          [-Z LEVEL] STORY
+
+DESCRIPTION
+    Plays a story file for the Z-machine, the virtual computer of the
+    Infocom text adventures and of the games written with Inform since:
+    versions 1 to 8 (.z1 to .z8, .dat). You read, you type what you do
+    ("go north", "take the key", "examine the desk"), the story answers.
+    The status line (the room, the score or the time) is printed above
+    each answer.
+
+    This is Frotz 2.55 with its "dumb" front end: plain text in and out,
+    no cursor positioning, so it works the same on a console, in a term
+    window, over telnet or ssh, and with its input and output redirected
+    (a script of moves in, a transcript out).
+
+    The games package brings one story: All Things Devours (2004, by
+    "half sick of shadows", public domain), a night in a research lab,
+    six minutes and a prototype that bends time:
+        frotz /usr/share/games/frotz/devours.z5
+    Type "about" first. More stories are on the IF Archive (ifarchive.org,
+    games/zcode); Infocom's own are not free to give away.
+
+OPTIONS
+    -m        no [MORE] prompts (for a pager, a script or a transcript)
+    -q        quiet: no start-up messages
+    -p        plain ASCII output only
+    -w COLS   the screen's width (80), -h ROWS its height (24)
+    -s SEED   the random numbers' seed: the same moves give the same story
+    -u SLOTS  turns undo keeps (25, at most 500)
+    -L SAVE   start from a saved game
+    -Z LEVEL  story errors: 0 none, 1 the first (the default), 2 all,
+              3 stop at the first
+    -R DIR    read and write saves only in DIR
+    The debugging and the rarer options (-a -A -f -i -I -o -O -P -r -S -t
+    -v -x) are upstream's: frotz without a story lists them.
+
+    While playing: save, restore, undo, quit are the story's own words;
+    \help lists Frotz's own commands (a line starting with a backslash).
+
+EXIT STATUS
+    0 when the story ends, 1 on a fatal error (a damaged story file).
+
+FILES
+    /usr/share/games/frotz/devours.z5  All Things Devours (release 3)
+    /usr/share/licenses/frotz          Frotz's licence (GPL 2 or later)
+    /usr/share/licenses/devours        the story's public-domain notice
+
+NOTES
+    No pictures and no sounds (Blorb files are not read); no colours.
+    The size is not read from the terminal: give -w and -h for a console
+    of 80 x 32. Saves are Quetzal files, as other interpreters write.
+    A plain program (ZEXE). Frotz is GPL 2 or later (ports/frotz).
+
+SEE ALSO
+    adventure(1)
