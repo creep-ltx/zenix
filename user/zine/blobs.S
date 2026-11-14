@@ -769,6 +769,10 @@ zs_AllocBitMap:
     CF  zs_InitSemaphore, c_InitSemaphore, 1, %a0
     CF  zs_AttemptSemaphore, c_AttemptSemaphore, 1, %a0
     CF  zs_DeleteFile, c_DeleteFile, 1, %d1
+    CF  zs_FGetC, c_FGetC, 1, %d1
+    CF  zs_UnGetC, c_UnGetC, 2, %d1, %d2
+    CF  zs_FGets, c_FGets, 3, %d1, %d2, %d3
+    CF  zs_SetAttr, c_SetAttr, 1, %d1          /* SetProtection, SetComment, SetFileDate (16.24) */
     CFS zs_AudioBeginIO, zb_audio_beginio, 1, %a1
     CF  zs_AudioAbortIO, zb_audio_abort, 1, %a1
     CF  zs_ConBeginIO, zb_con_beginio, 1, %a1

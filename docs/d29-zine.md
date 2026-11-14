@@ -2470,6 +2470,38 @@ left out; `zine -c` zhello with 0 KB fast RAM; on the 68060 machine `zine -l` za
 68030 three productions that ran their course with their big files left out now find them and run out of memory
 (16 MB); on the 68060 Elude's Shake Off The Dust stays black with its files on the disk and 62 MB free, and plays with `zine
 -m` (49 MB free) or with its files on the disk and 30 MB free: too much free memory stops it, not the reads.
+(Corrected in 16.24: it plays to its end; neither of the other two runs got past its loading picture.)
+
+### 16.24 Shake Off The Dust's end, a file's attributes, line reads (2026-11-14, branch zine15)
+
+**Shake Off The Dust was never stuck** (round 14's "too much free memory" was wrong). Traced on the 68060 machine
+(64 MB, its files on the disk): it loads, starts its 7.3 MB soundtrack (4-bit ADPCM, 27,429 Hz stereo: 272 s), plays
+the whole of it (52 of the trace's 5-second marks, its chunky-to-planar loop running throughout), says "[Sound]:
+Flushing buffers... Done." and then shows a black screen, waiting for a key in a loop of GetSysTime, Delay and
+GetMsg. In warp mode it gets there within the harness's 120 s, so its last screenshot was black. The two runs that
+"played" (`zine -m`, 49 MB free; 32 MB of fast RAM) were still on its loading picture at 120 s. With 32 MB it never
+gets further: its AllocMem calls of 128 KB fill the fast RAM, one is refused, and it loops (out of memory, as on a
+real 32 MB machine). So no cap on AvailMem is needed for it, and none was built: no Top 100 production has been seen
+to fail for having too much memory. (`zine -l` already gives a 1992 program only the fast RAM below 16 MB.)
+
+Escape at its black end screen ends it: "[Sound]: Finished!", then it writes `ds2_demo.vars` (its settings) and
+calls dos **SetProtection** on it, which ZINE lacked: stopped there. Now `SetProtection` (-186), `SetComment` (-180)
+and `SetFileDate` (-396) answer DOSTRUE for a file or directory that is there (the volume's, or one written in
+memory) and 0 with ERROR_OBJECT_NOT_FOUND otherwise; the attribute is not kept (the session's files are copies,
+nothing goes back to the disk, 16.9) (`c_SetAttr`, blibs.c).
+
+**FGetC, UnGetC, FGets** (-306, -318, -336). Nature's Jesus Christ Motocross reads a text file a byte at a time
+(found when it got more memory, below). ZINE's file handles have no buffer, so FGetC is a Read of one byte (-1 at the
+end), UnGetC steps the file back by one (Seek; 0 when it cannot), FGets reads up to `len - 1` bytes to and with a
+newline, ends them with a 0 and answers the buffer (0 when nothing was read).
+
+**The trace build dumps low memory** when a session ends on an unsupported call or a crash below `$1000` (the first
+4 KB as the program left them, read before Zenix's low memory comes back): for a program that runs its code there,
+as Elysium's decruncher at `$100` and its program at `$800`.
+
+*Verified* in FS-UAE: `tools/zine-emu-test.sh` (zwrite: SetProtection of a written file, SetComment of one of its
+own, SetFileDate by another name, SetProtection of a deleted file refused with 205; FGetC, UnGetC and FGets read a
+written file a line at a time, then 0 at the end).
 
 ## 17. Questions for the owner (what ZINE should be)
 
