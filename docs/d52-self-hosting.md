@@ -401,8 +401,9 @@ the full images carry it, the demo floppies and the RAM disks do not.
   NetBSD's macros and the BSD calls picolibc lacks (`err`, `getprogname`, `arc4random` from `/dev/urandom`, `flock` and
   `ftruncate` as ENOSYS), a **small curses of our own** (`zenix/curses.c`, about 600 lines: character grids, a refresh
   writes only the cells that differ from what the terminal shows, keypad's arrows; SIGALRM held off during a refresh,
-  as worm and robots -r refresh from their alarm handlers), tetris's terminfo built in, and one patch (wump showed its
-  instructions by fork and exec: Zenix has no fork, so the shell runs `less < wump.info`). adventure's text is
+  as worm and robots -r refresh from their alarm handlers), tetris's terminfo built in, and two patches (wump showed its
+  instructions by fork and exec: Zenix has no fork, so the shell runs `less < wump.info`; adventure took a clock at
+  1970, an Amiga without a battery clock, for a game suspended minutes ago and refused to start). adventure's text is
   scrambled at build time with `random()`, which the game undoes on Zenix: the PC's tool is built with picolibc's
   generator (`zrandom.c`). Zenix's own data: 40 **fortunes** from the night city and 300 words for hangman (ours,
   GPL 2); score files in `/var/games` (1777, the files 0666: nothing on Zenix is set-group-id).

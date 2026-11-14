@@ -21,8 +21,11 @@ zenix/     Zenix's own files (GPL-2.0-only):
                              refresh writes only the cells that differ from what the terminal shows, the attributes
                              bold, underline, standout, keypad's arrows), over the xterm escapes Zenix's console reads
            include/term.h, term.c  the terminfo calls tetris makes, the console's capabilities built in
-           wump.patch        the one patch: wump showed its instructions by fork and exec; on Zenix the shell runs
+           wump.patch        wump showed its instructions by fork and exec; on Zenix the shell runs
                              "PAGER < wump.info" (system), and the pager is less
+           adventure.patch   a clock behind the last save's time (or before 1977: an Amiga without a battery
+                             clock starts in 1970) made every new game "suspended a mere -3680640 minutes ago"
+                             and refused it: a negative delay counts as long ago
            host.h, zrandom.c the PC's side of the build: NetBSD's macros over glibc; Zenix's C library's random()
                              for adventure's mkdata (below)
 
