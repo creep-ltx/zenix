@@ -228,8 +228,8 @@ FAMILIES = [
     ("lua", "Lua 5.4, the scripting language (DESIGN D52)", "lua"),
     ("make", "make, the POSIX make (pdpmake, public domain; DESIGN D52)", "make"),
     ("devel", "tcc, zld, zas, zdb: compiler, linker, assembler, debugger, C library", "zld zas tcc zdb"),
-    ("games", "games: Frotz, the BSD games, Lua games with windows and sound (gridrun)",
-              "frotz adventure arithmetic banner fortune hangman number rain robots tetris worm worms wump"),
+    ("games", "games: Frotz, the BSD games, Lua games (gridrun), the Zenix intro",
+              "frotz adventure arithmetic banner fortune hangman number rain robots tetris worm worms wump zintro"),
     ("shadow", "users and passwords: su, sudo, passwd, useradd", "su sudo passwd useradd userdel gpasswd"),
     ("disktools", "disks and filesystems: fdisk, mkfs, fsck, dd, umount", "dd fdisk mkfs_ext2 fsck_ext2 mkfs_zenixfs "
                   "fsck_zenixfs umount"),

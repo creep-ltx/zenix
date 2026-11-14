@@ -50,7 +50,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet \
           rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs files show ttf2font \
           play modplay lsusb lua make zld zas tcc zdb \
-          frotz adventure arithmetic banner fortune hangman number rain robots tetris worm worms wump
+          frotz adventure arithmetic banner fortune hangman number rain robots tetris worm worms wump zintro
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -561,17 +561,18 @@ STACK_exfatd := 8192
 # ---- Zenix Desktop (DESIGN D38, docs/d38-desktop.md): the display server /sbin/displayd (display/server/: the
 # protocol, the input and the font reader cold, -Os; the drawing and the fonts -O2: the golden path, input to screen), the client
 # library display/lib/libdisplay.c linked into each client (static, D38 5), the test client dpytest ----
-DPYDOBJS := $(patsubst %,$(BUILD)/dpyd-%.no,displayd win draw font amifont fb)
+DPYDOBJS := $(patsubst %,$(BUILD)/dpyd-%.no,displayd win draw font amifont fb screen)
 $(BUILD)/dpyd-%.no: display/server/%.c display/server/dpyd.h display/server/amifont.h display/ttf/ttfont.h display/ttf/ttf.h display/server/fb.h kernel/hwinfo.h display/proto.h user/libz.h user/usys.h | $(BUILD)
-	$(CC) $(UCFLAGS) -Iuser -DDIW_V=$(DIWV) $(if $(filter displayd win amifont fb,$*),-Os) -c $< -o $@
+	$(CC) $(UCFLAGS) -Iuser -DDIW_V=$(DIWV) $(if $(filter displayd win amifont fb screen,$*),-Os) -c $< -o $@
 $(BUILD)/displayd.uelf: $(DPYDOBJS) $(BUILD)/screenfile.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(DPYDOBJS) $(BUILD)/screenfile.no $(BUILD)/libz.uo $(LIBGCC) -o $@
 STACK_displayd := 8192
 # the demo floppies' displayd (audit 2026-11-12 block 6, 2.3): the same files with -DNO_RTG, without fb.c and the card's
-# branches (their bootblock writes no card record, D43 3), put on them as /sbin/displayd; every other image the full one
+# branches (their bootblock writes no card record, D43 3), and -DNO_SCREEN, without screen.c (D55: no program on them
+# opens a screen of its own), put on them as /sbin/displayd; every other image the full one
 DPYDNOBJS := $(patsubst %,$(BUILD)/dpydn-%.no,displayd win draw font amifont)
 $(BUILD)/dpydn-%.no: display/server/%.c display/server/dpyd.h display/server/amifont.h display/ttf/ttfont.h display/ttf/ttf.h display/server/fb.h kernel/hwinfo.h display/proto.h user/libz.h user/usys.h | $(BUILD)
-	$(CC) $(UCFLAGS) -Iuser -DNO_RTG -DDIW_V=$(DIWV) $(if $(filter displayd win amifont,$*),-Os) -c $< -o $@
+	$(CC) $(UCFLAGS) -Iuser -DNO_RTG -DNO_SCREEN -DDIW_V=$(DIWV) $(if $(filter displayd win amifont,$*),-Os) -c $< -o $@
 $(BUILD)/displayd-nortg.uelf: $(DPYDNOBJS) $(BUILD)/screenfile.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(DPYDNOBJS) $(BUILD)/screenfile.no $(BUILD)/libz.uo $(LIBGCC) -o $@
 STACK_displayd-nortg := 8192
@@ -622,6 +623,14 @@ $(BUILD)/show-pic.uo: display/show/pic.c display/show/pic.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -mtune=68020 -c $< -o $@
 $(BUILD)/show.uelf: $(BUILD)/show.uo $(BUILD)/show-pic.uo $(BUILD)/keys.no $(BUILD)/libdisplay.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/show.uo $(BUILD)/show-pic.uo $(BUILD)/keys.no $(BUILD)/libdisplay.no $(BUILD)/libz.uo $(LIBGCC) -o $@
+# the Zenix intro (DESIGN D55 13, docs/d55-screens.md): a screen of its own; its logo, font, text and module made by
+# tools/mkintro.py into a header (nothing third-party); the music through sndd with modplay's replayer
+$(BUILD)/zintro-data.h: tools/mkintro.py tools/mkmod.py | $(BUILD)
+	python3 tools/mkintro.py header $@ >/dev/null
+$(BUILD)/zintro.uo: display/intro/zintro.c $(BUILD)/zintro-data.h display/display.h display/proto.h user/sndlib.h user/sndproto.h user/modrep.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -I$(BUILD) -c $< -o $@
+$(BUILD)/zintro.uelf: $(BUILD)/zintro.uo $(BUILD)/modrep.uo $(BUILD)/sndlib.uo $(BUILD)/libdisplay.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/zintro.uo $(BUILD)/modrep.uo $(BUILD)/sndlib.uo $(BUILD)/libdisplay.no $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/conprefs.uo: user/conprefs.c user/cfgfile.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
 $(BUILD)/conprefs.uelf: $(BUILD)/conprefs.uo $(BUILD)/cfgfile.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
