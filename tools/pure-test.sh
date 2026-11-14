@@ -82,8 +82,12 @@ rx   $L "... a ZEXE build reads into its literal" "crash: open of a literal path
 line $L "a running program's file opened for writing (cp): text file busy" "cp: /tmp/hp: text file busy"
 line $L "... cp fails" "cp=1"
 rx   $L "... appending to it (>>) is refused too" "sh: .*text file busy.*"
-cmp_ "renamed over while it runs: the next start loads the new file (two copies)" "$(S $L versions)" -gt "$(S $L one)"
-line $L "... the running one kept its old code to the end, the new one ran the new code" "old=30 new=10"
+# compared with the old file's copy running alone (==busy), not with crashpure's (==one): crashpure's code is larger
+# than two of hellopure's since libz's printf went to -Os (2026-11-12), so that comparison failed with two copies. The
+# old copy (12 s) is started, replaced and measured in one typed line: the typing runs ahead of the Amiga in fast mode
+cmp_ "the running program alone: its one copy" "$(S $L busy)" -gt "$(S $L base)"
+cmp_ "renamed over while it runs: the next start loads the new file (two copies)" "$(S $L versions)" -gt "$(S $L busy)"
+line $L "... the running one kept its old code to the end, the new one ran the new code" "old=60 new=10"
 cmp_ "... both freed" "$(S $L gone)" -eq "$(S $L base)"
 rx   $L "a file open for writing is started as a private copy (SHR 0, its code in MEM)" " +[0-9]+ +[0-9]+ +[0-9]+ +-?[0-9]+ [a-z]+ +([5-9]|[1-9][0-9]+) +0 hw"
 cmp_ "... no shared copy of it" "$(S $L private)" -eq "$(S $L base)"
