@@ -2,9 +2,9 @@
 /* zbig: a program whose file and hunks do not fit in memory together (docs/d29-zine.md 16.12; tools/mkbigtest.py
  * writes it: a 1.5 MB chip data hunk, a 1.25 MB fast data hunk, a 64 KB BSS hunk), so zine loads it from its file before
  * the hand-over. Checks both data hunks' first, middle and last longwords, that they are in chip and fast RAM, the
- * BSS clear; in its folder the small zbig.small is found; then (16.23) zbig.huge (1.5 MB, longword i 0x4E000000 | i)
+ * BSS clear; in its folder the small zbig.small is found; then (16.23) zbig.huge (400 KB, longword i 0x4E000000 | i)
  * stays on the disk and is read from there (its first longword, an aligned 1 KB, 8 bytes across a sector's end, the
- * last 8 bytes, then the end), zbig.mid1-8 (200 KB each, more than the volume's budget together) on the disk or in
+ * last 8 bytes, then the end), zbig.mid1-6 (200 KB each, more than the volume's budget together) on the disk or in
  * the volume, read right, and the archive zbig-pack.lha left out (archives go first); with the argument m (zine -m: every
  * file in memory), too big for ZINE's volume as before 16.23, zbig.huge and zbig-pack.lha are left out and not found.
  * Exit 0 when everything held, else the step. PC-relative code. */
@@ -118,17 +118,17 @@ main:
     bne     8f
     cmp.l   #0x4E0004FF,1020(%a2)
     bne     8f
-    moveq   #9,%d7              /* 8 bytes from byte 1000002 (a sector's end inside them: 1000448 is not; 1000002 is
-                                 * in sector 1953, the read through the 8-sector cache) */
-    move.l  #1000002,%d2
+    moveq   #9,%d7              /* 8 bytes from byte 300002 (in sector 585, which ends at 300032: no sector's end inside
+                                 * them; the read through the 8-sector cache) */
+    move.l  #300002,%d2
     moveq   #-1,%d3
     bsr     seek
     lea     buf(%pc),%a2
     moveq   #8,%d3
     bsr     rd
-    cmp.l   #0xD0904E03,(%a2)
+    cmp.l   #0x24F84E01,(%a2)
     bne     8f
-    cmp.l   #0xD0914E03,4(%a2)
+    cmp.l   #0x24F94E01,4(%a2)
     bne     8f
     moveq   #10,%d7             /* 8 bytes across the end of sector 1 (bytes 1020-1027): two sectors in the cache */
     move.l  #1020,%d2
@@ -146,9 +146,9 @@ main:
     bsr     seek
     moveq   #8,%d3
     bsr     rd
-    cmp.l   #0x4E05FFFE,(%a2)
+    cmp.l   #0x4E018FFE,(%a2)
     bne     8f
-    cmp.l   #0x4E05FFFF,4(%a2)
+    cmp.l   #0x4E018FFF,4(%a2)
     bne     8f
     moveq   #4,%d3
     bsr     rd0
@@ -189,14 +189,14 @@ main:
     bne     8f
     move.l  %d4,%d1
     jsr     LVO_Close(%a6)
-    moveq   #14,%d7             /* zbig.mid1 and zbig.mid8, 200 KB each: in the volume or (the budget's largest) on
+    moveq   #14,%d7             /* zbig.mid1 and zbig.mid6, 200 KB each: in the volume or (the budget's largest) on
                                  * the disk, their last longwords right either way */
     lea     f_mid1(%pc),%a0
     move.l  #0x4D100000+51199,%d6
     bsr     midchk
     bne     9f
-    lea     f_mid8(%pc),%a0
-    move.l  #0x4D800000+51199,%d6
+    lea     f_mid6(%pc),%a0
+    move.l  #0x4D600000+51199,%d6
     bsr     midchk
     bne     9f
     moveq   #12,%d7             /* the archive: left out (the folder is over the volume's budget: archives first) */
@@ -270,10 +270,10 @@ f_small: .asciz "zbig.small"
 f_huge:  .asciz "zbig.huge"
 f_lha:   .asciz "zbig-pack.lha"
 f_mid1:  .asciz "zbig.mid1"
-f_mid8:  .asciz "zbig.mid8"
+f_mid6:  .asciz "zbig.mid6"
 m_load:  .asciz "zbig: loaded from its file before the hand-over: its chip, fast and BSS hunks right\n"
 m_vol:   .asciz "zbig: zbig.small found; zbig.huge and zbig-pack.lha left out of the volume\n"
-m_disk:  .asciz "zbig: zbig.small found; zbig.huge read from the disk (its first longword, 1 KB, across sectors, the last bytes, the end, 100 KB across runs) right; zbig.mid1 and .mid8 right; zbig-pack.lha left out\n"
+m_disk:  .asciz "zbig: zbig.small found; zbig.huge read from the disk (its first longword, 1 KB, across sectors, the last bytes, the end, 100 KB across runs) right; zbig.mid1 and .mid6 right; zbig-pack.lha left out\n"
     .even
 buf:     .long 0, 0
 big:     .space 1024

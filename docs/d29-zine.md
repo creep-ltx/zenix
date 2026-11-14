@@ -2461,7 +2461,7 @@ It is not the whole of Elysium's trouble.
   table into exec's jump table below `$800`, as in round 12.
 - What sends it into low memory, and why it depends on timing, was not found.
 
-*Verified* in FS-UAE: `tools/zine-emu-test.sh` (zbig: zbig.huge, 1.5 MB, read from the disk, its first longword, an
+*Verified* in FS-UAE: `tools/zine-emu-test.sh` (zbig: zbig.huge, 400 KB, read from the disk, its first longword, an
 aligned 1 KB, 8 bytes through the cache, 8 across a sector's end, the last 8 and the end; `zine -m` as before:
 left out; `zine -c` zhello with 0 KB fast RAM; on the 68060 machine `zine -l` zalloc with the 8 MB below 16 MB of
 72 MB; zsuper: ExecBase written over and a SOFTINT acknowledged, which crashed without the change).
