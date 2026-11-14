@@ -274,3 +274,26 @@ int dpy_fontset(const char *name, int size)    /* name: DPY_FONTNAME bytes of th
 {
     return dpy_call(DPY_FONT_SET, name && *name ? (unsigned)name : 0, (unsigned)size, 0, 0);
 }
+
+/* DESIGN D55: a screen of its own */
+int dpy_screen(struct dpyscr *s)
+{
+    s->size = DPYSCR_FIRST;
+    return dpy_call(DPY_SCREEN, (unsigned)s, 0, 0, 0);
+}
+int dpy_scr_set(int what, unsigned a1, unsigned a2, int *bad)
+{
+    struct umsg m;
+    memset(&m, 0, sizeof m);
+    m.type = DPY_SCR_SET;
+    m.a[0] = (unsigned)what; m.a[1] = a1; m.a[2] = a2; m.a[3] = ~0u;
+    if (sport < 0)
+        return -ENOTCONN;
+    int r = sys_call(sport, &m);
+    if (bad)
+        *bad = r == -EINVAL ? (int)m.a[3] : -1;
+    return r;
+}
+int dpy_scr_close(void) { return dpy_call(DPY_SCR_CLOSE, 0, 0, 0, 0); }
+int dpy_vwait(unsigned n) { return sys_vblank(n & 0x7FFFFFFFu); }
+int dpy_vcount(void) { return sys_vblank(CONV_ASK); }

@@ -215,6 +215,8 @@ static int key_line(char **w, int n)
         if (!strcmp(w[1], actions[i].n)) act = actions[i].a;
     if (code < 0 || !act || (code >= 0x50 && code <= 0x59))
         return -1;                      /* Amiga+F1..F10 are the kernel's (the consoles) */
+    if (code == 0x36 && qual == GQ_LAMIGA && !shift)
+        return -1;                      /* Left Amiga+N is the display server's: the desktop or a screen in front (D55) */
     short a = n > 2 ? (short)atoi(w[2]) : 0, b = n > 3 ? (short)atoi(w[3]) : 0;
     char *cmd = 0;
     if (act == A_RUN) {

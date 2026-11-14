@@ -94,6 +94,20 @@ DESCRIPTION
     floppies' displayd is built without this (their boot never hands
     over a card): it always uses the chipset's screen.
 
+    A program may open a screen of its own (DPY_SCREEN, DESIGN D55): its
+    own mode (lores or hires, interlaced, 1-8 planes, HAM6, HAM8, Extra
+    Half-Brite; OCS/ECS: lores up to 6 planes, hires up to 4), its own
+    palette and planes in its own chip RAM, which the kernel holds while
+    they are shown, and a Copper list in Zenix's own instructions that
+    displayd checks (every fetch inside the planes, every line's moves
+    in time) and turns into Copper words itself. A new screen comes in
+    front; Left Amiga+N puts the desktop in front and back again (Left
+    Amiga+M too while a screen is in front); keys and the mouse go to the
+    screen's program while it is in front, and there is no pointer on it.
+    It goes when its program closes it or ends. Not on a graphics card.
+    It says "displayd: a screen's program ended" when the kernel hands
+    it the planes of a program that ended with its screen open.
+
     It ends when its last client has gone, and the console is text again.
 
 OPTIONS

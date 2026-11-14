@@ -17,17 +17,20 @@
 
 int aga;
 int wm_cl = -1;
-static int port, gfd = -1, confd = -1, persist, grabbed, grabbed_con;
+static int port, confd = -1, persist, grabbed, grabbed_con;
+int gfd = -1;
 u32 ndraws;
 /* the Copper list (chip RAM): its fixed part twice, one a field of an interlaced screen (the long field's, the short
  * field's: D38 "Screen modes"; without interlace the first alone runs), each jumping to its field's changing part */
-static u16 *copl[2];
+u16 *copl[2];
 static int cop_col, cop_col2;           /* the index of COLOR00's value in them; of playfield 2's first (AGA) */
 static u16 *dyn[2][2], *cop_jmp[2];     /* the changing part: two buffers, each a list a field; COP2LCL's values */
 static int dyn_cur;                     /* the buffer the Copper is told to use */
 int lace;                               /* the screen is interlaced: a field shows every other line */
 int frame_l = 312;                      /* a frame's lines: 312 PAL, 262 NTSC (a long field one more) */
-static int base_w, base_h;              /* the console's size (640 x 256 PAL, 640 x 200 NTSC): a field's */
+int base_w, base_h;                     /* the console's size (640 x 256 PAL, 640 x 200 NTSC): a field's */
+u16 *scr_tramp;                         /* D55: the screens' trampolines (in the changing part's block) */
+u8 *scr_zero;                           /* ... and an empty line of 96 bytes (8-aligned): an empty sprite, a short screen's end */
 static u16 *spr;                        /* the pointer: sprite 0 */
 static int ptx, pty;                    /* the pointer, from the kernel */
 static u16 btns;                        /* its buttons (GQ_*BUTTON) */
@@ -303,6 +306,9 @@ static void dyn_build(u16 *c, int on, int f)    /* f: the field (0 long: lines 0
         *c++ = 0xFFFE;
         MOVE(0x080, (u32)copl[1] >> 16);
         MOVE(0x082, (u32)copl[1]);
+    } else {                            /* D55: after an interlaced screen alternated the fields, the one list again */
+        MOVE(0x080, (u32)copl[0] >> 16);
+        MOVE(0x082, (u32)copl[0]);
     }
     *c++ = 0xFFFF;
     *c++ = 0xFFFE;
@@ -322,18 +328,35 @@ static void dyn_settle(void)
         ;
     flip_line = -1;
 }
+/* the jump words written: the beam and the time read only after them (a reading delayed by a preemption then only
+ * makes the settle longer; read before, it could end early and let a running list be rewritten: the D55 reviews) */
+static void flip_mark(void)
+{
+    flip_line = dpy_beam() + DIW_V;
+    flip_t = sys_hrtime();
+}
 static void dyn_flip(int on)
 {
     dyn_settle();
     int b = dyn_cur ^ 1;
     for (int f = 0; f < 2; f++)
         dyn_build(dyn[b][f], on, f);
-    flip_line = dpy_beam() + DIW_V;
-    flip_t = sys_hrtime();
+    dyn_cur = b;
+    if (scr_shown())                    /* D55: a screen is in front; the desktop's lists wait for its return */
+        return;
     for (int f = 0; f < 2; f++)
         *cop_jmp[f] = (u16)(u32)dyn[b][f];
-    dyn_cur = b;
+    flip_mark();
 }
+/* D55: show a screen's trampolines (t0, t1: the fields'), or the desktop's changing part again (0) */
+void cop_show(const u16 *t0, const u16 *t1)
+{
+    dyn_settle();
+    for (int f = 0; f < 2; f++)
+        *cop_jmp[f] = (u16)(u32)(t0 ? (f ? t1 : t0) : dyn[dyn_cur][f]);
+    flip_mark();
+}
+void cop_settle(void) { dyn_settle(); }
 int hw_ok(void) { return aga && use_blit && cop_col2 && scr.depth == 4; }
 void hw_show(const struct bm *b, const u8 *zero, int x, int y, int pen)
 {
@@ -556,7 +579,7 @@ static int screen_up(int con)
     /* the fixed part of the Copper list; the part that changes (the planes, and playfield 2 while a window is dragged
      * by the chips) is one of two buffers of a list a field in dynmem, jumped to with COP2LC and COPJMP2 (D38
      * "Dragging with the chips", "Screen modes") */
-    u16 *dm = sys_memalloc_chip(1024 + 1024);
+    u16 *dm = sys_memalloc_chip(3072);
     if (!dm) {
         sys_close(gfd);
         gfd = -1;
@@ -565,7 +588,15 @@ static int screen_up(int con)
         bm_free(&scr);
         return -ENOMEM;
     }
-    u16 *d0 = (u16 *)(((u32)dm + 1023) & ~1023u);  /* an aligned 1 KB block never crosses 64 KB: one word flips */
+    /* the changing part's lists (1 KB), D55's trampolines (192 bytes) and empty line (96): 1,312 bytes that cross no
+     * 64 KB boundary (one word flips), found in 3 KB: a boundary leaves one side of at least 1.5 KB */
+    u32 a0 = ((u32)dm + 7) & ~7u;
+    if ((a0 & 0xFFFF) + 1312 > 0x10000)
+        a0 = (a0 + 0xFFFF) & ~0xFFFFu;
+    u16 *d0 = (u16 *)a0;
+    scr_tramp = d0 + 512;
+    scr_zero = (u8 *)(d0 + 512 + 96);
+    memset(scr_tramp, 0, 192 + 96);
     for (int b = 0; b < 2; b++)
         for (int f = 0; f < 2; f++)
             dyn[b][f] = d0 + 128 * (2 * b + f);
@@ -685,6 +716,8 @@ static struct dpykey grabs[DPY_MAXGRAB];
 static int ngrabs;
 static void key(const struct ugevent *e)
 {
+    if (scr_key(e))                     /* D55: Left Amiga+N, and every key while a screen is in front */
+        return;
     int up = e->code & 0x80, code = e->code & 0x7F;
     if (wm_cl >= 0)
         for (int i = 0; i < ngrabs; i++)
@@ -811,6 +844,8 @@ static void pointer(const struct ugevent *e)
     if (moved && rtg)
         fb_pointer(ptx, pty);
     btns = now;
+    if (scr_pointer(e, old, now, moved))        /* D55: a screen in front has the mouse */
+        return;
     if (pgrab_w >= 0 && (wins[pgrab_w].id != pgrab_id || !(wins[pgrab_w].state & WST_SHOWN)))
         pgrab_w = -1;
     if (pgrab_w >= 0) {                 /* the manager's menu has the pointer until the buttons are up */
@@ -860,6 +895,7 @@ static void kernel_events(void)
                 blit_idle();
                 use_blit = 0;
                 hvs_show(0);            /* D43: the Pi's HDMI shows the chipset's picture (the text console) */
+                scr_focus(0);
                 sys_congack(gfd, (u16)e->x);
                 break;
             case GEV_ACQUIRE:           /* every key counts as up; the screen was never touched */
@@ -871,6 +907,10 @@ static void kernel_events(void)
                     fb_pointer(ptx, pty);
                 }
                 hvs_show(1);
+                scr_focus(1);
+                break;
+            case GEV_GONE:              /* D55: a screen's owner ended; the kernel handed us its planes */
+                scr_gone((u32)e->ch[0] << 24 | (u32)e->ch[1] << 16 | (u32)e->ch[2] << 8 | e->ch[3]);
                 break;
             case GEV_KEY:
                 key(e);
@@ -890,6 +930,14 @@ static int peer(struct umsg *m, int op, u32 addr, u32 len)
 {
     struct upeermem pm = { addr, len };
     return sys_peer(m, op, &pm);
+}
+int dpy_peer(struct umsg *m, int op, u32 addr, u32 len) { return peer(m, op, addr, len); }
+/* D55: a screen came in front: no held button's window, menu grab or frame press survives it */
+void input_reset(void)
+{
+    grab_w = -1;
+    pgrab_w = -1;
+    fpress.win = 0;
 }
 static int client_of(struct umsg *m)
 {
@@ -919,6 +967,7 @@ static void drop(int cl)
     if (!c->used)
         return;
     expose_wait &= ~(1u << cl);
+    scr_drop(cl);                       /* D55: its screen, off the glass first */
     c->used = 0;
     if (wm_cl == cl)
         wm_gone();
@@ -1185,6 +1234,10 @@ static int req(struct umsg *m)
                 nlate = 0;
         return 0;
     }
+    case DPY_SCREEN:                    /* D55: a screen of its own (screen.c) */
+    case DPY_SCR_SET:
+    case DPY_SCR_CLOSE:
+        return scr_req(m, cl);
     case DPY_MODE:                      /* any client of the desktop's session (a preferences program) */
         if (rtg)                        /* D43: a card's screen has the mode AmigaOS gave it; nothing changes */
             return a[0] == DPYM_ASK || a[0] <= DPYM_RTG ? DPYM_RTG : -EINVAL;

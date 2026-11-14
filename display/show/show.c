@@ -25,9 +25,9 @@ static int bgpen, fgpen;
 
 /* ================================================================ keys and actions */
 enum { A_NONE, A_NEXT, A_PREV, A_FIRST, A_LAST, A_ZOOM, A_DITHER, A_LEFT, A_RIGHT, A_UP, A_DOWN, A_HELP, A_QUIT,
-       NACT };
+       A_SCREEN, NACT };
 static const char *const actname[NACT] = { "none", "next", "prev", "first", "last", "zoom", "dither", "left",
-                                           "right", "up", "down", "help", "quit" };
+                                           "right", "up", "down", "help", "quit", "screen" };
 static const char defaults[] =
     "; show - the picture viewer of Zenix Desktop: the keys (man show). Edit freely; show reads this at start.\n"
     ";\n"
@@ -38,10 +38,11 @@ static const char defaults[] =
     "; The format is files' and Ahiru.keys's.\n"
     ";\n"
     "; left and right move a picture wider than the window; when its width\n"
-    "; fits they go to the previous and next picture.\n"
+    "; fits they go to the previous and next picture. screen shows the\n"
+    "; picture on a screen of its own, in its own mode and colours (DESIGN D55).\n"
     "\n[main]\n"
     "n next\n<Space> next\np prev\n<BS> prev\ngg first\nG last\n"
-    "z zoom\nd dither\n"
+    "z zoom\nd dither\ns screen\n"
     "h left\n<Left> left\nl right\n<Right> right\nk up\n<Up> up\nj down\n<Down> down\n"
     "? help\n<Help> help\nq quit\n<Esc> quit\n";
 #define MAXB 64
@@ -367,6 +368,125 @@ static void step(int d)
     if (verbose) dprintf(1, "show: say: %s\n", d > 0 ? "the last picture" : "the first picture");
 }
 
+/* ================================================================ a screen of its own (DESIGN D55, docs/d55-screens.md
+ * section 11): the picture's mode and palette, its planes copied into chip RAM (a row padded to 8 bytes) */
+static int onscr, spl, sbpr, srows, sw, sh, sx, sy;
+static u8 *smem;
+static void scr_off(void)
+{
+    if (!onscr)
+        return;
+    dpy_scr_close();                    /* (displayd lets go of the planes before it answers) */
+    sys_memfree(smem);
+    smem = 0;
+    onscr = 0;
+    if (verbose) dprintf(1, "show: screen closed\n");
+}
+static void scr_say(const char *w)
+{
+    char t[80];
+    snprintf(t, sizeof t, "(no screen of its own: %s) %s", w, name);
+    dpy_title(win, t);
+    if (verbose) dprintf(1, "show: say: no screen of its own: %s\n", w);
+}
+static void scr_on(void)
+{
+    scr_off();
+    if (!have) return;
+    if (P.flags & (PIC_RGB | PIC_SHRES)) { scr_say(P.flags & PIC_RGB ? "24-bit" : "super-hires"); return; }
+    int chunky = (P.flags & PIC_CHUNKY) != 0, hires = (P.flags & PIC_HIRES) != 0, lace = (P.flags & PIC_LACE) != 0;
+    int d = P.depth;
+    if (chunky)
+        for (d = 1; d < 8 && (1 << d) < P.ncol; d++)
+            ;
+    int base = dpy_h >= 400 ? dpy_h / 2 : dpy_h, maxh = base << lace;
+    sw = hires ? 640 : 320;
+    sh = P.h < maxh ? P.h : maxh;
+    if (lace) sh &= ~1;
+    if (sh < 2) sh = 2;
+    int pb = (P.w + 7) / 8;
+    spl = ((pb > sw / 8 ? pb : sw / 8) + 7) & ~7;
+    srows = P.h > sh ? P.h : sh;
+    sbpr = spl * d;
+    u32 bytes = (u32)sbpr * (u32)srows;
+    if (!(smem = sys_memalloc_chip(bytes))) { scr_say("no chip RAM"); return; }
+    memset(smem, 0, bytes);
+    int perm[8];                        /* HAM8: the file's control planes (its top two) are the hardware's 1 and 2 */
+    for (int k = 0; k < 8; k++)
+        perm[k] = (P.flags & PIC_HAM8) ? (k < 2 ? 6 + k : k - 2) : k;
+    for (int y = 0; y < P.h; y++) {
+        u8 *o = smem + (u32)y * (u32)sbpr;
+        if (!chunky) {
+            u32 n = P.rowbytes < (unsigned)spl ? P.rowbytes : (unsigned)spl;
+            for (int k = 0; k < d; k++)
+                memcpy(o + k * spl, P.data + (u32)y * P.stride + (u32)perm[k] * P.rowbytes, n);
+        } else
+            for (int x = 0; x < P.w; x++) {
+                int pen = P.data[(u32)y * P.stride + (u32)x];
+                for (int k = 0; k < d; k++)
+                    if (pen >> k & 1)
+                        o[k * spl + (x >> 3)] |= (u8)(0x80 >> (x & 7));
+            }
+    }
+    static u32 pal[256];
+    int n = (P.flags & PIC_HAM8) ? 64 : (P.flags & PIC_HAM6) ? 16 : (P.flags & PIC_EHB) ? 32 : 1 << d;
+    if (n > P.ncol && !(P.flags & PIC_EHB)) n = P.ncol;
+    for (int i = 0; i < n; i++)
+        pal[i] = (u32)P.pal[3 * i] << 16 | (u32)P.pal[3 * i + 1] << 8 | P.pal[3 * i + 2];
+    struct dpyscr s;
+    memset(&s, 0, sizeof s);
+    s.w = (u16)sw; s.h = (u16)sh; s.depth = (u16)d;
+    s.flags = (u16)((lace ? DPYSF_LACE : 0) | (P.flags & (PIC_HAM6 | PIC_HAM8) ? DPYSF_HAM : 0) |
+                    (P.flags & PIC_EHB ? DPYSF_EHB : 0));
+    s.planes = (u32)smem; s.bytes = bytes; s.pstride = (u32)spl; s.bpr = (u16)sbpr; s.ncol = (u16)n;
+    s.palette = (u32)pal;
+    int r = dpy_screen(&s);
+    if (r < 0) {
+        sys_memfree(smem);
+        smem = 0;
+        scr_say(r == -ENODEV ? "not a mode of this display" : zstrerror(r) ? zstrerror(r) : "refused");
+        return;
+    }
+    onscr = 1;
+    sx = sy = 0;
+    if (verbose) {
+        char m[48];
+        pic_mode(&P, m, sizeof m);
+        dprintf(1, "show: screen %d x %d, %d planes (%s)\n", sw, sh, d, m);
+    }
+}
+static void scr_pan(int dx, int dy)     /* dx in fetch units of 8 bytes, dy in lines */
+{
+    int mx = spl - sw / 8, my = srows - sh;
+    sx += dx * 8;
+    sy += dy;
+    if (sx > mx) sx = mx;
+    if (sx < 0) sx = 0;
+    if (sy > my) sy = my;
+    if (sy < 0) sy = 0;
+    dpy_scr_set(SS_PLANES, (u32)sy * (u32)sbpr + (u32)sx, 0, 0);
+}
+static void scr_key(const struct dpyev *e)
+{
+    if (e->type == EV_BUTTON) {
+        if (!(e->code & 0x80)) scr_off();
+        return;
+    }
+    if (e->type != EV_KEY || (e->code & 0x80))
+        return;
+    int c = e->ch[0], raw = e->code & 0x7F;
+    if (c == 's' || c == 'q' || raw == 0x45)
+        scr_off();
+    else if (c == 'n' || c == ' ' || c == 'p' || raw == 0x41) {
+        int was = cur;
+        step(c == 'n' || c == ' ' ? 1 : -1);
+        if (cur != was) scr_on();
+    } else if (raw == 0x4E || c == 'l') scr_pan(1, 0);
+    else if (raw == 0x4F || c == 'h') scr_pan(-1, 0);
+    else if (raw == 0x4D || c == 'j') scr_pan(0, sh / 4);
+    else if (raw == 0x4C || c == 'k') scr_pan(0, -(sh / 4));
+}
+
 static void pan(int dx, int dy)
 {
     int px = ox, py = oy;
@@ -402,6 +522,7 @@ static void act(int a)
     case A_DOWN: if (have && ch > wh) pan(0, -sy); break;
     case A_HELP: helping = 1; draw_help(); break;
     case A_QUIT: quit = 1; break;
+    case A_SCREEN: scr_on(); break;
     }
 }
 static int pending;
@@ -428,7 +549,7 @@ static void key(const struct dpyev *e)
     if ((b = keys_find(&K, k, 0)))
         act(b->act);
 }
-static const char menus[] = "Show\tNext\tPrevious\tFit or real size\tDither\tKeys\tQuit";
+static const char menus[] = "Show\tNext\tPrevious\tFit or real size\tDither\tOwn screen\tKeys\tQuit";
 
 /* ================================================================ the screen's pens */
 static int pens(void)
@@ -454,6 +575,11 @@ static int pens(void)
 
 static void handle(const struct dpyev *e)
 {
+    if (onscr && e->win == 0 && (e->type == EV_KEY || e->type == EV_BUTTON || e->type == EV_MOTION ||
+                                 e->type == EV_FOCUS)) {
+        scr_key(e);                     /* the screen's events (D55: win 0) */
+        return;
+    }
     switch (e->type) {
     case EV_RESIZE:
         if (e->w != ww || e->h != wh) {
@@ -490,7 +616,7 @@ static void handle(const struct dpyev *e)
         break;
     case EV_MENU:
         if (e->code == 0) {
-            static const u8 m[] = { A_NEXT, A_PREV, A_ZOOM, A_DITHER, A_HELP, A_QUIT };
+            static const u8 m[] = { A_NEXT, A_PREV, A_ZOOM, A_DITHER, A_SCREEN, A_HELP, A_QUIT };
             if (e->arg < sizeof m) act(m[e->arg]);
         }
         break;
@@ -501,13 +627,15 @@ static void handle(const struct dpyev *e)
 int main(int argc, char **argv)
 {
     const char *file = 0;
+    int own = 0;
     for (int i = 1; i < argc; i++)
         if (!strcmp(argv[i], "-v")) verbose = 1;
+        else if (!strcmp(argv[i], "-s")) own = 1;
         else if (!strcmp(argv[i], "-n")) dither = PIC_NEAREST;
         else if (!strcmp(argv[i], "-f")) dither = PIC_FS;
         else if (argv[i][0] != '-' && !file) file = argv[i];
-        else { dprintf(2, "usage: show [-v] [-n | -f] PICTURE\n"); return 2; }
-    if (!file) { dprintf(2, "usage: show [-v] [-n | -f] PICTURE\n"); return 2; }
+        else { dprintf(2, "usage: show [-v] [-s] [-n | -f] PICTURE\n"); return 2; }
+    if (!file) { dprintf(2, "usage: show [-v] [-s] [-n | -f] PICTURE\n"); return 2; }
     char full[ZPATH_MAX];
     if (zrealpath(file, full, sizeof full) < 0) {
         dprintf(2, "show: %s: %s\n", file, zwhy("cannot resolve"));
@@ -566,6 +694,8 @@ int main(int argc, char **argv)
         dpy_title(win, K.bad);              /* until the next picture's title */
         if (verbose) dprintf(1, "show: say: %s\n", K.bad);
     }
+    if (own)
+        scr_on();
     while (!quit) {
         struct dpyev e;
         int got = dpy_next(&e, -1);
@@ -576,6 +706,7 @@ int main(int argc, char **argv)
         if (dpy_lost())
             draw_all();
     }
+    scr_off();
     dpy_close();
     return have ? 0 : 1;
 }

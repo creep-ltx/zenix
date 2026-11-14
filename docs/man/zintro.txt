@@ -1,0 +1,38 @@
+ZINTRO(1)			Zenix manual
+
+NAME
+    zintro - the Zenix intro: a logo, copper bars, stars and a scroller
+
+SYNOPSIS
+    zintro [-v] [-q]
+
+DESCRIPTION
+    An Amiga demo intro in the old way, on a screen of its own (DESIGN
+    D55): the ZENIX logo in bevelled steel with a toxic green rim, copper
+    bars sweeping through the background, a starfield of three speeds, a
+    turning wireframe shape, and a scroller at the bottom whose letters
+    the Copper shades line by line. A four-channel ProTracker module
+    plays through the sound server (sndd): A minor, slow and heavy.
+
+    Esc, q or a click ends it and the desktop is back. Left Amiga+N puts
+    the desktop in front while it goes on playing; Left Amiga+N again
+    brings it back.
+
+OPTIONS
+    -v      say the screen, and at the end the frames drawn and missed
+    -q      no music
+
+NOTES
+    Everything in it (the logo, the font, the text, the music) is made
+    from numbers by tools/mkintro.py when Zenix is built: nothing of
+    anyone else's. Lores, 4 planes, two pictures in chip RAM (80 KB on a
+    PAL machine); the CPU draws, the Copper colours. It needs the desktop
+    on the chipset's display: on a graphics card (zenixboot RTG) it says
+    so and ends. Without the sound server, or with its channels busy
+    (modplay playing), it runs silent and says why. On NTSC the screen is
+    200 lines and the layout follows.
+
+    In the games package (zpkg -S games). Ours, GPL 2.
+
+SEE ALSO
+    show(1), modplay(1), gridrun(1), dpytest(1)
