@@ -35,7 +35,8 @@
  * interrupts masked. */
 
 #define GQN 64                  /* records in the ring (1 KB) */
-#define GQ_CTL 2                /* slots kept for GEV_RELEASE and GEV_ACQUIRE: input never takes them */
+#define GQ_CTL (2 + NHOLD)       /* slots kept for GEV_RELEASE, GEV_ACQUIRE and each hold's GEV_GONE: input never
+                                 * takes them */
 #define G_AWAY 0                /* another console is shown */
 #define G_SHOWN 1               /* the grabbed console is shown: the server has the screen and the blitter */
 #define G_RELEASING 2           /* asked to let go (GEV_RELEASE), until CON_GACK or the deadline */
@@ -282,15 +283,16 @@ static void end_grab(struct gcon *g)
     u16 s = irq_save();
     gc = 0;
     irq_restore(s);
-    for (int i = 0; i < NHOLD; i++)     /* D55: a dead owner's planes the server was handed go with the grab */
-        if (g->hold[i].base && !g->hold[i].pid)
-            mem_free((void *)g->hold[i].base);
     if (g->state != G_AWAY) {
         kbd_forget();
         gfx_hand(0);
         redraw_to = g->state == G_RELEASING ? g->target : g->con;
         kwork_pending = 1;
     }
+    for (int i = 0; i < NHOLD; i++)     /* D55: a dead owner's planes the server was handed go with the grab, once the
+                                         * Copper runs the kernel's list (gfx_hand above) */
+        if (g->hold[i].base && !g->hold[i].pid)
+            mem_free((void *)g->hold[i].base);
     if (g->forced)
         gfx_blit_cpu(0);                /* the server is gone: nobody else writes the blitter */
     ev_wake(&g->wait);
@@ -343,8 +345,13 @@ long gcon_hold(struct file *f, u32 pid, u32 base)
         if (g->hold[i].base == base && base) {
             if (pid)
                 return -EBUSY;
-            if (!g->hold[i].pid)
+            if (!g->hold[i].pid) {
                 mem_free((void *)base);         /* its owner ended: the block was handed to us */
+                for (u16 k = g->tail; k != g->head; k = (u16)((k + 1) % GQN))
+                    if (g->q[k].type == GEV_GONE && g->q[k].x == (short)i)
+                        g->q[k].type = 0;       /* its GEV_GONE not read yet: nothing now (a later hold of the
+                                                 * same base must not be taken for it) */
+            }
             g->hold[i].base = 0;
             g->hold[i].pid = 0;
             return 0;

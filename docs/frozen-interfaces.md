@@ -437,4 +437,5 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   most 100 ms; -EINTR not restarted; -ENODEV without a display) and op 13 `CON_HOLD` (the grab's descriptor and
   process: a2 a pid and a3 the base of a chip RAM region that pid's memalloc gave -> its size; a2 0 lets go; `NHOLD` 4
   at least; a held region's memfree -EBUSY; its owner's end hands the block to the grab's process); the grab's record
-  `GEV_GONE` 6 (x the hold's slot, ch the base big-endian).
+  `GEV_GONE` 6 (x the hold's slot, ch the base big-endian), and a record of type 0 that says nothing (readers skip it:
+  an unread `GEV_GONE` whose block was let go becomes one).

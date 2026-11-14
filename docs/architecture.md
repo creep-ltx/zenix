@@ -1679,8 +1679,10 @@ name); `ls` 5.66 -> 1.05 s, `ls -l` 6.83 -> 2.19 s, the file view 6.6 -> 1.7 s.
   most 100 ms, -EINTR for a signal; bit 31 only asks) and answers the count; -ENODEV without a display. `CON_HOLD`
   (op 13, on the grab's descriptor, its process) holds a chip RAM region of a client process (its memalloc's base) while
   a screen of its own shows it (at most 4): the owner's `memfree` of it is -EBUSY; at the owner's end `proc_exit` makes
-  the grab's process the block's owner and puts `GEV_GONE` (6: the slot, the base) in the ring, so the server takes the
-  screen off the glass and then lets go (a2 0), which frees it; the grab's end frees what it was handed.
+  the grab's process the block's owner and puts `GEV_GONE` (6: the slot, the base) in the ring (a slot of the ring is
+  kept for each hold), so the server takes the screen off the glass and then lets go (a2 0), which frees it and
+  empties an unread `GEV_GONE` of it (type 0); the grab's end frees what it was handed once the Copper runs the
+  kernel's list.
 - **The display server** (`/sbin/displayd`, `display/server/`, DESIGN D38 step 3, docs/man/displayd.txt): the
   service `display` (`/etc/svctab`, nice -5), started by the desktop's first program, whose console (`PEER_CTTY`; a
   console, never a pty) it grabs. Its screen: 640 x 256 (200 on NTSC), or interlaced 640 x 512 (400) by

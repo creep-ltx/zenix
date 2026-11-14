@@ -1053,7 +1053,8 @@ struct ugevent {             /* a record of the grab's ring (16 bytes, frozen) *
 #define GEV_ACQUIRE     4    /* the console is shown: the screen and the blitter are the server's */
 #define GEV_LOST        5    /* the ring was full: x records were dropped */
 #define GEV_GONE        6    /* (D55) a held region's owner ended: x the hold's slot, ch the region's base big-endian;
-                              * the block is the grab's process's now, CON_HOLD 0 frees it */
+                              * the block is the grab's process's now, CON_HOLD 0 frees it (and turns a GEV_GONE of it
+                              * still unread into a record of type 0, which says nothing: readers skip it) */
 #define GQ_LSHIFT       0x0001          /* AmigaOS's IEQUALIFIER values */
 #define GQ_RSHIFT       0x0002
 #define GQ_CAPS         0x0004
