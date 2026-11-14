@@ -23,7 +23,13 @@ check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi
 clean() { tr -d '\r' | sed 's/\x1b\[[0-9;:]*[mK]//g'; }
 for run in $RUNS; do
     case $run in
-    ext2-*) cp $BD/zenix.hdf $BD/ide-speed-ext2.hdf || exit 1 ;;
+    ext2-*) cp $BD/zenix.hdf $BD/ide-speed-ext2.hdf || exit 1
+            # the run writes three 1 MB files (/r, /z, /r2) at once: a root too full for them shows only as a wrong
+            # SHA-256 (2026-11-14: ZINE's test files had taken the room), so the room is checked first, on the host
+            fb=$(dumpe2fs -h $BD/ide-speed-ext2.hdf 2>/dev/null | awk -F: '/^Free blocks/ { print $2 + 0 }')
+            bs=$(dumpe2fs -h $BD/ide-speed-ext2.hdf 2>/dev/null | awk -F: '/^Block size/ { print $2 + 0 }')
+            [ $(( ${fb:-0} * ${bs:-1024} / 1024 )) -ge 3400 ] && check "$run: the root has room for the three 1 MB files ($(( ${fb:-0} * ${bs:-1024} / 1024 )) KB free, 3,400 needed)" ok ||
+                { check "$run: the root has room for the three 1 MB files ($(( ${fb:-0} * ${bs:-1024} / 1024 )) KB free, 3,400 needed)" bad; continue; } ;;
     zfs-*)  [ -s $OUT/zfs-fresh.hdf ] || ZFS_BSHIFT=12 tools/mkroot-zenixfs.sh $OUT/zfs-fresh.hdf $BD "$PROGS" 24 >/dev/null ||
                 { echo "ZenixFS disk build failed"; exit 1; }
             cp $OUT/zfs-fresh.hdf $BD/ide-speed-zfs.hdf || exit 1 ;;
@@ -37,6 +43,7 @@ for run in $RUNS; do
     sr=$(grep -aE '^[0-9a-f]{64}  /r$' $OUT/$run.log | cut -c1-64)
     sr2=$(grep -aE '^[0-9a-f]{64}  /r2$' $OUT/$run.log | cut -c1-64)
     sz=$(grep -aE '^[0-9a-f]{64}  /z$' $OUT/$run.log | cut -c1-64)
+    grep -aq 'write failed' $OUT/$run.log && check "$run: no write failed (the disk full?)" bad
     [ -n "$sr" ] && [ "$sr" = "$sr2" ] && check "$run: the copy reads back the same as the original (SHA-256)" ok || check "$run: the copy reads back the same as the original (SHA-256)" bad
     [ "$sz" = "$(head -c 1048576 /dev/zero | sha256sum | cut -c1-64)" ] && check "$run: 1 MB of zeros written in 64 KB pieces reads back right" ok || check "$run: 1 MB of zeros written in 64 KB pieces reads back right" bad
     grep -aqx END-DONE $OUT/$run.log && check "$run: the run ended (sync after rm)" ok || check "$run: the run ended (sync after rm)" bad
