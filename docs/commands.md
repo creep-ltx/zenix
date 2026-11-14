@@ -1,6 +1,6 @@
 # Command reference
 
-Zenix has 161 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
+Zenix has 174 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
 page in `docs/man/NAME.txt`; a few more pages are for names that start the same program (`gunzip`, `zcat`, `chgrp`,
 `more`, `pkill`, `ifup`, `ifdown`, `unlzx`). The pages use the exact format that Zenix's own `man` reads (plain text of at most 78 columns, a
 `NAME(section)` header, `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`, `EXAMPLES`, `EXIT STATUS`, `SEE ALSO`); the
@@ -110,6 +110,19 @@ spot-checked against the code that day.
 | [nfscd](man/nfscd.txt) | not a command: an NFS mount's server (`/sbin/nfscd`, DESIGN D23), started by the kernel for `mount -t nfs`; its manual is mount's |
 | [wasabid](man/wasabid.txt) | not a command: the remote control daemon (`/sbin/wasabid`, DESIGN D24), the owner's Wasabi protocol on TCP 1236; off until root writes `/etc/wasabid.conf`, kept running by init through `/etc/daemons` |
 
+## Games
+In the games package (`zpkg -S games`; roadmap block 7 item 7, "fun"; DESIGN D52 section 8, "As built: the games").
+
+| Command | Summary |
+|---|---|
+| [frotz](man/frotz.txt) | play interactive fiction: Z-machine stories, with All Things Devours (public domain) (Frotz 2.55, GPL 2+, `ports/frotz`) |
+| [gridrun](man/gridrun.txt) | a light-cycle duel on the desktop, with sound and music: a Lua script over the zenix module (ours) |
+| [zenix-lua](man/zenix-lua.txt) | Lua's `zenix` module in /bin/lua: a window, pictures, keys and mouse, samples and modules through sndd, time (ours) |
+| [adventure](man/adventure.txt), [wump](man/wump.txt) | Colossal Cave; hunt the Wumpus (NetBSD's, BSD licence, `ports/bsdgames`) |
+| [robots](man/robots.txt), [worm](man/worm.txt), [tetris](man/tetris.txt), [hangman](man/hangman.txt) | the terminal games, over Zenix's own small curses (NetBSD's) |
+| [rain](man/rain.txt), [worms](man/worms.txt) | screen toys (NetBSD's) |
+| [fortune](man/fortune.txt), [banner](man/banner.txt), [number](man/number.txt), [arithmetic](man/arithmetic.txt) | a message from the night city (Zenix's own fortunes), big letters, numbers in words, a sums quiz (NetBSD's) |
+
 ## Internals and test programs
 [init](man/init.txt), [boot](man/boot.txt), [diskd](man/diskd.txt) (the built-in start-up programs);
 [hello](man/hello.txt), [spin](man/spin.txt), [crash](man/crash.txt), [badptr](man/badptr.txt),
@@ -122,7 +135,7 @@ spot-checked against the code that day.
 
 ## Run on AmigaOS, not on Zenix
 [zenixboot](man/zenixboot.txt) starts Zenix from files on a hard disk, CF or SD card partition, so that no floppy is
-needed (not one of the 161 programs: it is an AmigaOS program on the AmigaDOS boot partition).
+needed (not one of the 174 programs: it is an AmigaOS program on the AmigaDOS boot partition).
 [bootmenu](man/bootmenu.txt) is the boot menu of a disk with AmigaOS and Zenix on it (the SD card of
 `tools/mkdualcard.sh`): it boots a chosen AmigaOS partition or runs zenixboot.
 
