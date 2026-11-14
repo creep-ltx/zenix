@@ -17,12 +17,9 @@ wait crash: slept 3 s 20
 sleep 1
 send /tests/crashpure literal; crash literal\r
 sleep 3
-send cp -p /tests/hellopure /tmp/hp; /tmp/hp 30 > /tmp/old.out & sleep 1; cp /tests/hellopure2 /tmp/hp; echo cp=$?; echo x >> /tmp/hp; echo app=$?; echo ==busy\r
-wait (?m)^==busy 20
-send cp -p /tests/hellopure2 /tmp/hp.new; mv /tmp/hp.new /tmp/hp; /tmp/hp 10 > /tmp/new.out & sleep 1; echo ==versions; free\r
-wait (?m)^==versions 20
-sleep 7
-send echo old=$(grep -c 'hello from pid' /tmp/old.out) new=$(grep -c 'HELLO from pid' /tmp/new.out); echo ==gone; free\r
+send cp -p /tests/hellopure /tmp/hp; /tmp/hp 60 > /tmp/old.out & sleep 1; cp /tests/hellopure2 /tmp/hp; echo cp=$?; echo x >> /tmp/hp; echo app=$?; echo ==busy; free; cp -p /tests/hellopure2 /tmp/hp.new; mv /tmp/hp.new /tmp/hp; /tmp/hp 10 > /tmp/new.out & sleep 1; echo ==versions; free\r
+wait (?m)^==versions 30
+send wait; echo old=$(grep -c 'hello from pid' /tmp/old.out) new=$(grep -c 'HELLO from pid' /tmp/new.out); echo ==gone; free\r
 wait (?m)^==gone 20
 sleep 2
 send cp -p /tests/hellopure /tmp/hw; sleep 4 >> /tmp/hw & sleep 1; /tmp/hw 10 > /dev/null & sleep 1; echo ==private; free; ps\r
