@@ -16,7 +16,7 @@ _start:
     .ascii  "ZEXE"                  /* filled in by tools/mkzexe.py */
     .long   0, 0, 0, 0, 0, 0
     .ascii  "ZINB"                  /* +32: kernel/zine.h ZINB_MAGIC, the layout, the file's CRC32 (tools/mkzblob.py) */
-    .long   1
+    .long   2                       /* ZINE_LAYOUT (2 since d29 16.23) */
     .long   0
 
 /* long entry(struct zine_args *): the plan first, on the kernel's stack (nothing is touched yet: a refusal returns

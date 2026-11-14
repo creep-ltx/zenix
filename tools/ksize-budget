@@ -112,11 +112,16 @@
 # under a debugger, the stop branch, the exit and wait tests, the spawn's DBG_NEXT taken), seg + 46 (seg_disown),
 # main + 82, signal + 54, syscall + 68, zine + 12, mmu + 24, start + 6; kernel.bin 199,608 -> 204,464, TOTAL 199,700 ->
 # 204,500; the mount tests' RAM disk 683 -> 678 KB for the floppy's ROOM.
+# 2026-11-13 (d29 16.23, ZINE reads a program's big data files from the disk during the session): zine 1,555 -> 1,819,
+# budget 1,600 -> 1,850 (ZINE_MAP: the checks and the FS_BMAP request), ide + 9 (ide_zine_port), blk + 24, embed
+# 49,576 -> 49,900, budget 49,600 -> 49,900 (the built-in fsd's FS_BMAP and ext2_runs); kernel.bin 199,492 -> 200,164,
+# TOTAL 199,600 -> 200,200; the mount tests' RAM disk 683 -> 682 KB for the floppy's ROOM.
+# merged (D54 + d29 16.23): TOTAL 205,200; the mount tests' RAM disk 677 KB.
 start     4850   8200
 main      5950   1100
 serial    6100   6500
 mem       4250    240
-ide       4750    560
+ide       4800    560
 emmc      4900    640
 floppy    4500    160
 input      550     32
@@ -140,11 +145,11 @@ signal    2100      0
 random    3800    280
 sock      4700   1060
 drv       3100    640
-zine      1600     16
+zine      1850     16
 cache     1800     32
 gcon      3600     16
 dbg       4100     20
 mmu       5700    160
-embed    49600      0
-TOTAL   204500
+embed    49900      0
+TOTAL   205200
 ROOM       800

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
 #include "random.h"
+void ide_zine_port(u32 *v);
 
 /* The raw disk behind the "ide0" name of the disk server: a Gayle IDE drive when there is one, else the
  * SD card of a Raspberry Pi 4 / CM4 under Emu68 (emmc.c), else the Amiga 3000's SCSI disk (a3000.c). */
@@ -33,6 +34,13 @@ int blk_read(u32 lba, u32 count, void *buf)
     int r = which == B_EMMC ? emmc_read(lba, count, buf) : which == B_A3000 ? a3000_read(lba, count, buf) : ide_read(lba, count, buf);
     rnd_event(0);                       /* a disk completion: mixed, never credited (the chipset's clock, D19 9.3) */
     return r;
+}
+
+/* D29 16.23: the IDE drive's port for ZINE's reader (kernel/ide.c), or v left 0: only that drive has one */
+void blk_zine(u32 *v)
+{
+    if (which == B_IDE)
+        ide_zine_port(v);
 }
 
 int blk_write(u32 lba, u32 count, const void *buf)

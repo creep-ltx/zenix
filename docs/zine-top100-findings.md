@@ -918,3 +918,51 @@ The 45 working ones at random still work. Still failing as above: Elysium (68020
 (68030, 68060), Signals on the 68030 (black at the limit, as in round 11), Serenity, Noxie (this run), Goon Royale,
 the castle (68060).
 
+
+## Round 14 (2026-11-13/14, branch zine14, d29 16.23)
+
+**What changed.** Data files of 256 KB or more (and any file the volume's budget would leave out) stay on the IDE
+drive and ZINE reads them from there during the session; `zine -c` (chip RAM only), `-l` (no fast RAM above 16 MB),
+`-m` (every file in memory, as before); ZINE's interrupt dispatcher calls nothing through an ExecBase the program
+wrote over (d29 16.23).
+
+**Round 13's three questions.**
+- *Foam Oil's two 1 MB tables* (68030): they were left out by the volume's budget (half the free fast RAM, 3 MB,
+  against an 11.7 MB folder), not by the harness or a rule on big files. They now stay on the disk and are read;
+  the demo loads them and gets further, then stops with "Failed recording frame 28 / demo_init() failed" after its
+  precalc: 13.6 MB of fast RAM is not enough for it. On the 68060 it plays to its end (4,013 s with a 420 s limit; in
+  the 120 s rerun it counts as working).
+- *sumea* (all fast RAM above 16 MB): `zine -l` and `-c` both leave it chip RAM only, and its hunks need 3.3 MB
+  ("does not fit in memory" with -c; with -l an AllocMem of 865 KB refused). Neither saves it on these machines (as a
+  real A1200 with a CPU-slot board). The harness does not retry with -c/-l; such a retry would be a second attempt,
+  reported apart.
+- *Elysium* (68EC020): one real hole found and closed (an interrupt through ZINE's ExecBase at `$800`, which the demo
+  overwrites); the demo still fails in some runs: plain runs 3 of 4 played after the change, trace-build runs 3 of 3
+  slid through the vector table into exec's jump table. Open.
+
+**The reruns** (fin: every production with a data file of 256 KB or more, 69, on each machine, Elysium, and 15
+working ones picked at random with seed 14 on each; 255 runs, 2 emulators at a time, PC load 7-16; 50 s for the 020
+and 030, 120 s for the 060; the newly failing ones run once more). Round 13's state recounted from its run files with
+today's report.py gives the same 246, 315 and 354.
+
+| Machine | Round 13 | Round 14 | Now working | No longer working |
+|---|---|---|---|---|
+| 68EC020, 8 MB fast | 246 | **248** | Relic, killer, (Elysium in 1 of 2 runs, not counted) | none |
+| 68030 + 68882, 16 MB in one block | 315 | **313** | We come in peace, Lightshaft, Neonsky | Jesus Christ Motocross, lux aeterna luceat eis, Surfing Great Victoria (out of memory now that their files are found), Dust (an AllocMem of 6.2 MB refused, then exec -912), Last Train To Danzig (black) |
+| 68060 with FPU, 64 MB in one block | 354 | **361** | Starstruck, Human Traffic, Foam Oil, Serenity, Brutalism, Sojourn of the Soul, No-CPU Challenge, Machinist | Shake Off The Dust (black) |
+
+The 45 working ones at random still work. About the 68030's losses: Jesus Christ Motocross ("16 MB fast
+required"), lux aeterna and Surfing Great Victoria ran their course in round 13 *because* their big files were
+left out; with the files found they ask for more memory than the machine has (honest, as on a real 16 MB 68030).
+Last Train To Danzig's round 12 "picture" was Zenix's own console after a cold start in the session (report.py
+counts any changing picture); it is black now within 150 s. Tint (black in the first rerun at load 23) played in the
+second. Shake Off The Dust on the 68060 is black at 120, 300 and 900 s with its 13.8 MB of files on the disk (it loops in
+GetMsg) and plays with `zine -m` (49 MB free) and, with its files on the disk, on the same machine with 32 MB of
+fast RAM instead of 64 (30 MB free): it stops with about 62 MB free, more memory than it was ever given before,
+not because of the reads. Holding the program's interrupts during each disk command made no difference (tried,
+not kept). Counted as failing.
+
+**The biggest remaining blockers** (unchanged in kind): on the 68020, FPU instructions (a real 68EC020 fails too) and
+programs whose hunks alone need more than 8 MB; on the 68030, memory (16 MB is less than many AGA demos of the 2010s
+need) and black screens at the limit; on the 68060, black screens at the limit. The volume's in-memory part still
+takes up to half the free fast RAM for files under 256 KB; a lower threshold would give memory-bound programs more.

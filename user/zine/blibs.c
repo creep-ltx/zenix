@@ -738,7 +738,137 @@ static int locate(const char *name, u32 *ent, int *r, int *nodev)
     return w;
 }
 
-/* a file's bytes for loading: 0 and *f, *size, *ent (~0 for a RAM: file), or -ZE_NOENT */
+/* ---- d29 16.23: the files zine left on the disk (struct zv_ent nx), read from the IDE drive as the program asks ----
+ * The drive's registers as the kernel gave them (Z.a.ide: kernel/ide.c ide_zine_port). Zenix is paused and the
+ * program has the machine: polled (the drive raises no interrupt: nIEN, as Zenix left it; Gayle's latch is cleared by
+ * the kernel on the way back), the status register and the program's interrupts left alone, every wait timed by the
+ * beam's frames (CIA-B's counter may be the program's): 1,600 frames, about 30 s, as the kernel's 30 s. LBA28, the
+ * master, the kernel's sectors per command, its long or word moves. A cache of 8 sectors serves short reads. */
+#define IDEREG(n) (*(volatile u8 *)(Z.a.ide[0] + ((u32)(n) << 2) + 2))
+#define IDECTL    (*(volatile u8 *)(Z.a.ide[0] + 0x101A))   /* device control (kernel/ide.c IDE_CTL) */
+/* (status & mask) == want with BSY clear; err: ERR fails it (not before a command: an earlier command's ERR stays
+ * until the next is written). The beam's line counter wraps once a frame; 1,600 frames (32 s PAL, 27 s NTSC), and
+ * 50 million looks besides (a program that rewrote the beam's counter, or stopped it) */
+static int ide_wait(u8 mask, u8 want, int err)
+{
+    u32 frames = 0, looks = 0, line = (*(volatile u16 *)0xDFF006 >> 8) | (*(volatile u16 *)0xDFF004 & 1) << 8;
+    for (;;) {
+        u8 st = IDEREG(7);
+        if (!(st & 0x80)) {
+            if (err && (st & 0x01))
+                return -1;
+            if ((st & mask) == want)
+                return 0;
+        }
+        u32 l = (*(volatile u16 *)0xDFF006 >> 8) | (*(volatile u16 *)0xDFF004 & 1) << 8;
+        if ((l < line && ++frames > 1600) || ++looks > 50000000u)
+            return -1;
+        line = l;
+    }
+}
+static void ide_settle(void)            /* 400 ns: two CIA reads (each waits for the E-clock) */
+{
+    (void)*(volatile u8 *)0xBFE001;
+    (void)*(volatile u8 *)0xBFE001;
+}
+/* after a failed command: a software reset (SRST with nIEN, then nIEN alone, as Zenix keeps it), so the next
+ * command, the session's or Zenix's after it, meets a drive at rest */
+static void ide_reset(void)
+{
+    IDECTL = 0x06;
+    for (int i = 0; i < 8; i++)         /* at least 5 us: 16 E-clock reads */
+        ide_settle();
+    IDECTL = 0x02;
+    ide_settle();
+    (void)ide_wait(0x80, 0, 0);
+}
+static int ide_read(u32 lba, u32 count, u8 *buf)
+{
+    u32 per = Z.a.ide[3] & 0xFFFF, lng = Z.a.ide[3] >> 16;
+    if (!Z.a.ide[0] || !per || lba >= Z.a.ide[2] || count > Z.a.ide[2] - lba)
+        return -1;
+    while (count) {
+        u32 n = count > per ? per : count;
+        if (ide_wait(0x80, 0, 0))
+            goto bad;
+        IDEREG(6) = (u8)(0xE0 | ((lba >> 24) & 0x0F));
+        IDEREG(2) = (u8)n;              /* 256 is written as 0 */
+        IDEREG(3) = (u8)lba;
+        IDEREG(4) = (u8)(lba >> 8);
+        IDEREG(5) = (u8)(lba >> 16);
+        IDEREG(7) = 0x20;               /* READ SECTORS */
+        ide_settle();
+        for (u32 k = 0; k < n; k++) {
+            if (ide_wait(0x88, 0x08, 1))    /* DRQ */
+                goto bad;
+            volatile u32 *pl = (volatile u32 *)Z.a.ide[1];
+            volatile u16 *pw = (volatile u16 *)Z.a.ide[1];
+            if (lng)
+                for (u32 *d = (u32 *)buf, i = 0; i < 128; i++)
+                    *d++ = *pl;
+            else
+                for (u16 *d = (u16 *)buf, i = 0; i < 256; i++)
+                    *d++ = *pw;
+            buf += 512;
+            ide_settle();
+        }
+        (void)IDEREG(7);
+        lba += n;
+        count -= n;
+    }
+    return 0;
+bad:
+    ide_reset();
+    return -1;
+}
+static u8 dcache[8 * 512];
+static u32 dc_lba = ~0u, dc_n;
+/* n bytes of entry e from byte pos (inside the file) into buf: 0, or -1 (a read failed: said once) */
+static int disk_bytes(const struct zv_ent *e, u32 pos, u8 *buf, u32 n)
+{
+    const struct zv_run *run = (const struct zv_run *)((const u8 *)Z.a.vol + e->off);
+    while (n) {
+        u32 sec = pos >> 9, off = pos & 511, i = 0, s0 = 0, k;
+        while (i < e->nx && s0 + run[i].count <= sec)
+            s0 += run[i++].count;
+        if (i == e->nx)
+            goto bad;
+        u32 lba = run[i].lba, left = run[i].count - (sec - s0);
+        if (lba == ZV_HOLE) {
+            k = left >= (n + off + 511) >> 9 ? n : left * 512 - off;
+            zmemset(buf, 0, k);
+        } else if (lba += sec - s0, !off && n >= 512) {
+            u32 c = n >> 9 < left ? n >> 9 : left;
+            c = c > 128 ? 128 : c;
+            if (ide_read(lba, c, buf))
+                goto bad;
+            k = c * 512;
+        } else {
+            if (lba < dc_lba || lba >= dc_lba + dc_n) {
+                dc_lba = ~0u;
+                u32 c = left < 8 ? left : 8;
+                if (ide_read(lba, c, dcache))
+                    goto bad;
+                dc_lba = lba, dc_n = c;
+            }
+            u32 have = (dc_lba + dc_n - lba) * 512 - off;
+            k = have < n ? have : n;
+            zmemcpy(buf, dcache + (lba - dc_lba) * 512 + off, k);
+        }
+        pos += k, buf += k, n -= k;
+    }
+    return 0;
+bad:;
+    static u8 said;
+    if (!said) {
+        said = 1;
+        say3("ZINE: a read of ", e->name, " from the disk failed\n");
+    }
+    return -1;
+}
+/* a file's bytes for loading: 0 and *f, *size, *ent (~0 for a RAM: file), or -ZE_NOENT; with f &probe only whether
+ * it is there (a file on the disk is not read) */
+static const zu8 *probe;
 static int file_bytes(const char *name, const zu8 **f, u32 *size, u32 *ent)
 {
     int r, nodev;
@@ -750,6 +880,11 @@ static int file_bytes(const char *name, const zu8 **f, u32 *size, u32 *ent)
     if (w == 2 && !zv_ent((const void *)Z.a.vol, *ent)->dir) {
         const struct zv_ent *e = zv_ent((const void *)Z.a.vol, *ent);
         *f = (const zu8 *)Z.a.vol + e->off, *size = e->size;
+        if (e->nx && f != &probe) {     /* 16.23: a data file zine left on the disk is not loaded as a whole (zine
+                                         * keeps program files and fonts in memory) */
+            say3("ZINE: ", e->name, " stays on the disk (a data file): not loaded as a program, library or font\n");
+            return -ZE_NOENT;
+        }
         return 0;
     }
     return -ZE_NOENT;
@@ -770,9 +905,8 @@ int zb_dir_ent(const char *name, u32 *ent)
 
 int zb_file_exists(const char *name, char *where, u32 max)
 {
-    const zu8 *f;
     u32 size, ent;
-    if (file_bytes(name, &f, &size, &ent))
+    if (file_bytes(name, &probe, &size, &ent))
         return 0;
     u32 n = slen(hit) < max ? slen(hit) : max - 1;
     zmemcpy(where, hit, n);
@@ -866,8 +1000,22 @@ u32 c_Open(const char *name, s32 mode)
         if (w == 2 && mode == MODE_READWRITE) {
             const struct zv_ent *e = zv_ent((const void *)Z.a.vol, ent);
             ramf[m].size = 0;
-            if (e->size && ram_write(m, 0, (const char *)Z.a.vol + e->off, e->size) == (u32)-1)
-                return 0;
+            if (!e->nx) {
+                if (e->size && ram_write(m, 0, (const char *)Z.a.vol + e->off, e->size) == (u32)-1)
+                    return 0;
+            } else {                    /* 16.23: from the disk, 2 KB at a time */
+                static u8 bounce[2048];
+                for (u32 at = 0; at < e->size;) {
+                    u32 k = e->size - at < sizeof bounce ? e->size - at : sizeof bounce;
+                    if (disk_bytes(e, at, bounce, k)) {
+                        Z.ioerr = 226;  /* ERROR_NO_DISK */
+                        return 0;
+                    }
+                    if (ram_write(m, at, (const char *)bounce, k) == (u32)-1)
+                        return 0;
+                    at += k;
+                }
+            }
         }
         return fh_new(0, 0, m + 1);
     }
@@ -926,7 +1074,13 @@ u32 c_Read(u32 fh, char *buf, s32 n)
     u32 size;
     const u8 *d = slot_data(i, &size);
     u32 left = size > files[i].pos ? size - files[i].pos : 0, k = (u32)n < left ? (u32)n : left;
-    if (k)
+    const struct zv_ent *e = files[i].ram || files[i].sink ? 0 : zv_ent((const void *)Z.a.vol, files[i].ent);
+    if (k && e && e->nx) {              /* 16.23: from the disk */
+        if (disk_bytes(e, files[i].pos, (u8 *)buf, k)) {
+            Z.ioerr = 226;              /* ERROR_NO_DISK: the drive did not answer */
+            return (u32)-1;
+        }
+    } else if (k)
         zmemcpy(buf, d + files[i].pos, k);
     files[i].pos += k;
     return k;
@@ -1471,6 +1625,10 @@ u32 c_LoadSeg(const char *name, u32 tab, u32 fh)
         ent = files[i].ent, start = files[i].pos;
         const struct zv_ent *e = zv_ent(vol, ent);
         f = (const zu8 *)vol + e->off, fsize = e->size;
+        if (e->nx) {                    /* (16.23: zine keeps program files in memory) */
+            Z.ioerr = ERROR_BAD_HUNK;
+            return 0;
+        }
     }
     const char *who = name ? name : Z.blk->name;
     struct zh_info inf;
@@ -4039,13 +4197,21 @@ void zb_libs_init(void)
      * GfxBase from ExecBase->IntVects[INTB_BLIT].iv_Data instead of opening the library (no handler: its interrupt
      * stays off until a program sets one) */
     IV(6)->data = Z.lib[1];
-    /* the memory lists (4.1, 4.2): one MemHeader a region, its chunks exactly what the plan gives */
+    /* the memory lists (4.1, 4.2): one MemHeader a region, its chunks exactly what the plan gives; 16.23: with zine
+     * -c no fast RAM (as NoFastMem leaves AmigaOS), with -l none above 16 MB (a chunk across it cut there). What is
+     * left out is nobody's during the session: Zenix's free memory, its headers saved as always */
+    u32 mem = ((const struct zv_hdr *)Z.a.vol)->mem, vfree = 0, vbig = 0;
     for (u32 r = 0; r < 8; r++) {
         struct zmh *h = 0;
         struct zchunk **tail = 0;
         for (u32 i = 0; i < Z.nchunk; i++) {
             const struct zp_chunk *c = &Z.chunk[i];
-            if (c->reg != r || c->len < 8)
+            u32 len = c->len, fast = !(Z.reg[r].attrs & MEMF_CHIP);
+            if (fast && mem == ZV_MEM_CHIP)
+                continue;
+            if (fast && mem == ZV_MEM_LOW)
+                len = c->addr >= ZV_LOW16 ? 0 : c->addr + len > ZV_LOW16 ? ZV_LOW16 - c->addr : len;
+            if (c->reg != r || len < 8)
                 continue;
             if (!h) {
                 h = (struct zmh *)take(sizeof *h);
@@ -4055,16 +4221,22 @@ void zb_libs_init(void)
                 h->node.name = Z.reg[r].attrs & MEMF_CHIP ? "chip memory" : "expansion memory";
                 h->lower = Z.reg[r].lower < 0x1000 ? 0x1000 : Z.reg[r].lower;
                 h->upper = Z.reg[r].upper;
+                if (fast && mem == ZV_MEM_LOW && h->upper > ZV_LOW16)
+                    h->upper = ZV_LOW16;
                 tail = &h->first;
                 if (Z.reg[r].attrs & MEMF_CHIP)
                     EB(ZO_ExecBase_MaxLocMem, u32) = h->upper;
             }
             struct zchunk *m = (struct zchunk *)c->addr;
             m->next = 0;
-            m->bytes = c->len & ~7u;
+            m->bytes = len & ~7u;
             *tail = m;
             tail = &m->next;
             h->free += m->bytes;
+            if (fast) {
+                vfree += m->bytes;
+                vbig = m->bytes > vbig ? m->bytes : vbig;
+            }
         }
         if (h)
             c_Enqueue((struct zlist *)(ZEXEC + ZO_ExecBase_MemList), &h->node);
@@ -4075,6 +4247,8 @@ void zb_libs_init(void)
             zb_serial_hex('K', v, 2);
         }
     }
+    if (mem != ZV_MEM_ALL)              /* what zine says the program had: what it could see */
+        b->fast_free = vfree, b->fast_largest = vbig;
     /* the process and its CLI (6) */
     u8 *pr = (u8 *)take(ZO_Process_SIZEOF + 16);
     Z.proc = (u32)pr;

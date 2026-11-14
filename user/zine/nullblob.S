@@ -11,7 +11,7 @@ _start:
     .ascii  "ZEXE"
     .long   0, 0, 0, 0, 0, 0
     .ascii  "ZINB"
-    .long   1
+    .long   2                       /* kernel/zine.h ZINE_LAYOUT */
     .long   0
 1:  move.l  4(%sp),%a0              /* struct zine_args * */
     move.l  4(%a0),%a1              /* its resume routine */

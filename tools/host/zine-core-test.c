@@ -546,6 +546,26 @@ static void test_vol(void)
           "vol: the limits (2000 files, 48 MB, the budget given)");
     CHECK(zv_init(b, sz, 1, "a:b") == 0 && !strcmp(h->volname, "ZINE") && zv_add(b, 0, "x", 0, 0644, 0, 0, 0) == ZV_E_FULL,
           "vol: a volume name that is no AmigaDOS name, a full table");
+    /* d29 16.23: a file left on the disk: its runs written at zv_tail, then the entry; it takes only the runs' room */
+    sz = zv_need(4, 64, 2);
+    CHECK(zv_init(b, sz, 4, "D") == 0 && h->mem == ZV_MEM_ALL, "vol runs: init (the memory mode all)");
+    zu32 room0, room1;
+    struct zv_run *t = (struct zv_run *)zv_tail(b, &room0);
+    t[0].lba = 1000, t[0].count = 8, t[1].lba = ZV_HOLE, t[1].count = 2, t[2].lba = 5000, t[2].count = 2038;
+    int big = zv_add_runs(b, 0, "huge.dat", 0644, 0, 1u << 20, 3);
+    zv_tail(b, &room1);
+    CHECK(big == 1 && zv_ent(b, 1)->nx == 3 && zv_ent(b, 1)->size == 1u << 20 && room0 - room1 == 24 &&
+          ((const struct zv_run *)((const zu8 *)b + zv_ent(b, 1)->off))[2].lba == 5000 && zv_check(b, sz) == 0,
+          "vol runs: 1 MB on the disk in 24 bytes of the volume, its runs kept, zv_check takes it");
+    CHECK(zv_add_runs(b, 0, "none", 0644, 0, 10, 0) == ZV_E_SPACE && zv_add_runs(b, 0, "many", 0644, 0, 10, ZV_MAXRUNS + 1) ==
+          ZV_E_SPACE && zv_add_runs(b, 0, "room", 0644, 0, 10, 100) == ZV_E_SPACE, "vol runs: no runs, too many, no room");
+    ((struct zv_ent *)(h + 1))[1].nx = ZV_MAXRUNS + 1;
+    CHECK(zv_check(b, sz) == -ZE_INVAL, "vol runs: a bad run count refused");
+    ((struct zv_ent *)(h + 1))[1].nx = 3;
+    h->mem = 3;
+    CHECK(zv_check(b, sz) == -ZE_INVAL, "vol runs: a memory mode not known refused");
+    h->mem = ZV_MEM_LOW;
+    CHECK(zv_check(b, sz) == 0, "vol runs: the mode -l taken");
 }
 
 /* ---- the planner, on a small model of memory: chip 512 KB (the RAM disk and the klog area outside the pools), fast

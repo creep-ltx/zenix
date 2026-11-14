@@ -10,9 +10,12 @@ typedef int s32;
 #include "zine/hunk.h"
 #include "zine/zvol.h"
 #include "zine/lvo.h"
+#include "../kernel/diskproto.h"
 
 #define BLOB "/lib/zine/zine.blob"
 static const char *name, *blobpath = BLOB;
+static u32 memmode = ZV_MEM_ALL;        /* d29 16.23: -c chip RAM only, -l no fast RAM above 16 MB */
+static int inmem;                       /* d29 16.23: -m, every file in memory (no file read from the disk) */
 
 static int zine_sys(u32 op, void *a, u32 b) { return sys3(93, op, (u32)a, b); }
 
@@ -203,6 +206,88 @@ static const char *fpu_missing(u32 w)
     return 0;
 }
 
+/* d29 16.23: a data file of ZV_DISKMIN bytes or more stays on the disk, and ZINE's dos reads it from there during the
+ * session, when the kernel has a reader for the session (the IDE drive) and the file's filesystem says where it lies
+ * (FS_BMAP, the built-in ext2 server). Not a program file (hunks: LoadSeg, Execute and the overlays read those from
+ * memory), not a font. The runs are sectors of the whole drive: the partition's start (diskd) added here. */
+#define ZV_DISKMIN (256u << 10)
+static struct { u32 dev, start; int ok; } DV[4];        /* the devices seen: ok 1 on the IDE drive, -1 not */
+static int dv_n, dv_off;                                /* devices known; 1: reading from the disk is not possible */
+static struct uzine_ext dx[128];
+static u32 dmin = ZV_DISKMIN;           /* the smallest file that stays on the disk (1 for a file the budget leaves out) */
+
+/* the partition start of the mount whose files have stat device dev, when it is on the IDE drive ("ide0..."); -1 not */
+static int dev_start(u32 dev, u32 *start)
+{
+    for (int i = 0; i < dv_n; i++)
+        if (DV[i].dev == dev) {
+            *start = DV[i].start;
+            return DV[i].ok > 0 ? 0 : -1;
+        }
+    int ok = -1;
+    u32 st0 = 0;
+    struct umountinfo mi;
+    struct ustat2 s2;
+    for (u32 i = 0; ok < 0 && sys_mountinfo(i, &mi) == 0; i++) {
+        if (strncmp(mi.dev, "ide0", 4) || sys_stat2(mi.path, &s2) || s2.dev != dev)
+            continue;
+        int port = sys_port_find("disk");
+        struct diskinfo di;
+        for (u32 k = 0; port >= 0 && ok < 0; k++) {
+            struct umsg m;
+            memset(&m, 0, sizeof m);
+            m.type = DISK_LISTSZ, m.a[0] = k, m.a[1] = (u32)&di, m.a[2] = sizeof di;
+            if (sys_call(port, &m) < 0)
+                break;
+            if (!strncmp(di.name, mi.dev, sizeof di.name))
+                ok = 1, st0 = di.start;
+        }
+    }
+    if (dv_n < 4)
+        DV[dv_n].dev = dev, DV[dv_n].start = st0, DV[dv_n++].ok = ok;
+    *start = st0;
+    return ok > 0 ? 0 : -1;
+}
+
+/* the runs of the file at path on the IDE drive into out (room of them; out 0: only counted): their number, or 0 when
+ * it stays in memory (a program file, too short, not on that drive, its server cannot say, more than room runs) */
+static u32 disk_runs(const char *path, u32 size, struct zv_run *out, u32 room)
+{
+    if (inmem || dv_off || size < dmin || size > 0x7FFFFFFFu)
+        return 0;
+    int fd = sys_open(path, 0);
+    struct ustat2 s2;
+    u32 start, n = 0, first = 0, magic = 0;
+    if (fd < 0 || sys_fstat2(fd, &s2) || sys_read(fd, &magic, 4) != 4 || magic == 0x3F3 || dev_start(s2.dev, &start)) {
+        if (fd >= 0)
+            sys_close(fd);
+        return 0;
+    }
+    for (;;) {
+        struct uzine_map m = { sizeof m, fd, first, sizeof dx / sizeof dx[0], dx };
+        int r = zine_sys(ZINE_MAP, &m, 0);
+        if (r == -ENODEV)
+            dv_off = 1;                 /* no reader for the session (not the IDE drive): never again */
+        if (r <= 0) {
+            if (r < 0)
+                n = 0;
+            break;
+        }
+        for (int i = 0; i < r; i++) {
+            if (n >= ZV_MAXRUNS || (out && n >= room) || !dx[i].count || dx[i].count > 0x800000u) {
+                sys_close(fd);
+                return 0;
+            }
+            if (out)
+                out[n].lba = dx[i].lba == UZINE_HOLE ? ZV_HOLE : dx[i].lba + start, out[n].count = dx[i].count;
+            n++;
+            first += dx[i].count;
+        }
+    }
+    sys_close(fd);
+    return first == (size + 511) >> 9 ? n : 0;
+}
+
 /* The volume's walk (5.6, 16.10): the program's directory and its subdirectories, to ZV_DEPTH levels. Pass 1 (W.vol
  * 0) counts the entries and the files' bytes, stopping once past 5.6's limits; pass 2 adds them to W.vol. Recursive,
  * a small frame a level (no path on the stack: W.path is the one being read). */
@@ -217,6 +302,8 @@ static struct {
     int noarch;                         /* pass 2: archives and disk images left out */
     u32 thr;                            /* pass 2: files larger than this left out (16.12) */
     u32 left, leftbytes;                /* pass 2: files left out by the two rules above */
+    u32 dn, druns, dbytes;              /* 16.23: files read from the disk (pass 1: planned, pass 2: done), their runs
+                                         * (pass 1) and bytes */
     int fonts;                          /* the walk of Zenix's Amiga fonts (16.13): at the top only NAME.font files and
                                          * folders; merged into the volume's FONTS, the program's own files first */
 } W;
@@ -291,9 +378,13 @@ static void walk(u32 plen, u32 parent, int depth)
                 dprintf(2, "zine: %s left out: deeper than %u directories\n", W.path + W.top, ZV_DEPTH);
             continue;
         }
+        u32 nx = dir || W.fonts ? 0 : W.vol ? !inmem && !dv_off && st.size >= ZV_DISKMIN :
+                                           disk_runs(W.path, st.size, 0, 0);
         if (!W.vol) {
             W.n++;
-            if (!dir) {
+            if (nx) {                   /* 16.23: on the disk, not in the budget */
+                W.dn++, W.druns += nx, W.dbytes += st.size;
+            } else if (!dir) {
                 W.bytes = st.size > 0xFFFFFFFFu - W.bytes ? 0xFFFFFFFFu : W.bytes + st.size;
                 if (W.sz && W.nsz < ZV_MAXFILES)
                     W.sz[W.nsz++] = (st.size < ZA_ARCH ? st.size : ZA_ARCH - 1) | (is_archive(de.name) ? ZA_ARCH : 0);
@@ -303,6 +394,27 @@ static void walk(u32 plen, u32 parent, int depth)
             if (dir && !W.over)
                 walk(plen + 1 + l, 0, depth + 1);
             continue;
+        }
+        if (nx) {                       /* 16.23: its runs straight into the volume, then the entry */
+            zu32 room;
+            struct zv_run *t = (struct zv_run *)zv_tail(W.vol, &room);
+            nx = disk_runs(W.path, st.size, t, room / sizeof *t);
+            int e = nx ? zv_add_runs(W.vol, parent, de.name, st.mode, st.mtime, st.size, nx) : ZV_E_SPACE;
+            if (e >= 0) {
+                W.dn++, W.dbytes += st.size;
+                continue;
+            }                           /* else as any file (in memory, or left out) */
+        }
+        if (!dir && !(W.noarch && is_archive(de.name)) && st.size > W.thr && !inmem && !dv_off) {
+            zu32 room;                  /* 16.23: a file the budget leaves out stays on the disk instead, any size */
+            struct zv_run *t = (struct zv_run *)zv_tail(W.vol, &room);
+            dmin = 1;
+            nx = disk_runs(W.path, st.size, t, room / sizeof *t);
+            dmin = ZV_DISKMIN;
+            if (nx && zv_add_runs(W.vol, parent, de.name, st.mode, st.mtime, st.size, nx) >= 0) {
+                W.dn++, W.dbytes += st.size;
+                continue;
+            }
         }
         if (!dir && ((W.noarch && is_archive(de.name)) || st.size > W.thr)) {
             if (W.left < 5)
@@ -385,9 +497,11 @@ static void *fast_region(u32 want, int low)
  * path A's AllocMem starts low too), else anywhere */
 static void *region(u32 want, int chip)
 {
-    if (chip)
+    if (chip || memmode == ZV_MEM_CHIP)
         return sys_memalloc_chip(want);
     void *m = fast_region(want, 1);
+    if (memmode == ZV_MEM_LOW)          /* 16.23: below 16 MB or in chip RAM, never above */
+        return m ? m : sys_memalloc_chip(want);
     return m ? m : fast_region(want, 0);
 }
 static int pre_plan(const u8 *head, const struct zh_info *inf)
@@ -460,8 +574,24 @@ int main(int argc, char **argv)
         argv += 2;
         argc -= 2;
     }
+    for (; argc > 1 && argv[1][0] == '-'; argv++, argc--) {    /* 16.23: the memory the program sees */
+        if (!strcmp(argv[1], "-c") || !strcmp(argv[1], "--chip-only"))
+            memmode = ZV_MEM_CHIP;
+        else if (!strcmp(argv[1], "-l") || !strcmp(argv[1], "--low"))
+            memmode = ZV_MEM_LOW;
+        else if (!strcmp(argv[1], "-m") || !strcmp(argv[1], "--in-memory"))
+            inmem = 1;
+        else if (!strcmp(argv[1], "--")) {
+            argv++, argc--;
+            break;
+        } else {
+            dprintf(2, "zine: unknown option %s\n", argv[1]);
+            argc = 0;
+            break;
+        }
+    }
     if (argc < 2) {
-        dprintf(2, "usage: zine [--blob FILE] PROGRAM [ARGS...]\n");
+        dprintf(2, "usage: zine [--blob FILE] [-c | -l] [-m] PROGRAM [ARGS...]\n");
         return 2;
     }
     ruid = (u32)sys_getuid();
@@ -502,9 +632,18 @@ int main(int argc, char **argv)
                 (inf.ovl ? inf.ovl_words * 4 + (inf.tabsize + 1) * 4 : 0);
     u32 avail = info.chip_free + info.fast_free;
     int whole = len <= avail && hunks <= avail - len;
+    P.chip_end = info.chip_total;
+    void *lo = memmode == ZV_MEM_LOW ? fast_region(1u << 16, 1) : 0;
+    if (lo)
+        sys_memfree(lo);
+    if (memmode == ZV_MEM_CHIP || (memmode == ZV_MEM_LOW && !lo)) {
+        avail = info.chip_free;         /* 16.23: the hunks in chip RAM (-c; -l with no fast RAM below 16 MB), the
+                                         * file (path A) in fast RAM beside them */
+        whole = len <= info.fast_free && hunks <= avail;
+    }
     /* 16.18: a big plain program's file is not kept either (zh_lean, hunk.h): its copy in the volume would only take
      * memory from the program (on the 68020 test machine 3-4 MB of 8, which three AGA demos then missed) */
-    int lean = whole && zh_lean(&inf, len, info.chip_free, avail);
+    int lean = whole && memmode == ZV_MEM_ALL && zh_lean(&inf, len, info.chip_free, avail);
     if (lean) {                         /* the largest chip hunk must find a free piece of chip RAM now (path B puts it
                                          * there), and the other ones a piece of fast RAM: all together below 16 MB
                                          * (16.19, MEMA_LOW), or at least the largest one anywhere; path B then puts
@@ -569,7 +708,7 @@ int main(int argc, char **argv)
     W.sz = malloc(ZV_MAXFILES * sizeof *W.sz);
     walk(W.top, 0, 0);                  /* pass 1: count */
     W.top++;
-    u32 nent = W.n, fneed = inf.bytes[0] + inf.bytes[2] + (whole ? len : 0);
+    u32 nent = W.n, fneed = (memmode == ZV_MEM_CHIP ? 0 : inf.bytes[0] + inf.bytes[2]) + (whole ? len : 0);
     u32 budget = info.fast_free > fneed ? (info.fast_free - fneed) / 2 : 0;
     W.thr = 0xFFFFFFFFu;
     u32 vbytes = W.bytes;
@@ -603,7 +742,9 @@ int main(int argc, char **argv)
         dprintf(2, "zine: %s's directory holds %u KB, more than ZINE's volume takes on this machine now (%u KB: "
                 "half the fast RAM the program leaves free); %s are left out, a program that loads them will not "
                 "find them\n", name, (W.bytes + 1023) >> 10, budget >> 10,
-                W.thr == 0xFFFFFFFFu ? "its archives and disk images" : "its archives, disk images and largest files");
+                W.thr == 0xFFFFFFFFu ? "its archives and disk images" : !inmem && !dv_off ?
+                "its archives and disk images (and its largest files that cannot stay on the disk, d29 16.23)" :
+                "its archives, disk images and largest files");
     }
     if (W.over) {
         dprintf(2, "zine: only %s goes into ZINE's volume: its directory holds more than %u files and directories: "
@@ -632,7 +773,12 @@ int main(int argc, char **argv)
         memcpy(W.path, wpath, sizeof wpath);
     }
     u32 pf = whole ? len : 0;           /* the program's file in the volume */
-    u32 vsize = zv_need(nent + fn + 3, vbytes + fbytes + pf, nent + fn + 1);
+    u32 druns = W.druns + 8 * W.dn;     /* 16.23: the runs, and room for a few more each (the files may change) */
+    if (W.thr != 0xFFFFFFFFu && W.sz && !inmem && !dv_off)
+        for (u32 i = 0; i < W.nsz; i++) /* and 16 for each file the budget leaves out (it may stay on the disk) */
+            if (!(W.sz[i] & ZA_ARCH) && W.sz[i] > W.thr)
+                druns += 16;
+    u32 vsize = zv_need(nent + fn + 3, vbytes + fbytes + pf + druns * sizeof(struct zv_run), nent + fn + 1);
     u8 *data;
     W.vol = sys_memalloc(vsize);
     if (!W.vol || zv_init(W.vol, vsize, nent + fn + 3, "ZINE"))
@@ -662,7 +808,11 @@ int main(int argc, char **argv)
                 "file, from memory\n", name, (len - inf.end + 1023) >> 10);
     if (nent) {
         W.path[W.top - 1] = 0;
+        W.dn = W.dbytes = 0;
         walk(W.top - 1, 0, 0);          /* pass 2: fill */
+        if (W.dn)
+            dprintf(1, "ZINE: %u of %s's files (%u KB) stay on the disk: ZINE reads them from there as it asks\n",
+                    W.dn, name, (W.dbytes + 1023) >> 10);
         if (W.left > 5)
             dprintf(2, "zine: and %u more files left out (%u KB together)\n", W.left - 5, (W.leftbytes + 1023) >> 10);
     }
@@ -683,6 +833,10 @@ int main(int argc, char **argv)
     }
     u8 *vol = W.vol;
     ((struct zv_hdr *)vol)->now = sys_time();  /* dos DateStamp's clock (16.13) */
+    ((struct zv_hdr *)vol)->mem = memmode;
+    if (memmode != ZV_MEM_ALL)
+        dprintf(1, "ZINE: %s sees %s (%s)\n", name, memmode == ZV_MEM_CHIP ? "chip RAM only" :
+                "chip RAM and the fast RAM below 16 MB only", memmode == ZV_MEM_CHIP ? "-c" : "-l");
     /* a 68040 or 68060 (AttnFlags; a 68060 without 68060.library at boot says 68040, so then both): Motorola's
      * packages for what the CPU lacks (16.14); not on Emu68, which runs every instruction itself */
     if ((info.attn & 0x88) && !(info.size >= UZINE_INFO_MACHINE && (info.machine & UZI_EMU68))) {

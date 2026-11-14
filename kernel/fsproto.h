@@ -62,6 +62,11 @@
                         * at the end, or -errno; fsrdx.next the position after the last record. An error after one
                         * record or more answers those (the error comes again from there). A server without it: -ENOSYS */
 struct fsrdx { unsigned int size, next; };
+#define FS_BMAP    28  /* DESIGN D29 16.23 (ZINE reads a data file from the disk while Zenix is paused): a0 ino (a regular
+                        * file), a1 its first 512-byte sector wanted, a2 u32 pairs[a3] -> the pairs filled: each a run of
+                        * sectors on the server's device (the first, the count; 0xFFFFFFFF a hole: zeros), each following
+                        * the one before in the file, the last ending at the file's last sector; 0 at or past the end;
+                        * -EINVAL not a regular file. Root's (the kernel's ZINE_MAP). A server without it: -ENOSYS */
 #include "udirx.h"
 struct fsinfo { char dev[16]; char type[8]; };
 

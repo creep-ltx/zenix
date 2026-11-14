@@ -462,6 +462,32 @@ __attribute__((noinline)) u32 ext2_bmap(const struct inode *in, u32 n)
     return ind(ind(ind(in->block[14], n / (per * per)), (n / per) % per), n % per);
 }
 
+/* D29 16.23 (FS_BMAP): from the file's 512-byte sector `first` on, at most n runs of sectors on the device into r
+ * (pairs: the first sector, the count; 0xFFFFFFFF for a hole), each run following the one before in the file, the
+ * last ending at the file's last sector: the runs filled (0 at or past the end) */
+int ext2_runs(const struct inode *in, u32 first, u32 *r, u32 n)
+{
+    u32 spb = bsize >> 9, end = (in->size + 511) >> 9, k = 0;
+    while (first < end) {
+        u32 b = ext2_bmap(in, first / spb), c = spb - first % spb;
+        if (b >= total_blocks)          /* a block number from the disk outside the volume: the runs so far (zine then
+                                         * keeps the file in memory, whose read meets the same damage) */
+            return k ? (int)k : damaged("block number out of range:", b);
+        u32 s = b ? part_lba + b * spb + first % spb : 0xFFFFFFFFu;
+        if (c > end - first)
+            c = end - first;
+        if (k && r[2 * k - 1] < 0x10000000u &&
+            (s == 0xFFFFFFFFu ? r[2 * k - 2] == s : r[2 * k - 2] != 0xFFFFFFFFu && r[2 * k - 2] + r[2 * k - 1] == s))
+            r[2 * k - 1] += c;
+        else if (k == n)
+            break;
+        else
+            r[2 * k] = s, r[2 * k + 1] = c, k++;
+        first += c;
+    }
+    return (int)k;
+}
+
 /* Sequential reading (docs/d42-faster-ide.md): block lb of a file is blk, most likely not cached; it and the blocks
  * after it that are its neighbours on the disk and not cached either - at most a quarter of the cache - go into as many
  * neighbouring slots, the ones whose newest use is the oldest, with one disk request. (A block is never in two slots:

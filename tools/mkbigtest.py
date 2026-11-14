@@ -41,7 +41,14 @@ os.makedirs(out, exist_ok=True)
 open(os.path.join(out, "zbig"), "wb").write(h)
 os.chmod(os.path.join(out, "zbig"), 0o755)
 open(os.path.join(out, "zbig.small"), "wb").write(b"SMALL DATA FILE\n" * 64)
-open(os.path.join(out, "zbig.huge"), "wb").write(b"HUGE" * (1536 * 256))
+# d29 16.23: read from the disk during the session, so its longwords tell where they are: i = 0x4E000000 | i
+open(os.path.join(out, "zbig.huge"), "wb").write(b"".join(struct.pack(">I", 0x4E000000 | i) for i in range(1536 * 256)))
+# d29 16.23: eight files of 200 KB (under the 256 KB that stay on the disk anyway), together more than the volume's
+# budget on the test machine: the ones it leaves out stay on the disk instead; longword i of zbig.midK = 0x4D000000 |
+# K << 20 | i
+for k in range(1, 9):
+    open(os.path.join(out, "zbig.mid%d" % k), "wb").write(b"".join(struct.pack(">I", 0x4D000000 | k << 20 | i)
+                                                              for i in range(200 * 256)))
 open(os.path.join(out, "zbig-pack.lha"), "wb").write(b"\x00-lh5-" + bytes(100 * 1024))
 
 # zlean (d29 16.19)
