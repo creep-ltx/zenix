@@ -11,6 +11,8 @@
 #     and set-group-id, O_EXCL, and that raw messages from a user (not from the kernel) are refused;
 #   - a rename cut by a power cut after every block write leaves at worst a leak (e2fsck -fn);
 #   - fsck.ext2 against host e2fsck on damaged images; mkfs.ext2 results checked by e2fsck;
+#   - a 1 MB copy in 1 KB pieces read back the same, FS_BMAP's runs read off the image (holes as zeros), a copy that
+#     does not fit ends with ENOSPC (d29 16.23);
 #   - a bounded fuzz loop: randomly damaged images must never crash the server (AddressSanitizer build).
 # usage: tools/ext2-host-test.sh [fuzz-rounds]     (default 150; memory: one small image at a time)
 cd "$(dirname "$0")/.." || exit 1
@@ -133,6 +135,50 @@ for img in plain plain4k; do
         { check "the small cache (no fast RAM): the workload's answers the same, e2fsck -fn clean ($img)" bad; diff $T/out-$img $T/out | head; }
 done
 debugfs -R "stat /idx" $T/w-plain.img 2>/dev/null | grep -q "Flags: 0x0" && check "a changed htree directory lost its index flag" ok || check "a changed htree directory lost its index flag" bad
+
+# ---- a 1 MB copy compared, FS_BMAP's runs read off the image, a copy that does not fit (d29 16.23; 2026-11-14:
+# tools/ide-speed-test.sh's 1 MB copy on the ext2 root failed with the disk full, which showed only as a wrong SHA-256)
+mkdir -p $T/bsrc
+python3 -c "
+import struct, sys
+open(sys.argv[1], 'wb').write(b''.join(struct.pack('>I', 0x6D000000 ^ (i * 2654435761 & 0xFFFFFFFF)) for i in range(262144)))
+f = open(sys.argv[2], 'wb'); f.write(b'head' * 1024); f.seek(200000); f.write(b'tail' * 1024); f.close()
+" $T/bsrc/big1m $T/bsrc/sparse
+for img in plain plain4k; do
+    case $img in plain) o="-b 1024";; plain4k) o="-b 4096";; esac
+    rm -f $T/b-$img.img
+    mke2fs -q -F -t ext2 $o -d $T/bsrc $T/b-$img.img 8M || exit 1
+    printf 'mount\ncopy /big1m /c1m\nbmap /big1m %s\nbmap /sparse %s\nbmap /c1m %s\nsync\n' \
+        $T/runs1 $T/runs2 $T/runs3 > $T/b.txt
+    fsd $T/b-$img.img $T/b.txt $T/bout
+    rm -f $T/c1m.out; debugfs -R "dump /c1m $T/c1m.out" $T/b-$img.img >/dev/null 2>&1   # the host reads the copy
+    grep -q '^copy -> 0 1048576$' $T/bout && cmp -s $T/c1m.out $T/bsrc/big1m && check "a 1 MB copy in 1 KB pieces reads back the same ($img)" ok ||
+        { check "a 1 MB copy in 1 KB pieces reads back the same ($img)" bad; cat $T/bout; }
+    clean $T/b-$img.img && check "host e2fsck -fn clean after the copy ($img)" ok || { check "host e2fsck -fn clean after the copy ($img)" bad; cat $T/e2fsck.log; }
+    # the runs, read straight off the image, give each file's bytes (holes as zeros)
+    python3 - $T/b-$img.img $T/runs1 $T/bsrc/big1m $T/runs2 $T/bsrc/sparse $T/runs3 $T/bsrc/big1m > $T/rcheck <<'PY'
+import sys
+img = open(sys.argv[1], 'rb')
+for rf, want in zip(sys.argv[2::2], sys.argv[3::2]):
+    w = open(want, 'rb').read(); got = b''; holes = 0
+    for line in open(rf):
+        lba, n = map(int, line.split())
+        if lba == 0xFFFFFFFF: got += bytes(512 * n); holes += 1
+        else: img.seek(lba * 512); got += img.read(512 * n)
+    print(rf.split('/')[-1], 'same' if got[:len(w)] == w and len(got) == (len(w) + 511) // 512 * 512 else 'DIFFERENT', 'holes', holes)
+PY
+    grep -q '^runs1 same' $T/rcheck && grep -q '^runs2 same holes [1-9]' $T/rcheck && grep -q '^runs3 same' $T/rcheck &&
+        grep -q '^bmap -> 0 [0-9]* 2048$' $T/bout &&
+        check "FS_BMAP's runs read off the image give the file, a hole as zeros, the copy's too ($img)" ok ||
+        { check "FS_BMAP's runs read off the image give the file, a hole as zeros, the copy's too ($img)" bad; cat $T/rcheck; grep bmap $T/bout; }
+done
+# a copy that does not fit (the first fits): refused with ENOSPC (-28) part way, never answered as done; the volume clean after
+python3 -c "import sys; open(sys.argv[1], 'wb').write(b'fill' * (384 * 1024))" $T/bsrc/fill   # (not zeros: no holes)
+rm -f $T/f.img; mke2fs -q -F -t ext2 -b 1024 -d $T/bsrc $T/f.img 4M || exit 1
+printf 'mount\ncopy /big1m /c1m\ncopy /big1m /c2m\nsync\n' > $T/b.txt
+fsd $T/f.img $T/b.txt $T/bout
+grep -q '^copy -> 0 1048576$' $T/bout && grep -q '^copy -> -28 ' $T/bout && clean $T/f.img && check "a copy the volume has no room for ends with ENOSPC, the volume clean" ok ||
+    { check "a copy the volume has no room for ends with ENOSPC, the volume clean" bad; cat $T/bout; }
 
 # ---- bench's create/delete: every request is on the disk when it is answered (write-through, no sync) ----
 # (the PiStorm bench showed 25 us per create on the SD card, too fast for that: this checks the server's side)

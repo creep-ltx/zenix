@@ -1,0 +1,27 @@
+ADVENTURE(1)			Zenix manual
+
+NAME
+    adventure - the original Colossal Cave adventure
+
+SYNOPSIS
+    adventure [SAVEFILE]
+
+DESCRIPTION
+    Will Crowther's and Don Woods's cave (1976-77), the first text
+    adventure: explore the cave, gather its treasures, mind the dwarves.
+    Type one or two words: "enter building", "get lamp", "north", "xyzzy".
+    "info" tells more, "score" the score, "quit" ends. "suspend" saves the
+    game in a file and ends; adventure FILE goes on from it.
+
+EXIT STATUS
+    0.
+
+NOTES
+    One of the BSD games (NetBSD 10.2's, pinned unchanged in
+    ports/bsdgames; the BSD licence: /usr/share/licenses/bsdgames), in
+    the games package (zpkg -S games).
+    Its text is kept scrambled in the program, as upstream's (made at
+    build time by its own setup tool).
+
+SEE ALSO
+    frotz(1), wump(1)

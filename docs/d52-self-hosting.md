@@ -20,7 +20,7 @@ How the facts were found: licences read from each project's own files or pages (
 | 4 | assembler | `zas`, our own, Motorola syntax, ELF objects (or vasm) | ours GPL-2 (vasm: not GPL-compatible) | about 30-50 KB (estimate); vasm 303 KB (measured) | **yes**: vasm only with its author's consent |
 | 5 | C compiler | tcc with a new 68k back end (or vbcc) | tcc LGPL-2.1: GPL-2-compatible (vbcc: not) | about 180-220 KB (tcc measured 176 KB for i386); `/bin/tcc` 257 KB (measured) | **yes**: the choice (tcc); **built** (section 7) |
 | 6 | debugger | stage 1 `zdb` after a crash (no kernel change); stage 2 live | ours | stage 1 about 15 KB (estimate) | **yes** for stage 2 (a kernel change) |
-| 7 | fun | Lua's display and sound module, terminal games, a text-adventure player | ours; BSD; GPL-2+ | small each | **yes**: which ones |
+| 7 | fun | Lua's display and sound module, terminal games, a text-adventure player | ours; BSD; GPL-2+ | small each | **yes**: both; **built** (section 8) |
 | 8 | audit | the whole system | | | release 1.0 with the owner's yes |
 
 Smallest and most useful first: Lua and make need no decision and are useful at once (scripts, games, build files);
@@ -380,6 +380,63 @@ Zenix itself:
   Interactive Fiction Archive's); the classic games themselves are not free to ship.
 - **A Zenix intro:** our own demo through the display server, once `DPY_SCREEN` (D50 section 4, a question already
   with the partner) gives a program a screen of its own.
+
+### As built: the fun (item 7, 2026-11-14)
+
+The partner's answer, "Both?" (docs/decisions.md, "Block 7's choices", item 3), taken as Lua games with windows and sound
+and the classic terminal games; the Zenix intro waits for D50's full screen. Everything is in the **games** package
+(`zpkg -S games`, tools/mkzup.py: the programs, their data and score files, gridrun; it depends on the package lua);
+the full images carry it, the demo floppies and the RAM disks do not.
+
+- **Frotz** (`ports/frotz`, its README): Frotz 2.55 pinned unchanged, its core and the dumb front end (plain text in and
+  out: the console, term, telnet and a script of moves alike; the curses front end needs a fuller curses than Zenix
+  has), GPL 2 or later. `/bin/frotz` 102,416 bytes (ZEXE: the front end's speed factor is a float). The story:
+  **All Things Devours** (2004, "half sick of shadows", public domain in its author's words), 160,768 bytes in
+  `/usr/share/games/frotz`. Found on the way: upstream's random numbers overflow a signed long (UBSan): built with
+  `-fwrapv`, which gives the PC's 64-bit and Zenix's 32-bit build the same numbers (only the low 31 bits are used).
+- **The BSD games** (`ports/bsdgames`, its README): twelve of NetBSD 10.2's, pinned unchanged, BSD 2- and 3-clause (no
+  advertising clause): adventure, wump, robots, worm, tetris, hangman, rain, worms, fortune, banner, number,
+  arithmetic; 416,640 bytes together (adventure 112,656 the largest). Left out: rogue (its notice forbids selling: not
+  GPL-compatible), hack and larn (big), primes and factor (50-90 KB of prime tables). Zenix's part: a forced header for
+  NetBSD's macros and the BSD calls picolibc lacks (`err`, `getprogname`, `arc4random` from `/dev/urandom`, `flock` and
+  `ftruncate` as ENOSYS), a **small curses of our own** (`zenix/curses.c`, about 600 lines: character grids, a refresh
+  writes only the cells that differ from what the terminal shows, keypad's arrows; SIGALRM held off during a refresh,
+  as worm and robots -r refresh from their alarm handlers), tetris's terminfo built in, and one patch (wump showed its
+  instructions by fork and exec: Zenix has no fork, so the shell runs `less < wump.info`). adventure's text is
+  scrambled at build time with `random()`, which the game undoes on Zenix: the PC's tool is built with picolibc's
+  generator (`zrandom.c`). Zenix's own data: 40 **fortunes** from the night city and 300 words for hangman (ours,
+  GPL 2); score files in `/var/games` (1777, the files 0666: nothing on Zenix is set-group-id).
+- **Lua's `zenix` module** (`ports/lua/zenix/lzenix.c`, man/zenix-lua.txt): a window from the display server (fills,
+  lines, text, pictures with see-through pixels, keys and the mouse as events), samples and a ProTracker module
+  through sndd as one frames stream (the bank holds the module's samples, then the script's; a sample played takes
+  its channel for its length, the module's notes there wait, as Amiga games always did), the time and waits that keep
+  the music's frames 100 ms ahead. Linked into `/bin/lua` (registered by wrapping `luaL_openlibs` with the linker's
+  `--wrap`, Lua's files unchanged), the display's and sound server's client libraries and modplay's replayer compiled
+  unchanged against the C library through a stand-in for libz's header: `/bin/lua` 244,148 -> 267,320 bytes (+23 KB;
+  a separate binary would have cost every game player 267 KB more on the disk and in memory).
+- **gridrun** (`games/gridrun.lua`, man/gridrun.txt): a light-cycle duel against a daemon of the grid, a 512 x 182
+  window of 8 x 4-pixel cells (square in hires), its pictures, sounds and music (a four-channel module in A minor)
+  made by the script itself with whole numbers (a float is a library call on a 68020 without an FPU: the first
+  version took over 20 s to make its sounds in FS-UAE's stock A1200). About 550 KB while it runs (FS-UAE figure:
+  Lua's code is not shared, its 128 KB stack, the heap).
+
+**Tests:** `tools/games-host-test.sh` (the PC, `make check`'s host list): Frotz plays a script of moves under ASan and
+UBSan, the reference transcript; adventure's text read back with picolibc's generator; banner and number; strfile's
+index of the fortunes; the curses against a decoder of its own output, 300 frames of random drawing at three sizes,
+equal frame by frame, and a refresh with nothing changed writing nothing; gridrun with a stand-in for the module
+(every call's arguments checked, nothing drawn outside the window, three rounds) and its module read by modplay's
+replayer, every channel playing. `tools/games-test.sh` (FS-UAE, an A1200 with 4 MB of fast RAM): the transcript the
+PC's line for line, adventure, banner and number the PC's, all 40 fortunes found through the index, wump and
+arithmetic, and the curses games on console 1 read from its grid (`termtest screen`) and driven by their keys:
+robots, hangman, tetris, worm, rain, worms; no stack guard fired. `tools/luagame-test.sh` (FS-UAE through the cage rig,
+STOCK): the module's bad arguments end in Lua errors, never a crash; gridrun under zdesk reads its keys, both trails
+show in the screenshot, sndd's state while it plays shows the stream, its frames and three or more channels on with
+the module's periods, and the stream is gone after q. The independent review (2026-11-14, one reviewer for the ports,
+one for the module) found, among others: a failed bank raised at every later wait (now the music stops and the
+reason is answered at z.sample/z.music), frames made from a time already past could fill sndd's queue at fast tempos,
+two samples played in one frame started 20 ms apart, a picture's buffer leaked on an error, a second connect after a
+failed one left the display unusable, curses refreshing from an alarm handler; all fixed. **Verified in FS-UAE
+2026-11-14; not yet on a real Amiga** (the first run there should time gridrun's start and steps on the stock A1200).
 
 ## 9. Lua as built (item 1, 2026-11-13)
 

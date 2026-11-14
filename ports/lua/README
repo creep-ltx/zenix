@@ -21,6 +21,13 @@ hook for a user header (lua.h includes the file LUA_USER_H names after luaconf.h
   stack", has the measurements behind the numbers and STACK_lua.
 - No dynamic libraries (upstream's default without LUA_USE_DLOPEN): require loads Lua modules only.
 
+Zenix's own module (GPL-2.0-only, not Lua's): zenix/lzenix.c, Lua's "zenix" module for games (a desktop window,
+pictures, keys and the mouse, samples and modules through sndd, time; docs/man/zenix-lua.txt, DESIGN D52 section 8
+"As built: the fun"). Linked into /bin/lua only (not the probe build) and registered in package.preload by wrapping
+luaL_openlibs with the linker's --wrap, so upstream's files stay unchanged; zenix/shim/libz.h lets the display's and
+the sound server's client libraries (display/lib/libdisplay.c, user/sndlib.c) and modplay's replayer (user/modrep.c)
+compile unchanged against the C library. It adds 23 KB to /bin/lua.
+
 Found while porting (for the record, not changed):
 - libgcc's soft float on m68k (lb1sf68) keeps its state in data reached by absolute addresses, so a program using
   doubles cannot be a program with shared code (ZEX2) today: Lua is a plain program, each running Lua has its own

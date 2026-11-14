@@ -1,0 +1,22 @@
+RAIN(1)			Zenix manual
+
+NAME
+    rain - rain falling on the screen
+
+SYNOPSIS
+    rain [-d DELAY]
+
+DESCRIPTION
+    Draws raindrops hitting a pool, ripples spreading, until Ctrl-C.
+    -d DELAY waits DELAY milliseconds (0-999) between frames (120).
+
+EXIT STATUS
+    0.
+
+NOTES
+    One of the BSD games (NetBSD 10.2's, pinned unchanged in
+    ports/bsdgames; the BSD licence: /usr/share/licenses/bsdgames), in
+    the games package (zpkg -S games).
+
+SEE ALSO
+    worms(1)

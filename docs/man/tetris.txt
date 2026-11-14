@@ -1,0 +1,39 @@
+TETRIS(1)			Zenix manual
+
+NAME
+    tetris - the falling blocks game
+
+SYNOPSIS
+    tetris [-bps] [-k KEYS] [-l LEVEL]
+
+DESCRIPTION
+    Shapes fall into a well; turn them and move them so they fill whole
+    rows, which then vanish. The game ends when the well is full. Keys:
+    j left, k rotate, l right, space drop, n down a step, p pause, q quit
+    (-k KEYS gives seven others, in that order). The level (1-9, -l)
+    sets the speed; the score is points times the level.
+
+OPTIONS
+    -k KEYS   the seven keys: left, rotate, right, drop, pause, quit, down
+    -l LEVEL  the starting level (2)
+    -p        show the next shape
+    -s        show the high scores and end
+    -b        no colours
+
+FILES
+    /var/games/tetris.scores   the high scores (every user writes them)
+
+EXIT STATUS
+    0.
+
+NOTES
+    One of the BSD games (NetBSD 10.2's, pinned unchanged in
+    ports/bsdgames; the BSD licence: /usr/share/licenses/bsdgames), in
+    the games package (zpkg -S games).
+    It draws with the console's escape codes directly (a small built-in
+    description of Zenix's terminal, ports/bsdgames/zenix/term.c). A
+    damaged score file is left alone and no scores are kept: Zenix
+    cannot shorten an open file.
+
+SEE ALSO
+    robots(1), gridrun(1)

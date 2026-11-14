@@ -1,0 +1,40 @@
+FORTUNE(1)			Zenix manual
+
+NAME
+    fortune - print a random message from the night city
+
+SYNOPSIS
+    fortune [-aefilosw] [-m PATTERN] [[N%] FILE|DIRECTORY|all]...
+
+DESCRIPTION
+    Prints one message picked at random from the fortune files. The
+    games package brings Zenix's own collection, fortunes: forty short
+    lines from a dark, rainy, wired city, written for Zenix. Put fortune
+    in a shell's start file to get one at each login.
+
+OPTIONS
+    -a    from all the files (the same here: there is one)
+    -e    every file as likely, whatever its size
+    -f    list the files that would be used, with their chances
+    -l    long messages only (over 160 characters), -s short ones only
+    -m PATTERN  print every message that matches the regular expression
+    -i    the pattern ignores case
+    -w    wait a moment after the message, for its length
+    -o    the offensive files: there are none
+
+FILES
+    /usr/share/games/fortune/fortunes      the messages, % between them
+    /usr/share/games/fortune/fortunes.dat  their index (made by strfile)
+
+EXIT STATUS
+    0, 1 when no file can be read.
+
+NOTES
+    One of the BSD games (NetBSD 10.2's, pinned unchanged in
+    ports/bsdgames; the BSD licence: /usr/share/licenses/bsdgames), in
+    the games package (zpkg -S games).
+    A file of your own needs its index, which strfile makes on the PC
+    (strfile is not on Zenix). The messages are Zenix's (GPL 2).
+
+SEE ALSO
+    banner(1)

@@ -1,0 +1,43 @@
+ROBOTS(1)			Zenix manual
+
+NAME
+    robots - escape the robots by making them crash
+
+SYNOPSIS
+    robots [-Aajnrst] [MAXIMUM] [SCOREFILE]
+
+DESCRIPTION
+    You (@) are on a field of robots (+) that step towards you each time
+    you move. Two robots that meet, or a robot that runs into a junk heap
+    (*), are scrap. Clear the field to go on to the next level.
+    Keys: h j k l y u b n move (left, down, up, right and the diagonals);
+    the capitals move until something is in the way; . or space waits a
+    turn; w waits until the robots are done; t teleports you somewhere
+    else (perhaps next to a robot); q quits; Ctrl-L redraws.
+
+OPTIONS
+    -r    real time: the robots move every 3 seconds, ready or not
+    -s    show the scores and end
+    -j    jump: the moves are not shown, only their end
+    -t    teleport on the move that would kill you, if one is left
+    -a    start at level 4
+    -A    the computer plays (watch)
+    -n    one more game in a row (for each -n)
+    MAXIMUM  how many scores one user keeps in SCOREFILE (5)
+    SCOREFILE  another score file (one named pattern_roll or stand_still
+          changes how the robots are placed)
+
+FILES
+    /var/games/robots_roll   the high scores (every user writes them)
+
+EXIT STATUS
+    0.
+
+NOTES
+    One of the BSD games (NetBSD 10.2's, pinned unchanged in
+    ports/bsdgames; the BSD licence: /usr/share/licenses/bsdgames), in
+    the games package (zpkg -S games).
+    Drawn with Zenix's own small curses (ports/bsdgames/zenix).
+
+SEE ALSO
+    worm(1), tetris(1)

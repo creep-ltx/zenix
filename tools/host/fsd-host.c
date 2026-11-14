@@ -22,6 +22,8 @@
  *   state                   the clean mark (DESIGN D17): the state's bit 0 on the image, and fsd's marked, need, hold,
  *                           orphans and the block writes it made outside the mark
  *   idle                    what fsd does 1 s after the last change (the quiet moment)
+ *   copy SRC DST            (ext2) as cp: 1 KB read and written at a time; "copy -> RESULT BYTES"
+ *   bmap PATH HOSTFILE      (ext2) FS_BMAP's runs (d29 16.23), 5 a request, as "SECTOR COUNT" lines
  * At the end a line "unmarked-writes N" if fsd wrote a block while the volume was not marked (never right).
  * open FLAGS also take x (O_EXCL).
  * An inode argument "%N" is the inode number the N-th successful open returned.
@@ -443,6 +445,44 @@ int main(void)
             r = fs_blk_read(2, 1, sec);
             printf("state -> %d marked %d need %d hold %d orphans %d unmarked %lu\n", r ? -1 : sec[58] & 1, marked, need, hold,
                    norphans, fsd_unmarked_writes);
+            continue;
+        }
+        else if (!strcmp(cmd, "copy")) {                  /* copy SRC DST: as cp does, 1 KB read and written at a time */
+            struct ustat ss, ds;
+            int si = req(FS_OPEN, (u32)a, CWD, O_RDONLY, (u32)&ss);
+            int di = si < 0 ? si : req(FS_OPEN, (u32)b, CWD, flags_of("wct"), (u32)&ds);
+            u32 off = 0;
+            r = di < 0 ? di : 0;
+            while (r == 0) {
+                int n = req(FS_READ, (u32)si, off, (u32)big, 1024);
+                if (n <= 0) { r = n; break; }
+                int w = req(FS_WRITE, (u32)di, off, (u32)big, (u32)n);
+                if (w != n) { r = w < 0 ? w : -1; break; }
+                off += (u32)n;
+            }
+            if (si > 0) req(FS_CLOSE, (u32)si, 0, 0, 0);
+            if (di > 0) req(FS_CLOSE, (u32)di, 0, 0, 0);
+            printf("copy -> %d %u\n", r, off);
+            continue;
+        }
+        else if (!strcmp(cmd, "bmap")) {                  /* bmap PATH HOSTFILE: FS_BMAP's runs (d29 16.23), 5 at a time,
+                                                           * written as "SECTOR COUNT" lines */
+            struct ustat ps;
+            int pi = req(FS_OPEN, (u32)a, CWD, O_RDONLY, (u32)&ps);
+            if (pi < 0) { printf("bmap -> %d\n", pi); continue; }
+            FILE *out = fopen(b0, "w");
+            u32 first = 0, runs = 0, x[10];
+            for (;;) {
+                r = req(FS_BMAP, (u32)pi, first, (u32)x, 5);
+                if (r <= 0) break;
+                for (int i = 0; i < r; i++, runs++) {
+                    if (out) fprintf(out, "%u %u\n", x[2 * i], x[2 * i + 1]);
+                    first += x[2 * i + 1];
+                }
+            }
+            if (out) fclose(out);
+            req(FS_CLOSE, (u32)pi, 0, 0, 0);
+            printf("bmap -> %d %u %u\n", r, runs, first);
             continue;
         }
 #endif

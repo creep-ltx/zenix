@@ -1,0 +1,25 @@
+ARITHMETIC(1)			Zenix manual
+
+NAME
+    arithmetic - quiz on simple sums
+
+SYNOPSIS
+    arithmetic [-o +-x/] [-r RANGE]
+
+DESCRIPTION
+    Asks sums with numbers up to RANGE (10) and the operations given (+
+    and - by default; x is times, / is division). Type the answer and
+    Return; a wrong answer is asked again at once until it is right, and
+    the sums you got wrong come up more often after. At the end of input
+    (Ctrl-D) or Ctrl-C it says how many were right and how long they took.
+
+EXIT STATUS
+    0.
+
+NOTES
+    One of the BSD games (NetBSD 10.2's, pinned unchanged in
+    ports/bsdgames; the BSD licence: /usr/share/licenses/bsdgames), in
+    the games package (zpkg -S games).
+
+SEE ALSO
+    number(1)

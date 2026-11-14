@@ -21,6 +21,7 @@ section 3, "Updates"). The bundle and the manifest are frozen formats (CLAUDE.md
                                          added as a file, mode 755) - for test bundles that change something
   mkzup.py check FILE                    every range and SHA-256 of a bundle; exit 1 with the reason if one is wrong
   mkzup.py list FILE                     the header and the parts
+  mkzup.py stage FAMILY STAGE BUILD      a family's other files (FAMILY_EXTRA) into a staging tree, as its package
   mkzup.py installdb STAGE PKGDIR DEST   the manifests of the packages whose every entry is in the staging tree STAGE
                                          as the manifest says, into DEST (/var/lib/zpkg of a root image; mkroot.sh)
 
@@ -36,6 +37,7 @@ import gzip
 import hashlib
 import io
 import os
+import shutil
 import re
 import stat
 import struct
@@ -226,6 +228,8 @@ FAMILIES = [
     ("lua", "Lua 5.4, the scripting language (DESIGN D52)", "lua"),
     ("make", "make, the POSIX make (pdpmake, public domain; DESIGN D52)", "make"),
     ("devel", "tcc, zld, zas, zdb: compiler, linker, assembler, debugger, C library", "zld zas tcc zdb"),
+    ("games", "games: Frotz, the BSD games, Lua games with windows and sound (gridrun)",
+              "frotz adventure arithmetic banner fortune hangman number rain robots tetris worm worms wump"),
     ("shadow", "users and passwords: su, sudo, passwd, useradd", "su sudo passwd useradd userdel gpasswd"),
     ("disktools", "disks and filesystems: fdisk, mkfs, fsck, dd, umount", "dd fdisk mkfs_ext2 fsck_ext2 mkfs_zenixfs "
                   "fsck_zenixfs umount"),
@@ -278,7 +282,40 @@ FAMILY_LICENSES = {"zine": [("user/zine/msp/060/README", "m68060sp"), ("user/zin
                    "ctop": [("ports/ctop/upstream/LICENSE", "ctop"), ("ports/tui/upstream/LICENSE", "ctop-tui")],
                    "lua": [("ports/lua/upstream/LICENSE", "lua")],
                    "make": [("ports/pdpmake/upstream/LICENSE", "make")],
-                   "devel": [("ports/tcc/upstream/COPYING", "tcc")]}
+                   "devel": [("ports/tcc/upstream/COPYING", "tcc")],
+                   "games": [("ports/frotz/upstream/COPYING", "frotz"), ("ports/bsdgames/LICENSE", "bsdgames"),
+                             ("ports/frotz/stories/README", "devours")]}
+# a family's other files: (kind, mode, source, path), the source from the source tree, "build:NAME" from the build
+# directory, None an empty file; kind "c" is kept when changed (a score file). tools/mkroot.sh stages the same list
+# (mkzup.py stage FAMILY ROOT BUILD), so an image holds what the package holds. The games: the Lua games as #!
+# scripts (they need the package lua), the data the games read, the score files every user may write.
+FAMILY_EXTRA = {"games": [("f", 0o755, "games/gridrun.lua", "/bin/gridrun"),
+                          ("f", 0o644, "build:bg/fortunes", "/usr/share/games/fortune/fortunes"),
+                          ("f", 0o644, "build:bg/fortunes.dat", "/usr/share/games/fortune/fortunes.dat"),
+                          ("f", 0o644, "ports/bsdgames/upstream/wump/wump.info", "/usr/share/games/wump.info"),
+                          ("f", 0o644, "ports/frotz/stories/devours.z5", "/usr/share/games/frotz/devours.z5"),
+                          ("f", 0o644, "games/words", "/usr/share/dict/words"),
+                          ("d", 0o1777, None, "/var/games"),
+                          ("c", 0o666, None, "/var/games/robots_roll"),
+                          ("c", 0o666, None, "/var/games/tetris.scores")]}
+FAMILY_DEPS = {"games": ["lua"]}
+
+
+def extra_src(build, src):
+    return os.devnull if src is None else os.path.join(build, src[6:]) if src.startswith("build:") else \
+        os.path.join(ROOT, src)
+
+
+def stage_extra(fam, stage, build):
+    """tools/mkroot.sh: FAMILY_EXTRA's files of the family into the image's tree, as the package installs them"""
+    for kind, mode, src, path in FAMILY_EXTRA.get(fam, []):
+        p = stage + path
+        if kind == "d":
+            os.makedirs(p, exist_ok=True)
+        else:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            shutil.copyfile(extra_src(build, src), p)
+        os.chmod(p, mode)
 ANCHORS = "anchors"                       # DESIGN D21 8.1: build/anchors (tools/mkanchors.py) as /etc/ssl/anchors
 FONT = "cp437-8x8.psf"                    # DESIGN D20 4.2: build/cp437-8x8.psf as /usr/share/consolefonts/cp437-8x8.psf
 UFONT = "zenix-8x8.zcf"                   # DESIGN D28 6: the Unicode font init loads at boot (/etc/console's font line)
@@ -397,13 +434,21 @@ def std_packages(build, uapps):
                 ents += [("d", 0o755, 0, 0, None, d) for d in ("/" + "/".join(parts[:i + 1]) for i in range(len(parts)))
                          if d not in have]
                 ents += [("f", 0o644, 0, 0, os.path.join(ROOT, f), dst)]
+            for kind, mode, src, dst in FAMILY_EXTRA.get(fam, []):
+                have = {e[5] for e in ents}
+                parts = dst.split("/")[1:-1]
+                ents += [("d", 0o755, 0, 0, None, d) for d in ("/" + "/".join(parts[:i + 1]) for i in range(len(parts)))
+                         if d not in have]
+                if dst not in have:
+                    ents.append((kind, mode, 0, 0, None if kind == "d" else extra_src(build, src), dst))
             for f in FAMILY_CONFIG.get(fam, []):
                 have = {e[5] for e in ents}
                 parts = f.split("/")[:-1]
                 ents += [("d", 0o755, 0, 0, None, d) for d in ("/" + "/".join(parts[:i + 1]) for i in range(len(parts)))
                          if d not in have]
                 ents += [("c", 0o644, 0, 0, os.path.join(ROOT, "rootfs", f), "/" + f)]
-            make_package(out, fam, vnum, vstr, ents, deps=[("base", vnum)], desc=desc, takes=("utils", "man"))
+            make_package(out, fam, vnum, vstr, ents, deps=[("base", vnum)] + [(d, vnum) for d in FAMILY_DEPS.get(fam, [])],
+                         desc=desc, takes=("utils", "man"))
             names.append(fam)
         if "zpkg" in progs:                 # the bootstrap package (BOOTSTRAP above): this build's zpkg, under its own name
             # (its page goes with base-man: an image has the page but not this package, so it may not own it)
@@ -659,6 +704,8 @@ def main(a):
                 print("  %-28s %8d %s" % (n, len(d), sha(d)))
         else:
             print("%s: ok" % a[1])
+    elif len(a) == 4 and a[0] == "stage":
+        stage_extra(a[1], a[2], a[3])
     elif len(a) == 4 and a[0] == "installdb":
         got = installdb(a[1], a[2], a[3])
         print("package database: %s" % (" ".join(got) or "none"))
