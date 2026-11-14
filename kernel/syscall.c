@@ -686,6 +686,8 @@ void syscall_c(u32 *rb)
             r = a2 && current->uid != 0 ? -EPERM : gfx_set_colours((int)a2);
         else if (a1 == CON_MODE)        /* D28 22: hires or interlaced, every console's (no descriptor) */
             r = a2 != CONM_ASK && current->uid != 0 ? -EPERM : gfx_set_mode((int)a2);
+        else if (a1 == CON_VBLANK)      /* D55 6: the vertical blank's count, any process (no descriptor) */
+            r = (s32)gfx_vwait(a2);
         else if (a1 == CON_UFONT)       /* D28: the Unicode font, every console's: no descriptor (with one: */
             r = (s32)term_ufont(a2, a3);        /* term_conop's -EINVAL, as for any op it does not know) */
         else

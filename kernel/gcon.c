@@ -62,6 +62,8 @@ struct gcon {
     u16 lost;                   /* input records dropped (a full ring): GEV_LOST says how many */
     u16 head, tail;
     u32 wait;                   /* the slots polling or reading the descriptor */
+    struct { u32 base, size; int pid; } hold[NHOLD];   /* D55: regions a screen shows; pid 0 and base set: the owner
+                                                        * ended, the block is the grab's process's until CON_HOLD 0 */
     struct ugevent q[GQN];
 };
 static struct gcon *gc;
@@ -280,6 +282,9 @@ static void end_grab(struct gcon *g)
     u16 s = irq_save();
     gc = 0;
     irq_restore(s);
+    for (int i = 0; i < NHOLD; i++)     /* D55: a dead owner's planes the server was handed go with the grab */
+        if (g->hold[i].base && !g->hold[i].pid)
+            mem_free((void *)g->hold[i].base);
     if (g->state != G_AWAY) {
         kbd_forget();
         gfx_hand(0);
@@ -303,15 +308,81 @@ void gcon_close(struct file *f)
  * as 0-2), since the Copper list and the sprite are its memory */
 void gcon_proc_exit(int pid)
 {
-    if (gc && gc->pid == pid)
-        end_grab(gc);
+    struct gcon *g = gc;
+    if (!g)
+        return;
+    if (g->pid == pid) {
+        end_grab(g);
+        return;
+    }
+    /* D55 6: a region a screen shows outlives its owner until the server has taken it off the glass: the block is
+     * the server's from now on (and no longer the dying process's region, so nothing else frees it) */
+    struct proc *p = proc_by_pid(pid);
+    for (int i = 0; i < NHOLD; i++) {
+        u32 b = g->hold[i].base;
+        if (!b || g->hold[i].pid != pid)
+            continue;
+        mem_set_owner((void *)b, (u32)g->pid);
+        for (int k = 0; p && k < NREG; k++)
+            if (p->reg[k].base == b)
+                p->reg[k].base = 0;
+        g->hold[i].pid = 0;
+        u8 ch[4] = { (u8)(b >> 24), (u8)(b >> 16), (u8)(b >> 8), (u8)b };
+        push(g, GEV_GONE, 0, 0, (short)i, 0, ch, 1);
+    }
 }
 
-/* SYS_memfree: a region holding the grab's Copper list or sprite is not given back while the grab lasts */
+/* CON_HOLD (D55 6): the server holds a client's chip RAM region while a screen shows it (pid 0: lets go) */
+long gcon_hold(struct file *f, u32 pid, u32 base)
+{
+    struct gcon *g = gc;
+    if (f->type != FT_GCON || !g || g->file != f || g->pid != current->pid)
+        return -EBADF;
+    int free_at = -1;
+    for (int i = 0; i < NHOLD; i++) {
+        if (g->hold[i].base == base && base) {
+            if (pid)
+                return -EBUSY;
+            if (!g->hold[i].pid)
+                mem_free((void *)base);         /* its owner ended: the block was handed to us */
+            g->hold[i].base = 0;
+            g->hold[i].pid = 0;
+            return 0;
+        }
+        if (!g->hold[i].base && free_at < 0)
+            free_at = i;
+    }
+    if (!pid)
+        return -EINVAL;
+    struct proc *p = proc_by_pid((int)pid);
+    if (!p || p->exiting || p->state == P_ZOMBIE)
+        return -ESRCH;
+    for (int k = 0; k < NREG; k++)
+        if (p->reg[k].base == base && base) {
+            u32 n = p->reg[k].size;
+            if (!chip_ok(base, n))
+                return -EINVAL;
+            if (free_at < 0)
+                return -EBUSY;
+            g->hold[free_at].base = base;
+            g->hold[free_at].size = n;
+            g->hold[free_at].pid = (int)pid;
+            return (long)n;
+        }
+    return -EINVAL;
+}
+
+/* SYS_memfree: a region holding the grab's Copper list or sprite is not given back while the grab lasts, nor a
+ * region a screen shows (D55) */
 int gcon_uses(u32 base, u32 size)
 {
     struct gcon *g = gc;
-    return g && g->pid == current->pid &&
+    if (!g)
+        return 0;
+    for (int i = 0; i < NHOLD; i++)
+        if (g->hold[i].base == base && g->hold[i].pid == current->pid)
+            return 1;
+    return g->pid == current->pid &&
            ((g->cop >= base && g->cop < base + size) || ((u32)g->spr >= base && (u32)g->spr < base + size));
 }
 
@@ -399,6 +470,7 @@ void gcon_vblank(void)
 /* kwork (process context): the pointer's news into the ring, the release's deadline, a console given back */
 void gcon_work(void)
 {
+    gfx_vwake();                        /* D55: the vertical blank's waiters (the interrupt only counted) */
     if (redraw_to) {
         int to = redraw_to;
         redraw_to = 0;

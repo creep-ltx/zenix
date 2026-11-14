@@ -133,7 +133,7 @@ proc     10650  21500
 syscall  10300      0
 vfs      11750   1600
 tty       5900    100
-gfx       8900   2450
+gfx       9050   2450
 term     14500    256
 confont   3100     32
 kbd       4300    180
@@ -147,9 +147,9 @@ sock      4700   1060
 drv       3100    640
 zine      1850     16
 cache     1800     32
-gcon      3600     16
+gcon      4150     16
 dbg       4100     20
 mmu       5700    160
 embed    49900      0
-TOTAL   205200
+TOTAL   206000
 ROOM       800

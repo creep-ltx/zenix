@@ -1673,6 +1673,14 @@ name); `ls` 5.66 -> 1.05 s, `ls -l` 6.83 -> 2.19 s, the file view 6.6 -> 1.7 s.
   sprite shows unless the server's list fetches at least one bitplane (found with `gcontest`). Verified in FS-UAE by
   `tools/gcon-test.sh` (screenshots, `gcontest`, docs/man/gcontest.txt). A grab whose struct is 28 bytes or more
   (`UCONGRAB_TOPAZ`) also gets the console's Topaz 8 (1,792 bytes) for the server to draw text with.
+- **The vertical blank's count and held regions** (`gfx.c`, `gcon.c`, DESIGN D55 section 6): the vertical-blank
+  interrupt counts frames (31 bits) and, when someone waits, sets `kwork_pending`; kwork wakes the waiters
+  (`gcon_work`). `SYS_console` `CON_VBLANK` (op 12, no descriptor, any process) waits until the count reaches a2 (at
+  most 100 ms, -EINTR for a signal; bit 31 only asks) and answers the count; -ENODEV without a display. `CON_HOLD`
+  (op 13, on the grab's descriptor, its process) holds a chip RAM region of a client process (its memalloc's base) while
+  a screen of its own shows it (at most 4): the owner's `memfree` of it is -EBUSY; at the owner's end `proc_exit` makes
+  the grab's process the block's owner and puts `GEV_GONE` (6: the slot, the base) in the ring, so the server takes the
+  screen off the glass and then lets go (a2 0), which frees it; the grab's end frees what it was handed.
 - **The display server** (`/sbin/displayd`, `display/server/`, DESIGN D38 step 3, docs/man/displayd.txt): the
   service `display` (`/etc/svctab`, nice -5), started by the desktop's first program, whose console (`PEER_CTTY`; a
   console, never a pty) it grabs. Its screen: 640 x 256 (200 on NTSC), or interlaced 640 x 512 (400) by
@@ -1688,6 +1696,11 @@ name); `ls` 5.66 -> 1.05 s, `ls -l` 6.83 -> 2.19 s, the file view 6.6 -> 1.7 s.
   partly covered window keeps a copy of its inside (taken from the screen when it starts to be covered, freed when
   it is whole again) and its drawing goes to the screen where visible and to the copy; raising, uncovering, moving
   and showing it are copies; the copies' budget is 256 KB, past it a window is simple refresh (cleared, EV_EXPOSE).
+  **Screens of their own** (`screen.c`, DESIGN D55, docs/d55-screens.md): a client's own mode, palette and planes (its
+  chip RAM, held by `CON_HOLD`) and a Copper list of Zenix's own instructions, checked and translated into displayd's
+  chip RAM; shown by pointing the changing part's jump word at a trampoline (still one word), the desktop's lists kept
+  as they are; colours changed in place, pointers and a list's shape by a flip after the settle; Left Amiga+N (and
+  Left Amiga+M on a screen) flips between the desktop and the screen; refused on a graphics card.
   Every change paints only its damage, back to front, each pixel once. The blitter fills, inverts and copies while
   the console is shown; while it is not (GEV_RELEASE) the CPU does, and text is always the CPU's, a byte a plane as
   the console's. Two fonts (D38 "Fonts"): the 8 x 8 (terminals) and the desktop's, an AmigaOS bitmap font named by

@@ -355,6 +355,14 @@ static inline int sys_congrab(int fd, struct ucongrab *g) { return sys3(89, CON_
 static inline int sys_congack(int gfd, u32 seq) { return sys3(89, CON_GACK | (u32)(gfd + 1) << 8, seq, 0); }
 #define CON_MOUSE 10            /* the grab's descriptor: the mouse's acceleration, THRESHOLD | MULTIPLIER << 8 */
 static inline int sys_conmouse(int gfd, u32 acc) { return sys3(89, CON_MOUSE | (u32)(gfd + 1) << 8, acc, 0); }
+/* DESIGN D55 6: the vertical blank's count (any process; a2 the count to wait for, CONV_ASK only asks) and the
+ * display server's hold on a client's chip RAM region while a screen shows it (kernel/kernel.h has the contract) */
+#define CON_VBLANK 12
+#define CON_HOLD 13
+#define CONV_ASK 0x80000000u
+#define GEV_GONE 6
+static inline int sys_vblank(u32 want) { return sys3(89, CON_VBLANK, want, 0); }
+static inline int sys_conhold(int gfd, int pid, u32 base) { return sys3(89, CON_HOLD | (u32)(gfd + 1) << 8, (u32)pid, base); }
 /* DESIGN D38 step 3: serving clients that are not the kernel (kernel/kernel.h has the contract) */
 #define PEER_CTTY 1             /* the client's controlling tty */
 #define PEER_RD 2               /* struct upeermem: those bytes are the client's to read -> 0, else -EFAULT */

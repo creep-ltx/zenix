@@ -1008,6 +1008,17 @@ struct uconline {            /* CON_LINE: the caller fills size, pens, npens; th
 #define CONM_HIRES      0
 #define CONM_LACE       1
 #define CONM_ASK        0xFF
+/* DESIGN D55 6 (docs/d55-screens.md): CON_VBLANK (no descriptor, any process): a2 the vertical-blank count to wait for
+ * -> the count now (31 bits); the wait ends when the count reaches a2 ((s32)((now - a2) << 1) >= 0), after 100 ms at
+ * most, or -EINTR (a signal; not restarted); a2 with bit 31 set only asks; -ENODEV without a display. CON_HOLD (the
+ * grab's descriptor, the grab's process): a2 a pid, a3 the base of a chip RAM region that pid's memalloc gave -> its
+ * size: held while a screen shows it (the owner's memfree -EBUSY; the owner's end hands the block to the grab's process
+ * and puts GEV_GONE in the ring); a2 0: let go of the region at a3 (a dead owner's block is freed then). -EINVAL, -ESRCH,
+ * -EBUSY (held already, NHOLD held). */
+#define CON_VBLANK      12
+#define CON_HOLD        13
+#define NHOLD           4
+#define CONV_ASK        0x80000000u
 struct ucongrab {            /* CON_GRAB: the caller fills size .. hoty; the kernel the rest */
     u32 size;                /* UCONGRAB_FIRST or more */
     u32 cop;                 /* the Copper list: the caller's chip RAM, ending 0xFFFF 0xFFFE (at most 4,096 moves);
@@ -1041,6 +1052,8 @@ struct ugevent {             /* a record of the grab's ring (16 bytes, frozen) *
 #define GEV_RELEASE     3    /* let go of the screen and the blitter, then CON_GACK x */
 #define GEV_ACQUIRE     4    /* the console is shown: the screen and the blitter are the server's */
 #define GEV_LOST        5    /* the ring was full: x records were dropped */
+#define GEV_GONE        6    /* (D55) a held region's owner ended: x the hold's slot, ch the region's base big-endian;
+                              * the block is the grab's process's now, CON_HOLD 0 frees it */
 #define GQ_LSHIFT       0x0001          /* AmigaOS's IEQUALIFIER values */
 #define GQ_RSHIFT       0x0002
 #define GQ_CAPS         0x0004
@@ -1055,6 +1068,9 @@ struct ugevent {             /* a record of the grab's ring (16 bytes, frozen) *
 #define GQ_LBUTTON      0x4000
 long gcon_grab(int con, u32 a2);
 long gcon_ack(struct file *f, u32 op, u32 a);   /* CON_GACK, CON_MOUSE */
+long gcon_hold(struct file *f, u32 pid, u32 base);      /* CON_HOLD (D55) */
+long gfx_vwait(u32 want);               /* CON_VBLANK (D55) */
+void gfx_vwake(void);                   /* kwork (gcon_work): the vertical blank's waiters woken */
 long gcon_read(struct file *f, void *buf, u32 n);
 u16 gcon_poll(struct file *f);
 void gcon_close(struct file *f);
