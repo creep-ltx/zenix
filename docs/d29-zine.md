@@ -2400,7 +2400,7 @@ memory of its own, so a big file was in memory twice, and a folder bigger than t
 ("left out"). Round 13 counted 48 failing productions on the 68020 machine, 34 on the 68030 and 6 on the 68060 with
 files left out; the 68060's Serenity failed with its 6 MB file in the volume (its pool needs 55 MB of the 64).
 
-*The design.* A file of 256 KB or more (`ZV_DISKMIN`) that is no program file (its first longword not `$3F3`) and not
+*The design.* A file of 256 KB or more (`ZV_DISKMIN`; 64 KB since 16.24) that is no program file (its first longword not `$3F3`) and not
 one of Zenix's fonts (`/usr/share/fonts/amiga`) stays on the disk. `zine` asks where its sectors lie and puts that list in the volume instead of the bytes
 (`struct zv_ent nx`, `struct zv_run`); ZINE's dos reads them from the drive when the program asks (`Read`, packets,
 `Seek` as before), while Zenix is paused.
@@ -2499,9 +2499,30 @@ newline, ends them with a 0 and answers the buffer (0 when nothing was read).
 4 KB as the program left them, read before Zenix's low memory comes back): for a program that runs its code there,
 as Elysium's decruncher at `$100` and its program at `$800`.
 
+**Data files of 64 KB or more stay on the disk** (`ZV_DISKMIN`, was 256 KB; a change to 16.23). The files under the
+threshold still went into the volume, up to half the free fast RAM, and a program reads each into memory of its own
+again. Measured (the Top 100's folders, the harness's staging):
+- In memory across the 426 productions: 139.6 MB at 256 KB, 76.3 MB at 64 KB, 12.0 MB at 16 KB, 3.6 MB at 4 KB;
+  files on the disk 251, 821, 2,435 and 3,446.
+- The 68030 machine (16 MB): the fast RAM the program had grew by 1.2-3.0 MB at 64 KB (Jesus Christ Motocross 11.7
+  -> 14.7 MB, Little Nell 11.6 -> 14.5, Surfing Great Victoria 13.2 -> 15.0, Perfect Circle 11.9 -> 13.2, lux
+  aeterna 4.7 -> 5.9). Jesus Christ Motocross then got past its memory check to FGetC (above) and plays; the others
+  still ask for more than the machine has (Little Nell 14 MB in one block, Surfing Great Victoria 129 KB more even
+  at 4 KB with 15.2 MB). The 68020 machine's (8 MB) memory-bound ones need more than its 8 MB either way.
+- Nothing lost: the six working productions with the most files between 64 and 256 KB (fake elektronik lightshow,
+  closer, lapsuus, killer, e255, J; 10 to 16 such files each) still work on all three machines (lapsuus fails on the 68020 either way) (18 runs at 64 KB; the
+  4 KB setting was not run on them).
+- Why not lower: 4 KB would put 14 times as many files on the disk (each a drive command while the program waits,
+  a few milliseconds a small file on an A1200's IDE port, not measured on hardware) and saved no further production
+  in these runs; 64 KB keeps a demo's small files (its tables, palettes, scripts) in memory and its pictures, music
+  and meshes on the disk.
+
+The test folder changed with it: zbig.mid1-20 are 60 KB each (under the threshold, together over the budget, so the
+budget's path to the disk is still tested) and zbig-pack.lha 40 KB (left out as before).
+
 *Verified* in FS-UAE: `tools/zine-emu-test.sh` (zwrite: SetProtection of a written file, SetComment of one of its
 own, SetFileDate by another name, SetProtection of a deleted file refused with 205; FGetC, UnGetC and FGets read a
-written file a line at a time, then 0 at the end).
+written file a line at a time, then 0 at the end; zbig with its 60 KB files over the budget, read from the disk).
 
 ## 17. Questions for the owner (what ZINE should be)
 
