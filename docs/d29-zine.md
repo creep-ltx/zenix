@@ -2447,19 +2447,29 @@ without the rest, and zine's "had N KB fast RAM" line says what the program coul
 68030 machine: its hunks need 3.3 MB, more than the chip RAM, and the machine has no fast RAM below 16 MB (as a real
 A1200 with a CPU-slot board).
 
-**ExecBase written over** (`zb_irq`, `blob.c`). ZINE's ExecBase lies in the low page at `$800`; Sanity's Elysium
-turns its interrupts off, copies its decruncher to `$100` and itself to `$800` (274 KB) and decrunches there. An
-interrupt it did not take over later went through ZINE's handler, which read exec's vectors from the program's bytes
-and jumped there (round 12: "called a library from $12C"; round 13: a CHK crash at `$132`, black screens). AmigaOS's
-ExecBase is elsewhere, so its handlers still work then. Now the handler first checks exec's library node (its type
-and its negative size); when they are not exec's, it acknowledges the request (the CIA's register read, a key's
-handshake) and calls nothing. It hit sometimes (2 of 12 runs on the 68EC020 machine; Elysium played in 6 of 6 runs at
-a low PC load before the change).
+**ExecBase written over** (`zb_irq`, `blob.c`). ZINE's ExecBase lies in the low page at `$800`. Sanity's Elysium
+turns its interrupts off, copies its decruncher to `$100` (over the user vectors), points the illegal-instruction
+vector there, and decrunches 274 KB of itself to `$800`. An interrupt the program has not taken over would then go
+through ZINE's handler, which reads exec's vectors from the program's bytes and jumps there. AmigaOS's ExecBase is
+elsewhere, so its handlers still work in that case. Now the handler first checks exec's library node (its type and
+its negative size). When they are not exec's, it acknowledges the request (the CIA's register read, a key's
+handshake) and calls nothing. This is a real hole, and zsuper's test shows it: without the check, the test crashes.
+
+It is not the whole of Elysium's trouble.
+- Plain runs on the 68EC020 machine after the change: it played in 3 of 4 and stayed black in 1.
+- The trace build failed in 3 of 3: "called a library (offset -0, from `$12C`)". That is a slide through the vector
+  table into exec's jump table below `$800`, as in round 12.
+- What sends it into low memory, and why it depends on timing, was not found.
 
 *Verified* in FS-UAE: `tools/zine-emu-test.sh` (zbig: zbig.huge, 1.5 MB, read from the disk, its first longword, an
 aligned 1 KB, 8 bytes through the cache, 8 across a sector's end, the last 8 and the end; `zine -m` as before:
 left out; `zine -c` zhello with 0 KB fast RAM; on the 68060 machine `zine -l` zalloc with the 8 MB below 16 MB of
 72 MB; zsuper: ExecBase written over and a SOFTINT acknowledged, which crashed without the change).
+
+**The reruns** (zine-top100-findings.md "Round 14"): 68020 246 -> 248, 68030 315 -> 313, 68060 354 -> 361. On the
+68030 three productions that ran their course with their big files left out now find them and run out of memory
+(16 MB); on the 68060 Elude's Shake Off The Dust stays black with its files on the disk and 62 MB free, and plays with `zine
+-m` (49 MB free) or with its files on the disk and 30 MB free: too much free memory stops it, not the reads.
 
 ## 17. Questions for the owner (what ZINE should be)
 
