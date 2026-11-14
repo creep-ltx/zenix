@@ -370,14 +370,14 @@ static void step(int d)
 
 /* ================================================================ a screen of its own (DESIGN D55, docs/d55-screens.md
  * section 11): the picture's mode and palette, its planes copied into chip RAM (a row padded to 8 bytes) */
-static int onscr, spl, sbpr, srows, sw, sh, sx, sy;
+static int onscr, spl, sbpr, srows, sw, sh, sx, sy, lace_on;
 static u8 *smem;
 static void scr_off(void)
 {
     if (!onscr)
         return;
-    dpy_scr_close();                    /* (displayd lets go of the planes before it answers) */
-    sys_memfree(smem);
+    if (dpy_scr_close() >= 0)           /* (displayd lets go of the planes before it answers) */
+        sys_memfree(smem);              /* (else they stay ours until we end: freeing them now would be refused) */
     smem = 0;
     onscr = 0;
     if (verbose) dprintf(1, "show: screen closed\n");
@@ -408,6 +408,7 @@ static void scr_on(void)
     spl = ((pb > sw / 8 ? pb : sw / 8) + 7) & ~7;
     srows = P.h > sh ? P.h : sh;
     sbpr = spl * d;
+    if (sbpr > 65528) { scr_say("too wide for a screen"); return; }
     u32 bytes = (u32)sbpr * (u32)srows;
     if (!(smem = sys_memalloc_chip(bytes))) { scr_say("no chip RAM"); return; }
     memset(smem, 0, bytes);
@@ -448,6 +449,7 @@ static void scr_on(void)
         return;
     }
     onscr = 1;
+    lace_on = lace;
     sx = sy = 0;
     if (verbose) {
         char m[48];
@@ -458,8 +460,10 @@ static void scr_on(void)
 static void scr_pan(int dx, int dy)     /* dx in fetch units of 8 bytes, dy in lines */
 {
     int mx = spl - sw / 8, my = srows - sh;
+    if (lace_on)
+        my &= ~1;
     sx += dx * 8;
-    sy += dy;
+    sy += lace_on ? dy & ~1 : dy;       /* interlaced: whole frame lines, so the fields keep their order */
     if (sx > mx) sx = mx;
     if (sx < 0) sx = 0;
     if (sy > my) sy = my;

@@ -103,7 +103,7 @@ displayd's screens' budget `SCR_BUDGET` 160 KB), -ENOSPC (four screens open: `NS
 | `SS_PALETTE` 1 | first \| count << 16, the colours | the base palette, written in place (no flip): first + count within the mode's colours |
 | `SS_COPPER` 2 | the instructions, their count (0 .. `ncop`) | the list replaced (a flip); -EINVAL with the bad instruction's index in a[3] |
 | `SS_PLANES` 3 | the offset of plane 0 in `planes` | double buffering (a flip); every fetch checked again |
-| `SS_FRONT` 4 | 1 in front, 0 behind | -EBUSY during a drag |
+| `SS_FRONT` 4 | 1 in front, 0 behind | answers 0 (not a count); -EBUSY during a drag |
 | `SS_COLOURS` 5 | first index \| count << 16, count colours | new values for the next count `CO_COLOUR` instructions from instruction first on (other instructions passed over: one call for a colour a line), written in place (no flip); -EINVAL with a[3] the colours set if the list has fewer |
 
 In place means: the value words of colour moves are rewritten in the lists the Copper may be running. A colour word
@@ -150,8 +150,9 @@ key counts as up then) - all with `win` 0. No new event type.
      the colours the mode shows (`1 << depth`; HAM6 16, HAM8 64, EHB 32).
   5. The plane pointers: plane k at `planes + offset + k * pstride`; the short field's one line on (`+ fetch + mod`).
   6. The program's instructions, translated (section 5).
-  7. A screen shorter than the display: after its last line, every plane on the empty line with the modulos
-     `-fetch` (colour 0 below; one plane still fetched, the kernel's contract).
+  7. A screen shorter than the display: at the start of the line after it (before that line's fetch; earlier, a
+     BPLCON0 change would show on the last line's last pixels), BPLCON0 with one plane, that plane on the empty line
+     with the modulos `-fetch` (five moves; colour 0 below; one plane still fetched, the kernel's contract).
   8. The end: not interlaced, `COP1LC` = `copl[0]`; interlaced, the desktop's field scheme (`COP1LC` = the long
      field's list, a WAIT for the line only a long field has, then the short field's). The desktop's changing part
      gains `COP1LC` = `copl[0]` at its end when not interlaced, so a desktop after an interlaced screen runs its one
@@ -194,15 +195,20 @@ the buffer's room checked.
 - **CO_PLANE, CO_MOD** only right after a CO_WAIT whose b is 0 (any order among themselves, at most 12 moves of
   them), or before the first WAIT. They are written after a WAIT for the end of the previous line (position `$D9`,
   after its fetch, as `dyn_build` does), so they take effect exactly at their line, never part-way through one.
+- **Bounded sums:** `bytes` at most 2 MB, `pstride` below it, a plane offset below `bytes`, so no sum of the fetch's
+  model can wrap 32 bits (a wrapped sum would pass the check and point the DMA anywhere: the code review).
 - **The fetch, worked out exactly:** for each plane, from each change (its pointer, the modulos) to the next or the
   screen's end, the first and the last line's fetch (with the line's advance `fetch + modulo`, positive or negative;
   interlaced, each field's own: the field modulo `fetch + 2 x modulo`, the short field a line on) lie inside
   `[planes, planes + bytes)`. `fetch` is the bytes the hardware fetches a line: w/8 (and the scroll unit with
   `DPYSF_SCROLL`); section 7's test measures it. The extent of the whole list, relative to `SS_PLANES`' offset, is
   kept, so `SS_PLANES` checks a new offset with two comparisons. Every modulo written is checked to fit 16 bits.
-- **The Copper's time:** a group of moves must finish before the next WAIT's line: at most 14 moves for each line
-  between them (a conservative rate for every mode: a move takes 4 colour clocks, fewer slots are free during an
-  OCS hires fetch), the last group before the screen's end likewise, and the base part with the moves before the
+- **The Copper's time:** a group of moves must finish before the next WAIT: 14 moves for each whole line between them
+  (a conservative rate for every mode: a move takes 4 colour clocks, fewer slots are free during an OCS hires fetch),
+  plus what is left of its own line before position `$D9` (an eighth of the colour clocks, at most 14; on one line,
+  an eighth of the clocks between the two WAITs); the last group before the screen's end likewise (the end's moves
+  start at the last line's `$D9`); pointers and modulos only after a WAIT on a later line than the one before, and no
+  more of them than fit between `$D9` and DDFSTRT (12 at most; fewer with `DPYSF_SCROLL`'s early fetch); and the base part with the moves before the
   first WAIT within the vertical blank (40 moves a line for its lines above the display window). A list that the
   Copper could not run in time is refused (its index), so no change lands late on a line the check did not see.
 - **CO_COLOUR:** the register within the chips'; AGA 4 moves (high nibbles at LOCT 0, low at LOCT 1, BPLCON3's
@@ -278,28 +284,32 @@ switch), so a later step may switch it for a screen. That needs the partner's Pi
 ## 10. Memory and size
 
 - displayd: about 3.5 KB of code estimated, 8.3 KB measured (DESIGN D55 "As built"; the demo floppies' displayd is
-  built without it), four screens' records and the
-  translation's offsets in fast RAM (at most about 6 KB for a 1,024-instruction list); the changing part's block 3 KB
-  of chip RAM instead of 2 KB.
-- A screen's lists: 2 buffers x fields x (base + translated instructions + 30) moves x 4 bytes: a 16-colour lores
-  screen with a 512-instruction list (a colour a line) about 2 x (70 + 1,300 + 30) x 4 = 11 KB of chip RAM; the worst,
-  256 colours, interlaced, a full list about 2 x 2 x 4,032 x 4 = 64 KB; at most `SCR_BUDGET` 160 KB for all screens.
-- The kernel: about 450 bytes (section 6).
+  built without it); nothing in memory for a screen never opened; the changing part's block 2.6 KB of chip RAM instead
+  of 2 KB.
+- A screen: **one chip RAM region** holding its record (2.3 KB: the palette, the places of its colour words), its two
+  buffers of lists, its instruction list and a spare one to check a new list in, the pointers' and colours' places:
+  one region and no growth of displayd's heap (a display server's regions are few, D11's `NREG`, and its images and
+  kept copies need them: found by show-test, when a screen's record made the heap take a region and a window's
+  strips could no longer be drawn). The lists: 2 buffers x fields x (base + translated instructions + 20) moves x 4
+  bytes; a 16-colour lores screen with zintro's 311 instructions about 25 KB in all; the worst, 256 colours,
+  interlaced, a full list, about 90 KB; at most `SCR_BUDGET` 160 KB for all screens.
+- The kernel: about 850 bytes (section 6, DESIGN D55 "As built").
 
 ## 11. `show -s`: a picture on its own screen
 
 - `show -s FILE` opens the picture on a screen in its mode (lores or hires, interlaced, its planes, HAM6, HAM8, EHB)
   and palette; `s` in the window does the same for the picture shown; on the screen `s`, `q`, Esc or a click go back
   to the window; `n`, `p` show the next and the previous picture on the screen; the arrows move a larger picture.
-- The planes are copied row by row into chip RAM in the screen's interleaved layout (each row padded to the fetch's
-  alignment: a 352-pixel row is 44 bytes, 48 on AGA); a picture narrower or lower than the screen sits top left on
+- The planes are copied row by row into chip RAM in the screen's interleaved layout (each plane's row padded to 8
+  bytes, the 64-bit fetch's alignment, on every chipset: a 352-pixel row is 48 bytes); a picture narrower or lower than the screen sits top left on
   colour 0. A GIF (up to 256 colours) becomes planes (AGA: as many as its colours need; OCS/ECS: at most 32 colours,
   else the window says why).
 - HAM8: the hardware's control bits are bitplanes 1 and 2 (AGA's documentation); show's decoder takes the file's top
-  two planes (D50 section 3). The screen opens behind (`DPYSF_BACK`) with a Copper list whose first line points the
-  planes in that order, then comes in front: the copy stays one block. A test compares a HAM8 file's screen with the
-  generator's own decode.
-- Larger pictures: the top left, the arrows move it (lines exactly; across in steps of 16 pixels, 64 on AGA).
+  two planes (D50 section 3). The copy puts the file's planes 6 and 7 into the screen's planes 0 and 1 and its planes
+  0-5 into 2-7 (it copies plane by plane anyway). A test compares a HAM8 picture's screen with the generator's own
+  decode.
+- Larger pictures: the top left, the arrows move it (lines exactly, whole frame lines when interlaced; across in steps
+  of 8 bytes: 64 lores pixels).
 - Refused, said in the window: 24-bit pictures (no native mode), super-hires, RTG.
 
 ## 12. Tests
@@ -392,6 +402,16 @@ for these, all taken into revision 2:
 - **Not taken:** pointers patched in place (a torn high/low pair could fetch anywhere: they flip); a third review
   (the code review after building covers the changes).
 
-## 18. The code review
+## 18. The code review (2026-11-14, one independent, after building)
 
-(to be filled after the review)
+Found and fixed: the fetch model's sums in 32 bits could wrap for a plane offset or stride near 2^31 and let a plane
+point anywhere in chip RAM (now bounded, section 5, and a test); the Copper time budget took every group to start at
+its line's start, so colours late on a line could push the next line's pointers past its first fetch (now each group's
+own line counts only up to `$D9`, pointers only on a later line, and the short screen's end is five moves; a test);
+`GEV_GONE` could be pushed out of the grab's ring (its slots are now kept, `GQ_CTL` 2 + `NHOLD`); a `GEV_GONE` read
+after its block was freed and reused could close another program's screen (letting go now turns an unread one into
+an empty record); the grab's end freed a dead owner's planes before the Copper left them; the 4,096-move contract
+could be passed by a trampoline's 3; the demo floppies' displayd allocated the screens' block; in `show -s` a failed
+close leaked into a refused free, interlaced pans could swap the fields, a very wide picture's line was truncated; the
+note's text about `show`'s HAM8 order, padding and pans, and `SS_FRONT`'s answer. Kernel 205,944 -> 205,992 bytes
+(the mount tests' floppy 856 bytes left).

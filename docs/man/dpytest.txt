@@ -54,9 +54,9 @@ DESCRIPTION
                            line y lit only at byte (y / 4) % (W / 8)), a
                            palette of its own: "dpytest: scr COUNT"
         scrpal I RRGGBB    colour I in place (SS_PALETTE)
-        scrcop bars|mirror|bad1..bad8
+        scrcop bars|mirror|bad1..bad10
                            a Copper list (SS_COPPER): a red ramp in colour
-                           0, lines 0-31; the lower half mirrored; eight
+                           0, lines 0-31; the lower half mirrored; ten
                            lists that must be refused: "dpytest: scrcop
                            WHAT ok|refused at INDEX"
         scrcol             the ramp green in place (SS_COLOURS), then one
@@ -66,6 +66,7 @@ DESCRIPTION
         scrclose           the screen closed
         scrfree            memfree of the planes (refused while shown)
         scrnotmine         a screen on memory not a region of its own
+        scrbig             a screen whose plane stride is past its memory
         vblank N           N frames waited for (CON_VBLANK) against the
                            E-clock, then a far count given up after 100 ms
         quit               the end

@@ -8,7 +8,8 @@
 #  - a lores 4-plane screen: dpytest's blocks in its palette; a Copper list of a colour a line (a red ramp in colour 0,
 #    lines 0-31); the same colours changed in place (SS_COLOURS: green), a WAIT's place refused; a base colour in place
 #  - SS_PLANES: the second picture; a Copper list that mirrors the lower half (pointers at a line, a negative modulo)
-#  - eight bad lists, each refused with its instruction's index (-1: the fetch outside the memory)
+#  - ten bad lists, each refused with its instruction's index (-1: the fetch outside the memory), among them colours
+#    late on a line before pointers at the next, and a plane offset near 2^31; a plane stride past the memory
 #  - the planes' memfree refused while shown; Left Amiga+N: the desktop as it was; again: the screen; Amiga+F2 and
 #    Amiga+F1: the screen again
 #  - closed: the desktop as it was; memory that is not the client's region refused
@@ -74,7 +75,9 @@ send d scrcop bad5\r
 send d scrcop bad6\r
 send d scrcop bad7\r
 send d scrcop bad8\r
-wait dpytest: scrcop bad8 30
+send d scrcop bad9\r
+send d scrcop bad10\r
+wait dpytest: scrcop bad10 30
 send d scrfree\r
 wait dpytest: scrfree 30
 sleep 1
@@ -93,6 +96,8 @@ sleep 2
 shot closed
 send d scrnotmine\r
 wait dpytest: scrnotmine 30
+send d scrbig\r
+wait dpytest: scrbig 30
 send d scrclose\r
 send d scr 320 256 1 0 0 fetch\r
 wait dpytest: scr 30
@@ -148,8 +153,8 @@ python3 tools/colour-test.py columns "$OUT/s-columns.png" > "$OUT/geom"; rc=$?; 
 T() { python3 tools/screen-test.py "$1" "$OUT/s-$2.png" "$OUT/geom" "${@:3}"; }
 same() { python3 tools/dpy-test.py same "$OUT/s-$1.png" "$OUT/s-$2.png" "$OUT/geom" -x 0,0,640,4; }
 v=$(grep -ao -m1 'dpytest: vblank.*' "$L"); read -r _ _ fr _ ticks _ _ far ftk _ <<< "$v"
-[ "$fr" = 100 ] && [ "$ticks" -ge 1390000 ] && [ "$ticks" -le 1450000 ] && [ "$far" = 1 ] && [ "$ftk" -ge 65000 ] && [ "$ftk" -le 80000 ]
-check "CON_VBLANK: 100 frames in $ticks E-clock ticks (2 s at 50 a second: 1,418,758), a far count given up after $ftk (100 ms)" $?
+[ "$fr" = 100 ] && [ "$ticks" -ge 1390000 ] && [ "$ticks" -le 1450000 ] && [ "$far" = 1 ] && [ "$ftk" -ge 60000 ] && [ "$ftk" -le 80000 ]
+check "CON_VBLANK: 100 frames in $ticks E-clock ticks (2 s at 50 a second: 1,418,758), a far count given up after $ftk (90-100 ms: the 100 Hz tick)" $?
 grep -aq 'dpytest: scr [0-9][0-9]*$' "$L"; rc=$?; check "DPY_SCREEN: a lores 4-plane screen opened, the answer a frame's count ($(grep -ao -m1 'dpytest: scr [0-9-]*' "$L"))" $rc
 T blocks blocks 320 4 0 > "$OUT/q1"; rc=$?; check "... its blocks in its palette ($(cat "$OUT/q1"))" $rc
 T bars bars r > "$OUT/q2"; rc=$?; check "a Copper list: a red ramp in colour 0 a line ($(cat "$OUT/q2"))" $rc
@@ -160,16 +165,17 @@ T px green 320 60,48,FF0000 20,48,88DD11 > "$OUT/q3b"
 rc=$?; check "SS_PALETTE: colour 9 red in place, its neighbour as it was ($(cat "$OUT/q3b"))" $rc
 T blocks pic1 320 4 1 > "$OUT/q4"; rc=$?; check "SS_PLANES: the second picture ($(cat "$OUT/q4"))" $rc
 T mirror mirror > "$OUT/q5"; T blocks mirror 320 4 0 0 127 >> "$OUT/q5"; rc=$?; check "a mirror: pointers at line 128, a negative modulo ($(tr '\n' ' ' < "$OUT/q5"))" $rc
-want="bad1:1 bad2:-1 bad3:-1 bad4:1 bad5:2 bad6:31 bad7:0 bad8:-1"
-got=""; for b in bad1 bad2 bad3 bad4 bad5 bad6 bad7 bad8; do
+want="bad1:1 bad2:1 bad3:-1 bad4:1 bad5:2 bad6:31 bad7:0 bad8:-1 bad9:4 bad10:1"
+got=""; for b in bad1 bad2 bad3 bad4 bad5 bad6 bad7 bad8 bad9 bad10; do
     got="$got $b:$(grep -a -m1 "dpytest: scrcop $b refused at" "$L" | awk '{print $NF}')"; done
-[ "$(echo $got)" = "$want" ]; rc=$?; check "eight bad lists refused with their index ($(echo $got))" $rc
+[ "$(echo $got)" = "$want" ]; rc=$?; check "ten bad lists refused with their index ($(echo $got))" $rc
 grep -aq 'dpytest: scrfree -16' "$L"; check "the planes' memfree refused while the screen shows them (-EBUSY)" $?
 same desk behind > "$OUT/q6"; rc=$?; check "Left Amiga+N: the desktop as it was ($(cat "$OUT/q6"))" $rc
 T blocks again 320 4 0 32 127 > "$OUT/q7"; rc=$?; check "Left Amiga+N again: the screen ($(cat "$OUT/q7"))" $rc
 T blocks console 320 4 0 32 127 > "$OUT/q8"; rc=$?; check "Amiga+F2, Amiga+F1: the screen again ($(cat "$OUT/q8"))" $rc
 same desk closed > "$OUT/q9"; rc=$?; check "DPY_SCR_CLOSE: the desktop as it was ($(cat "$OUT/q9"))" $rc
 grep -aq 'dpytest: scrnotmine -22' "$L"; check "planes that are not a region of the client's refused (-EINVAL)" $?
+grep -aq 'dpytest: scrbig -22' "$L"; check "a plane stride past the memory refused (-EINVAL: no 32-bit sum wraps)" $?
 T fetch fetch 320 > "$OUT/q10"; rc=$?; check "the fetch, lores at 64 bits: every line starts where it should ($(cat "$OUT/q10"))" $rc
 T fetch fetchh 640 > "$OUT/q11"; rc=$?; check "... hires ($(cat "$OUT/q11"))" $rc
 DPY_LINES=256 T blocks lace 320 4 0 0 0 > /dev/null; same desk unlace > "$OUT/q12"

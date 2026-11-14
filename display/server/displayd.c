@@ -579,7 +579,12 @@ static int screen_up(int con)
     /* the fixed part of the Copper list; the part that changes (the planes, and playfield 2 while a window is dragged
      * by the chips) is one of two buffers of a list a field in dynmem, jumped to with COP2LC and COPJMP2 (D38
      * "Dragging with the chips", "Screen modes") */
-    u16 *dm = sys_memalloc_chip(3072);
+#ifdef NO_SCREEN
+#define DYNBLOCK 1024                   /* the changing part's lists only */
+#else
+#define DYNBLOCK 1312                   /* and D55's trampolines (192 bytes) and empty line (96) */
+#endif
+    u16 *dm = sys_memalloc_chip(2 * DYNBLOCK);
     if (!dm) {
         sys_close(gfd);
         gfd = -1;
@@ -588,15 +593,17 @@ static int screen_up(int con)
         bm_free(&scr);
         return -ENOMEM;
     }
-    /* the changing part's lists (1 KB), D55's trampolines (192 bytes) and empty line (96): 1,312 bytes that cross no
-     * 64 KB boundary (one word flips), found in 3 KB: a boundary leaves one side of at least 1.5 KB */
+    /* the block (DYNBLOCK bytes) must cross no 64 KB boundary (one word flips): in twice its size, a boundary leaves
+     * one side at least that big */
     u32 a0 = ((u32)dm + 7) & ~7u;
-    if ((a0 & 0xFFFF) + 1312 > 0x10000)
+    if ((a0 & 0xFFFF) + DYNBLOCK > 0x10000)
         a0 = (a0 + 0xFFFF) & ~0xFFFFu;
     u16 *d0 = (u16 *)a0;
+#ifndef NO_SCREEN
     scr_tramp = d0 + 512;
     scr_zero = (u8 *)(d0 + 512 + 96);
     memset(scr_tramp, 0, 192 + 96);
+#endif
     for (int b = 0; b < 2; b++)
         for (int f = 0; f < 2; f++)
             dyn[b][f] = d0 + 128 * (2 * b + f);

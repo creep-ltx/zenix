@@ -99,7 +99,7 @@ send show -s -v /tests/pics/ham.iff > /tmp/s.log 2>&1 &\r
 sleep 14
 shot hamscr
 EOS
-typ s; echo "sleep 4"; echo "shot hamwin"; st 18 3
+typ s; echo "sleep 4"; echo "shot hamwin"; st 18 6
 typ q; echo "sleep 3"
 cat <<'EOS'
 send show -s -v /tests/pics8/ham8.iff > /tmp/s.log 2>&1 &\r
@@ -108,7 +108,7 @@ shot ham8scr
 send gcontest keys 45 c5\r
 sleep 4
 EOS
-st 19 3
+st 19 6
 typ q; echo "sleep 3"
 echo "send cat /tmp/z.log | tail -5; echo end-\$((40+2))\\r"
 echo "wait end-42 30"

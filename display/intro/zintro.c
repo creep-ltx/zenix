@@ -436,7 +436,7 @@ int main(int argc, char **argv)
     s.bytes = 2 * picsz;
     s.pstride = PL;
     s.bpr = BPR;
-    s.ncop = MAXCOP;
+    s.ncop = (u16)ncop;                 /* the room it needs (displayd keeps that much for it) */
     s.ncol = 16;
     s.palette = (u32)logo_pal;
     r = dpy_screen(&s);

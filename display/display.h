@@ -49,7 +49,7 @@ int dpy_fontset(const char *name, int size);    /* the desktop's font now: name 
 /* a screen of its own (DESIGN D55, docs/d55-screens.md): one a program; its events carry win 0. The answers that
  * change the picture are the vertical-blank count from which it shows: dpy_vwait(it) before drawing into the old */
 int dpy_screen(struct dpyscr *s);       /* -> the count, -errno */
-int dpy_scr_set(int what, unsigned a1, unsigned a2, int *bad);  /* SS_*: -> the count, -errno (bad: a list's index) */
+int dpy_scr_set(int what, unsigned a1, unsigned a2, int *bad);  /* SS_*: -> the count (SS_FRONT 0), -errno (bad: a[3]) */
 int dpy_scr_close(void);
 int dpy_vwait(unsigned n);              /* until the vertical-blank count is n (at most 100 ms) -> the count now */
 int dpy_vcount(void);                   /* the count now */

@@ -203,6 +203,11 @@ static int scrcmd(char **w, int n)
             C(CO_WAIT, 41, 0, 0);
         } else if (!strcmp(what, "bad7")) { C(9, 0, 0, 0); }
         else if (!strcmp(what, "bad8")) { C(CO_WAIT, 0, 0, 0); ncount = sd.ncop + 1; }
+        else if (!strcmp(what, "bad9")) {           /* colours late on a line, then pointers at the next: too late */
+            C(CO_WAIT, 40, 300, 0);
+            for (int j = 0; j < 3; j++) C(CO_COLOUR, j, 0, 0);
+            C(CO_WAIT, 41, 0, 0); C(CO_PLANE, 0, 0, 0);
+        } else if (!strcmp(what, "bad10")) { C(CO_WAIT, 8, 0, 0); C(CO_PLANE, 0, 0x7FFF, 0xFFF8); }
         else if (!strcmp(what, "mirror")) {         /* lines 128 on: the picture's lines 127 back up (a negative modulo) */
             C(CO_WAIT, 128, 0, 0);
             for (int p = 0; p < sd.depth; p++) C(CO_PLANE, p, 0, 127u * sd.bpr + (u32)p * sd.pstride);
@@ -230,6 +235,13 @@ static int scrcmd(char **w, int n)
     if (!strcmp(w[0], "scrfront") && n >= 2) { say("dpytest: scrfront %d\n", dpy_scr_set(SS_FRONT, (u32)atoi(w[1]), 0, 0)); return 1; }
     if (!strcmp(w[0], "scrclose")) { say("dpytest: scrclose %d\n", dpy_scr_close()); return 1; }
     if (!strcmp(w[0], "scrfree")) { say("dpytest: scrfree %d\n", smem ? sys_memfree(smem) : -1); return 1; }
+    if (!strcmp(w[0], "scrbig")) {              /* a plane stride past the memory (a sum that would overflow) */
+        struct dpyscr q = sd;
+        q.depth = 2;
+        q.pstride = 0x7FFFFFF8u;
+        say("dpytest: scrbig %d\n", dpy_screen(&q));
+        return 1;
+    }
     if (!strcmp(w[0], "scrnotmine")) {          /* planes that are not a region of ours: refused */
         struct dpyscr q = sd;
         q.planes = (u32)smem + 16;

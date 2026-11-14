@@ -16,7 +16,7 @@
 #define SCR_BUDGET (160u << 10)         /* the lists' chip RAM, all screens */
 #define PERLINE 14                      /* moves the Copper is sure to make in a line, any mode (section 5) */
 #define VBLINE 40                       /* ... in a line of the vertical blank */
-#define MAXMOVES (4096 - 64)            /* the kernel's contract less displayd's fixed part */
+#define MAXMOVES (4096 - 64 - 3)        /* the kernel's contract less displayd's fixed part and a trampoline */
 
 struct ptr { u16 at; u16 pad; s32 rel0, rel1; };       /* a pointer's high word in the list; its offsets from off */
 struct scrn {
@@ -26,12 +26,13 @@ struct scrn {
     u32 planes, bytes, pstride, off;
     s32 lo, hi;                         /* the whole list's fetch, relative to off: [lo, hi) */
     u32 pal[256];
-    struct dpycop *list;                /* the instructions (fast RAM), nlist of them */
+    struct dpycop *list, *spare;        /* the instructions, nlist of them; a new list is checked in spare */
     int nlist;
     u16 *buf[2][2];                     /* [buffer][field]: the lists (chip RAM) */
     u32 room;                           /* each list's words */
     u32 chip;                           /* their bytes, for the budget */
-    void *chipmem;                      /* the allocation they are in */
+    void *chipmem;                      /* the one region all of it is in (this record, the lists, the arrays): no
+                                         * growth of displayd's heap, whose regions its images need too */
     u32 gen, bgen[2];                   /* the shape's version, each buffer's */
     int cur;                            /* the buffer that is complete and current (the one shown in front) */
     u16 *tramp[2][2];
@@ -131,6 +132,18 @@ static void seg(const struct scrn *s, struct chk *k, int pl, int to)
     k->s[pl] = to;
 }
 static int base_moves(const struct scrn *s);
+static int ddf_start(const struct scrn *s);
+static int hpos(const struct scrn *s, int b) { return b ? 0x40 + (s->hires ? b / 4 : b / 2) : 0; }
+/* the moves the Copper is sure to make from a WAIT at (line, hp) until one at (L, hp2): what is left of its own line
+ * before the fetch's end ($D9) and PERLINE for each whole line between (the next WAIT's pointers and modulos are
+ * written from (L - 1, $D9), so the group must be done by then) */
+static int budget(int line, int hp, int L, int hp2)
+{
+    if (L == line)
+        return (hp2 - hp) / 8;
+    int own = hp < 0xD9 ? (0xD9 - hp) / 8 : 0;
+    return (own < PERLINE ? own : PERLINE) + PERLINE * (L - line - 1);
+}
 /* -> the translated list's instructions (moves and waits), or -1 with *bad the instruction's index (-1: the whole) */
 static int check(const struct scrn *s, const struct dpycop *l, int n, s32 *lo, s32 *hi, int *bad)
 {
@@ -145,6 +158,9 @@ static int check(const struct scrn *s, const struct dpycop *l, int n, s32 *lo, s
         k.s[p] = 0;
     }
     int line = -1, x = 0, pm = 1, pmmoves = 0, grp = 0, pre = 0, words = 0, wrapped = 0, beam;
+    int pmmax = ((0xE2 - 0xD9) + ddf_start(s)) / 4 - 1;     /* moves between the line above's $D9 and DDFSTRT */
+    if (pmmax > 12)
+        pmmax = 12;
     *bad = -1;
     for (int i = 0; i < n; i++) {
         const struct dpycop *c = &l[i];
@@ -156,10 +172,10 @@ static int check(const struct scrn *s, const struct dpycop *l, int n, s32 *lo, s
                 return -1;
             if (line < 0)
                 pre += grp;
-            else if (grp > PERLINE * (L - line > 1 ? L - line : 1))
-                return -1;              /* the Copper could not make these moves before the next line */
+            else if (grp > budget(line, hpos(s, x), L, hpos(s, c->b)))
+                return -1;              /* the Copper could not make these moves before the next WAIT */
             grp = 0;
-            pm = c->b == 0;
+            pm = c->b == 0 && L > line; /* pointers and modulos: only at a new line's start */
             pmmoves = 0;
             /* the translation: a WAIT for the end of the line above (pointers and modulos), then the line's */
             beam = DIW_V + L;
@@ -192,7 +208,7 @@ static int check(const struct scrn *s, const struct dpycop *l, int n, s32 *lo, s
             int L = line < 0 ? 0 : line;
             if (c->op == CO_PLANE) {
                 s32 rel = (s32)((u32)c->b << 16 | c->c);
-                if (c->a >= s->depth || ((u32)rel & align()) || rel < 0)
+                if (c->a >= s->depth || ((u32)rel & align()) || rel < 0 || (u32)rel >= s->bytes)
                     return -1;
                 seg(s, &k, c->a, L);
                 k.p0[c->a] = rel;
@@ -208,8 +224,8 @@ static int check(const struct scrn *s, const struct dpycop *l, int n, s32 *lo, s
                 k.m[1] = m1;
                 pmmoves += 2;
             }
-            if (pmmoves > 12)
-                return -1;
+            if (pmmoves > pmmax)
+                return -1;              /* they would not all be written before the line's first fetch */
             grp += 2;
             words += 2;
             break;
@@ -219,8 +235,8 @@ static int check(const struct scrn *s, const struct dpycop *l, int n, s32 *lo, s
         }
     }
     *bad = -1;
-    if (line >= 0 && grp > PERLINE * (H - line > 1 ? H - line : 1))
-        return -1;
+    if (line >= 0 && grp > budget(line, hpos(s, x), H, 0))
+        return -1;                      /* (the end's moves start at (H - 1, $D9), as a pointer group would) */
     if (line < 0)
         pre += grp;
     for (int p = 0; p < s->depth; p++)
@@ -239,7 +255,7 @@ static int base_moves(const struct scrn *s)
     n += aga ? ((s->npal + 31) / 32) * 2 + 2 * s->npal + 1 : s->npal;
     return n;
 }
-static int tail_moves(const struct scrn *s) { return 2 + 2 * s->depth + 2 + 8 + 1; }
+static int tail_moves(const struct scrn *s) { (void)s; return 2 + 5 + 8 + 1; }
 
 /* ---- the translation into one list (buffer b, field f); rec: record the words' places (one buffer's first build of
  * a shape: the places are the same in every buffer and field) ---- */
@@ -311,7 +327,7 @@ static void build(struct scrn *s, int b, int f, int rec)
             s->colat[i][0] = s->colat[i][1] = 0;
         switch (o->op) {
         case CO_WAIT: {
-            int L = o->a >> s->slace, hp = o->b ? 0x40 + (s->hires ? o->b / 4 : o->b / 2) : 0;
+            int L = o->a >> s->slace, hp = hpos(s, o->b);
             int j = i + 1;
             if (o->b == 0 && j < s->nlist && (s->list[j].op == CO_PLANE || s->list[j].op == CO_MOD)) {
                 c = wait_to(c, DIW_V + L - 1, 0xD9);    /* the line above's fetch is over: pointers, modulos */
@@ -369,11 +385,11 @@ static void build(struct scrn *s, int b, int f, int rec)
     }
     int H = s->h >> s->slace;
     if (H < base_h) {                   /* a short screen: the empty line below it (still a plane fetched) */
-        c = wait_to(c, DIW_V + H - 1, 0xD9);
-        for (int k = 0; k < s->depth; k++) {
-            MOVE(0x0E0 + 4 * k, z >> 16);
-            MOVE(0x0E2 + 4 * k, z);
-        }
+        c = wait_to(c, DIW_V + H, 0);   /* the next line's start: BPLCON0 changed after the last line is shown
+                                         * (at its $D9 the line's last pixels would show one plane) */
+        MOVE(0x100, 0x1200 | (s->hires ? 0x8000 : 0) | (s->slace ? 4 : 0));    /* one plane: 5 moves before the fetch */
+        MOVE(0x0E0, z >> 16);
+        MOVE(0x0E2, z);
         MOVE(0x108, -s->fetch);
         MOVE(0x10A, -s->fetch);
     }
@@ -477,15 +493,12 @@ static void scr_free(struct scrn *s)
     if (last == i)
         last = -1;
     cop_settle();                       /* the Copper is off its lists and planes from here */
-    sys_memfree(s->chipmem);
+    void *mem = s->chipmem;
+    u32 planes = s->planes;
     chip_lists -= s->chip;
-    sys_conhold(gfd, 0, s->planes);     /* the kernel's hold ends (a dead owner's block is freed now) */
-    free(s->list);
-    free(s->ptrs);
-    free(s->colat);
-    free(s->cidx);
     scrs[i] = 0;
-    free(s);
+    sys_conhold(gfd, 0, planes);        /* the kernel's hold ends (a dead owner's block is freed now) */
+    sys_memfree(mem);                   /* (the record too: nothing of s after this) */
 }
 
 /* the palette from the client's memory (0x00RRGGBB) into s->pal[first ..] */
@@ -501,7 +514,7 @@ static int pal_in(struct umsg *m, struct scrn *s, u32 first, u32 n, u32 addr)
     return 0;
 }
 
-static int scr_make(struct umsg *m, struct scrn *s, const struct dpyscr *qp, int i, int cl);
+static int scr_make(struct umsg *m, struct scrn *s, const struct dpyscr *qp, int i, int cl, struct scrn **out);
 /* DPY_SCREEN (section 3) */
 static int scr_open(struct umsg *m, int cl)
 {
@@ -533,14 +546,13 @@ static int scr_open(struct umsg *m, int cl)
     u32 al = aga ? 7 : 1;
     if ((q.planes & al) || (q.bpr & al) || (q.pstride & al))
         return -EINVAL;
-    struct scrn *s = malloc(sizeof *s);
-    if (!s)
-        return -ENOMEM;
-    int r = scr_make(m, s, &q, i, cl);
-    if (r < 0) {
-        free(s);
+    if (q.bytes > (2u << 20) || (q.depth > 1 && q.pstride >= q.bytes))
+        return -EINVAL;                 /* (bounded: the fetch's sums below stay far inside 32 bits) */
+    static struct scrn tmp;             /* made here, then copied into the screen's own region */
+    struct scrn *s;
+    int r = scr_make(m, &tmp, &q, i, cl, &s);
+    if (r < 0)
         return r;
-    }
     scrs[i] = s;
     s->used = 1;
     s->gen = 1;
@@ -551,7 +563,7 @@ static int scr_open(struct umsg *m, int cl)
     return when();
 }
 /* the screen's record and its lists (no change anywhere on failure) */
-static int scr_make(struct umsg *m, struct scrn *s, const struct dpyscr *qp, int i, int cl)
+static int scr_make(struct umsg *m, struct scrn *s, const struct dpyscr *qp, int i, int cl, struct scrn **out)
 {
     struct dpyscr q = *qp;
     int hires = q.w == 640, slace = (q.flags & DPYSF_LACE) != 0, ham = (q.flags & DPYSF_HAM) != 0;
@@ -586,25 +598,19 @@ static int scr_make(struct umsg *m, struct scrn *s, const struct dpyscr *qp, int
     u32 room = (u32)(base_moves(s) + 4 * q.ncop + tail_moves(s) + 4);
     if (room > MAXMOVES)
         room = MAXMOVES;
-    u32 bytes = 2 * (1 + (u32)slace) * room * 4;
-    if (chip_lists + bytes > SCR_BUDGET || !(s->chipmem = sys_memalloc_chip(bytes))) {
-        sys_conhold(gfd, 0, q.planes);
-        return -ENOMEM;
-    }
-    s->list = q.ncop ? malloc(q.ncop * sizeof *s->list) : 0;
-    s->ptrs = malloc((q.depth + (u32)q.ncop) * sizeof *s->ptrs);
-    s->colat = malloc(((u32)q.ncop + 1) * sizeof *s->colat);
-    s->cidx = malloc(((u32)q.ncop + 1) * sizeof *s->cidx);
-    if ((q.ncop && !s->list) || !s->ptrs || !s->colat || !s->cidx) {
-        free(s->list); free(s->ptrs); free(s->colat); free(s->cidx);
-        sys_memfree(s->chipmem);
+    u32 lists = 2 * (1 + (u32)slace) * room * 4, nl = q.ncop, rec = (sizeof *s + 7) & ~7u;
+    u32 bytes = rec + lists + 2 * nl * (u32)sizeof(struct dpycop) + (q.depth + nl) * (u32)sizeof(struct ptr) +
+                (nl + 1) * 4 + (((nl + 1) * 2 + 7) & ~7u);
+    u8 *mem;
+    if (chip_lists + bytes > SCR_BUDGET || !(mem = sys_memalloc_chip(bytes))) {
         sys_conhold(gfd, 0, q.planes);
         return -ENOMEM;
     }
     s->room = room;
     s->chip = bytes;
+    s->chipmem = mem;
     chip_lists += bytes;
-    u16 *c = s->chipmem;
+    u16 *c = (u16 *)(mem + rec);
     for (int b = 0; b < 2; b++)
         for (int f = 0; f < 2; f++) {
             s->buf[b][f] = f && !slace ? s->buf[b][0] : c;
@@ -617,6 +623,14 @@ static int scr_make(struct umsg *m, struct scrn *s, const struct dpyscr *qp, int
             t[4] = 0x08A; t[5] = 0;
             s->tramp[b][f] = t;
         }
+    u8 *p = mem + rec + lists;
+    s->list = (struct dpycop *)p; p += nl * sizeof(struct dpycop);
+    s->spare = (struct dpycop *)p; p += nl * sizeof(struct dpycop);
+    s->ptrs = (struct ptr *)p; p += (q.depth + nl) * sizeof(struct ptr);
+    s->colat = (u16 (*)[2])p; p += (nl + 1) * 4;
+    s->cidx = (u16 *)p;
+    memcpy(mem, s, sizeof *s);          /* the record into its region */
+    *out = (struct scrn *)mem;
     return 0;
 }
 
@@ -639,15 +653,13 @@ static int scr_set(struct umsg *m, struct scrn *s)
             return -EINVAL;
         if (n && ((a[1] & 1) || dpy_peer(m, PEER_RD, a[1], n * sizeof(struct dpycop)) < 0))
             return -EFAULT;
-        struct dpycop *l = malloc(n ? n * sizeof *l : 1);
-        if (!l)
-            return -ENOMEM;
+        struct dpycop *l = s->spare;
         memcpy(l, (const void *)a[1], n * sizeof *l);  /* checked and kept in our memory: never read again there */
         s32 lo, hi;
         int bad, w = check(s, l, (int)n, &lo, &hi, &bad);
         if (w >= 0 && (s32)s->off + lo >= 0 && (u32)((s32)s->off + hi) <= s->bytes &&
             (u32)(w + base_moves(s) + tail_moves(s)) <= s->room) {
-            free(s->list);
+            s->spare = s->list;
             s->list = l;
             s->nlist = (int)n;
             s->ncidx = 0;
@@ -660,7 +672,6 @@ static int scr_set(struct umsg *m, struct scrn *s)
             flip(s);
             return when();
         }
-        free(l);
         a[3] = (u32)bad;
         return -EINVAL;
     }
