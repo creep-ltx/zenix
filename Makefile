@@ -1180,8 +1180,8 @@ $(BUILD)/frotz.zx: $(BUILD)/frotz.celf tools/mkzexe.py tools/check-68020-60.sh
 # ---- The BSD games (roadmap block 7 item 7; DESIGN D52 section 8; ports/bsdgames/README): twelve of NetBSD 10.2's
 # games pinned unchanged in ports/bsdgames/upstream, compiled with NetBSD's macros and the BSD calls Zenix's C library
 # lacks (ports/bsdgames/zenix: zgames.h included first, compat.c), a small curses of Zenix's own (curses.c) and
-# tetris's terminfo (term.c), in libzgames.a; one patch (wump.patch: no fork). /bin/NAME (UAPPS, the games package),
-# plain programs (ZEXE); arithmetic and hangman print floats (the float printf). On the PC: adventure's mkdata (its
+# tetris's terminfo (term.c), in libzgames.a; two patches (wump.patch: no fork; adventure.patch: a clock at 1970).
+# /bin/NAME (UAPPS, the games package), plain programs (ZEXE); arithmetic and hangman print floats (the float printf). On the PC: adventure's mkdata (its
 # text "encrypted" with random(), so built with the C library's own generator, zenix/zrandom.c, and the game decrypts
 # it on Zenix) and fortune's strfile (the fortunes' index, big-endian on any host). ----
 BSDGAMES := adventure arithmetic banner fortune hangman number rain robots tetris worm worms wump
