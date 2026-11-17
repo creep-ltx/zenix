@@ -130,6 +130,15 @@ image file), and prints a table in the order of the list (test, PASS/FAIL, time,
 `tools/check.sh host` runs only the host tests, `tools/check.sh NAME...` only the named ones (e.g. `matrix users-test`).
 Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (shown as skipped).
 
+**Amiberry** (2026-11-17, DESIGN D41 section 19). `ZENIX_EMU=amiberry` runs any test whose machine is an A1200 in
+Amiberry instead of FS-UAE, headless: `tools/run-test.sh` turns the FS-UAE config into Amiberry's (`tools/fsuae_conf.py
+--amiberry`), gives it a runtime folder of its own and joins its serial port, which Amiberry offers on TCP only, to the
+tap's PTY (`tools/serial-tcp.py`); the tests' scripts are unchanged. It always runs at the machine's own speed (no warp
+mode from a config; `cpu_speed=max` made its IDE stop answering). It models every 68030/040/060 variant, the EC parts
+too, which FS-UAE does not; the cage rig's screenshot tests stay on FS-UAE. **Memory protection's CPU matrix**:
+`tools/mmu-test.sh MODEL...` (every CPU model, protection on or the reason it is off) and `tools/mmu-suite.sh
+030|040|060` (the regular suites with protection on), both in `make check`, and in either emulator.
+
 **Fast mode** (2026-11-04). Most emulator tests check logic, not the stock A1200's speed, so `tools/check.sh NAME...`
 runs them in fast mode by default; the full `tools/check.sh` (the nightly run, before a merge) stays at stock speed;
 `--fast` and `--stock` (or `ZENIX_FAST=1`/`0`) choose either way. In fast mode every FS-UAE run made through

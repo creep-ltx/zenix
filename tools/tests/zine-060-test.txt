@@ -22,5 +22,7 @@ send zine -l /tests/zine/zalloc; echo zallocl-rc=$?\r
 wait zallocl-rc= 60
 send free\r
 wait (?m)^fast RAM free.*\n 20
+send crash write 0x1000; echo prot-rc=$?\r
+wait prot-rc= 30
 send echo disk-ok > /home/z60.disk; sync; cat /home/z60.disk; echo zine-060-done\r
 wait zine-060-done 20
