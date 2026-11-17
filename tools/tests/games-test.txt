@@ -3,12 +3,14 @@ send cd /tests/games; frotz -m -q -s 1 -w 78 /usr/share/games/frotz/devours.z5 <
 wait ==fend 900
 send printf 'no\\nquit\\nyes\\n' | adventure > /tmp/adv.txt 2>&1; r=$?; echo; echo ast=$r; echo ==a""out; cat /tmp/adv.txt; echo; echo ==a""end\r
 wait ==aend 300
+send d=$(date '+%Y-%m-%d %H:%M:%S'); date -s '1970-01-02 03:04:05' > /dev/null; printf 'no\\nquit\\nyes\\n' | adventure > /tmp/adv2.txt 2>&1; r=$?; date -s "$d" > /dev/null; echo; echo a2st=$r; echo ==a""2out; cat /tmp/adv2.txt; echo; echo ==a""2end\r
+wait ==a2end 300
 send banner -w 40 ZENIX > /tmp/b.txt; echo bst=$?; number 1999 > /tmp/n.txt; echo nst=$?; echo ==b""out; cat /tmp/b.txt; echo ==n""out; cat /tmp/n.txt; echo ==n""end\r
 wait ==nend 60
 send fortune > /tmp/o.txt; echo ost=$?; fortune -f > /tmp/of.txt 2>&1; fortune -m . > /tmp/oa.txt 2>&1; echo ==o""out; cat /tmp/o.txt; echo ==o""lst; cat /tmp/of.txt; echo ==o""all; cat /tmp/oa.txt; echo ==o""end\r
 wait ==oend 60
 send printf 'n\\n' | wump > /tmp/w.txt 2>&1; r=$?; echo; echo wst=$r; printf '\\n' | arithmetic -o + -r 3 > /tmp/ar.txt 2>&1; r=$?; echo; echo rst=$r\r
-waitecho rst= 60
+waitecho rst=0 60
 send echo ==w""out; cat /tmp/w.txt; echo; echo ==r""out; cat /tmp/ar.txt; echo; echo ==r""end\r
 wait ==rend 60
 send clear; (termtest screen /dev/tty1 'Directions:' 60 'q' > /tmp/sr1.txt; termtest screen /dev/tty1 'Really quit?' 60 'y' > /tmp/sr2.txt) & robots; r=$?; echo; echo ost2=$r\r

@@ -370,7 +370,29 @@ def pics(d):
     open(os.path.join(d, "broken.iff"), "wb").write(good.replace(b"BMHD", b"XXXX"))
 
 
+def ham8_pic():
+    """a lores HAM8 picture (DESIGN D55's screen test): groups of 8 pixels, a base colour, red modified for two
+    pixels, then green for five (so each colour is wide enough to read in a scaled screenshot)"""
+    w, h = 320, 64
+    idx = []
+    for y in range(h):
+        for x in range(w):
+            k, g = x % 8, x // 8
+            idx.append(g % 64 if k == 0 else (0x80 | y) if k < 3 else (0xC0 | ((g * 5 + y) % 64)))
+    pal = [(i * 4, 255 - i * 4, (i * 16) & 255) for i in range(64)]
+    return w, h, idx, pal
+
+
+def ham8(d):
+    os.makedirs(d, exist_ok=True)
+    w, h, idx, pal = ham8_pic()
+    open(os.path.join(d, "ham8.iff"), "wb").write(ilbm(w, h, 8, idx, pal, 0x21800))
+
+
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "ham8":
+        ham8(sys.argv[2])
+        sys.exit(0)
     if len(sys.argv) != 3 or sys.argv[1] not in ("cases", "pics"):
         sys.exit(__doc__)
     if sys.argv[1] == "cases":

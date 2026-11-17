@@ -588,8 +588,39 @@ static u16 colour_of(int i, int depth)
     return depth == 1 ? (i ? gfx_palette[7] : 0) : depth == 2 ? gfx_palette2[i] : (scga ? cga_palette : gfx_palette)[i];
 }
 
+/* DESIGN D55 6: the vertical blanks counted; the interrupt only counts and asks kwork to wake the waiters (D16:
+ * producers run in process context) */
+static volatile u32 vbl_n;
+static u32 vbl_wait;                    /* the slots waiting in CON_VBLANK */
+void gfx_vwake(void)
+{
+    if (vbl_wait)
+        ev_wake(&vbl_wait);
+}
+/* CON_VBLANK: wait until the count reaches want (or 100 ms passed) -> the count now; CONV_ASK only asks */
+long gfx_vwait(u32 want)
+{
+    if (!up)
+        return -ENODEV;
+    if (want & CONV_ASK)
+        return (long)(vbl_n & 0x7FFFFFFFu);
+    u32 until = ticks + 10;
+    for (;;) {
+        ev_arm(&vbl_wait);              /* registered first: a count after the test still wakes us (ev_block) */
+        u32 n = vbl_n & 0x7FFFFFFFu;
+        if ((s32)((n - want) << 1) >= 0 || (s32)(ticks - until) >= 0)
+            return (long)n;
+        long r = ev_block(EV_IO, 1, until, 0);
+        if (r < 0)
+            return r;
+    }
+}
+
 void gfx_vblank(void)
 {
+    vbl_n++;
+    if (vbl_wait)
+        kwork_pending = 1;
     int o = base;
     if (up && (o != hw_base || pal_dirty) && (int)((VPOSL >> 8) & 0x1FF) < COP_WAIT_LINE - 4) {
         cop_point(o);

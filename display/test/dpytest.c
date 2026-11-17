@@ -123,13 +123,144 @@ static void events(void)
             ws[i].h = e.h;
         }
         char l[64];
-        int n = snprintf(l, sizeof l, "ev %d %s %d %d %d %d %d\n", e.type, i >= 0 ? ws[i].name : "?", e.code, e.x, e.y,
+        int n = snprintf(l, sizeof l, "ev %d %s %d %d %d %d %d\n", e.type, i >= 0 ? ws[i].name : e.win ? "?" : "scr", e.code, e.x, e.y,
                          e.w, e.h);
         if (nev + (u32)n < sizeof evlog) {
             memcpy(evlog + nev, l, (u32)n);
             nev += (u32)n;
         }
     }
+}
+
+/* ---- D55: a screen of its own (docs/d55-screens.md): two pictures of interleaved planes in one chip RAM region ---- */
+static struct dpyscr sd;
+static u8 *smem;
+static u32 sbytes;
+static u32 spal(int i)                  /* the test's palette: tools/screen-test.sh works the same out */
+{
+    return (u32)(((i * 7) & 15) * 17) << 16 | (u32)(((i * 11 + 5) & 15) * 17) << 8 | (u32)(((i * 13 + 9) & 15) * 17);
+}
+static void spattern(int pic, int fetch)
+{
+    u32 pl = sd.w / 8u, base = (u32)pic * sd.bpr * sd.h;
+    memset(smem + base, 0, (u32)sd.bpr * sd.h);
+    for (u32 y = 0; y < sd.h; y++)
+        for (u32 x = 0; x < sd.w; x++) {
+            u32 pen = fetch ? (x / 8 == (y / 4) % pl) : (x / (sd.w / 8) + (y / 32) * 8 + (u32)pic) % (1u << sd.depth);
+            for (u32 k = 0; k < sd.depth; k++)
+                if (pen >> k & 1)
+                    smem[base + y * sd.bpr + k * pl + x / 8] |= (u8)(0x80 >> (x & 7));
+        }
+}
+static int scrcmd(char **w, int n)
+{
+    if (!strcmp(w[0], "scr") && n >= 6) {   /* scr W H DEPTH FLAGS NCOP [fetch] */
+        static u32 pal[256];
+        memset(&sd, 0, sizeof sd);
+        sd.w = (u16)atoi(w[1]); sd.h = (u16)atoi(w[2]); sd.depth = (u16)atoi(w[3]); sd.flags = (u16)atoi(w[4]);
+        sd.ncop = (u16)atoi(w[5]);
+        sd.bpr = (u16)(sd.w / 8 * sd.depth);
+        sd.pstride = sd.w / 8u;
+        sbytes = 2u * sd.bpr * sd.h;
+        static u32 shave;
+        if (smem && sbytes > shave) {   /* a bigger screen: a bigger region (the old one is no screen's now) */
+            sys_memfree(smem);
+            smem = 0;
+        }
+        if (!smem && !(smem = sys_memalloc_chip(shave = sbytes))) { say("dpytest: scr no chip RAM\n"); return 1; }
+        spattern(0, n >= 7 && !strcmp(w[6], "fetch"));
+        spattern(1, 0);
+        for (int i = 0; i < 256; i++)
+            pal[i] = spal(i);
+        sd.planes = (u32)smem;
+        sd.bytes = sbytes;
+        sd.ncol = (u16)(sd.depth >= 5 ? 32 : 1 << sd.depth);
+        sd.palette = (u32)pal;
+        say("dpytest: scr %d\n", dpy_screen(&sd));
+        return 1;
+    }
+    if (!strcmp(w[0], "scrpal") && n >= 3) {
+        u32 v = (u32)strtol(w[2], 0, 16);
+        say("dpytest: scrpal %d\n", dpy_scr_set(SS_PALETTE, (u32)atoi(w[1]) | 1u << 16, (u32)&v, 0) >= 0);
+        return 1;
+    }
+    if (!strcmp(w[0], "scrcop") && n >= 2) {    /* bars: a red ramp in colour 0, lines 0-31; badN: a refused list */
+        static struct dpycop l[80];
+        int k = 0, ncount = -1;
+        const char *what = w[1];
+#define C(o, A, B, CC) (l[k].op = (o), l[k].a = (u16)(A), l[k].b = (u16)(B), l[k].c = (u16)(CC), k++)
+        if (!strcmp(what, "bars")) {
+            for (int y = 0; y < 32; y++) { C(CO_WAIT, y, 0, 0); C(CO_COLOUR, 0, (y * 8) & 0xFF, 0); }
+            C(CO_WAIT, 32, 0, 0); C(CO_COLOUR, 0, spal(0) >> 16, spal(0) & 0xFFFF);
+        } else if (!strcmp(what, "bad1")) { C(CO_WAIT, 10, 0, 0); C(CO_WAIT, 5, 0, 0); }
+        else if (!strcmp(what, "bad2")) { C(CO_WAIT, 0, 0, 0); C(CO_PLANE, 0, sbytes >> 16, sbytes & 0xFFFF); }
+        else if (!strcmp(what, "bad3")) { C(CO_WAIT, 8, 0, 0); C(CO_MOD, -400, -400, 0); }
+        else if (!strcmp(what, "bad4")) { C(CO_WAIT, 0, 0, 0); C(CO_PLANE, 0, 0, 2); }
+        else if (!strcmp(what, "bad5")) { C(CO_WAIT, 0, 0, 0); C(CO_COLOUR, 0, 0, 0); C(CO_PLANE, 0, 0, 0); }
+        else if (!strcmp(what, "bad6")) {
+            C(CO_WAIT, 40, 0, 0);
+            for (int j = 0; j < 30; j++) C(CO_COLOUR, j, 0, 0);
+            C(CO_WAIT, 41, 0, 0);
+        } else if (!strcmp(what, "bad7")) { C(9, 0, 0, 0); }
+        else if (!strcmp(what, "bad8")) { C(CO_WAIT, 0, 0, 0); ncount = sd.ncop + 1; }
+        else if (!strcmp(what, "bad9")) {           /* colours late on a line, then pointers at the next: too late */
+            C(CO_WAIT, 40, 300, 0);
+            for (int j = 0; j < 3; j++) C(CO_COLOUR, j, 0, 0);
+            C(CO_WAIT, 41, 0, 0); C(CO_PLANE, 0, 0, 0);
+        } else if (!strcmp(what, "bad10")) { C(CO_WAIT, 8, 0, 0); C(CO_PLANE, 0, 0x7FFF, 0xFFF8); }
+        else if (!strcmp(what, "mirror")) {         /* lines 128 on: the picture's lines 127 back up (a negative modulo) */
+            C(CO_WAIT, 128, 0, 0);
+            for (int p = 0; p < sd.depth; p++) C(CO_PLANE, p, 0, 127u * sd.bpr + (u32)p * sd.pstride);
+            C(CO_MOD, -(int)(sd.bpr + sd.w / 8), -(int)(sd.bpr + sd.w / 8), 0);
+        }
+#undef C
+        int bad, r = dpy_scr_set(SS_COPPER, (u32)l, (u32)(ncount >= 0 ? ncount : k), &bad);
+        say("dpytest: scrcop %s %s at %d\n", what, r >= 0 ? "ok" : r == -EINVAL ? "refused" : "error", r >= 0 ? -2 : bad);
+        return 1;
+    }
+    if (!strcmp(w[0], "scrcol")) {              /* the bars' colours in place: a green ramp, then one too many */
+        static u32 v[34];
+        for (int y = 0; y < 32; y++)
+            v[y] = (u32)((y * 8) & 0xFF) << 8;
+        v[32] = spal(0);
+        int ok = dpy_scr_set(SS_COLOURS, 0 | 33u << 16, (u32)v, 0) >= 0;    /* the 33 CO_COLOURs, WAITs passed over */
+        int bad, r = dpy_scr_set(SS_COLOURS, 0 | 34u << 16, (u32)v, &bad);  /* one more than there are */
+        say("dpytest: scrcol %d too-many %d\n", ok, r == -EINVAL && bad == 33);
+        return 1;
+    }
+    if (!strcmp(w[0], "scrplanes") && n >= 2) {
+        say("dpytest: scrplanes %d\n", dpy_scr_set(SS_PLANES, (u32)atoi(w[1]) * sd.bpr * sd.h, 0, 0) >= 0);
+        return 1;
+    }
+    if (!strcmp(w[0], "scrfront") && n >= 2) { say("dpytest: scrfront %d\n", dpy_scr_set(SS_FRONT, (u32)atoi(w[1]), 0, 0)); return 1; }
+    if (!strcmp(w[0], "scrclose")) { say("dpytest: scrclose %d\n", dpy_scr_close()); return 1; }
+    if (!strcmp(w[0], "scrfree")) { say("dpytest: scrfree %d\n", smem ? sys_memfree(smem) : -1); return 1; }
+    if (!strcmp(w[0], "scrbig")) {              /* a plane stride past the memory (a sum that would overflow) */
+        struct dpyscr q = sd;
+        q.depth = 2;
+        q.pstride = 0x7FFFFFF8u;
+        say("dpytest: scrbig %d\n", dpy_screen(&q));
+        return 1;
+    }
+    if (!strcmp(w[0], "scrnotmine")) {          /* planes that are not a region of ours: refused */
+        struct dpyscr q = sd;
+        q.planes = (u32)smem + 16;
+        say("dpytest: scrnotmine %d\n", dpy_screen(&q));
+        return 1;
+    }
+    if (!strcmp(w[0], "vblank") && n >= 2) {    /* N frames waited for, against the E-clock */
+        int k = atoi(w[1]);
+        u32 c0 = (u32)dpy_vcount(), t0 = sys_hrtime(), c = c0;
+        for (int j = 0; j < k; j++)
+            c = (u32)dpy_vwait(c + 1);
+        u32 t1 = sys_hrtime();
+        u32 t2 = sys_hrtime();
+        int far = dpy_vwait(c + 1000);          /* not reached: the wait ends after 100 ms */
+        u32 t3 = sys_hrtime();
+        say("dpytest: vblank %u frames %u ticks far %d %u ticks\n", c - c0, t1 - t0, far >= 0 && (u32)far < c + 1000, t3 - t2);
+        return 1;
+    }
+    return 0;
 }
 
 static int words(char *l, char **w, int max)
@@ -149,6 +280,8 @@ static void command(char *line)
     char *w[8];
     int n = words(line, w, 8), i = n > 1 ? find(w[1]) : -1, r = 0;
     if (!n)
+        return;
+    if (scrcmd(w, n))
         return;
     if (!strcmp(w[0], "win") && n >= 5) {
         int k = -1;

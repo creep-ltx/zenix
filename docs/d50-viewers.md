@@ -132,6 +132,8 @@ design of its own, proposed here, not built):
   where keys go).
 Then `show` would offer both: the window by default (the desktop stays in view), `Return` or a menu item for the
 picture's own screen with its real colours. **Question for the partner** (section 9, 1). Until then: the window.
+**Built since** (DESIGN D55, docs/d55-screens.md, branch intro 2026-11-14): `DPY_SCREEN`, and in `show` as an option
+(`-s`, the key `s`, the menu's Own screen), the window still the default.
 
 ## 5. Keys and the mouse
 

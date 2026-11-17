@@ -152,3 +152,36 @@ void hw_show(const struct bm *b, const u8 *zero, int x, int y, int pen);  /* at 
                                  * stand-in in b (-1 none) */
 void hw_off(void);              /* playfield 2 off, in effect on return */
 void hw_wait(void);             /* the last change in effect */          /* the pointer moved during a drag: one move a pass of the main loop */
+
+/* displayd.c, for D55's screens (screen.c, docs/d55-screens.md) */
+extern int gfd;                 /* the grab's descriptor (CON_HOLD) */
+extern int base_w, base_h;      /* the console's size: a field's lines */
+extern u16 *copl[2];            /* the fixed parts (a screen's list names them in COP1LC) */
+extern u16 *scr_tramp;          /* 4 screens x 2 buffers x 2 fields x 6 words, in the jump word's 64 KB */
+extern u8 *scr_zero;            /* 96 zero bytes, 8-aligned, chip RAM */
+void cop_show(const u16 *t0, const u16 *t1);    /* the jump words at these trampolines (0: the desktop's lists) */
+void cop_settle(void);          /* until the Copper runs only what the last flip named */
+int dpy_peer(struct umsg *m, int op, u32 addr, u32 len);
+void input_reset(void);
+/* screen.c (not in the demo floppies' displayd, -DNO_SCREEN: no program there opens a screen of its own) */
+#ifdef NO_SCREEN
+static inline int scr_req(struct umsg *m, int cl) { (void)m; (void)cl; return -ENOSYS; }
+static inline void scr_drop(int cl) { (void)cl; }
+static inline void scr_gone(u32 base) { (void)base; }
+static inline int scr_shown(void) { return 0; }
+static inline void scr_focus(int in) { (void)in; }
+static inline int scr_key(const struct ugevent *e) { (void)e; return 0; }
+static inline int scr_pointer(const struct ugevent *e, u16 old, u16 now, int moved)
+{
+    (void)e; (void)old; (void)now; (void)moved;
+    return 0;
+}
+#else
+int scr_req(struct umsg *m, int cl);    /* DPY_SCREEN, DPY_SCR_SET, DPY_SCR_CLOSE */
+void scr_drop(int cl);
+void scr_gone(u32 base);        /* GEV_GONE */
+int scr_shown(void);            /* a screen is in front */
+void scr_focus(int in);         /* the console shown again (1), switched away (0) */
+int scr_key(const struct ugevent *e);   /* 1: taken (Left Amiga+N, a screen in front) */
+int scr_pointer(const struct ugevent *e, u16 old, u16 now, int moved);
+#endif

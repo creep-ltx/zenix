@@ -66,6 +66,8 @@ pointers.
   hang-up and SIGWINCH at its size change are); `poll` takes at most 32 items, `select` 32 descriptors; a signal
   frame needs 84 bytes of stack and leaves 512 bytes above the stack guard, or the process is killed.
 - The display server (DESIGN D38, man/displayd.txt): one desktop, on one console; 32 windows, 16 client programs, 48 images;
+  screens of their own (D55): 4, one a program, 1,024 Copper instructions a list (at most 4,032 Copper moves once
+  translated), 160 KB of displayd's chip RAM for their lists, 4 held plane regions;
   a window's visible part at most 24 rectangles (more: the change is painted whole and its windows asked to draw);
   kept copies of covered windows 256 KB of chip RAM; a program's images 64 KB of chip RAM; two fonts: the 8 x 8 and
   the desktop's (one AmigaOS bitmap font, D38 "Fonts": at most 64 lines tall, glyphs at most 64 pixels wide, kerning

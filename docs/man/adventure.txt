@@ -21,7 +21,9 @@ NOTES
     ports/bsdgames; the BSD licence: /usr/share/licenses/bsdgames), in
     the games package (zpkg -S games).
     Its text is kept scrambled in the program, as upstream's (made at
-    build time by its own setup tool).
+    build time by its own setup tool). One Zenix patch: a clock that is
+    behind (an Amiga without a battery clock starts in 1970) no longer
+    makes a new game look like one suspended a moment ago.
 
 SEE ALSO
     frotz(1), wump(1)

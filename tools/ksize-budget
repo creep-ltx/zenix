@@ -117,6 +117,9 @@
 # 49,576 -> 49,900, budget 49,600 -> 49,900 (the built-in fsd's FS_BMAP and ext2_runs); kernel.bin 199,492 -> 200,164,
 # TOTAL 199,600 -> 200,200; the mount tests' RAM disk 683 -> 682 KB for the floppy's ROOM.
 # merged (D54 + d29 16.23): TOTAL 205,200; the mount tests' RAM disk 677 KB.
+# 2026-11-14 (D55, screens of their own): gfx 8,900 -> 9,050 (the vertical blank's count and CON_VBLANK), gcon 3,600 ->
+# 4,250 (CON_HOLD, GEV_GONE, the ring's kept slots); kernel.bin 205,136 -> 205,992, TOTAL 205,200 -> 206,000; the mount
+# tests' floppy 856 bytes left (ROOM 800).
 start     4850   8200
 main      5950   1100
 serial    6100   6500
@@ -133,7 +136,7 @@ proc     10650  21500
 syscall  10300      0
 vfs      11750   1600
 tty       5900    100
-gfx       8900   2450
+gfx       9050   2450
 term     14500    256
 confont   3100     32
 kbd       4300    180
@@ -147,9 +150,9 @@ sock      4700   1060
 drv       3100    640
 zine      1850     16
 cache     1800     32
-gcon      3600     16
+gcon      4250     16
 dbg       4100     20
 mmu       5700    160
 embed    49900      0
-TOTAL   205200
+TOTAL   206000
 ROOM       800

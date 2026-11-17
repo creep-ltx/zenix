@@ -47,6 +47,28 @@ DESCRIPTION
                            its bytes in hex as they lie in memory
         mouse DX DY        the mouse moved DX, DY counts (CON_INPUT,
                            root's), no button
+        scr W H DEPTH FLAGS NCOP [fetch]
+                           a screen of its own (DESIGN D55): two pictures
+                           of interleaved planes in a chip RAM region of
+                           its own, blocks of 40 x 32 in pens 0-15 (fetch:
+                           line y lit only at byte (y / 4) % (W / 8)), a
+                           palette of its own: "dpytest: scr COUNT"
+        scrpal I RRGGBB    colour I in place (SS_PALETTE)
+        scrcop bars|mirror|bad1..bad10
+                           a Copper list (SS_COPPER): a red ramp in colour
+                           0, lines 0-31; the lower half mirrored; ten
+                           lists that must be refused: "dpytest: scrcop
+                           WHAT ok|refused at INDEX"
+        scrcol             the ramp green in place (SS_COLOURS), then one
+                           colour too many
+        scrplanes N        picture N shown (SS_PLANES)
+        scrfront 0|1       behind the desktop, in front
+        scrclose           the screen closed
+        scrfree            memfree of the planes (refused while shown)
+        scrnotmine         a screen on memory not a region of its own
+        scrbig             a screen whose plane stride is past its memory
+        vblank N           N frames waited for (CON_VBLANK) against the
+                           E-clock, then a far count given up after 100 ms
         quit               the end
 
     EV_EXPOSE is answered by drawing the window again.

@@ -423,3 +423,19 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   attached to and kills what it started; a target's end is reported once by `DBG_WAIT` (`DBGW_EXIT`). The crash lines
   `[kernel] pid N regs: base B code C sr S pc P d0..d7 X*8 a0..a7 X*8` and `[kernel] pid N frames: K R1 .. RK` (zdb
   reads them; not for root's or a `nodebug` process): words may be added at the end of each, never moved. `zld -M`'s map is `nm -n`'s format.
+- **D55 (screens of their own, branch intro, 2026-11-14):** the display protocol's `DPY_SCREEN` 18 (a[0] `struct
+  dpyscr`, first size 36: size, w, h, depth, flags, planes, bytes, pstride, bpr, ncop, ncol, pad, palette; `DPYSF_LACE`
+  1, `DPYSF_HAM` 2, `DPYSF_EHB` 4, `DPYSF_SCROLL` 8, `DPYSF_BACK` 16, `DPYSF_MOTION` 32; the answer the vertical-blank
+  count from which it shows, or -EINVAL, -EFAULT, -EBUSY, -ENODEV, -ENOMEM, -ENOSPC), `DPY_SCR_SET` 19 (a[0] `SS_PALETTE`
+  1, `SS_COPPER` 2 (-EINVAL with the instruction's index in a[3], -1 the fetch), `SS_PLANES` 3, `SS_FRONT` 4,
+  `SS_COLOURS` 5 (the next count `CO_COLOUR`s from an instruction, others passed over; -EINVAL with a[3] the colours
+  set)), `DPY_SCR_CLOSE` 20; `struct dpycop` (8 bytes: op, a, b, c) with `CO_WAIT` 1, `CO_COLOUR` 2, `CO_PLANE` 3,
+  `CO_MOD` 4, `CO_SCROLL` 5 and their checks (docs/d55-screens.md section 5; a list refused today may be accepted by a
+  later displayd, never the other way); `DPYSCR_COPMAX` 1024 at least; a screen's events with `win` 0; libdisplay's
+  `dpy_screen`, `dpy_scr_set`, `dpy_scr_close`, `dpy_vwait`, `dpy_vcount`. The kernel's `SYS_console` op 12
+  `CON_VBLANK` (no descriptor, any process: a2 the count to wait for, bit 31 only asks; the count now, 31 bits; at
+  most 100 ms; -EINTR not restarted; -ENODEV without a display) and op 13 `CON_HOLD` (the grab's descriptor and
+  process: a2 a pid and a3 the base of a chip RAM region that pid's memalloc gave -> its size; a2 0 lets go; `NHOLD` 4
+  at least; a held region's memfree -EBUSY; its owner's end hands the block to the grab's process); the grab's record
+  `GEV_GONE` 6 (x the hold's slot, ch the base big-endian), and a record of type 0 that says nothing (readers skip it:
+  an unread `GEV_GONE` whose block was let go becomes one).

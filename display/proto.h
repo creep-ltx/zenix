@@ -63,6 +63,20 @@
                              * be read), -ENOMEM: the font in use stays; -EBUSY (a drag). Any client of the desktop's
                              * session, as DPY_MODE (docs/d38-desktop.md "Preferences": Test, Use, Cancel) */
 #define DPY_FONTNAME    32
+/* DESIGN D55 (docs/d55-screens.md): a screen of the program's own, its mode and palette, its planes in its own chip
+ * RAM, a Copper list displayd checks and translates. At most one a client; its events carry win 0. Each answer that
+ * changes the picture is the vertical-blank count from which it shows (CON_VBLANK, libdisplay's dpy_vwait) */
+#define DPY_SCREEN      18  /* a[0] struct dpyscr * -> the count, or -EINVAL, -EFAULT, -EBUSY, -ENODEV, -ENOMEM, -ENOSPC */
+#define DPY_SCR_SET     19  /* a[0] what (SS_*), a[1], a[2] -> the count (SS_FRONT: 0), -ENOENT no screen */
+#define DPY_SCR_CLOSE   20  /* -> 0: the screen goes (the desktop in front if it was) */
+#define SS_PALETTE      1   /* a[1] first | count << 16, a[2] the colours (0x00RRGGBB): in place */
+#define SS_COPPER       2   /* a[1] struct dpycop[], a[2] their count (0 .. ncop): a flip; -EINVAL with the index in a[3] */
+#define SS_PLANES       3   /* a[1] plane 0's offset in the planes' memory: a flip */
+#define SS_FRONT        4   /* a[1] 1 in front, 0 behind (-EBUSY during a drag) */
+#define SS_COLOURS      5   /* a[1] first instruction | count << 16, a[2] count colours: the next count CO_COLOURs from
+                             * that instruction on (other instructions passed over) get them, in place; -EINVAL with
+                             * a[3] the colours set when the list has fewer */
+#define DPYSCR_COPMAX   1024
 /* the window manager's (only after DPY_WM_HELLO; one window manager at a time) */
 #define DPY_WM_HELLO    32  /* become the window manager -> 0, -EBUSY (another one), -EPERM (not the session's user) */
 #define DPY_WM_STYLE    33  /* a[0] struct dpystyle *: frames from now on (and the screen's palette) */
@@ -188,6 +202,36 @@ struct dpystyle {
     unsigned char drag;          /* the default drag: DRAG_OUTLINE or 0 (the whole window) */
 };
 #define DPYSTYLE_FIRST  64
+
+/* a screen of its own (DPY_SCREEN, DESIGN D55 section 3) */
+struct dpyscr {
+    unsigned size;               /* sizeof (DPYSCR_FIRST) */
+    unsigned short w, h;         /* 320 (lores) or 640 (hires); 1 .. the display's lines (twice with DPYSF_LACE, even) */
+    unsigned short depth;        /* planes 1-8 (OCS/ECS: lores 1-6, hires 1-4) */
+    unsigned short flags;        /* DPYSF_* */
+    unsigned planes;             /* the planes' memory: the base of a chip RAM region the client's memalloc gave */
+    unsigned bytes;              /* the part every fetch stays in: [planes, planes + bytes) */
+    unsigned pstride;            /* plane k + 1 is this many bytes after plane k */
+    unsigned short bpr;          /* a plane's line to its next line */
+    unsigned short ncop;         /* the most instructions SS_COPPER gives (0 .. DPYSCR_COPMAX) */
+    unsigned short ncol;         /* colours in palette (0 .. 256; 32 on OCS/ECS) */
+    unsigned short pad;
+    unsigned palette;            /* ncol colours, 0x00RRGGBB */
+};
+#define DPYSCR_FIRST    36
+#define DPYSF_LACE      1        /* interlaced */
+#define DPYSF_HAM       2        /* HAM6 (6 planes) or HAM8 (8, AGA) */
+#define DPYSF_EHB       4        /* Extra Half-Brite (6 planes) */
+#define DPYSF_SCROLL    8        /* one more fetch unit on the left of each line (2 bytes OCS/ECS, 8 AGA) */
+#define DPYSF_BACK      16       /* opened behind the desktop */
+#define DPYSF_MOTION    32       /* EV_MOTION also without a button held */
+struct dpycop { unsigned short op, a, b, c; };  /* SS_COPPER's instructions, in screen order */
+#define CO_WAIT         1        /* a the line (interlaced: frame line a / 2), b the lores (hires) pixel across, 0 the start */
+#define CO_COLOUR       2        /* a the colour register, b << 16 | c 0x00RRGGBB */
+#define CO_PLANE        3        /* a the plane, b << 16 | c its offset from SS_PLANES' offset; only right after a CO_WAIT
+                                  * with b 0 (or before the first): from that line on */
+#define CO_MOD          4        /* a, b the odd and even planes' modulos (signed, the hardware's, not interlaced); as CO_PLANE */
+#define CO_SCROLL       5        /* a BPLCON1 */
 
 /* ---- drawing orders (DPY_DRAW): 16-bit words; each order's first word is op << 8 | its length in words (header
  * included), so an order the server does not know is skipped. Coordinates are window-relative pixels, clipped to

@@ -15,6 +15,8 @@
 #    gg: the first again; a click on the picture: the next (broken.iff); the keys file written with the built-in keys
 #  - the keys file changed (a key added, a bad line): the bad line said, the new key works; q quits
 #  - files on /tests/pics, Return on bars.iff: files starts /bin/show (no terminal), and its window shows the blocks
+#  - show -s (DESIGN D55 section 11): ham.iff on a screen of its own, every second pixel of every fourth line the
+#    generator's own HAM6 decode (tools/screen-test.py ham); s: the window again; a HAM8 picture likewise; Esc
 # Printed: the program's size and memory (ps), the rendering's time (emulator figures).
 cd "$(dirname "$0")/.." || exit 1
 export ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenix-show-serial}
@@ -46,7 +48,7 @@ sleep 5
 shot columns
 send q
 sleep 2
-send t() { echo st-$1; grep '^show: (shown|picture|say|window|rendered|wrote)' /tmp/s.log | tail -$2; }\r
+send t() { echo st-$1; grep '^show: (shown|picture|say|window|rendered|wrote|screen)' /tmp/s.log | tail -$2; }\r
 sleep 2
 send rm -rf $HOME/.config/show; echo acceleration none > /etc/zdesk/mouse; zdesk -v > /tmp/z.log 2>&1 &\r
 sleep 8
@@ -92,6 +94,22 @@ sleep 2
 send echo st-16; ps | grep show | cat; ls -l /bin/show\r
 sleep 3
 EOS
+cat <<'EOS'
+send show -s -v /tests/pics/ham.iff > /tmp/s.log 2>&1 &\r
+sleep 14
+shot hamscr
+EOS
+typ s; echo "sleep 4"; echo "shot hamwin"; st 18 6
+typ q; echo "sleep 3"
+cat <<'EOS'
+send show -s -v /tests/pics8/ham8.iff > /tmp/s.log 2>&1 &\r
+sleep 14
+shot ham8scr
+send gcontest keys 45 c5\r
+sleep 4
+EOS
+st 19 6
+typ q; echo "sleep 3"
 echo "send cat /tmp/z.log | tail -5; echo end-\$((40+2))\\r"
 echo "wait end-42 30"
 } > "$OUT/script.txt"
@@ -162,6 +180,14 @@ after 14 | grep -q '^show: picture broken.iff'; check "... its new key x: next" 
 s15=$(after 15); echo "$s15" | grep -q '^files: start /bin/show /tests/pics/bars.iff' && echo "$s15" | grep -qx 'no-term'
 rc=$?; check "files, Return on bars.iff: /bin/show started, no terminal ($(echo $s15))" $rc
 blocks fromfiles "" "" 77 62 > "$OUT/q4"; rc=$?; check "... its window shows the blocks ($(cat "$OUT/q4"))" $rc
+after 18 | grep -q '^show: screen 320 x 64, 6 planes (HAM6)' && after 18 | grep -q '^show: screen closed'
+rc=$?; python3 tools/screen-test.py ham "$OUT/p-hamscr.png" "$OUT/geom" 6 > "$OUT/q5"; r2=$?
+check "show -s: ham.iff on a screen of its own, HAM6 in full colour ($(cat "$OUT/q5")); s: back to the window" $((rc | r2))
+python3 tools/dpy-test.py same "$OUT/p-hamwin.png" "$OUT/p-hamscr.png" "$OUT/geom" > /dev/null; r3=$?
+[ $r3 != 0 ]; check "... the window again after s (not the screen)" $?
+after 19 | grep -q '^show: screen 320 x 64, 8 planes (HAM8)'; rc=$?
+python3 tools/screen-test.py ham "$OUT/p-ham8scr.png" "$OUT/geom" 8 > "$OUT/q6"; r2=$?
+check "show -s: a HAM8 picture on its own screen ($(cat "$OUT/q6")); Esc: back" $((rc | r2))
 echo "emulator figures (FS-UAE, stock A1200 + 4 MB fast; not a real machine's):"
 grep -a '^show: rendered' "$L" | sort -u | sed 's/^/  /'
 after 16 | grep -a 'show' | sed 's/^/  /'
