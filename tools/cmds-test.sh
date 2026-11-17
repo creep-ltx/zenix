@@ -10,8 +10,12 @@ make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 rm -f $BD/zenix.hdf; make -s BUILD=$BD $MKBOX $BD/zenix.hdf >/dev/null 2>&1
 if [ -n "$MKBOX" ]; then [ "$(debugfs -R "stat /bin/ls" $BD/zenix.hdf 2>/dev/null | grep -o 'Links: [0-9]*')" = "Links: 65" ] || { echo "FAIL: the image's /bin/ls is not the box (65 links)"; exit 1; }; fi
 OUT=${ZENIX_OUT:-/tmp/zenix-cmds}; mkdir -p $OUT
-# GNU ls and grep with their built-in colours (the colour lines compare bytes; DESIGN D14)
-( cd rootfs/home/t && env -u LS_COLORS -u GREP_COLORS -u GREP_COLOR LC_ALL=C bash ../../tests/cmds.sh "$PWD" > $OUT/expected.txt 2>&1 )
+# GNU ls and grep with their built-in colours (the colour lines compare bytes; DESIGN D14). The script's scratch folder
+# is /tmp/cmds.t on the PC too (its name is in the expected output): two runs at once on this PC (two sessions, or
+# tools/mmu-suite.sh in two emulators) take turns there, or one's files land in the other's expected output
+# (2026-11-17: "ln: ... col/link: File exists" expected from the other run's folder)
+( cd rootfs/home/t && flock /tmp/zenix-cmds-host.lock env -u LS_COLORS -u GREP_COLORS -u GREP_COLOR LC_ALL=C \
+    bash ../../tests/cmds.sh "$PWD" > $OUT/expected.txt 2>&1 )
 cat > $OUT/script.txt <<EOS
 wait zenix:/# 90
 sleep 1
