@@ -1153,6 +1153,20 @@ u32 c_DeleteFile(const char *name)
     return 0;
 }
 
+/* SetProtection(name, mask), SetComment(name, comment), SetFileDate(name, date) (d29 16.24): a file's attributes. The
+ * session's files are its own copies and nothing goes back to the disk (16.9), so the attribute is not kept: DOSTRUE
+ * when the file (or directory) is there, else 0 with ERROR_OBJECT_NOT_FOUND. Elude's Shake Off The Dust saves its
+ * settings at its end and protects the file. */
+u32 c_SetAttr(const char *name)
+{
+    u32 ent = 0;
+    int r = -1, nodev = 0;
+    if (name && locate(name, &ent, &r, &nodev))
+        return (u32)-1;
+    Z.ioerr = 205;                      /* ERROR_OBJECT_NOT_FOUND */
+    return 0;
+}
+
 /* ---- dos locks and directories (16.13): Lock, UnLock, DupLock, Examine, ExNext, Info, CurrentDir, ParentDir,
  * DupLockFromFH, OpenFromLock, ExamineFH, NameFromLock, SameLock, ParentOfFH, on the volume's files and directories,
  * ZINE's memory files and RAM:'s top (the autodocs; FileLock 20 bytes, FileInfoBlock 260, InfoData 36). A lock is a
@@ -2039,6 +2053,41 @@ u32 c_FPutC(u32 fh, u32 c)
 {
     char ch = (char)c;
     return c_Write(fh, &ch, 1) == (u32)-1 ? (u32)-1 : (c & 0xFF);
+}
+
+/* FGetC, UnGetC, FGets (d29 16.24): ZINE's files have no buffer of their own, so these read through Read (a byte at a
+ * time) and UnGetC steps the file back by one (Seek): enough for a program that reads a text file a line at a time
+ * (Nature's Jesus Christ Motocross). FGetC: the byte, or -1 at the end or on an error. UnGetC(fh, -1) (the last byte
+ * again) and UnGetC(fh, c) both step back one; it answers the character, or 0 when the file cannot step back. FGets:
+ * up to len - 1 bytes, to and with a newline, ended by a 0; buf, or 0 when nothing was read. */
+u32 c_FGetC(u32 fh)
+{
+    u8 ch;
+    return c_Read(fh, (char *)&ch, 1) == 1 ? ch : (u32)-1;
+}
+
+u32 c_UnGetC(u32 fh, u32 c)
+{
+    if (c_Seek(fh, -1, 0) < 0)          /* OFFSET_CURRENT */
+        return 0;
+    return c == (u32)-1 ? (u32)-1 : c & 0xFF;
+}
+
+u32 c_FGets(u32 fh, char *buf, u32 len)
+{
+    u32 n = 0;
+    if (!buf || !len)
+        return 0;
+    while (n + 1 < len) {
+        u8 ch;
+        if (c_Read(fh, (char *)&ch, 1) != 1)
+            break;
+        buf[n++] = (char)ch;
+        if (ch == '\n')
+            break;
+    }
+    buf[n] = 0;
+    return n ? (u32)buf : 0;
 }
 
 struct fput { u32 fh, n, err; };
@@ -3527,7 +3576,7 @@ F(GetColorMap); F(FreeColorMap); F(GetRGB4); F(SetRGB4CM); F(SetRGB32CM); F(GetR
 F(SumKickData); F(Fault); F(PrintFault); F(WaitBOVP); F(WritePixel); F(ReadPixel);
 F(AllocDBufInfo); F(FreeDBufInfo); F(ChangeVPBitMap); F(FilePart); F(PathPart); F(AddPart);
 F(CreateNewProc); F(CreateProc); F(AddTask); F(RemTask);
-F(DoPkt); F(ChangeSprite); F(MoveSprite); F(GetExtSpriteA); F(AllocSpriteDataA); F(ChangeExtSpriteA); F(FreeSpriteData);
+F(DoPkt); F(SetAttr); F(FGetC); F(UnGetC); F(FGets); F(ChangeSprite); F(MoveSprite); F(GetExtSpriteA); F(AllocSpriteDataA); F(ChangeExtSpriteA); F(FreeSpriteData);
 
 /* the offsets: the RKRM's Function Offset Reference (V37), the pools and ColdReboot from the NDK 3.2's exec_lib.fd */
 static const u16 exec_lvo[] = { 30, 108, 114, 120, 126, 132, 138, 144, 162, 168, 174, 198, 204, 210, 216, 234, 240,
@@ -3572,7 +3621,7 @@ static void (*const gfx_fn[])(void) = { zs_LoadRGB4, zs_LoadView, zs_WaitBlit, z
 static const u16 dos_lvo[] = { 42, 48, 54, 60, 132, 144, 198, 312, 342, 354, 360, 462, 948, 954, 30, 36, 66, 150,
     156, 222, 72, 216, 324, 330, 576, 534, 798, 858, 228, 234,
     84, 90, 96, 102, 108, 114, 126, 210, 192, 372, 378, 384, 390, 402, 420, 870, 876, 882, 468, 474, 498, 138,
-    738, 654, 660, 666, 690, 684, 642, 648, 174, 240 };
+    738, 654, 660, 666, 690, 684, 642, 648, 174, 240, 186, 180, 396, 306, 318, 336 };
 static void (*const dos_fn[])(void) = { zs_Read, zs_Write, zs_Input, zs_Output, zs_IoErr, zx_Exit, zs_Delay,
     zs_FPutC, zs_FPuts, zs_VFPrintf, zs_Flush, zs_SetIoErr, zs_PutStr, zs_VPrintf, zs_Open, zs_Close, zs_Seek,
     zs_LoadSeg, zs_UnLoadSeg, zs_Execute, zs_DeleteFile, zs_IsInteractive, zs_FRead, zs_FWrite, zs_GetProgramName,
@@ -3581,7 +3630,7 @@ static void (*const dos_fn[])(void) = { zs_Read, zs_Write, zs_Input, zs_Output, 
     zs_DupLockFromFH, zs_OpenFromLock, zs_ParentOfFH, zs_ExamineFH, zs_NameFromLock, zs_SameLock, zs_FilePart,
     zs_PathPart, zs_AddPart, zs_Fault, zs_PrintFault, zs_CreateNewProc, zs_CreateProc, zs_CompareDates, zs_LockDosList,
     zs_UnLockDosList, zs_LockDosList, zs_NextDosEntry, zs_FindDosEntry, zs_GetDeviceProc, zs_FreeDeviceProc,
-    zs_DeviceProc, zs_DoPkt };
+    zs_DeviceProc, zs_DoPkt, zs_SetAttr, zs_SetAttr, zs_SetAttr, zs_FGetC, zs_UnGetC, zs_FGets };
 static const u16 int_lvo[] = { 78, 210, 612, 198, 66, 252, 246, 606, 204, 72, 150, 270, 60, 300,
     510, 516, 768, 774, 780,
     474, 342, 336, 450, 90, 396, 408, 108, 588, 390, 384, 378, 162, 294 };

@@ -23,6 +23,9 @@
 #   dcache       A1200 3.1 with a 68060 and 64 MB of 32-bit fast RAM (DESIGN D37): zenixboot DCACHE=maybe is refused,
 #                then DCACHE=WT boots with the data cache write-through (the root in RAM)
 #   dcache-off   the same with DCACHE=OFF: the data cache stays off, and says why
+#   a1200-030mmu A1200 3.1 with a 68030 and FS-UAE's MMU model: tools/tests/mmuleft.S leaves the 68030's translation on
+#                (as Enforcer or CPU FASTROM would), then zenixboot: its hand-over must switch it off before the kernel
+#                copies itself (audit 2026-11-12 A6-14), so the kernel finds nothing left on, and protection comes on
 # usage: tools/zenixboot-test.sh [setup...]     (ZENIX_SERIAL, ZENIX_OUT as the other tests)
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
@@ -32,7 +35,7 @@ export ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenix-zenixboot-serial}
 KDIR=$(python3 -c 'import sys; sys.path.insert(0, "tools"); import fsuae_conf; print(fsuae_conf.kickstart_dir())')
 K32=${ZENIX_KICK32:-$KDIR/kick32-a1200.rom}
 K205=${ZENIX_KICK205:-$KDIR/kick205-a600.rom}
-SETUPS="${*:-a1200-31 a1200-040 a1200-32 a600-205 a600-68000 card-root errors bootmenu dcache dcache-off}"
+SETUPS="${*:-a1200-31 a1200-040 a1200-32 a600-205 a600-68000 card-root errors bootmenu dcache dcache-off a1200-030mmu}"
 B=$(cd "$BD" && pwd)
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
@@ -63,6 +66,20 @@ for d in dcache dcache-off; do
         "$B/kernel.bin=zenix" "$B/root-ram.img=ramdisk" >/dev/null || { echo "FAIL mkffs ($d)"; exit 1; }
     python3 tools/mkrdb-multi.py "$OUT/$d.hdf" "$OUT/$d-ffs.img:ffs:ZB0:boot" >/dev/null || { echo "FAIL mkrdb ($d)"; exit 1; }
 done
+
+# the disk of the "a1200-030mmu" setup: mmuleft (assembled here, one code hunk) leaves the 68030's MMU on, then zenixboot
+: "${TOOLPREFIX:=$(command -v m68k-elf-gcc >/dev/null && echo m68k-elf- || echo $HOME/opt/m68k-elf/bin/m68k-elf-)}"
+"${TOOLPREFIX}as" -m68030 -o "$OUT/mmuleft.o" tools/tests/mmuleft.S && "${TOOLPREFIX}objcopy" -O binary -j .text \
+    "$OUT/mmuleft.o" "$OUT/mmuleft.bin" || { echo "FAIL assembling mmuleft"; exit 1; }
+python3 -c '
+import struct, sys
+c = open(sys.argv[1], "rb").read(); c += bytes(-len(c) % 4); n = len(c) // 4
+open(sys.argv[2], "wb").write(struct.pack(">6I", 0x3F3, 0, 1, 0, 0, n) + struct.pack(">2I", 0x3E9, n) + c + struct.pack(">I", 0x3F2))
+' "$OUT/mmuleft.bin" "$OUT/mmuleft" || { echo "FAIL wrapping mmuleft"; exit 1; }
+printf 'SYS:mmuleft\nSYS:zenixboot RAM=ramdisk\n' >"$OUT/mmu-ss"
+python3 tools/mkffs.py "$OUT/a1200-030mmu-ffs.img" 16632K ZenixBoot "$OUT/mmu-ss=S/Startup-Sequence" "$OUT/mmuleft=mmuleft" \
+    "$B/zenixboot=zenixboot" "$B/kernel.bin=zenix" "$B/root-ram.img=ramdisk" >/dev/null || { echo "FAIL mkffs (030mmu)"; exit 1; }
+python3 tools/mkrdb-multi.py "$OUT/a1200-030mmu.hdf" "$OUT/a1200-030mmu-ffs.img:ffs:ZB0:boot" >/dev/null || { echo "FAIL mkrdb (030mmu)"; exit 1; }
 
 # the disk of the "bootmenu" setup: the menu, its configuration (Zenix first, after 1 s), zenixboot, the kernel, the root
 printf 'SYS:bootmenu\n' >"$OUT/bm-ss"
@@ -166,6 +183,18 @@ uae_mmu_model = 68060" conf $s A1200 '$ZENIX_KICKSTART_DIR/kicka1200.rom' 68060 
             check "$s: DCACHE=OFF: the data cache stays off" "$(has $s '^cache: instruction cache on, data cache off: DCACHE=OFF')"
         fi
         check "$s: the self-test or nothing, never chip RAM cached" "$(grep -aq 'chip RAM cached' "$OUT/$s.log" && echo bad || echo ok)"
+        check "$s: a shell prompt" "$(has $s '^zbok$')"
+        check "$s: no panic" "$(grep -aq 'panic' "$OUT/$s.log" && echo bad || echo ok)" ;;
+    a1200-030mmu)
+        HDTYPE="uae_mmu_model = 68030
+uae_fpu_model = 68882" conf $s A1200 '$ZENIX_KICKSTART_DIR/kicka1200.rom' 68030 8192 "$OUT/$s.hdf"
+        run $s 150 tools/tests/zenixboot-test.txt
+        check "$s: zenixboot loaded the kernel after mmuleft" "$(has $s 'zenixboot [0-9.b]*: loading zenix (')"
+        check "$s: the CPU is a 68030" "$(has $s '^cpu: 68030')"
+        check "$s: the hand-over switched the translation off: the kernel found none left on" \
+            "$(grep -aq "translation was left on" "$OUT/$s.log" && echo bad || echo ok)"
+        check "$s: memory protection on (the default, the 68030's MMU passes the probe)" \
+            "$(has $s '^mmu: memory protection on: 68030')"
         check "$s: a shell prompt" "$(has $s '^zbok$')"
         check "$s: no panic" "$(grep -aq 'panic' "$OUT/$s.log" && echo bad || echo ok)" ;;
     *) echo "FAIL unknown setup $s" ; pass=0 ;;

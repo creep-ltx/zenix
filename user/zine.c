@@ -206,11 +206,11 @@ static const char *fpu_missing(u32 w)
     return 0;
 }
 
-/* d29 16.23: a data file of ZV_DISKMIN bytes or more stays on the disk, and ZINE's dos reads it from there during the
+/* d29 16.23, 16.24: a data file of ZV_DISKMIN bytes or more stays on the disk, and ZINE's dos reads it from there during the
  * session, when the kernel has a reader for the session (the IDE drive) and the file's filesystem says where it lies
  * (FS_BMAP, the built-in ext2 server). Not a program file (hunks: LoadSeg, Execute and the overlays read those from
  * memory), not a font. The runs are sectors of the whole drive: the partition's start (diskd) added here. */
-#define ZV_DISKMIN (256u << 10)
+#define ZV_DISKMIN (64u << 10)        /* 256 KB until round 15 (d29 16.24) */
 static struct { u32 dev, start; int ok; } DV[4];        /* the devices seen: ok 1 on the IDE drive, -1 not */
 static int dv_n, dv_off;                                /* devices known; 1: reading from the disk is not possible */
 static struct uzine_ext dx[128];

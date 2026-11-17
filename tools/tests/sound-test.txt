@@ -22,7 +22,7 @@ send \x03
 sleep 1
 send echo "p7=$?"; play -S; echo M7\r
 wait M7 20
-send modplay /snd/test.mod; echo "m1=$?"\r
+send modplay -s /snd/test.mod; echo "m1=$?"\r
 wait m1= 60
 send modplay -q /snd/test.mod & sleep 2; echo M8; play -S; wait; echo "m2=$?"\r
 wait m2= 60

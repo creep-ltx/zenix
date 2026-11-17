@@ -20,5 +20,7 @@ uae_mbresmem_size = 64
 # without it, with the data cache bit set, the CIA-A tick was lost now and then (D37 section 8)
 uae_mmu_model = 68040
 uae_cpu_model = 68040
+# a full 68040 (FPU and MMU), as the A4000's: FS-UAE gives a 68040 no FPU unless asked (an LC040 to the kernel)
+uae_fpu_model = 68040
 joystick_port_0 = none
 joystick_port_1 = none

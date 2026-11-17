@@ -2400,7 +2400,7 @@ memory of its own, so a big file was in memory twice, and a folder bigger than t
 ("left out"). Round 13 counted 48 failing productions on the 68020 machine, 34 on the 68030 and 6 on the 68060 with
 files left out; the 68060's Serenity failed with its 6 MB file in the volume (its pool needs 55 MB of the 64).
 
-*The design.* A file of 256 KB or more (`ZV_DISKMIN`) that is no program file (its first longword not `$3F3`) and not
+*The design.* A file of 256 KB or more (`ZV_DISKMIN`; 64 KB since 16.24) that is no program file (its first longword not `$3F3`) and not
 one of Zenix's fonts (`/usr/share/fonts/amiga`) stays on the disk. `zine` asks where its sectors lie and puts that list in the volume instead of the bytes
 (`struct zv_ent nx`, `struct zv_run`); ZINE's dos reads them from the drive when the program asks (`Read`, packets,
 `Seek` as before), while Zenix is paused.
@@ -2470,6 +2470,68 @@ left out; `zine -c` zhello with 0 KB fast RAM; on the 68060 machine `zine -l` za
 68030 three productions that ran their course with their big files left out now find them and run out of memory
 (16 MB); on the 68060 Elude's Shake Off The Dust stays black with its files on the disk and 62 MB free, and plays with `zine
 -m` (49 MB free) or with its files on the disk and 30 MB free: too much free memory stops it, not the reads.
+(Corrected in 16.24: it plays to its end; neither of the other two runs got past its loading picture.)
+
+### 16.24 Shake Off The Dust's end, a file's attributes, line reads (2026-11-14, branch zine15)
+
+**Shake Off The Dust was never stuck** (round 14's "too much free memory" was wrong). Traced on the 68060 machine
+(64 MB, its files on the disk): it loads, starts its 7.3 MB soundtrack (4-bit ADPCM, 27,429 Hz stereo: 272 s), plays
+the whole of it (52 of the trace's 5-second marks, its chunky-to-planar loop running throughout), says "[Sound]:
+Flushing buffers... Done." and then shows a black screen, waiting for a key in a loop of GetSysTime, Delay and
+GetMsg. In warp mode it gets there within the harness's 120 s, so its last screenshot was black. The two runs that
+"played" (`zine -m`, 49 MB free; 32 MB of fast RAM) were still on its loading picture at 120 s. With 32 MB it never
+gets further: its AllocMem calls of 128 KB fill the fast RAM, one is refused, and it loops (out of memory, as on a
+real 32 MB machine). So no cap on AvailMem is needed for it, and none was built: no Top 100 production has been seen
+to fail for having too much memory. (`zine -l` already gives a 1992 program only the fast RAM below 16 MB.)
+
+Escape at its black end screen ends it: "[Sound]: Finished!", then it writes `ds2_demo.vars` (its settings) and
+calls dos **SetProtection** on it, which ZINE lacked: stopped there. Now `SetProtection` (-186), `SetComment` (-180)
+and `SetFileDate` (-396) answer DOSTRUE for a file or directory that is there (the volume's, or one written in
+memory) and 0 with ERROR_OBJECT_NOT_FOUND otherwise; the attribute is not kept (the session's files are copies,
+nothing goes back to the disk, 16.9) (`c_SetAttr`, blibs.c).
+
+**FGetC, UnGetC, FGets** (-306, -318, -336). Nature's Jesus Christ Motocross reads a text file a byte at a time
+(found when it got more memory, below). ZINE's file handles have no buffer, so FGetC is a Read of one byte (-1 at the
+end), UnGetC steps the file back by one (Seek; 0 when it cannot), FGets reads up to `len - 1` bytes to and with a
+newline, ends them with a 0 and answers the buffer (0 when nothing was read).
+
+**The trace build dumps low memory** when a session ends on an unsupported call or a crash below `$1000` (the first
+4 KB as the program left them, read before Zenix's low memory comes back): for a program that runs its code there,
+as Elysium's decruncher at `$100` and its program at `$800`.
+
+**Data files of 64 KB or more stay on the disk** (`ZV_DISKMIN`, was 256 KB; a change to 16.23). The files under the
+threshold still went into the volume, up to half the free fast RAM, and a program reads each into memory of its own
+again. Measured (the Top 100's folders, the harness's staging):
+- In memory across the 426 productions: 139.6 MB at 256 KB, 76.3 MB at 64 KB, 12.0 MB at 16 KB, 3.6 MB at 4 KB;
+  files on the disk 251, 821, 2,435 and 3,446.
+- The 68030 machine (16 MB): the fast RAM the program had grew by 1.2-3.0 MB at 64 KB (Jesus Christ Motocross 11.7
+  -> 14.7 MB, Little Nell 11.6 -> 14.5, Surfing Great Victoria 13.2 -> 15.0, Perfect Circle 11.9 -> 13.2, lux
+  aeterna 4.7 -> 5.9). Jesus Christ Motocross then got past its memory check to FGetC (above) and plays; the others
+  still ask for more than the machine has (Little Nell 14 MB in one block, Surfing Great Victoria 129 KB more even
+  at 4 KB with 15.2 MB). The 68020 machine's (8 MB) memory-bound ones need more than its 8 MB either way.
+- Nothing lost: the six working productions with the most files between 64 and 256 KB (fake elektronik lightshow,
+  closer, lapsuus, killer, e255, J; 10 to 16 such files each) still work on all three machines (lapsuus fails on
+  the 68020 either way; 18 runs at 64 KB, the 4 KB setting not run on them).
+- Why not lower: 4 KB would put 14 times as many files on the disk (each a drive command while the program waits,
+  a few milliseconds a small file on an A1200's IDE port, not measured on hardware) and saved no further production
+  in these runs; 64 KB keeps a demo's small files (its tables, palettes, scripts) in memory and its pictures, music
+  and meshes on the disk.
+
+The test folder changed with it: zbig.mid1-20 are 60 KB each (under the threshold, together over the budget, so the
+budget's path to the disk is still tested) and zbig-pack.lha 40 KB (left out as before).
+
+*Verified* in FS-UAE: `tools/zine-emu-test.sh` (zwrite: SetProtection of a written file, SetComment of one of its
+own, SetFileDate by another name, SetProtection of a deleted file refused with 205; FGetC, UnGetC and FGets read a
+written file a line at a time, then 0 at the end; zbig with its 60 KB files over the budget, read from the disk).
+
+**Elysium** (16.23's open case) played in 8 of 8 runs at the start of the round and stayed black in 1 of the final
+rerun's. It makes no library call before it fails. So this is timing inside the demo itself, and it was not chased
+further.
+
+**The reruns** (zine-top100-findings.md "Round 15"): 68020 248 -> 248, 68030 313 -> 313 (Jesus Christ Motocross
+gained; superkewl found failing, the same with round 14's build), 68060 361 -> 362 (Shake Off The Dust). Nothing
+was lost to this round's changes. Of 20 black screens rerun at five times the limit, 17 stayed
+black: they are stuck, not slow, and none of them was traced to ZINE.
 
 ## 17. Questions for the owner (what ZINE should be)
 

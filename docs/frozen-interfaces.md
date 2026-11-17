@@ -247,7 +247,9 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `KOPT_DCACHE_WT` 2 (zenixboot `DCACHE=OFF|WT|CB`); 0, what every older loader leaves, means the defaults.
 - **D41 (memory protection, branch `mmu`, 2026-11-12):** bootinfo `kopts` `KOPT_MMU_ON` 4 and `KOPT_MMU_OFF` 8 (both:
   off), zenixboot's `MMU=ON|OFF`; the kernel file's default options, a long after the eight bytes `ZKOPTDEF` (its bit
-  4: on; `tools/kopts.py`); the boot line's start `mmu: memory protection on:` and the fault line's
+  4: on wherever the probe passes; bit 16, `KOPT_MMU_AUTO`, since 2026-11-17 in every build: on where the CPU is known
+  to have an MMU; neither: off; `tools/kopts.py MMU=ON|OFF|AUTO`: a kopts.py older than 2026-11-17 clears bit 4 only,
+  so its `MMU=OFF` leaves a newer kernel file on AUTO; use the tool of the same tree); the boot line's start `mmu: memory protection on:` and the fault line's
   `memory protection:` (programs and tests read them: `crash write`, `tools/mmu-test.sh`); exit status 139 for a
   protection fault, as for every fault. No system call, message, struct or file format changes.
 - **D43 (RTG, branch `rtg`, 2026-11-12):** the hardware table grows at its end: `struct hwfb` (32 bytes) at offset 408
@@ -439,3 +441,17 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   at least; a held region's memfree -EBUSY; its owner's end hands the block to the grab's process); the grab's record
   `GEV_GONE` 6 (x the hold's slot, ch the base big-endian), and a record of type 0 that says nothing (readers skip it:
   an unread `GEV_GONE` whose block was let go becomes one).
+- **D58 (the IRC client, branch irc, 2026-11-17):** `irc`'s settings file `~/.config/irc/config` (`SETTING VALUE` a
+  line, `#` comments; the settings `server port tls nick user realname password sasl quit charset scrollback
+  reconnect bell autojoin highlight`, the last two up to 8 words; an unknown setting is an error), its keys file
+  `~/.config/irc/keys` (files' format, D48) with the action names of docs/man/irc.txt; the command's options
+  (`-c -n -p -t -K`); `/lib/tls/tlspipe HOST PORT`'s contract (the socket its descriptor 2, the plain text on 0 and
+  1, its first line `ok`, `ok clock DATE` or `error TEXT`, `info TEXT` lines before it, exit 0/1/3), shared with the
+  e-mail client (D59; it was `/lib/irc/tlspipe` until D59 moved it into the package `tls`, before any release).
+- **D59 (the e-mail client, branch mail, 2026-11-17):** `mail`'s settings file `~/.config/mail/config` (`SETTING VALUE`
+  a line, `#` comments; the settings `imap pop tls port user password passcmd smtp smtp_tls smtp_port smtp_user
+  smtp_password smtp_passcmd from sent folder editor limit plain_auth`; `tls`/`smtp_tls` take `on`, `starttls`, `off`;
+  an unknown setting is an error; refused when others may change it, or read it while it holds a password), its keys
+  file `~/.config/mail/keys` (files' format, D48) with the action names of docs/man/mail.txt; the command's options
+  (`-c -f -s -K`) and `mail -s SUBJECT ADDRESS...` reading the text from standard input; the package `tls` owning
+  `/lib/tls/tlspipe`; `keys_tty` in display/keys.h (a key from a terminal: the codes of the shared parser).

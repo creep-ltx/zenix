@@ -237,13 +237,16 @@ FAMILIES = [
     ("zmodem", "receive and send files with Zmodem (rz, sz)", "rz"),
     ("nettools", "the network's interfaces, routes, ping, netstat, host", "ifconfig route ping netstat host"),
     ("telnet", "a terminal to another computer over the network", "telnet"),
+    ("irc", "an IRC client: channels, private messages, TLS", "irc"),
+    ("mail", "an e-mail client: IMAP, POP3 and SMTP, MIME, TLS", "mail"),
+    ("tls", "TLS for irc and mail: the helper /lib/tls/tlspipe", ""),
     ("ssh", "the secure shell and its keys", "ssh ssh-keygen"),
     ("wget", "fetch files over HTTP and HTTPS", "wget"),
     ("sntp", "set the clock from the network", "sntp"),
     ("zine", "ZINE: AmigaOS programs on Zenix (zine PROGRAM)", "zine"),
     ("zinstall", "the installer: put Zenix on a disk; the boot partition's programs", "zinstall"),
     ("desktop", "Zenix Desktop: the display server, the window manager, the terminal", "zdesk term deskprefs files show ttf2font"),
-    ("sound", "the sound server, play (WAV, 8SVX, AIFF) and modplay (modules)", "play modplay"),
+    ("sound", "the sound server, play (WAV, 8SVX, AIFF), modplay (MOD, MED, S3M, XM)", "play modplay"),
     ("usb", "the USB server (USB sticks on a CM4 PiStorm, read-only) and lsusb", "lsusb"),
     ("zenix-tests", "Zenix's test programs and the start-up programs' copies", "hello spin crash badptr msgpingd msgping "
                     "socktestd socktest bench termtest priotest svctest sigtest ptytest gcontest dpytest nettest cryptotest boot diskd"),
@@ -289,7 +292,10 @@ FAMILY_LICENSES = {"zine": [("user/zine/msp/060/README", "m68060sp"), ("user/zin
 # directory, None an empty file; kind "c" is kept when changed (a score file). tools/mkroot.sh stages the same list
 # (mkzup.py stage FAMILY ROOT BUILD), so an image holds what the package holds. The games: the Lua games as #!
 # scripts (they need the package lua), the data the games read, the score files every user may write.
-FAMILY_EXTRA = {"games": [("f", 0o755, "games/gridrun.lua", "/bin/gridrun"),
+# DESIGN D58/D59: the TLS helper of irc and mail, a package of its own (two packages may not own one file); a family
+# with no program, built for its files
+FAMILY_EXTRA = {"tls": [("f", 0o755, "build:tlspipe.zx", "/lib/tls/tlspipe")],
+                "games": [("f", 0o755, "games/gridrun.lua", "/bin/gridrun"),
                           ("f", 0o644, "build:bg/fortunes", "/usr/share/games/fortune/fortunes"),
                           ("f", 0o644, "build:bg/fortunes.dat", "/usr/share/games/fortune/fortunes.dat"),
                           ("f", 0o644, "ports/bsdgames/upstream/wump/wump.info", "/usr/share/games/wump.info"),
@@ -298,7 +304,7 @@ FAMILY_EXTRA = {"games": [("f", 0o755, "games/gridrun.lua", "/bin/gridrun"),
                           ("d", 0o1777, None, "/var/games"),
                           ("c", 0o666, None, "/var/games/robots_roll"),
                           ("c", 0o666, None, "/var/games/tetris.scores")]}
-FAMILY_DEPS = {"games": ["lua"]}
+FAMILY_DEPS = {"games": ["lua"], "irc": ["tls"], "mail": ["tls"]}
 
 
 def extra_src(build, src):
@@ -389,7 +395,7 @@ def std_packages(build, uapps):
         taken = set()
         for fam, desc, members in FAMILIES:
             mine = [p for p in members.split() if p in progs]
-            if not mine:
+            if not mine and (members or fam not in FAMILY_EXTRA):     # (a family of files only: tls)
                 continue
             ents = [("f", 0o4755 if p in SETUID else 0o755, 0, 0, zx(p), "/bin/" + binname(p)) for p in mine]
             for p in FAMILY_SBIN.get(fam, []):           # a server beside the family's programs (not a command)

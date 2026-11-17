@@ -1,0 +1,46 @@
+wait zenix:/# 90
+sleep 1
+send modplay -K | head -3; echo "k0=$?"\r
+wait k0= 20
+send modplay -s /trk/tune8.mod; echo "t0=$?"\r
+wait t0= 60
+send modplay -q /trk/tune8.mod & sleep 3; echo T1; play -S; wait; echo "t1=$?"\r
+wait t1= 60
+send modplay -q /trk/tune.med & sleep 3; echo T2; play -S; wait; echo "t2=$?"\r
+wait t2= 60
+send modplay -q -r 11025 /trk/tune.s3m & sleep 3; echo T3; play -S; wait; echo "t3=$?"\r
+wait t3= 60
+send modplay -q /trk/tune.xm & sleep 3; echo T4; play -S; wait; echo "t4=$?"\r
+wait t4= 60
+send modplay -q /trk/list; echo "t5=$?"\r
+wait t5= 90
+send modplay /trk/tune.xm\r
+wait zenix xm 30
+sleep 2
+send 2
+wait pingsine 20
+send 3
+wait /trk/tune.xm 20
+send ?
+wait louder 20
+send .
+sleep 1
+send q
+sleep 2
+send echo "u1=$?"\r
+wait u1= 20
+send mkdir -p /tmp/k/.config/modplay; printf 'q none\nx quit\n' > /tmp/k/.config/modplay/keys; env HOME=/tmp/k modplay /trk/tune.s3m\r
+wait zenix s3m 30
+sleep 1
+send q
+sleep 3
+send x
+sleep 2
+send echo "u2=$?"\r
+wait u2= 20
+send modplay -B 5 /trk/busy8.xm; echo "b1=$?"\r
+wait b1= 120
+send modplay /trk/nothing.mod; echo "e1=$?"\r
+wait e1= 20
+send echo tracker-test-done\r
+wait tracker-test-done 10

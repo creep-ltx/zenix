@@ -32,10 +32,12 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
   (`-msoft-float`).
 - Memory: **chip** RAM (reachable by the custom chips: display, audio, disk DMA) and **fast** RAM are separate
   pools. Fast is preferred; chip is used when asked for (`MEM_CHIP`) or when there is nothing else.
-- Memory protection (`kernel/mmu.c`, DESIGN D41, docs/d41-memory-protection.md), off by default: with zenixboot
-  `MMU=ON` (bootinfo `kopts` `KOPT_MMU_ON` 4; `KOPT_MMU_OFF` 8 wins; the kernel file's default after its `ZKOPTDEF`
-  marker, `tools/kopts.py`; the left mouse button held turns it off) on a 68030/040/060 whose MMU passes the boot's
-  probe (a test page mapped onto another and one left invalid, read with `MOVES` as user data, every trap caught),
+- Memory protection (`kernel/mmu.c`, DESIGN D41, docs/d41-memory-protection.md), on by default since 2026-11-17
+  (D41 section 19) where the CPU is known to have an MMU: a 68030, a 68040 with an FPU (an `FNOP` runs), a 68060 whose
+  `PCR` says 0x0430; an LC or EC 68040/68060 is left alone (its MMU instructions are undefined on the EC part) unless
+  zenixboot `MMU=ON` asks (bootinfo `kopts` `KOPT_MMU_ON` 4; `KOPT_MMU_OFF` 8 wins; the kernel file's default after its
+  `ZKOPTDEF` marker: `KOPT_MMU_AUTO` 16 as built, `tools/kopts.py MMU=ON|OFF|AUTO`; the left mouse button held turns it
+  off). On a 68030/040/060 whose MMU passes the boot's probe (a test page mapped onto another and one left invalid, read with `MOVES` as user data, every trap caught),
   `mmu_setup` (after `cache_setup`) builds one identity-mapped tree over the memory pools (4 KB pages; root, pointer
   and page tables of 128/128/64 entries on all three CPUs; U and M preset), sets the kernel's windows for supervisor
   accesses only (040/060: `DTT0` the first 16 MB inhibited, `DTT1` D37's fast block, `ITT0` everything; 030: `TT0`
@@ -797,7 +799,7 @@ pattern (section 6).
 - **Shared code** (DESIGN D13, section 4): a ZEX2 program's processes run one copy of its code (a segment); each has
   its own data part, and `a5` set in its first register frame (`TRAP #0` and the interrupt handlers keep every user
   register; the kernel is not built with `-msep-data` and keeps `a5` by the C calling rules; `switch_to` saves it).
-- **Memory protection** (D41, off by default; docs/d41-memory-protection.md). A *protected* process (every program a
+- **Memory protection** (D41, on by default where the MMU is known, section 2; docs/d41-memory-protection.md). A *protected* process (every program a
   user runs) sees in user mode only its view: its block, its regions, its code read only (what `user_ok_wr`/`rd`
   allow; root's also the update bundle, read only, for zup), and while it holds a client's request (from `ipc_recv`
   until the next retenant after `ipc_finish`: D41 section 8) that client's view too. A *system* process (a per-slot mask: `svc_born`, a reserved port's creator,

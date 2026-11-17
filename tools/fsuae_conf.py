@@ -11,6 +11,7 @@ The configs in the repository name no path of the machine they were written on. 
 With ZENIX_FAST=1 the machine also runs in FS-UAE's warp mode (make_fast; tools/check.sh's fast mode).
 
 usage: tools/fsuae_conf.py SRC.fs-uae DST.fs-uae     (tools/run-test.sh, tools/kbd-test.sh and make run use it)
+       tools/fsuae_conf.py --amiberry PORT SRC.fs-uae DST.uae   (the same machine for Amiberry: to_amiberry)
 From Python: import fsuae_conf; text = fsuae_conf.resolve(open(src).read())
 A missing Kickstart file is an error that names the variable to set.
 
@@ -88,6 +89,61 @@ def resolve(text, serial=None, build=None, states=None, fast=None):
     return text
 
 
+def to_amiberry(text, port):
+    """The same machine for Amiberry (ZENIX_EMU=amiberry, tools/run-test.sh), from a config resolve() made: Amiberry's
+    .uae keys (the knowledge base's amiga/amiberry-headless.md has the table); the serial port on TCP 127.0.0.1:PORT,
+    the emulation waiting for the connection (tools/serial-tcp.py joins it to the tap's PTY). Only the A1200 (the
+    machines the CPU matrix of DESIGN D41 runs on); anything else is an error that says so. Always at the machine's own
+    speed, in fast mode too: Amiberry has no warp mode to set in a config, and with cpu_speed=max its IDE emulation
+    stopped answering (BSY for 30 s during fsck's first reads, 2026-11-17), as FS-UAE's did (make_fast's note)."""
+    keys = {}
+    for line in text.splitlines():
+        m = re.match(r"^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$", line)
+        if m:
+            keys[m.group(1)] = m.group(2)
+    model = keys.get("amiga_model", "")
+    if model != "A1200":
+        raise ConfError(f"amiga_model {model or '(none)'}: the Amiberry runs know only the A1200")
+    out = ["config_description=zenix test (from an FS-UAE config)", "use_gui=no", "chipset=aga",
+           "chipset_compatible=A1200", "ide=a600/a1200", "sound_output=none",
+           "joyport0=none", "joyport1=none", f"serial_port=TCP://127.0.0.1:{port}/wait", "serial_direct=true"]
+    cpu = keys.get("uae_cpu_model", "68020")
+    nfl = "1"
+    for k, v in keys.items():
+        if k == "kickstart_file":
+            out.append(f"kickstart_rom_file={v}")
+        elif k == "chip_memory":
+            out.append(f"chipmem_size={int(v) // 512}")
+        elif k == "fast_memory":
+            out.append(f"fastmem_size={int(v) // 1024}")
+        elif re.fullmatch(r"floppy_drive_[0-3]", k):
+            out.append(f"floppy{k[-1]}={v}")
+        elif k == "floppy_drive_count":
+            nfl = v
+        elif k == "floppy_drive_speed":
+            out.append(f"floppy_speed={v}")
+        elif k == "hard_drive_0":
+            ctl = keys.get("hard_drive_0_controller", "ide0")
+            if ctl != "ide0":
+                raise ConfError(f"hard_drive_0_controller {ctl}: the Amiberry runs know only ide0")
+            out.append(f"hardfile2=rw,DH0:{v},0,0,0,512,0,,ide0")
+        elif k == "ntsc_mode" and v in ("1", "true"):
+            out.append("ntsc=true")
+        elif k in ("uae_serial_direct", "uae_cpu_speed", "uae_cpu_throttle"):
+            pass                                        # the serial port is set above; the speed below
+        elif k.startswith("uae_"):
+            out.append(f"{k[4:]}={v}")
+        # accuracy, window_*, zoom, joystick_port_*, save_states_dir, warp_mode, serial_port, amiga_model: as above;
+        # writable_floppy_images: Amiberry writes into the image itself; hard_drive_0_type: it finds an RDB itself
+    out.append(f"nr_floppies={nfl}")
+    if "uae_cpu_model" not in keys:                     # FS-UAE's A1200 has a 68EC020; Amiberry needs it said
+        out.append("cpu_model=68020")
+    if cpu not in ("68020", "68ec020"):
+        out.append("cpu_24bit_addressing=false")
+    out.append("cpu_speed=real")
+    return "\n".join(out) + "\n"
+
+
 # Up to ZENIX_EMU_SLOTS (default 6) FS-UAEs at once, each with its own serial port and images (tools/run-test.sh says
 # more). A run takes the first free slot - lock file /tmp/zenix-emulator.lock (slot 0, the one other projects on this
 # machine take with flock) or /tmp/zenix-emulator.lock.N - and holds it until its run ends. No run waits for anything
@@ -163,14 +219,20 @@ def load_cage():
 
 
 def main():
-    if len(sys.argv) != 3:
+    args = sys.argv[1:]
+    port = None
+    if args[:1] == ["--amiberry"] and len(args) == 4:
+        port, args = int(args[1]), args[2:]
+    if len(args) != 2:
         sys.exit(__doc__)
     try:
-        dst = os.path.abspath(sys.argv[2])
-        text = resolve(open(sys.argv[1]).read(), states=os.path.splitext(dst)[0] + ".states")
+        dst = os.path.abspath(args[1])
+        text = resolve(open(args[0]).read(), states=os.path.splitext(dst)[0] + ".states")
+        if port is not None:
+            text = to_amiberry(text, port)
     except ConfError as e:
         sys.exit(f"fsuae_conf: {e}")
-    with open(sys.argv[2], "w") as f:
+    with open(args[1], "w") as f:
         f.write(text)
 
 

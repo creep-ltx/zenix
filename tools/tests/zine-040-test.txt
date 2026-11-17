@@ -22,5 +22,7 @@ send free\r
 wait (?m)^fast RAM free.*\n 20
 send zine /tests/zine/zcalls one two TO=dest NUM 42 QUIET; echo zcalls-rc=$?\r
 wait zcalls-rc= 60
+send crash write 0x1000; echo prot-rc=$?\r
+wait prot-rc= 30
 send echo disk-ok > /home/z40.disk; sync; cat /home/z40.disk; echo zine-040-done\r
 wait zine-040-done 20

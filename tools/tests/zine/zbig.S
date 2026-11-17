@@ -4,7 +4,7 @@
  * the hand-over. Checks both data hunks' first, middle and last longwords, that they are in chip and fast RAM, the
  * BSS clear; in its folder the small zbig.small is found; then (16.23) zbig.huge (400 KB, longword i 0x4E000000 | i)
  * stays on the disk and is read from there (its first longword, an aligned 1 KB, 8 bytes across a sector's end, the
- * last 8 bytes, then the end), zbig.mid1-6 (200 KB each, more than the volume's budget together) on the disk or in
+ * last 8 bytes, then the end), zbig.mid1-20 (60 KB each, more than the volume's budget together) on the disk or in
  * the volume, read right, and the archive zbig-pack.lha left out (archives go first); with the argument m (zine -m: every
  * file in memory), too big for ZINE's volume as before 16.23, zbig.huge and zbig-pack.lha are left out and not found.
  * Exit 0 when everything held, else the step. PC-relative code. */
@@ -189,14 +189,14 @@ main:
     bne     8f
     move.l  %d4,%d1
     jsr     LVO_Close(%a6)
-    moveq   #14,%d7             /* zbig.mid1 and zbig.mid6, 200 KB each: in the volume or (the budget's largest) on
+    moveq   #14,%d7             /* zbig.mid1 and zbig.mid6, 60 KB each: in the volume or (the budget's largest) on
                                  * the disk, their last longwords right either way */
     lea     f_mid1(%pc),%a0
-    move.l  #0x4D100000+51199,%d6
+    move.l  #0x4D100000+15359,%d6
     bsr     midchk
     bne     9f
     lea     f_mid6(%pc),%a0
-    move.l  #0x4D600000+51199,%d6
+    move.l  #0x4D600000+15359,%d6
     bsr     midchk
     bne     9f
     moveq   #12,%d7             /* the archive: left out (the folder is over the volume's budget: archives first) */

@@ -25,13 +25,20 @@ hello from Zenix
 
 - 🧠 **No MMU needed.** Any Amiga with a 68020 or better can run it, a stock A1200 included. Programs are relocated as they
   load, and a crashing program is killed and its memory freed while the rest keep running.
+- 🛡️ **Memory protection, on by default where there is an MMU.** On a 68030, 68040 or 68060 with a working MMU,
+  every program a user runs sees only its own memory, its code read-only: a stray write ends that program with a
+  message naming whose memory it hit, and the kernel, the hardware and other programs stay safe. The system's own
+  servers keep the whole view. `zenixboot MMU=OFF` (or the left mouse button held at boot) turns it off; an LC or EC
+  68040/68060, which only its MMU's own instructions tell apart, gets it with `MMU=ON`
+  ([docs/d41-memory-protection.md](docs/d41-memory-protection.md)). A 68020, a CPU without an MMU or the PiStorm runs
+  exactly as before.
 - ✉️ **Built on messages, like Exec and QNX.** The disk and the filesystems are separate servers. A call to one passes
   a pointer, not a copy, so reading a file copies the data exactly once.
 - ⚖️ **Fair and responsive.** 32 priority levels with `nice`, 50 ms time slices, and priority inheritance: a server
   always works at the speed of whoever is waiting for it.
 - 💾 **Talks to the rest of the world.** Its filesystem is ext2, which Linux reads, writes and checks. It reads Amiga
   RDB and PC partition tables and keeps AmigaOS partitions untouched. Plus ZenixFS, its own copy-on-write filesystem.
-- 🖥️ **A proper Unix at the keyboard.** A bash-like shell with job control, history and completion, 175 programs with
+- 🖥️ **A proper Unix at the keyboard.** A bash-like shell with job control, history and completion, 177 programs with
   manual pages, users and permissions, ten consoles on Amiga+F1 to F10, an ANSI/VT100 terminal with scrollback.
 - 🌐 **On the network, even a stock A1200.** TCP/IP (lwIP) as a server loaded only when a program opens a socket;
   BSD sockets, `ping`, `ifconfig`, `route`, `netstat`; SLIP over a null-modem cable to a Linux PC, which shares its
@@ -70,8 +77,9 @@ For a PiStorm SD card, `tools/mkdualcard.sh` builds a card image with the boot m
 See [docs/pi-first-boot.md](docs/pi-first-boot.md).
 
 > ⚠️ **Not locked as shipped.** Root logs in by itself on console 1 and nobody has a password. Set them with `passwd`
-> and remove `/etc/autologin`. And with no MMU, permissions guard against mistakes, not against a program written to
-> cheat ([docs/limits.md](docs/limits.md)).
+> and remove `/etc/autologin`. And without memory protection (no MMU, or `MMU=OFF`), permissions guard against
+> mistakes, not against a program written to cheat ([docs/limits.md](docs/limits.md)); even with it, the system's
+> servers and root stay trusted (d41 section 2).
 
 ## Read more
 
@@ -82,7 +90,7 @@ See [docs/pi-first-boot.md](docs/pi-first-boot.md).
 | [How it works](docs/how-it-works.md) | Walk-throughs: power-on to prompt, a pipe, a crash |
 | [Source tree](docs/source-tree.md) | What each folder and file is |
 | [Features](docs/features.md) · [Limits](docs/limits.md) | What it can do, what it can't (yet) |
-| [Commands](docs/commands.md) | All 175 programs, each with its manual page |
+| [Commands](docs/commands.md) | All 177 programs, each with its manual page |
 | [Roadmap](docs/ROADMAP.md) · [Design decisions](docs/DESIGN.md) | Where it's going, and what was decided |
 | [Next to AmigaOS](docs/vs-amigaos.md) · [Next to Unix](docs/vs-unix-linux.md) | How it compares |
 

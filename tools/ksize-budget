@@ -123,6 +123,9 @@
 # 2026-11-14 (the full audit's K1: setpgid and setfg's group form only over processes the caller may signal; K2: the
 # debugger's record looked up again after DBG_WAIT blocks): signal 2,100 -> 2,150; kernel.bin 205,992 -> 206,060,
 # TOTAL 206,000 -> 206,100; the mount tests' RAM disk 677 -> 676 KB for the floppy's ROOM.
+# 2026-11-17 (D41 section 19, protection on by default where the MMU is known): mmu 5,592 -> 5,722 (the FPU's
+# FNOP test, the PCR's identity, the default's third state); budget 5,700 -> 5,800, TOTAL 206,000 -> 206,200
+# (both together, merged into the audit's branch: TOTAL 206,200).
 start     4850   8200
 main      5950   1100
 serial    6100   6500
@@ -155,7 +158,7 @@ zine      1850     16
 cache     1800     32
 gcon      4250     16
 dbg       4100     20
-mmu       5700    160
+mmu       5800    160
 embed    49900      0
-TOTAL   206100
+TOTAL   206200
 ROOM       800

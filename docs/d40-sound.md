@@ -259,7 +259,8 @@ One reader for `play`, from a file or standard input (no seeking: chunks are rea
   tests and curiosity): plays each file in turn; prints its format line unless `-q`; Ctrl-C ends it at once (play
   catches no signal: the kernel cancels its waiting `SND_WRITE`, sndd stops the pair, section 11); exit status 0, 1
   for a file it could not play (it goes on with the next), 2 for sound not available.
-- `modplay [-v VOL] [-l] [-q] FILE`: ProTracker / NoiseTracker 4-channel modules (`M.K.`, `M!K!`, `4CHN`, `FLT4`, and
+- (`modplay` grew into the tracker player in D56, docs/d56-tracker-player.md: more formats, the CPU's mixer, a screen;
+  what follows is its 4-channel path, unchanged.) `modplay [-v VOL] [-l] [-q] FILE`: ProTracker / NoiseTracker 4-channel modules (`M.K.`, `M!K!`, `4CHN`, `FLT4`, and
   the old 15-sample format); a status line (position, pattern, row, speed, tempo, each channel's note) updated in
   place; `-l` loops the song; keys: `q` or Ctrl-C quit, space pauses, `n`/`p` the next or previous position (`-q`:
   no status line and no keys, the terminal left alone, for scripts). Its loop: poll the keyboard without waiting, make

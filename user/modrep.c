@@ -51,23 +51,51 @@ static int tag4(const unsigned char *p, const char *t)
            p[3] == (unsigned char)t[3];
 }
 
-static unsigned bankoff_of(int nsmp, int npat) { return (nsmp == 31 ? 1084u : 600u) + (unsigned)npat * 1024u; }
+static unsigned bankoff_of(int nsmp, int npat, int nch) { return (nsmp == 31 ? 1084u : 600u) + (unsigned)npat * 256u * (unsigned)nch; }
 
-unsigned mod_bankoff(const struct mod *m) { return bankoff_of(m->nsmp, m->npat); }
+unsigned mod_bankoff(const struct mod *m) { return bankoff_of(m->nsmp, m->npat, m->nch); }
 
-int mod_load(struct mod *m, const unsigned char *d, unsigned size, char *why)
+/* the channels a tag at 1080 names: 4, 6, 8, 10..32 (FastTracker's "6CHN", "8CHN", "xxCH", "xCHN"; "OCTA" and "CD81"
+ * eight), 0 for no tag we know (the old 15-sample format), -1 for a tag we know and do not play (FLT8's pattern pairs) */
+static int tagch(const unsigned char *t)
+{
+    if (tag4(t, "M.K.") || tag4(t, "M!K!") || tag4(t, "4CHN") || tag4(t, "FLT4")) return 4;
+    if (tag4(t, "OCTA") || tag4(t, "CD81")) return 8;
+    if (tag4(t, "FLT8")) return -1;
+    if (t[1] == 'C' && t[2] == 'H' && t[3] == 'N' && t[0] >= '1' && t[0] <= '9') return t[0] - '0';
+    if (t[2] == 'C' && t[3] == 'H' && t[0] >= '1' && t[0] <= '3' && t[1] >= '0' && t[1] <= '9') return (t[0] - '0') * 10 + t[1] - '0';
+    return 0;
+}
+
+int mod_load(struct mod *m, const unsigned char *d, unsigned size, char *why) { return mod_loadn(m, d, size, why, 4); }
+
+int mod_loadn(struct mod *m, const unsigned char *d, unsigned size, char *why, int maxch)
 {
     unsigned char *z = (unsigned char *)m;
     for (unsigned i = 0; i < sizeof *m; i++) z[i] = 0;
-    if (size >= 1084 && (tag4(d + 1080, "M.K.") || tag4(d + 1080, "M!K!") || tag4(d + 1080, "4CHN") ||
-                         tag4(d + 1080, "FLT4")))
-        m->nsmp = 31;
-    else if (size >= 1084 && (tag4(d + 1080, "6CHN") || tag4(d + 1080, "8CHN") || (d[1082] == 'C' && d[1083] == 'H') || tag4(d + 1080, "FLT8") ||
-                              tag4(d + 1080, "OCTA") || tag4(d + 1080, "CD81"))) {
-        say(why, "not a 4-channel module");
+    int ch = size >= 1084 ? tagch(d + 1080) : 0;
+    if (ch < 0 || ch > MOD_MAXCH || (ch > 0 && ch < 4) || ch > maxch) {
+        say(why, maxch == 4 ? "not a 4-channel module" : "a kind of module not played (channels)");
         return -1;
-    } else
-        m->nsmp = 15;                           /* the old Ultimate Soundtracker format: no tag */
+    }
+    if (!ch && size >= 1084 && d[950] >= 1 && d[950] <= 128) {     /* a 31-sample module with a tag we do not know */
+        int alnum = 1, low = 1;
+        for (int i = 0; i < 4; i++) {
+            unsigned char c = d[1080 + i];
+            alnum &= (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '!' || c == '&' || c == '-';
+        }
+        for (int i = 0; i < 128; i++) low &= d[952 + i] < 128;
+        if (alnum && low) { say(why, "a kind of MOD not known (its tag)"); return -1; }
+    }
+    if (!ch && size >= 600)                     /* no tag: the old format has no mark, so its headers must look right */
+        for (int i = 0; i < 15; i++) {          /* (a text file would otherwise "play": D56 review 2026-11-17) */
+            const unsigned char *h = d + 20 + i * 30;
+            int ok = h[25] <= 64 && h[24] <= 15;
+            for (int k = 0; k < 22; k++) ok &= h[k] == 0 || h[k] >= 32;
+            if (!ok) { say(why, "not a module"); return -1; }
+        }
+    m->nsmp = ch ? 31 : 15;                     /* no tag: the old Ultimate Soundtracker format */
+    m->nch = ch ? ch : 4;
     unsigned head = m->nsmp == 31 ? 1084 : 600, ord = m->nsmp == 31 ? 950 : 470;
     if (size < head) {
         say(why, "too short for a module");
@@ -87,13 +115,13 @@ int mod_load(struct mod *m, const unsigned char *d, unsigned size, char *why)
         }
         if (m->order[i] + 1 > m->npat) m->npat = m->order[i] + 1;
     }
-    if (bankoff_of(m->nsmp, m->npat) > size) {
+    if (bankoff_of(m->nsmp, m->npat, m->nch) > size) {
         say(why, "the patterns run past the file's end");
         return -1;
     }
     m->pat = d + head;
     unsigned off = 0;
-    m->banksize = size - bankoff_of(m->nsmp, m->npat);
+    m->banksize = size - bankoff_of(m->nsmp, m->npat, m->nch);
     for (int i = 1; i <= m->nsmp; i++) {
         const unsigned char *h = d + 20 + (i - 1) * 30;
         struct modsmp *s = &m->s[i];
@@ -113,6 +141,8 @@ int mod_load(struct mod *m, const unsigned char *d, unsigned size, char *why)
             s->looplen = ll & ~1u;
         }
         if (s->looplen < 2) { s->loop = 0; s->looplen = 0; }    /* no loop: the server's silent word */
+        else if (m->nsmp == 31)
+            s->len = ls + s->looplen;           /* ProTracker plays up to the loop's end, then the loop (D56 review) */
         off += be16(h + 22) * 2u;
     }
     m->speed = 6;
@@ -135,6 +165,7 @@ void mod_goto(struct mod *m, int pos)
     m->jump = -1;
     m->pdelay = m->pdelayn = 0;
     m->ploop = 0;
+    m->rep = 0;                                 /* (an EE repeat must not swallow the new row's notes: D56 review) */
 }
 
 static int note_index(int ft, int period)
@@ -272,7 +303,8 @@ static void running(struct mod *m, struct modch *c)
 static void row_start(struct mod *m, int ch)
 {
     struct modch *c = &m->c[ch];
-    const unsigned char *b = m->pat + (unsigned)m->order[m->pos] * 1024u + (unsigned)m->row * 16u + (unsigned)ch * 4u;
+    unsigned rowb = 4u * (unsigned)m->nch;
+    const unsigned char *b = m->pat + (unsigned)m->order[m->pos] * 64u * rowb + (unsigned)m->row * rowb + (unsigned)ch * 4u;
     int smp = (b[0] & 0xF0) | b[2] >> 4, per = (b[0] & 15) << 8 | b[1];
     c->eff = b[2] & 15;
     c->prm = b[3];
@@ -386,7 +418,7 @@ static void next_row(struct mod *m)
 
 void mod_tick(struct mod *m)
 {
-    for (int ch = 0; ch < 4; ch++) {
+    for (int ch = 0; ch < m->nch; ch++) {
         struct modch *c = &m->c[ch];
         c->trig = 0;
         if (m->tick == 0 && !m->rep)

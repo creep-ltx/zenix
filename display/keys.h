@@ -4,7 +4,7 @@
  * <Space> <Del> <BS> <Help> <F1>..<F10>), two keys in a row a prefix; `ACTION none` takes a key away; `;` and `#`
  * comments; `[main]` the section read (others skipped). A program's built-in keys are text in this format; the
  * user's ~/.config/PROG/keys is read after them, and written with the built-in keys when it is missing. Shared by
- * files and show (one parser, D13's rule). */
+ * files and show (one parser, D13's rule), and with irc and mail, which read keys from a terminal (keys_tty). */
 #pragma once
 #include "proto.h"
 
@@ -39,3 +39,4 @@ int keys_prefix(const struct keyset *ks, int k);               /* k starts a two
 const struct kbind *keys_find(const struct keyset *ks, int k1, int k2);
 int keys_code(const struct dpyev *e);                           /* a key event -> a key code (0: none) */
 void keys_name(int k, char *o);                                 /* a key code -> its name (12 bytes) */
+int keys_tty(int fd);           /* a key read from a terminal (irc, mail): a code, 0x10000 + a byte >= 0x80, -1 the end */

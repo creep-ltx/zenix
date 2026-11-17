@@ -67,8 +67,8 @@ zc '^ZINE: zlean is loaded from its file now; its file (420 KB) is not kept' && 
 # 16.23: zbig.huge (400 KB) stays on the disk and is read from there during the session; with -m (every file in memory)
 # the folder is too big for the volume as before
 zbd=$(echo "$log" | grep -a "^ZINE: [0-9]* of zbig's files ([0-9]* KB) stay on the disk" | head -1 | cut -d' ' -f2)
-[ -n "$zbd" ] && [ "$zbd" -ge 2 ] && zc "^zine: zbig's directory holds" && zc '^zbig: zbig.small found; zbig.huge read from the disk (its first longword, 1 KB, across sectors, the last bytes, the end, 100 KB across runs) right; zbig.mid1 and .mid6 right; zbig-pack.lha left out' && zc '^zbig-rc=0' && ok "zbig: a big data file read from the disk during the session (16.23): its first longword, an aligned 1 KB straight into the buffer, 8 bytes through the sector cache, 8 across a sector's end, the last 8 from the end, then the end, 100 KB in one read past the 12th block; the folder over the volume's budget: $zbd files on the disk, the 200 KB ones it would leave out among them, read right, the archive left out; return code 0" || no "zbig: from the disk: $(echo "$log" | grep -a 'zbig' | tail -4)"
-zc '^zine: zbig-pack.lha left out (101 KB): an archive or a disk image' && zc '^zine: and [0-9]* more files left out' && zc '^zbig: zbig.small found; zbig.huge and zbig-pack.lha left out of the volume' && zc '^zbigm-rc=0' && ok "zbig -m: every file in memory: a folder too big for the volume: the archive, then the largest files left out and named; the small file found; return code 0" || no "zbig -m: the volume: $(echo "$log" | grep -a 'zbig' | tail -4)"
+[ -n "$zbd" ] && [ "$zbd" -ge 2 ] && zc "^zine: zbig's directory holds" && zc '^zbig: zbig.small found; zbig.huge read from the disk (its first longword, 1 KB, across sectors, the last bytes, the end, 100 KB across runs) right; zbig.mid1 and .mid6 right; zbig-pack.lha left out' && zc '^zbig-rc=0' && ok "zbig: a big data file read from the disk during the session (16.23): its first longword, an aligned 1 KB straight into the buffer, 8 bytes through the sector cache, 8 across a sector's end, the last 8 from the end, then the end, 100 KB in one read past the 12th block; the folder over the volume's budget: $zbd files on the disk, the 60 KB ones it would leave out among them, read right, the archive left out; return code 0" || no "zbig: from the disk: $(echo "$log" | grep -a 'zbig' | tail -4)"
+zc '^zine: zbig-pack.lha left out (41 KB): an archive or a disk image' && zc '^zine: and [0-9]* more files left out' && zc '^zbig: zbig.small found; zbig.huge and zbig-pack.lha left out of the volume' && zc '^zbigm-rc=0' && ok "zbig -m: every file in memory: a folder too big for the volume: the archive, then the largest files left out and named; the small file found; return code 0" || no "zbig -m: the volume: $(echo "$log" | grep -a 'zbig' | tail -4)"
 # 16.23: zine -c, chip RAM only (as NoFastMem): the program sees no fast RAM and runs
 zc '^ZINE: zhello sees chip RAM only (-c)' && zc '^ZINE: zhello had [0-9]* KB chip and 0 KB fast RAM' && zc '^zhelloc-rc=0' && ok "zhello -c: chip RAM only (16.23): no fast RAM in its memory lists, its hunks in chip RAM; return code 0" || no "zhello -c: $(echo "$log" | grep -a 'zhello' | tail -3)"
 zc '^hello from an AmigaOS program' && zc '^zlatin-rc=0' && ok "a program whose file name is Latin-1 (not UTF-8) on the Zenix disk runs" || no "the Latin-1 name: $(echo "$log" | grep -a 'zlatin\|AmigaDOS name' | tail -2)"
@@ -102,6 +102,8 @@ zl '^zlibs: memory as at the start' && zl '^zlibs-rc=0' && ok "zlibs: AvailMem a
 zl '^zwrite: T:, ENV:, the program.s folder and DH0: written and read back from memory' && ok "zwrite: T:, ENV:, PROGDIR: and DH0: files written and read back by other forms of their paths; NIL: keeps nothing" || no "zwrite: the paths: $(echo "$log" | grep -a 'zwrite' | tail -2)"
 zl '^zwrite: its own zexit shadowed by what it wrote' && zl '^zwrite: zhello changed through MODE_READWRITE, a copy in memory' && ok "zwrite: a file of its own folder shadowed by a written one; MODE_READWRITE changes a copy in memory" || no "zwrite: the shadow: $(echo "$log" | grep -a 'zwrite' | tail -2)"
 zl '^zwrite: the deleted files are gone for the session' && zl '^zwrite-rc=0' && ok "zwrite: DeleteFile of a shadowed, an unwritten and a T: file: not found afterwards, a second delete ERROR_OBJECT_NOT_FOUND; return code 0" || no "zwrite: the deletes: $(echo "$log" | grep -a 'zwrite' | tail -3)"
+zl '^zwrite: SetProtection, SetComment and SetFileDate answer' && ok "zwrite: SetProtection, SetComment, SetFileDate: DOSTRUE for a written file, one of its own; ERROR_OBJECT_NOT_FOUND for a deleted one (16.24)" || no "zwrite: the attributes: $(echo "$log" | grep -a 'zwrite' | tail -3)"
+zl '^zwrite: FGetC, UnGetC and FGets read zw.new a line at a time' && ok "zwrite: FGetC, UnGetC (the byte again) and FGets (a line, then 0 at the end) (16.24)" || no "zwrite: FGetC/FGets: $(echo "$log" | grep -a 'zwrite' | tail -3)"
 zl '^zwdisk-same' && ok "zwrite: the disk afterwards as before (zexit, zhello, zbadcall the same bytes; no zw.new, zw or T written)" || no "zwrite: the disk changed after the session"
 # 16.10: names found without case, in subdirectories of the program's folder (zcase.S)
 zl '^zcase: files in subdirectories found by names of another case' && ok "zcase: DATA/Xyl.Tp3, PROGDIR:data/xyl.tp3 and SYS:data/deep/er/mod.x found (Data/XYL.TP3, three levels down)" || no "zcase: the subdirectories: $(echo "$log" | grep -a 'zcase\|no file' | tail -2)"
@@ -155,6 +157,15 @@ echo "$log4" | grep -aq '^zcache: all answered' && echo "$log4" | grep -aq '^zca
 echo "$log4" | grep -aq '^ztake-rc=0' && echo "$log4" | grep -aq '^zcrash-rc=1' && ok "68040: ztake and zcrash, Zenix back each time (the MMU registers and caches restored)" || no "68040 ztake/zcrash: $(echo "$log4" | grep -a 'ztake-rc\|zcrash-rc' | tail -2)"
 g1=$(echo "$log4" | grep -a -m1 '^fast RAM free' | tr -dc 0-9); g2=$(echo "$log4" | grep -a '^fast RAM free' | sed -n 2p | tr -dc 0-9)
 [ -n "$g1" ] && [ "$g1" = "$g2" ] && echo "$log4" | grep -aq '^zine-040-done' && echo "$log4" | grep -aq '^disk-ok' && ok "68040: free memory as before, the disk written afterwards" || no "68040: memory $g1 -> $g2 KB, or the end not reached"
+# D41 section 19: memory protection is on there by default (FS-UAE's MMU model): every session switched it off and back
+# on (the kernel's 'back' lines), and after them a stray write is still stopped
+prot() {    # prot NAME LOG
+    echo "$2" | grep -aq "^mmu: memory protection on: $1" && echo "$2" | grep -aq '^prot-rc=139' &&
+        echo "$2" | grep -aq 'memory protection: a write to 0x1000 (the kernel.s memory): killed' &&
+        ok "$1: memory protection on at boot, and on again after the sessions (a stray write stopped, status 139)" ||
+        no "$1 protection: $(echo "$2" | grep -a '^mmu:\|prot-rc\|memory protection' | tail -3)"
+}
+prot 68040 "$log4"
 echo "$log4" | grep -aiE 'panic|exception|guru' && no "68040: the kernel log has a panic or exception"
 # 16.14 on a 68060 with its FPU (fsuae/zine: FS-UAE's 68060 FPU, PCR ID 0x0430, switched off at the start as on a real
 # 68060 before 68060.library): Motorola's 68060 package (/lib/zine/sp060) for the FPU's and the integer unit's
@@ -175,6 +186,7 @@ f1=$(echo "$log6" | grep -a -m1 '^ZINE: zexit had' | sed 's/.* and \([0-9]*\) KB
 echo "$log6" | grep -aq '^ZINE: zalloc sees chip RAM and the fast RAM below 16 MB only (-l)' && [ -n "$fl" ] && [ "$fl" -gt 1024 ] && [ "$fl" -le 8192 ] && [ -n "$f1" ] && [ "$f1" -gt 16384 ] && echo "$log6" | grep -aq '^zallocl-rc=0' && ok "68060: zine -l: zalloc sees $fl KB of fast RAM below 16 MB (zexit without -l: $f1 KB), its AllocMem of 1 MB fast and the pool there; return code 0" || no "68060 zine -l: fast $f1 -> $fl KB: $(echo "$log6" | grep -a 'zalloc' | tail -3)"
 h1=$(echo "$log6" | grep -a -m1 '^fast RAM free' | tr -dc 0-9); h2=$(echo "$log6" | grep -a '^fast RAM free' | sed -n 2p | tr -dc 0-9)
 [ -n "$h1" ] && [ "$h1" = "$h2" ] && echo "$log6" | grep -aq '^zine-060-done' && echo "$log6" | grep -aq '^disk-ok' && ok "68060: free memory as before, the disk written afterwards" || no "68060: memory $h1 -> $h2 KB, or the end not reached"
+prot 68060 "$log6"
 echo "$log6" | grep -aiE 'panic|exception|guru' && no "68060: the kernel log has a panic or exception"
 echo "$log" | grep -aiE 'panic|exception|guru' && no "the kernel log has a panic or exception"
 exit $((1 - pass))

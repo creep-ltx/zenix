@@ -85,6 +85,8 @@ case " $PROGS " in *" tcc "*) lic ports/tcc/upstream/COPYING tcc;; esac
 # files and Lua games as the package holds them (mkzup.py stage), on an image with the games
 case " $PROGS " in *" frotz "*) lic ports/frotz/upstream/COPYING frotz; lic ports/frotz/stories/README devours;; esac
 case " $PROGS " in *" robots "*) lic ports/bsdgames/LICENSE bsdgames;; esac
+# the TLS helper of irc and mail (DESIGN D58, D59), as its package tls holds it, on an image with either
+case " $PROGS " in *" irc "*|*" mail "*) python3 "$(dirname "$0")/mkzup.py" stage tls "$T" "$B";; esac
 case " $PROGS " in *" frotz "*|*" robots "*) python3 "$(dirname "$0")/mkzup.py" stage games "$T" "$B";; esac
 # the C library's notice (picolibc, BSD-style licences file by file, DESIGN D27 3.2) on the full images, as the base
 # package; and its test program in /tests

@@ -631,15 +631,16 @@ static void handle(const struct dpyev *e)
 int main(int argc, char **argv)
 {
     const char *file = 0;
-    int own = 0;
+    int own = 1;                        /* a screen of its own is the default (partner 2026-11-17); -w: the window */
     for (int i = 1; i < argc; i++)
         if (!strcmp(argv[i], "-v")) verbose = 1;
         else if (!strcmp(argv[i], "-s")) own = 1;
+        else if (!strcmp(argv[i], "-w")) own = 0;
         else if (!strcmp(argv[i], "-n")) dither = PIC_NEAREST;
         else if (!strcmp(argv[i], "-f")) dither = PIC_FS;
         else if (argv[i][0] != '-' && !file) file = argv[i];
-        else { dprintf(2, "usage: show [-v] [-s] [-n | -f] PICTURE\n"); return 2; }
-    if (!file) { dprintf(2, "usage: show [-v] [-s] [-n | -f] PICTURE\n"); return 2; }
+        else { dprintf(2, "usage: show [-v] [-s | -w] [-n | -f] PICTURE\n"); return 2; }
+    if (!file) { dprintf(2, "usage: show [-v] [-s | -w] [-n | -f] PICTURE\n"); return 2; }
     char full[ZPATH_MAX];
     if (zrealpath(file, full, sizeof full) < 0) {
         dprintf(2, "show: %s: %s\n", file, zwhy("cannot resolve"));

@@ -4,7 +4,7 @@
  * for "PROGDIR:zw.new", "SYS:zw.new"); NIL: still takes and keeps nothing; zexit (a file of its own folder) shadowed by a
  * new PROGDIR:zexit (read back as zexit); zhello opened MODE_READWRITE, changed and read back (a copy in memory);
  * DeleteFile of the shadowed zexit, of zbadcall (never written) and of T:zw.tmp: each then not found, a second delete
- * ERROR_OBJECT_NOT_FOUND. The shell checks afterwards that the disk has none of it. Exit 0 when everything held; else
+ * ERROR_OBJECT_NOT_FOUND; SetProtection, SetComment, SetFileDate, FGetC, UnGetC, FGets (16.24). The shell checks afterwards that the disk has none of it. Exit 0 when everything held; else
  * the return code names the step (and a line says it). PC-relative code. */
 #include "zt.i"
 #define LVO_DeleteFile  -72
@@ -13,6 +13,12 @@
 #define LVO_IoErr       -132
 #define LVO_Read        -42
 #define LVO_Seek        -66
+#define LVO_SetComment  -180
+#define LVO_SetProtection -186
+#define LVO_SetFileDate -396
+#define LVO_FGetC       -306
+#define LVO_UnGetC      -318
+#define LVO_FGets       -336
 #define MODE_OLDFILE    1005
 #define MODE_NEWFILE    1006
 #define MODE_READWRITE  1004
@@ -134,6 +140,81 @@ main:
     lea     f_t2(%pc),%a0
     bsr     delete
     lea     m_del(%pc),%a0
+    bsr     puts
+    /* 12 (16.24): SetProtection of a written file (zw.new), SetComment of one of its own (zhello), SetFileDate of the
+     * same by another name (SYS:zw.new): DOSTRUE each; SetProtection of the deleted zexit: 0, ERROR_OBJECT_NOT_FOUND */
+    moveq   #12,%d6
+    lea     f_new2(%pc),%a0
+    move.l  %a0,%d1
+    moveq   #0,%d2
+    jsr     LVO_SetProtection(%a6)
+    tst.l   %d0
+    beq     fail
+    lea     f_zhello(%pc),%a0
+    move.l  %a0,%d1
+    lea     text(%pc),%a0
+    move.l  %a0,%d2
+    jsr     LVO_SetComment(%a6)
+    tst.l   %d0
+    beq     fail
+    lea     f_new3(%pc),%a0
+    move.l  %a0,%d1
+    lea     BUF(%a4),%a0
+    move.l  %a0,%d2
+    jsr     LVO_SetFileDate(%a6)
+    tst.l   %d0
+    beq     fail
+    lea     f_zexit(%pc),%a0
+    move.l  %a0,%d1
+    moveq   #0,%d2
+    jsr     LVO_SetProtection(%a6)
+    tst.l   %d0
+    bne     fail
+    jsr     LVO_IoErr(%a6)
+    cmp.l   #205,%d0
+    bne     fail
+    lea     m_attr(%pc),%a0
+    bsr     puts
+    /* 13 (16.24): zw.new read with FGetC ('z'), UnGetC (-1: the same byte again), FGets (the whole line with its
+     * newline, buf answered), FGets again (0: the end) */
+    moveq   #13,%d6
+    lea     f_new2(%pc),%a0
+    move.l  #MODE_OLDFILE,%d2
+    bsr     open
+    move.l  %d4,%d1
+    jsr     LVO_FGetC(%a6)
+    moveq   #'z',%d1
+    cmp.l   %d1,%d0
+    bne     fail
+    move.l  %d4,%d1
+    moveq   #-1,%d2
+    jsr     LVO_UnGetC(%a6)
+    tst.l   %d0
+    beq     fail
+    move.l  %d4,%d1
+    lea     BUF(%a4),%a0
+    move.l  %a0,%d2
+    moveq   #64,%d3
+    jsr     LVO_FGets(%a6)
+    lea     BUF(%a4),%a0
+    cmp.l   %a0,%d0
+    bne     fail
+    lea     text(%pc),%a1
+    moveq   #textend-text-1,%d0
+1:  cmpm.b  (%a0)+,(%a1)+
+    dbne    %d0,1b
+    bne     fail
+    tst.b   (%a0)
+    bne     fail
+    move.l  %d4,%d1
+    lea     BUF(%a4),%a0
+    move.l  %a0,%d2
+    moveq   #64,%d3
+    jsr     LVO_FGets(%a6)
+    tst.l   %d0
+    bne     fail
+    bsr     close
+    lea     m_fgets(%pc),%a0
     bsr     puts
     moveq   #0,%d0
     bra.s   done
@@ -280,6 +361,8 @@ m_paths:  .asciz "zwrite: T:, ENV:, the program's folder and DH0: written and re
 m_shadow: .asciz "zwrite: its own zexit shadowed by what it wrote\n"
 m_rw:     .asciz "zwrite: zhello changed through MODE_READWRITE, a copy in memory\n"
 m_del:    .asciz "zwrite: the deleted files are gone for the session\n"
+m_attr:   .asciz "zwrite: SetProtection, SetComment and SetFileDate answer for files that are there\n"
+m_fgets:  .asciz "zwrite: FGetC, UnGetC and FGets read zw.new a line at a time\n"
 m_fail:   .asciz "zwrite: failed (the return code names the step)\n"
     .even
 vars:   .space  V_end

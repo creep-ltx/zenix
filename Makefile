@@ -47,7 +47,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           whoami hostname id uptime cmp hexdump stat expr find xargs du \
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
-          nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet \
+          nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet irc mail \
           rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs files show ttf2font \
           play modplay lsusb lua make zld zas tcc zdb \
           frotz adventure arithmetic banner fortune hangman number rain robots tetris worm worms wump zintro
@@ -265,8 +265,10 @@ RAMDISK_K := 640
 # 684 since DESIGN D49 (2026-11-13, directories in batches: 1.1 KB of kernel.bin, the built-in fsd's 0.7 KB). 683
 # since DESIGN D53 (2026-11-13, scripts started by their #! line: 712 bytes of kernel.bin). 678 since DESIGN D54
 # (2026-11-13, the live debugger: 4.9 KB of kernel.bin, kernel/dbg.c and its hooks).
-# 677 with both (D54 and d29 16.23, merged 2026-11-14). 676 since the full audit (2026-11-14: K1's group checks and
-# K2's debugger record looked up again, 68 bytes of kernel.bin).
+# 677 with both (D54 and d29 16.23, merged 2026-11-14).
+# 676 since D41 section 19 (2026-11-17, protection on by default: telling a full 68040/060 from an LC or EC one, 130
+# bytes of kernel.bin), and the full audit (2026-11-14: K1's group checks and K2's debugger record looked up again,
+# 68 bytes of kernel.bin).
 RAMDISK_MOUNT_K := 676
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
@@ -607,6 +609,25 @@ $(BUILD)/ttf-%.no: display/ttf/%.c display/ttf/ttf.h display/ttf/ttfont.h user/l
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
 $(BUILD)/ttf2font.uelf: $(patsubst %,$(BUILD)/ttf-%.no,ttf2font ttf ttfont) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(patsubst %,$(BUILD)/ttf-%.no,ttf2font ttf ttfont) $(BUILD)/libz.uo $(LIBGCC) -o $@
+# irc (DESIGN D58, docs/man/irc.txt) over its core in net/irc/ (no system calls, shared with the PC tests,
+# tools/host/irc-test.sh) and the shared key parser; cold code (-Os). Its TLS helper /lib/tls/tlspipe (not a command,
+# the package tls, shared with mail) carries the crypto library, so that irc does not: loaded only for a TLS server
+$(BUILD)/irc-core.no: net/irc/irc.c net/irc/irc.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/irc.uo: user/irc.c net/irc/irc.h display/keys.h user/socket.h kernel/netproto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/irc.uelf: $(BUILD)/irc.uo $(BUILD)/irc-core.no $(BUILD)/keys.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/irc.uo $(BUILD)/irc-core.no $(BUILD)/keys.no $(BUILD)/libz.uo $(LIBGCC) -o $@
+# mail (DESIGN D59, docs/man/mail.txt) over its core in net/mail/ (the protocols, MIME, the messages written; no system
+# calls, shared with the PC tests, tools/host/mail-test.sh), the shared key parser and the TLS helper /lib/tls/tlspipe;
+# cold code (-Os)
+MAILCORE := $(BUILD)/mail-proto.no $(BUILD)/mail-mime.no $(BUILD)/mail-compose.no
+$(BUILD)/mail-%.no: net/mail/%.c net/mail/mail.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/mail.uo: user/mail.c net/mail/mail.h display/keys.h user/socket.h kernel/netproto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/mail.uelf: $(BUILD)/mail.uo $(MAILCORE) $(BUILD)/keys.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/mail.uo $(MAILCORE) $(BUILD)/keys.no $(BUILD)/libz.uo $(LIBGCC) -o $@
 # the desktop programs' configurable keys (display/keys.h: files' parser, shared with show, DESIGN D50), cold: -Os
 $(BUILD)/keys.no: display/lib/keys.c display/keys.h display/proto.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
@@ -673,8 +694,17 @@ $(BUILD)/snddec.uo $(BUILD)/modrep.uo: $(BUILD)/%.uo: user/%.c user/snddec.h use
 	$(CC) $(UCFLAGS) -c $< -o $@
 $(BUILD)/play.uelf: $(BUILD)/play.uo $(BUILD)/snddec.uo $(BUILD)/sndlib.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/play.uo $(BUILD)/snddec.uo $(BUILD)/sndlib.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
-$(BUILD)/modplay.uelf: $(BUILD)/modplay.uo $(BUILD)/modrep.uo $(BUILD)/sndlib.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/modplay.uo $(BUILD)/modrep.uo $(BUILD)/sndlib.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+# the tracker player (DESIGN D56, docs/d56-tracker-player.md): modplay over the replayers behind trk.h (MOD through
+# modrep.c, MED, S3M, XM) and the mixer; the replayers at -Os (a tick's work, 50 a second), the mixer's loop at -O2
+TRKOBJS := $(BUILD)/trk.uo $(BUILD)/medrep.uo $(BUILD)/s3mrep.uo $(BUILD)/xmrep.uo $(BUILD)/trkmix.uo
+$(BUILD)/trk.uo $(BUILD)/medrep.uo $(BUILD)/s3mrep.uo $(BUILD)/xmrep.uo: $(BUILD)/%.uo: user/%.c user/trk.h user/modrep.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/trkmix.uo: user/trkmix.c user/trkmix.h user/trk.h | $(BUILD)
+	$(CC) $(UCFLAGS) -c $< -o $@
+# (its keys through the desktop programs' shared parser, display/keys.h)
+$(BUILD)/modplay.uo: user/trk.h user/trkmix.h display/keys.h
+$(BUILD)/modplay.uelf: $(BUILD)/modplay.uo $(BUILD)/modrep.uo $(TRKOBJS) $(BUILD)/keys.no $(BUILD)/sndlib.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/modplay.uo $(BUILD)/modrep.uo $(TRKOBJS) $(BUILD)/keys.no $(BUILD)/sndlib.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 # the crypto library (DESIGN D21 3.5, docs/d21-crypto-ssh-https.md): BearSSL and Monocypher (only the files used,
 # crypto/*/README) and Zenix's crypto/zc/, as one archive linked with --gc-sections into the programs that use it
 # (cryptotest, ssh, ssh-keygen). Cold code at -Os; the files a handshake waits on at -O2 (D21 3.6 step 1: the curve25519
@@ -743,7 +773,7 @@ FORCE:
 # wget (DESIGN D21 8, docs/man/wget.txt) over its core (user/wget/), net/http/ (shared with zpkg) and the library's
 # TLS glue (crypto/zc/zc_tls.c), a plain program (not pure: D21 3.5); sntp (D21 8.3, docs/man/sntp.txt) over
 # net/sntp/ and the clock file's code (crypto/zc/zc_clock.c). The cores are system-call free (tools/host/tls-test.sh)
-WGETOBJS := $(BUILD)/cr/user/wget/plan.o $(BUILD)/cr/net/http/http.o
+WGETOBJS := $(BUILD)/cr/user/wget/plan.o $(BUILD)/cr/net/http/http.o $(BUILD)/tlstrust.uo
 SNTPOBJS := $(BUILD)/cr/net/sntp/sntp.o $(BUILD)/clockfile.uo
 # /var/lib/clock's reading and writing, one copy for sntp and reboot (reboot raises the floor from a trusted clock)
 CLOCKOBJS := $(BUILD)/clockfile.uo $(BUILD)/cr/crypto/zc/zc_clock.o
@@ -760,7 +790,14 @@ $(BUILD)/cr/net/http/http.o: net/http/http.h
 $(BUILD)/cr/net/sntp/sntp.o: net/sntp/sntp.h
 $(BUILD)/wget.uo $(BUILD)/sntp.uo: $(BUILD)/%.uo: user/%.c $(BUILD)/builddate.h crypto/zc/zc_clock.h user/socket.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -I$(BUILD) -Inet/port/shim $(CRYPTO_DEF) -c $< -o $@
-$(BUILD)/wget.uo: user/wget/wget.h net/http/http.h crypto/zc/zc_tls.h crypto/zc/zc_x509.h
+$(BUILD)/wget.uo: user/wget/wget.h net/http/http.h crypto/zc/zc_tls.h crypto/zc/zc_x509.h user/tlstrust.h
+$(BUILD)/tlspipe.uo: user/tlspipe.c user/tlstrust.h $(BUILD)/builddate.h crypto/zc/zc_tls.h user/socket.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -I$(BUILD) -Inet/port/shim $(CRYPTO_DEF) -c $< -o $@
+$(BUILD)/tlspipe.uelf: $(BUILD)/tlspipe.uo $(BUILD)/tlstrust.uo $(BUILD)/libcrypto.a $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/tlspipe.uo $(BUILD)/tlstrust.uo $(BUILD)/libcrypto.a $(BUILD)/libz.uo $(LIBGCC) -o $@
+# the clock's rules, the seed and the trust anchors, one copy for wget and the TLS helper of irc and mail (user/tlstrust.h)
+$(BUILD)/tlstrust.uo: user/tlstrust.c user/tlstrust.h crypto/zc/zc_tls.h crypto/zc/zc_x509.h crypto/zc/zc_clock.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -Inet/port/shim $(CRYPTO_DEF) -c $< -o $@
 $(BUILD)/sntp.uo: net/sntp/sntp.h
 # zpkg (DESIGN D22, docs/man/zpkg.txt) over its cores (user/zpkg/: the list and the trust rules, the resolver),
 # net/http/, the package formats (zpkgfmt.c), Ed25519 from the library, the clock file's code; its trusted keys built
@@ -1548,7 +1585,7 @@ $(BUILD)/cp437-8x8.psf: tools/font_8x8.c tools/mkpsf.py | $(BUILD)
 UFONT_SRC := tools/font_8x8.c tools/mkconfont.py $(wildcard tools/consolefont/*)
 $(BUILD)/zenix-8x8.zcf: $(UFONT_SRC) | $(BUILD)
 	python3 tools/mkconfont.py font $@
-$(BUILD)/pkg/list: $(GAMESDATA) $(BUILD)/devel/usr/lib/libc.a $(BUILD)/bootmenu $(BUILD)/zenixboot $(BUILD)/cp437-8x8.psf $(BUILD)/zine.blob $(BUILD)/sp060 $(BUILD)/sp040 $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
+$(BUILD)/pkg/list: $(GAMESDATA) $(BUILD)/tlspipe.zx $(BUILD)/devel/usr/lib/libc.a $(BUILD)/bootmenu $(BUILD)/zenixboot $(BUILD)/cp437-8x8.psf $(BUILD)/zine.blob $(BUILD)/sp060 $(BUILD)/sp040 $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
 	NETDRVS="$(NETDRVS)" python3 tools/mkzup.py packages $(BUILD) "$(UAPPS)"
 # the system bundle: the kernel and the base group only (DESIGN D22 3.1 and 4.4: everything else is installed live,
 # zup -f; copied to BOOT:Zenix/zenix-update.zup, docs/man/zenixboot.txt)
@@ -1570,7 +1607,7 @@ $(BUILD)/zenix-update.zup: $(BUILD)/kernel.bin $(BUILD)/pkg/list tools/mkzup.py 
 # 1,024 left 2.7 MB free on 2026-11-05, and a test filling it failed without a word on 2026-11-04; 512 inodes ran out
 # with the network's files in D19 step 8: cmds2-test makes 150 files). The test images and zenix-boot.hdf's root only:
 # the floppies, the demo floppies, the installer and the SD card's root-card.img are built apart and do not change
-$(BUILD)/zenix.hdf: $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(GAMESDATA) $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(TESTLIBC) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list $(if $(BOX),$(BUILD)/box.zx)
+$(BUILD)/zenix.hdf: $(BUILD)/tlspipe.zx $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(GAMESDATA) $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(TESTLIBC) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list $(if $(BOX),$(BUILD)/box.zx)
 	PKGDB=1 $(if $(BOX),BOX="$(BOXAPPS)") tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 16M 2048
 
 # the same disk wrapped in an RDB, as a real hard disk or CF card has it

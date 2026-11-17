@@ -109,7 +109,7 @@ DESCRIPTION
     archives and disk images are left out first, then its largest
     files, each named (a program that loads one will not find it);
     with more than 2000 entries only the program goes in.
-    A data file of 256 KB or more stays on the disk and is read from
+    A data file of 64 KB or more stays on the disk and is read from
     there while the program runs (zine says how many), when the
     folder is on an ext2 volume of the IDE drive: it takes no memory
     and counts in none of these limits. Program files and fonts are

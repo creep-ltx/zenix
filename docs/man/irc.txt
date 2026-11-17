@@ -1,0 +1,167 @@
+IRC(1)			Zenix manual
+
+NAME
+    irc - an IRC client for the terminal
+
+SYNOPSIS
+    irc [-c FILE] [-n NICK] [-p PORT] [-t] [SERVER [#CHANNEL...]]
+    irc -K
+
+DESCRIPTION
+    irc connects to an IRC server and shows its channels and private
+    conversations in windows on the terminal. Without SERVER it takes the
+    server from its settings (FILES). The screen, 80 columns first:
+
+    row 1        the window's name and the channel's topic
+    the middle   the window's lines, each with its time (UTC); your nick
+                 bold, others in six colours, lines that name you (or a
+                 highlight word) bold yellow, events cyan, errors red
+    status row   the time, your nick, [N:window], the channel's members,
+                 -more- when scrolled back, the lag or the connection's
+                 state, "act:" the windows with news (+ a message, ! a
+                 highlight or a private message)
+    last row     the input, with the window's name as its prompt
+
+    Window 1 is the status window (the server's messages); a channel you
+    join gets a window, and so does a private conversation (opened when
+    someone writes to you, or with /query). At most 20 windows; a
+    stranger's message opens one only while fewer than 16 are open (else
+    it is shown in the status window).
+
+    Text typed in a channel or query window goes there; a line starting
+    with / is a command:
+
+    /join #CHANNEL [KEY]    join (or go to) a channel; /j too
+    /part [#CHANNEL] [WHY]  leave a channel (its window closes)
+    /msg NICK TEXT          a private message (shown where you are)
+    /query NICK [TEXT]      a window for NICK; /q too
+    /me TEXT                an action: * nick text
+    /notice NICK TEXT       a notice
+    /nick NICK              another nick
+    /names [#CHANNEL]       the channel's members
+    /topic [TEXT]           show or set the channel's topic
+    /whois [NICK]           who it is (in a query: that nick)
+    /close                  close the window (leaving its channel)
+    /window N               go to window N
+    /connect [HOST [PORT [tls]]]   connect (again) to a server; without
+                            HOST to the settings' server; /reconnect too
+    /quote LINE             a line to the server as it is
+    /clear                  empty the window
+    /help                   these commands
+    /quit [WHY]             leave, with a message (else the settings')
+
+    Any other /COMMAND goes to the server as it is, with its words (/mode,
+    /kick, /invite, /away, /list, /who). //TEXT sends TEXT starting with
+    a slash. Long text is sent in pieces of at most 400 bytes; a typed
+    line over 1,023 bytes is not sent, and that is said.
+
+    TLS (-t, or "tls on"): the connection is encrypted and the server's
+    certificate is checked as wget(1) checks it: against /etc/ssl/anchors
+    and your own roots in /etc/ssl/local/, for the server's name, its
+    dates by the clock's rules (sntp(1)). The handshake takes up to a
+    minute on a 68020. A certificate that is refused is said and not tried
+    again. The TLS code is a helper, /lib/tls/tlspipe (the package tls,
+    shared with mail(1)), started only for a TLS server (not a command).
+
+    SASL (the setting "sasl"): logs you in to your account before the
+    registration ends (PLAIN, best over TLS); a server without SASL, or a
+    refused login, is said and the connection goes on without it.
+
+    A lost connection (the server ends it, the network, or 300 s without a
+    word: irc sends a PING after 120 s) is taken up again after 5, 10, 30
+    s, then every 60 s, and the channels open are joined again. /connect
+    tries at once, /quit stops.
+
+    Text: what comes from the server is shown as UTF-8; a line that is not
+    UTF-8 is read as ISO-8859-1 (Latin-1). Control characters, mIRC's
+    colours and formats are dropped, so nothing from the server can move
+    the cursor or change the screen. Lines over 512 bytes are cut there,
+    and that is said. What you type goes out as UTF-8, or as ISO-8859-1
+    with "charset latin1".
+
+OPTIONS
+    -c FILE   the settings from FILE instead of ~/.config/irc/config
+    -n NICK   the nick (else the settings', else $USER)
+    -p PORT   the port (else 6667, or 6697 with TLS)
+    -t        TLS
+    -K        print the default keys and end
+    SERVER    the server instead of the settings' (plain unless -t);
+              channels after it instead of the settings' autojoin
+
+KEYS
+    The defaults; every key can be changed in ~/.config/irc/keys (written
+    with these the first time; the format of files(1): KEY ACTION
+    [ARGUMENT] a line, <Name> for special keys, "KEY none" takes a key
+    away; the action's name in brackets):
+
+    Return               send the line (send)
+    Backspace            the character before the cursor (backspace)
+    Del, Ctrl-D          the character under the cursor (delete)
+    Left, Right, Ctrl-B, Ctrl-F   move (left, right)
+    Ctrl-A, Ctrl-E, Home, End     the line's start, end (home, end)
+    Ctrl-U, Ctrl-K       cut to the start, to the end (kill_start,
+                         kill_end)
+    Ctrl-W               cut the word before (kill_word)
+    Up, Down             the lines typed before (history_up,
+                         history_down)
+    Tab                  complete a nick of the channel, again for the
+                         next one; at the line's start with ": "
+                         (complete)
+    Shift-Up, Shift-Down, PageUp, PageDown   scroll back a page, forward
+                         (page_up, page_down)
+    Ctrl-Up, Ctrl-Down   a line (line_up, line_down)
+    F1 .. F10            window 1 .. 10 (window N)
+    Ctrl-N, Ctrl-P, Shift-Right, Shift-Left   the next, previous window
+                         (next_window, prev_window)
+    Ctrl-X               the next window with news, highlights first
+                         (active_window)
+    Ctrl-L               draw the screen again (redraw)
+    (none)               quit (quit)
+
+    Ctrl-C does nothing, so a slip does not end the session: /quit.
+    Backspace sends <Del> on Zenix's console, so <Del> in the keys file is
+    Backspace; the Del key acts as <C-d>, Home and End as <C-a> and <C-e>,
+    PageUp and PageDown as <S-Up> and <S-Down>.
+
+FILES
+    ~/.config/irc/config
+        the settings, one "SETTING VALUE" a line, # a comment. Written the
+        first time with every setting commented out, readable by you only
+        (irc says so when it holds a password others may read):
+        server NAME        the server
+        port N             its port (6667, or 6697 with TLS)
+        tls on|off         TLS
+        nick NICK          your nick ($USER, else "zenix")
+        user NAME          the user name (the nick)
+        realname TEXT      the real name ("Zenix IRC")
+        password TEXT      the server's password (PASS)
+        sasl ACCOUNT PASSWORD   log in to an account with SASL PLAIN
+        autojoin #A #B     channels joined after the login (8 at most)
+        highlight W1 W2    words that count as your nick (8 at most)
+        charset utf-8|latin1   what you send (utf-8)
+        quit TEXT          the message for /quit and /part
+        scrollback N       lines kept in each window (300; 20-5000)
+        reconnect on|off   connect again when the connection is lost (on)
+        bell on|off        a bell for a highlight (on)
+        An unknown setting is an error, with its line.
+    ~/.config/irc/keys
+        the keys (KEYS above)
+    /lib/tls/tlspipe
+        the TLS helper (the package tls)
+    /etc/ssl/anchors, /etc/ssl/local/
+        the certificates TLS trusts (wget(1))
+
+EXIT STATUS
+    0 after /quit; 1 when the settings cannot be read; 2 for a wrong
+    option or setting, no server, or when the keys or the screen are not
+    a terminal.
+
+NOTES
+    Not done: DCC (files and chats), several servers at once, logs to
+    files, IRCv3's extras beyond SASL (message tags, server-time), a list
+    of nicks beside the text, mIRC colours shown (they are dropped), SASL
+    EXTERNAL, proxies. Times are UTC (Zenix has no time zones yet). Never
+    run on the real A1200 yet. DESIGN D58 (docs/d58-irc.md).
+
+SEE ALSO
+    telnet(1), ssh(1), wget(1), sntp(1), files(1), mail(1)

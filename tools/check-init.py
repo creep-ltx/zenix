@@ -36,14 +36,14 @@ BOUNDS = {"__zinit_start", "__zinit_end", "__zhwcd_start", "__zhwcd_end", "__zhw
 # within one call with interrupts masked. In these functions only a PC-relative lea of a label inside the same function
 # (a resume address) or, in mt_on, of mt_trap is accepted, and not followed (reviewed); any other load of span code's
 # address there is an error.
-ALLOW_HAND = {"mmu_regs_load", "mmu_regs_save", "mmu_probe_hw", "mt_on"}
+ALLOW_HAND = {"mmu_regs_load", "mmu_regs_save", "mmu_probe_hw", "mmu_fpu", "mt_on"}
 GUARD_TRAP = ("mt_on", "mt_trap")
 # ... and since these functions' loads are not followed, their bytes (the asm from mmu_regs_load to the end of
 # mmu_flush, the relocated fields read as zero) are pinned: an edit of the asm fails the build until it is reviewed and
 # the new digest written here (review of revision 3's code, C5). The allowance holds only for the functions of these
 # names inside that pinned range in the MMU span, never for a namesake elsewhere.
 GUARD_FIRST, GUARD_LAST = "mmu_regs_load", "mmu_flush"
-GUARD_SHA = "dbc28fef5a0a9cef"
+GUARD_SHA = "8fd515637e6e2c7d"
 ARM, DISARM, OPS, ON = "mmu_arm", "mmu_disarm", "mmu_ops", "mmu_ops_on"   # D45 section 13: the table and its writers
 # mmu_on is set only by mmu_arm (with the table: armed exactly while it is set, so the span is kept whenever a copy of a
 # slot could exist) and cleared only by mmu_before_reset_; everyone else only tests or loads it (C3)
