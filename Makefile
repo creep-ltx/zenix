@@ -265,8 +265,9 @@ RAMDISK_K := 640
 # 684 since DESIGN D49 (2026-11-13, directories in batches: 1.1 KB of kernel.bin, the built-in fsd's 0.7 KB). 683
 # since DESIGN D53 (2026-11-13, scripts started by their #! line: 712 bytes of kernel.bin). 678 since DESIGN D54
 # (2026-11-13, the live debugger: 4.9 KB of kernel.bin, kernel/dbg.c and its hooks).
-# 677 with both (D54 and d29 16.23, merged 2026-11-14).
-RAMDISK_MOUNT_K := 677
+# 677 with both (D54 and d29 16.23, merged 2026-11-14). 676 since the full audit (2026-11-14: K1's group checks and
+# K2's debugger record looked up again, 68 bytes of kernel.bin).
+RAMDISK_MOUNT_K := 676
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/check-init.py tools/ksize-check.sh tools/ksize-budget
