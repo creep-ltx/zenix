@@ -1,59 +1,89 @@
 MODPLAY(1)			Zenix manual
 
 NAME
-    modplay - play a ProTracker module
+    modplay - play tracker modules: MOD, MED, S3M, XM
 
 SYNOPSIS
-    modplay [-v VOL] [-l] [-q] FILE
+    modplay [-v VOL] [-l] [-s] [-q] [-z] [-r RATE] FILE|FOLDER...
+    modplay -K
+    modplay -B SECONDS [-r RATE] FILE
 
 DESCRIPTION
-    Plays a 4-channel ProTracker or NoiseTracker module (the tags
-    "M.K.", "M!K!", "4CHN", "FLT4", or the old 15-sample kind without
-    a tag) on Paula's four channels, through the sound server sndd(8).
-    modplay works out each tick's periods, volumes and note starts;
-    the server applies them at their time. The tempo is ProTracker's:
-    F with a value below 32 the speed (ticks a row), from 32 the BPM
-    (a tick is 2.5 / BPM s, the CIA timing).
-    A line shows the module's name; then a status line, updated in
-    place, the row being heard: the position, pattern, row, speed,
-    BPM and each channel's last note and sample.
-    The song ends when its order list has been played, at a jump back
-    to an earlier position, or at F00.
+    Plays tracker modules through the sound server sndd(8):
+      ProTracker, NoiseTracker and Soundtracker MODs ("M.K.", "M!K!",
+      "4CHN", "FLT4", the old 15-sample kind), FastTracker's MODs of
+      6 to 32 channels ("6CHN", "8CHN", "xxCH", "OCTA", "CD81"),
+      MED and OctaMED (MMD0, MMD1, MMD2, MMD3), Scream Tracker 3
+      (.s3m) and FastTracker 2 (.xm).
+    The kind is found from the file's contents, not its name. Each
+    FILE is played in turn; a FOLDER adds its files in name order (255
+    songs at most). A file that is not a module is said and passed
+    over.
+    A module Paula can play as it is (four channels or fewer: MODs and
+    MED songs of up to 4 tracks) goes to Paula's four channels, its
+    samples in chip RAM, exactly as the tracker played it. Others are
+    mixed by the CPU into one 8-bit stereo stream on channels 0 and 1
+    (as is a 4-channel one whose samples are over 1 MB), at 16,000 Hz
+    up to 8 channels and 11,025 Hz above unless -r says otherwise;
+    the other pair stays free.
+    On a terminal modplay has a screen of its own: the song's name,
+    kind and channels, "Paula" or "mixed"; the position, pattern, row,
+    speed, BPM, volume and time; a meter for each channel; and one of
+    four views: the pattern being heard, the instruments, the list,
+    the keys.
 
 OPTIONS
-    -v VOL    the volume, 0-64 (64), applied to every channel
-    -l        loop the song (F00 still ends it)
-    -q        no lines and no keys: the terminal is left alone
+    -v VOL    the volume, 0-64 (64)
+    -l        repeat the song (F00 or FFE still ends it)
+    -z        shuffle the list
+    -r RATE   the mixing rate in Hz, 4000-28000 (16000 up to 8
+              channels, 11025 above): lower for a busy 68020, higher
+              on a 68030 or 68060
+    -s        no screen: one status line updated in place (the
+              position, pattern, row, speed, BPM, the first 8
+              channels' meters); the keys still work
+    -q        nothing on the terminal and no keys, for scripts
+    -K        print the default keys (the keys file's format)
+    -B SECS   measure: mix SECS seconds of FILE without playing them
+              and say how long it took (the replayer and the mixer)
 
 KEYS
-    q, Esc, Ctrl-C   stop
+    q, Esc           quit (Ctrl-C always quits)
     space            pause, and go on
-    n, p             the next, the previous position
-
-EFFECTS
-    0 arpeggio, 1 and 2 portamento up and down (to 113 and 856), 3 tone
-    portamento, 4 vibrato, 5 and 6 (3 and 4 with a volume slide), 7
-    tremolo, 9 sample offset, A volume slide, B position jump, C set
-    volume, D pattern break, F speed and tempo; E1 E2 fine portamento,
-    E3 glissando, E4 E7 vibrato and tremolo waveforms, E5 finetune, E6
-    pattern loop, E9 retrigger, EA EB fine volume slide, EC note cut,
-    ED note delay, EE pattern delay.
+    n, p             the next, the previous song
+    . , Right Left   the next, the previous pattern (position)
+    + = -            louder, softer
+    r                repeat: off, the list, the song
+    s                shuffle the list (from the next song)
+    Tab 1 2 3 ? F1   the next view; pattern, instruments, list, keys
+    Up Down k j      move in the list; Return plays the one chosen
+    g                the list: back to the song playing
+    [ ]              the channels shown in the pattern view
+    Every key can be changed in ~/.config/modplay/keys, written with
+    the defaults when it is missing: one "KEY ACTION" a line, <Up>
+    <Down> <Left> <Right> <Return> <Esc> <Tab> <Space> <F1>.. for
+    special keys, "KEY none" to take one away (the format of files(1)
+    and show(1)). A mistake in it is said when modplay ends.
 
 EXIT STATUS
-    0 played; 1 not a module it plays (also one whose samples are
-    over 1 MB); 2 no sound (no server, the channels in use, not
-    enough chip RAM).
+    0 everything played; 1 a file it could not play (it goes on with
+    the next); 2 no sound (no server, the channels in use, not enough
+    chip RAM).
 
 NOTES
-    Not done: E0 (the filter: the machine's), E8 and EF; 6- and
-    8-channel modules and other trackers' formats. ProTracker's
-    behaviour on broken modules is not copied: an arpeggio past the
-    period table plays its last note, a sample offset past the end
-    plays the loop (or silence). Each tick is applied within about
-    5 ms of its time (the system's 100 Hz tick); at 125 BPM, the usual
-    tempo, exactly on every second tick. Keys are felt within the
-    server's queue, about a third of a second. The whole module is
-    read into memory, its samples copied to chip RAM (at most 1 MB).
+    MOD: every ProTracker effect but E0, E8 and EF; FLT8 and tags not
+    known are refused.
+    MED: sample instruments (8- and 16-bit); synthetic, hybrid and
+    multi-octave instruments are silent, MIDI is ignored, as are hold
+    and decay (08) and the mix mode's commands but 2E. On Paula a
+    note above B-3 plays an octave lower (Paula cannot go faster).
+    S3M: Adlib instruments are silent. XM: version 1.04 files.
+    Impulse Tracker (.it) is not played. Samples are played as 8-bit
+    (16-bit ones by their high byte); the mixer does not interpolate.
+    Each tick sent to Paula is applied within about 5 ms of its time;
+    a mixed song's keys and screen are about 0.15 s ahead of the sound
+    heard. A module's file is read into memory whole (8 MB at most);
+    Paula's samples are copied to chip RAM (1 MB at most).
 
 SEE ALSO
-    play(1), sndd(8), docs/d40-sound.md
+    play(1), sndd(8), docs/d56-tracker-player.md, docs/d40-sound.md
