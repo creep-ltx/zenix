@@ -29,8 +29,8 @@ branch `intro`, 2026-11-14 (DESIGN D55 "As built": sizes, speed, tests).
 - **The kernel keeps the planes alive** while they are on show: a program cannot free them under the display, and when
   it dies the kernel hands them to displayd, which takes them off the glass and only then gives them back (section 6).
 - **Not on a graphics card** (D43): refused there with a reason (section 9).
-- **`show -s`** opens a picture on a screen of its own with its real palette and mode (HAM in full colour); `s` in
-  the window does the same. Off by default.
+- **`show PICTURE`** opens a picture on a screen of its own with its real palette and mode (HAM in full colour; the
+  default since 2026-11-17, `-s` still accepted); `show -w` opens the window, and `s` there switches to the screen.
 - **`zintro`**, the Zenix intro (section 13): a logo, copper bars, a starfield, a turning vector shape and a scroller,
   with a ProTracker module of our own through sndd; everything made by a script in the repository.
 
@@ -295,10 +295,10 @@ switch), so a later step may switch it for a screen. That needs the partner's Pi
   interlaced, a full list, about 90 KB; at most `SCR_BUDGET` 160 KB for all screens.
 - The kernel: about 850 bytes (section 6, DESIGN D55 "As built").
 
-## 11. `show -s`: a picture on its own screen
+## 11. `show`: a picture on its own screen (the default; `-w` the window)
 
-- `show -s FILE` opens the picture on a screen in its mode (lores or hires, interlaced, its planes, HAM6, HAM8, EHB)
-  and palette; `s` in the window does the same for the picture shown; on the screen `s`, `q`, Esc or a click go back
+- `show FILE` (or `-s`) opens the picture on a screen in its mode (lores or hires, interlaced, its planes, HAM6, HAM8, EHB)
+  and palette; `show -w FILE` opens the window instead, and `s` there does the same for the picture shown; on the screen `s`, `q`, Esc or a click go back
   to the window; `n`, `p` show the next and the previous picture on the screen; the arrows move a larger picture.
 - The planes are copied row by row into chip RAM in the screen's interleaved layout (each plane's row padded to 8
   bytes, the 64-bit fetch's alignment, on every chipset: a 352-pixel row is 48 bytes); a picture narrower or lower than the screen sits top left on
@@ -310,7 +310,7 @@ switch), so a later step may switch it for a screen. That needs the partner's Pi
   decode.
 - Larger pictures: the top left, the arrows move it (lines exactly, whole frame lines when interlaced; across in steps
   of 8 bytes: 64 lores pixels).
-- Refused, said in the window: 24-bit pictures (no native mode), super-hires, RTG.
+- Refused, then the window is used and its title says "(no screen of its own: ...)", also when the screen was the default: 24-bit pictures (no native mode), super-hires, RTG.
 
 ## 12. Tests
 
@@ -324,7 +324,7 @@ switch), so a later step may switch it for a screen. That needs the partner's Pi
   the screen in front; the close; `kill -9`: the desktop back at once (`GEV_GONE`) and the chip RAM back.
 - **`CON_VBLANK`**: 100 frames counted against the E-clock (PAL 50 a second within 2%), a signal ending a wait,
   only-ask.
-- **`show -s`** (in show-test): ham.iff (HAM6) on its own screen, every pixel of a sample equal to the generator's own
+- **`show`** (in show-test; plain `show ham.iff`, `-s` for HAM8, `files` starting it): ham.iff (HAM6) on its own screen, every pixel of a sample equal to the generator's own
   HAM decode; HAM8 likewise; `s` back to the window.
 - **`tools/intro-test.sh`** (STOCK): `zintro` for 20 s: the logo's pixels in the screenshot, sndd's state saying a
   module plays, the frames it drew and missed, Esc: the desktop back; again, ended by a click; again, killed: the
@@ -369,7 +369,7 @@ overscan and dual-playfield screens, a screen on a graphics card (section 9), se
 - **The approval's reading:** both reviewers read "it waits for D50's full-screen call" as waiting for your answer to
   D50 question 1 (a screen of its own for pictures). The main session read it as the protocol request. Built on
   branch `intro`, not merged: yours to say.
-- `show`'s own screen is an option (`-s`, `s`); the default is still the window (D50 question 1).
+- `show`'s own screen is the default since 2026-11-17 (D50 question 1 answered); `-w` opens the window.
 - Left Amiga+N for the desktop (AmigaOS's "Workbench to front"), Left Amiga+M as well while a screen is in front;
   zdesk keeps Left Amiga+M for minimise on the desktop.
 

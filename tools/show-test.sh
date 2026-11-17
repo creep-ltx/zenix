@@ -14,8 +14,8 @@
 #    the nearest pen;
 #    gg: the first again; a click on the picture: the next (broken.iff); the keys file written with the built-in keys
 #  - the keys file changed (a key added, a bad line): the bad line said, the new key works; q quits
-#  - files on /tests/pics, Return on bars.iff: files starts /bin/show (no terminal), and its window shows the blocks
-#  - show -s (DESIGN D55 section 11): ham.iff on a screen of its own, every second pixel of every fourth line the
+#  - files on /tests/pics, Return on bars.iff: files starts /bin/show (no terminal), and it shows the blocks on a screen of its own
+#  - show with no option (DESIGN D55 section 11; its own screen is the default, show -w the window): ham.iff on a screen of its own, every second pixel of every fourth line the
 #    generator's own HAM6 decode (tools/screen-test.py ham); s: the window again; a HAM8 picture likewise; Esc
 # Printed: the program's size and memory (ps), the rendering's time (emulator figures).
 cd "$(dirname "$0")/.." || exit 1
@@ -54,7 +54,7 @@ send rm -rf $HOME/.config/show; echo acceleration none > /etc/zdesk/mouse; zdesk
 sleep 8
 send w() { n=0; until grep -q "$1" /tmp/s.log || [ $n -gt 90 ]; do sleep 1; n=$((n+1)); done; echo rdy-$2; }\r
 sleep 2
-send show -v /tests/pics/bars.iff > /tmp/s.log 2>&1 &\r
+send show -w -v /tests/pics/bars.iff > /tmp/s.log 2>&1 &\r
 sleep 2
 send w 'shown bars' $((40+1))\r
 wait rdy-41 120
@@ -77,7 +77,7 @@ typ q; echo "sleep 3"
 cat <<'EOS'
 send echo st-12; pgrep show || echo show-gone; grep -c . $HOME/.config/show/keys; grep -x 'gg first' $HOME/.config/show/keys | cat\r
 sleep 2
-send printf 'x next\\nZ frob\\n' >> $HOME/.config/show/keys; show -v /tests/pics/bars.iff > /tmp/s.log 2>&1 &\r
+send printf 'x next\\nZ frob\\n' >> $HOME/.config/show/keys; show -w -v /tests/pics/bars.iff > /tmp/s.log 2>&1 &\r
 sleep 12
 EOS
 st 13 4
@@ -94,8 +94,9 @@ sleep 2
 send echo st-16; ps | grep show | cat; ls -l /bin/show\r
 sleep 3
 EOS
+typ q; echo "sleep 3"; typ q; echo "sleep 3"       # off the screen, then quit show (files started it)
 cat <<'EOS'
-send show -s -v /tests/pics/ham.iff > /tmp/s.log 2>&1 &\r
+send show -v /tests/pics/ham.iff > /tmp/s.log 2>&1 &\r
 sleep 14
 shot hamscr
 EOS
@@ -179,15 +180,19 @@ after 13 | grep -q '^show: say: keys: line [0-9]*: unknown action frob'; check "
 after 14 | grep -q '^show: picture broken.iff'; check "... its new key x: next" $?
 s15=$(after 15); echo "$s15" | grep -q '^files: start /bin/show /tests/pics/bars.iff' && echo "$s15" | grep -qx 'no-term'
 rc=$?; check "files, Return on bars.iff: /bin/show started, no terminal ($(echo $s15))" $rc
-blocks fromfiles "" "" 77 62 > "$OUT/q4"; rc=$?; check "... its window shows the blocks ($(cat "$OUT/q4"))" $rc
+spec=""; k=0; for c in $FLAT; do                  # bars.iff on a screen of its own: lores, 8 blocks of 40 x 64 a row
+    [ ${#c} = 3 ] && c=${c:0:1}${c:0:1}${c:1:1}${c:1:1}${c:2:1}${c:2:1}
+    spec="$spec $(((k % 8) * 40 + 20)),$(((k / 8) * 64 + 32)),$c"; k=$((k + 1)); done
+python3 tools/screen-test.py px "$OUT/p-fromfiles.png" "$OUT/geom" 320 $spec > "$OUT/q4"; rc=$?
+check "... shows the picture on a screen of its own: the 16 blocks in their pens ($(cat "$OUT/q4"))" $rc
 after 18 | grep -q '^show: screen 320 x 64, 6 planes (HAM6)' && after 18 | grep -q '^show: screen closed'
 rc=$?; python3 tools/screen-test.py ham "$OUT/p-hamscr.png" "$OUT/geom" 6 > "$OUT/q5"; r2=$?
-check "show -s: ham.iff on a screen of its own, HAM6 in full colour ($(cat "$OUT/q5")); s: back to the window" $((rc | r2))
+check "show (no option): ham.iff on a screen of its own by default, HAM6 in full colour ($(cat "$OUT/q5")); s: back to the window" $((rc | r2))
 python3 tools/dpy-test.py same "$OUT/p-hamwin.png" "$OUT/p-hamscr.png" "$OUT/geom" > /dev/null; r3=$?
 [ $r3 != 0 ]; check "... the window again after s (not the screen)" $?
 after 19 | grep -q '^show: screen 320 x 64, 8 planes (HAM8)'; rc=$?
 python3 tools/screen-test.py ham "$OUT/p-ham8scr.png" "$OUT/geom" 8 > "$OUT/q6"; r2=$?
-check "show -s: a HAM8 picture on its own screen ($(cat "$OUT/q6")); Esc: back" $((rc | r2))
+check "show -s (the default, still accepted): a HAM8 picture on its own screen ($(cat "$OUT/q6")); Esc: back" $((rc | r2))
 echo "emulator figures (FS-UAE, stock A1200 + 4 MB fast; not a real machine's):"
 grep -a '^show: rendered' "$L" | sort -u | sed 's/^/  /'
 after 16 | grep -a 'show' | sed 's/^/  /'

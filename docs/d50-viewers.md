@@ -7,7 +7,9 @@ new message, port or system call.
 
 ## 1. In plain words
 
-- **`show PICTURE`** opens a window on Zenix Desktop with the picture in it. The file view (`files`, D48) starts it
+- **`show PICTURE`** opens the picture on a screen of its own (decided 2026-11-17, "just as on Amiga os"; D55),
+  `show -w PICTURE` in a window on Zenix Desktop; a picture that cannot have its own screen (24-bit, super-hires, over
+  32 colours on OCS/ECS, a graphics card) falls back to the window and the title says why. The file view (`files`, D48) starts it
   for a picture (Return or a double click), so pictures no longer ask "Open with:".
 - **The Amiga's own format first:** IFF ILBM, as Deluxe Paint, Brilliance, Personal Paint, ArtPRO and every grabber
   wrote it: 1 to 8 planes (2 to 256 colours), Extra Half-Brite, HAM6, HAM8, 24-bit (24 planes), lores, hires,
@@ -41,7 +43,7 @@ editor), so the viewer is `show`, as in "show me the picture"; a later text or s
   (D13's rule: no copies). `files` behaves as before.
 
 **`files`' open rule** (D48 section 5, a row added): a file whose first bytes say IFF ILBM (`FORM` .... `ILBM`) or GIF
-(`GIF87a`, `GIF89a`) is opened with `/bin/show PATH`, started bare (no terminal: `show` draws its own window), in the
+(`GIF87a`, `GIF89a`) is opened with `/bin/show PATH`, started bare (no terminal: `show` opens its own screen, or its own window when it cannot), in the
 folder shown; without `/bin/show` it asks "Open with:" as before. `i` still views it with `less`.
 
 ## 3. The formats
@@ -130,10 +132,10 @@ design of its own, proposed here, not built):
 - the cost: displayd about 1.5-2.5 KB of code (an estimate), the picture's chip RAM (a 320 x 256 HAM8 picture 80 KB,
   640 x 512 x 8 320 KB), a protocol growth (frozen-interfaces.md), two reviews (it changes what the screen shows and
   where keys go).
-Then `show` would offer both: the window by default (the desktop stays in view), `Return` or a menu item for the
+Then `show` would offer both: (first plan: the window by default; **decided 2026-11-17: the screen is the default**, `-w` the window) `Return` or a menu item for the
 picture's own screen with its real colours. **Question for the partner** (section 9, 1). Until then: the window.
 **Built since** (DESIGN D55, docs/d55-screens.md, branch intro 2026-11-14): `DPY_SCREEN`, and in `show` as an option
-(`-s`, the key `s`, the menu's Own screen), the window still the default.
+(`-s`, the key `s`, the menu's Own screen); since 2026-11-17 the screen is the default and `-w` opens the window.
 
 ## 5. Keys and the mouse
 
@@ -214,7 +216,7 @@ for the new size.
 
 1. **A screen of its own for pictures** (section 4: a protocol request, about 2 KB in displayd, two reviews): the
    real palette, HAM and the picture's mode, the way AmigaOS viewers show them, while the window stays the quick
-   look. Default: the window only, in the desktop's pens, dithered.
+   look. **Answered 2026-11-17: "Default I think, just as on Amiga os."** the screen is the default, `-w` the window.
 2. **One more format later:** PNG (today's screenshots and the web), JPEG (photos), both, or neither? Default:
    ILBM and GIF; PNG and JPEG would be decoders loaded on demand (section 3).
 3. **The name `show`** (not `view`, which is vi's read-only mode on Unix). Default: `show`.
