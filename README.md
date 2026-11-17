@@ -25,6 +25,11 @@ hello from Zenix
 
 - 🧠 **No MMU needed.** Any Amiga with a 68020 or better can run it, a stock A1200 included. Programs are relocated as they
   load, and a crashing program is killed and its memory freed while the rest keep running.
+- 🛡️ **Memory protection where there is an MMU (optional).** On a 68030, 68040 or 68060 with a working MMU,
+  `zenixboot MMU=ON` gives every program a user runs a view of only its own memory, its code read-only: a stray write
+  ends that program with a message naming whose memory it hit, and the kernel, the hardware and other programs stay
+  safe. The system's own servers keep the whole view. Off by default until it has run on real hardware
+  ([docs/d41-memory-protection.md](docs/d41-memory-protection.md)); a 68020 or the PiStorm runs exactly as before.
 - ✉️ **Built on messages, like Exec and QNX.** The disk and the filesystems are separate servers. A call to one passes
   a pointer, not a copy, so reading a file copies the data exactly once.
 - ⚖️ **Fair and responsive.** 32 priority levels with `nice`, 50 ms time slices, and priority inheritance: a server
@@ -70,8 +75,9 @@ For a PiStorm SD card, `tools/mkdualcard.sh` builds a card image with the boot m
 See [docs/pi-first-boot.md](docs/pi-first-boot.md).
 
 > ⚠️ **Not locked as shipped.** Root logs in by itself on console 1 and nobody has a password. Set them with `passwd`
-> and remove `/etc/autologin`. And with no MMU, permissions guard against mistakes, not against a program written to
-> cheat ([docs/limits.md](docs/limits.md)).
+> and remove `/etc/autologin`. And without memory protection (no MMU, or `MMU=ON` not given), permissions guard against
+> mistakes, not against a program written to cheat ([docs/limits.md](docs/limits.md)); even with it, the system's
+> servers and root stay trusted (d41 section 2).
 
 ## Read more
 
