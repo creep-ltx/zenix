@@ -248,7 +248,8 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
 - **D41 (memory protection, branch `mmu`, 2026-11-12):** bootinfo `kopts` `KOPT_MMU_ON` 4 and `KOPT_MMU_OFF` 8 (both:
   off), zenixboot's `MMU=ON|OFF`; the kernel file's default options, a long after the eight bytes `ZKOPTDEF` (its bit
   4: on wherever the probe passes; bit 16, `KOPT_MMU_AUTO`, since 2026-11-17 in every build: on where the CPU is known
-  to have an MMU; neither: off; `tools/kopts.py MMU=ON|OFF|AUTO`); the boot line's start `mmu: memory protection on:` and the fault line's
+  to have an MMU; neither: off; `tools/kopts.py MMU=ON|OFF|AUTO`: a kopts.py older than 2026-11-17 clears bit 4 only,
+  so its `MMU=OFF` leaves a newer kernel file on AUTO; use the tool of the same tree); the boot line's start `mmu: memory protection on:` and the fault line's
   `memory protection:` (programs and tests read them: `crash write`, `tools/mmu-test.sh`); exit status 139 for a
   protection fault, as for every fault. No system call, message, struct or file format changes.
 - **D43 (RTG, branch `rtg`, 2026-11-12):** the hardware table grows at its end: `struct hwfb` (32 bytes) at offset 408

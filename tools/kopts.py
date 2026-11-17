@@ -2,17 +2,21 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Set the kernel's default boot options in a kernel file (DESIGN D41 section 13).
 
-usage: tools/kopts.py KERNEL [MMU=ON|MMU=OFF]
+usage: tools/kopts.py KERNEL [MMU=ON|MMU=OFF|MMU=AUTO]
 
 The kernel keeps its defaults in a long after the eight bytes "ZKOPTDEF" (kernel/mmu.c, kopt_default); a bit given at
 boot in bootinfo's kopts (zenixboot MMU=ON|OFF) wins over it. A floppy's bootblock passes no options, so this is how a
-floppy (and the emulator tests, tools/mmu-test.sh) starts with memory protection on. Without a word, it says what the
-file holds. The marker must be in the file exactly once."""
+floppy (and the emulator tests, tools/mmu-test.sh) starts with memory protection on or off. Every build holds MMU=AUTO
+(D41 section 19): on where the CPU is known to have an MMU, an LC or EC 68040/68060 left alone. MMU=ON: every CPU whose
+MMU passes the boot's probe, the LC and EC parts tried too. MMU=OFF: off unless zenixboot MMU=ON asks. Without a word,
+it says what the file holds. The marker must be in the file exactly once. A kopts.py older than 2026-11-17 knows only
+bit 4: its MMU=OFF leaves a newer kernel on AUTO, so use the tool of the kernel's own tree."""
 import struct
 import sys
 
 MARK = b"ZKOPTDEF"
 KOPT_MMU_ON = 4
+KOPT_MMU_AUTO = 16
 
 
 def main():
@@ -27,15 +31,18 @@ def main():
     (v,) = struct.unpack(">I", data[at:at + 4])
     if len(sys.argv) == 3:
         word = sys.argv[2].upper()
+        v &= ~(KOPT_MMU_ON | KOPT_MMU_AUTO)
         if word == "MMU=ON":
             v |= KOPT_MMU_ON
-        elif word == "MMU=OFF":
-            v &= ~KOPT_MMU_ON
-        else:
-            sys.exit(f"kopts: {sys.argv[2]}: say MMU=ON or MMU=OFF")
+        elif word == "MMU=AUTO":
+            v |= KOPT_MMU_AUTO
+        elif word != "MMU=OFF":
+            sys.exit(f"kopts: {sys.argv[2]}: say MMU=ON, MMU=OFF or MMU=AUTO")
         data[at:at + 4] = struct.pack(">I", v)
         open(path, "wb").write(data)
-    print(f"kopts: {path}: memory protection {'on' if v & KOPT_MMU_ON else 'off'} by default (0x{v:x})")
+    how = ("on wherever the MMU works" if v & KOPT_MMU_ON else
+           "on where the CPU is known to have an MMU" if v & KOPT_MMU_AUTO else "off")
+    print(f"kopts: {path}: memory protection {how} by default (0x{v:x})")
 
 
 if __name__ == "__main__":

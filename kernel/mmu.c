@@ -24,6 +24,8 @@ u32 mmu_regs_save(struct mregs *m);             /* the registers as they are; -1
 void mmu_ttr(const u32 *v, u32 fam);            /* the windows: 040/060 DTT0, DTT1, ITT0 = v[0..2]; 030 TT0 = v[0] */
 void mmu_flush(u32 fam);                        /* PFLUSHA */
 u32 mmu_probe_hw(const struct mregs *m, u32 t, u32 r);
+u32 mmu_fpu(void);                              /* 1: an FPU (a full 68040) */
+long cpu_pcr(void);                             /* start.S: the 68060's PCR, -1 on a 68040 */
 
 u8 mmu_on;
 static u8 fam;                  /* 1: 68030; 2: 68040/68060 */
@@ -218,6 +220,21 @@ __asm__(
     "    move.l  %d2,%d0\n"
     "    movem.l (%sp)+,%d2-%d4/%a2-%a5\n"
     "    rts\n"
+    /* u32 mmu_fpu(void): 1 if an FRESTORE of a null frame runs (the CPU has an FPU: a full 68040; the FPU is left in
+     * its reset state, so nothing AmigaOS left pending in it can raise an exception later), 0 if it traps (line F: a
+     * 68LC040 or 68EC040, which nothing else tells apart; MC68040UM appendices A and B) */
+    "mmu_fpu:\n"
+    "    movem.l %d2/%a2-%a3,-(%sp)\n"
+    "    moveq   #0,%d2\n"
+    "    lea     1f(%pc),%a0\n"
+    "    bsr     mt_on\n"
+    "    clr.l   -(%sp)\n"
+    "    .word   0xF35F\n"               /* frestore (sp)+: the null state (mt_trap drops the long on a trap) */
+    "    moveq   #1,%d2\n"
+    "1:  bsr     mt_off\n"
+    "    move.l  %d2,%d0\n"
+    "    movem.l (%sp)+,%d2/%a2-%a3\n"
+    "    rts\n"
     /* void mmu_ttr(const u32 *v, u32 fam): the windows (no ATC flush: a window match wins over the ATC) */
     "mmu_ttr:\n"
     "    move.l  4(%sp),%a0\n"
@@ -250,8 +267,12 @@ __asm__(
     "    .popsection\n");
 
 /* The kernel's default options (D41 section 13): tools/kopts.py finds the marker in a kernel file and sets the long
- * after it. 0 in every build: protection off unless zenixboot MMU=ON asks. */
-__attribute__((used, aligned(4))) static volatile const u32 kopt_default[3] = { 0x5A4B4F50u, 0x54444546u, 0 };
+ * after it. KOPT_MMU_AUTO in every build (D41 section 19, the partner 2026-11-17): protection on wherever the CPU is
+ * known to have an MMU (a 68030 whose MMU passes the probe, a 68040 with an FPU, a 68060 whose PCR says 0x0430); an LC
+ * or EC 040/060, which only the MMU's own instructions tell apart, only with MMU=ON. 0: off unless MMU=ON;
+ * KOPT_MMU_ON: on wherever the probe passes, LC and EC parts tried too. */
+__attribute__((used, aligned(4))) static volatile const u32 kopt_default[3] = { 0x5A4B4F50u, 0x54444546u,
+                                                                               KOPT_MMU_AUTO };
 
 /* ---- the tree ---- */
 KMMU static u32 *pte(u32 a)          /* the page descriptor of a, or 0 where the pools have no page table */
@@ -481,7 +502,9 @@ KINIT void mmu_setup(const struct bootinfo *bi)
 {
     const struct hwinfo *hw = (const struct hwinfo *)HWINFO_ADDR;
     u32 k = bi->kopts;
-    int want = (k & KOPT_MMU_OFF) ? 0 : (k & KOPT_MMU_ON) ? 1 : (kopt_default[2] & KOPT_MMU_ON) != 0;
+    u32 d = kopt_default[2];
+    /* 0 not asked; 1 asked (MMU=ON, or a kernel file made so): every part tried; 2 the default: known MMUs only */
+    int want = (k & KOPT_MMU_OFF) ? 0 : (k & KOPT_MMU_ON) || (d & KOPT_MMU_ON) ? 1 : (d & KOPT_MMU_AUTO) ? 2 : 0;
     if (!(bi->attn & 0x8C))
         return (void)off_why("no MMU on a 68020");
     if (hw->magic != HWINFO_MAGIC)
@@ -493,6 +516,11 @@ KINIT void mmu_setup(const struct bootinfo *bi)
     if (fam == 2 && !want)              /* a 68040/060 not asked: no MMU register read (an EC060 has none: audit A6-11);
                                          * the 68030's cleanup below runs on every boot */
         goto not_asked;
+    if (fam == 2 && want == 2) {        /* the default on a 040/060: only a part known to have an MMU is touched */
+        long pcr = cpu_pcr();
+        if (pcr != -1 ? (u32)pcr >> 16 != 0x0430 : !mmu_fpu())
+            return (void)off_why("an LC or EC CPU (MMU=ON tries it)");
+    }
     int miss = mmu_regs_save(&off) != 0;
     /* the clean state, translation off: the loader's handoff did that on a 040/060 (D37 then set the windows); a 68030's
      * translation an AmigaOS tool left on (Enforcer, CPU FASTROM) is switched off here, protection or not, its tables
@@ -511,11 +539,11 @@ KINIT void mmu_setup(const struct bootinfo *bi)
     }
     if (!want)
 not_asked:
-        return (void)off_why(k & KOPT_MMU_OFF ? "MMU=OFF" : "not asked for (zenixboot MMU=ON)");
+        return (void)off_why(k & KOPT_MMU_OFF ? "MMU=OFF" : "not asked for (the kernel file's default)");
     if (!(CIAA(0) & 0x40))
         return (void)off_why("mouse button held");
     if (miss)
-        return (void)off_why("no working MMU (a register is missing)");
+        return (void)off_why("no MMU (a register is missing)");
 
     /* the kernel's windows (section 4). A page's cache mode is its window's: the first 16 MB inhibited, the fast
      * block D37's mode, so the kernel and a program never see one line two ways; with the data cache off everything is
@@ -607,14 +635,14 @@ not_asked:
         mmu_regs_load(&off);
         mem_free(tblk);
         tblk = 0;
-        kprintf("mmu: memory protection off: no working MMU (the probe gave %u)\n", res);
+        kprintf("mmu: memory protection off: no MMU (the probe found none: %u)\n", res);
         return;
     }
     if (mmu_regs_load(&on)) {
         mmu_regs_load(&off);
         mem_free(tblk);
         tblk = 0;
-        return (void)off_why("no working MMU (a register is missing)");
+        return (void)off_why("no MMU (a register is missing)");
     }
     mode = 0;
     mmu_arm(fam);                       /* the table to the span's functions, and mmu_on set: together, only here */
