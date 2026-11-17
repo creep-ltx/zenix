@@ -187,16 +187,16 @@ ARGUMENTS
                 under Emu68. The kernel finds it in bootinfo +0x84; the
                 floppy has no options (hold the left mouse button while
                 Zenix starts for the same as OFF)
-    MMU=ON      on a 68030, 68040 or 68060 with a working MMU: memory
-                protection (DESIGN D41): a program may touch only its own
-                memory; a stray read or write ends it with a line saying
-                where it went. Off by default until it has been tried on
-                real hardware. OFF: off, also when the kernel was made to
-                default to on (tools/kopts.py). On an LC or EC CPU the
-                kernel tries the MMU first; an EC part that has none is
-                refused, but the manuals call the instructions it tries
-                undefined there. The left mouse button held at boot turns
-                it off too
+    MMU=ON      memory protection (DESIGN D41): a program may touch only
+                its own memory; a stray read or write ends it with a line
+                saying where it went. On by default where the CPU is
+                known to have an MMU (a 68030 whose MMU works, a 68040
+                with an FPU, a full 68060); ON also tries an LC or EC
+                68040/68060, which nothing else tells apart: an EC part
+                that has no MMU is refused, but the manuals call the
+                instructions the kernel tries undefined there. OFF: off.
+                The left mouse button held at boot turns it off too.
+                Without the word: the kernel's default (tools/kopts.py)
     RTG         the desktop on a graphics card (DESIGN D43): the front
                 screen, if it is a Picasso96 screen of 16, 24 or 32 bits
                 (the Workbench on an RTG card or the PiStorm's VideoCore),
@@ -220,8 +220,10 @@ EXAMPLES
         Try it without leaving AmigaOS.
     Zenix (no data cache) = run SYS:zenixboot DCACHE=OFF
         A line for S:BootMenu.conf (bootmenu(8)).
+    Zenix (unprotected) = run SYS:zenixboot MMU=OFF
+        Memory protection off, on a CPU with an MMU.
     Zenix (protected) = run SYS:zenixboot MMU=ON
-        Memory protection, on a CPU with an MMU.
+        Memory protection also on an LC or EC 68040/68060.
     zenixboot CHECK RTG
         From the Workbench's Shell: what the RTG screen is, and whether
         the desktop could use it, without leaving AmigaOS.

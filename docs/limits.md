@@ -16,8 +16,9 @@ or the kernel and bring the system down. Users, groups and file permissions (DES
 protection against honest mistakes, not against a program written to cheat - the same trust level as AmigaOS.
 The documentation must keep saying this.
 
-**The exception: memory protection (DESIGN D41, built 2026-11-12, off by default).** On a 68030, 68040 or 68060 with a
-working MMU, `zenixboot MMU=ON` makes every program a user runs see only its own memory (its block, its regions, its
+**The exception: memory protection (DESIGN D41, built 2026-11-12, on by default since 2026-11-17).** On a 68030, 68040
+or 68060 with a working MMU (an LC or EC 68040/68060 only with `zenixboot MMU=ON`; d41 section 19), every program a
+user runs sees only its own memory (its block, its regions, its
 code read only): a stray read or write ends it with a line naming whose memory it was, and nothing else is damaged.
 Still unprotected then: the system processes (the servers the service manager starts, reserved ports, drivers, a
 display server, a mount's server), which are trusted as before; the kernel itself; a program's own memory (its stack

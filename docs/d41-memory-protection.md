@@ -1,7 +1,8 @@
-# D41: optional memory protection on CPUs with an MMU
+# D41: memory protection on CPUs with an MMU
 
 Revision 2, 2026-11-12: revision 1 after its two independent design reviews, every finding folded in or answered
-(section 17); built the same day on branch `mmu` (section 15). Roadmap block 6, "optional
+(section 17); built the same day on branch `mmu` (section 15). **Revision 3, 2026-11-17: on by default** where the CPU
+is known to have an MMU (the partner's order of that day; section 19, branch `mmudef`). Roadmap block 6, "optional
 memory protection on CPUs with an MMU", next in the order of work after sound (approved 2026-10-25); the details are
 delegated (docs/decisions.md, 2026-11-12). Sources: the MC68030, MC68040 and MC68060 user's manuals (the knowledge
 base's `manuals/`; pages named where a fact is used), the knowledge base's `amiga/emu68-mmu.md` (Emu68 has no 68k MMU)
@@ -18,9 +19,11 @@ another program, free memory, the custom chips, address 0) stops the program at 
 went, and the program is killed as for any other fault (exit status 139, SIGSEGV's); everything else goes on as if
 nothing happened. Writes into a program's own shared code (D13) are stopped too.
 
-It is optional: **off unless asked for** until the partner has tried it on the 1260 (section 13): `zenixboot MMU=ON`
-switches it on, `MMU=OFF` (or the left mouse button held at boot, as for D37) off. Machines without an MMU (the stock
-A1200's 68EC020, a 68EC030, a 68EC040/EC060, the PiStorm's Emu68) run exactly as before, and pay nothing.
+It is **on by default** since 2026-11-17 (section 19) on a 68030 whose MMU works, a full 68040 and a full 68060;
+`zenixboot MMU=OFF` (or the left mouse button held at boot, as for D37) switches it off, and `MMU=ON` also tries an LC
+or EC 68040/68060, which nothing safe tells apart (section 19). Machines without an MMU (the stock A1200's 68EC020, a
+68EC030, a 68EC040/EC060, the PiStorm's Emu68) run exactly as before, and pay nothing; the boot log says once, in a
+plain line, why protection is off.
 
 ## 2. What it protects, and what it does not (the honest limits)
 
@@ -57,21 +60,21 @@ A1200's 68EC020, a 68EC030, a 68EC040/EC060, the PiStorm's Emu68) run exactly as
 | CPU | MMU | Zenix |
 |---|---|---|
 | 68EC020 / 68020 | none (a 68851 beside a 68020 is rare and has its own formats) | nothing changes |
-| 68030 | yes (PMMU, MC68030UM section 9) | protection, if switched on |
+| 68030 | yes (PMMU, MC68030UM section 9) | protection (the default) |
 | 68EC030 | none (the access control registers sit where TT0/TT1 are) | found by the probe, nothing changes |
-| 68040 | yes (MC68040UM section 3) | protection |
-| 68LC040 | yes (no FPU) | protection |
-| 68EC040 | none | found by the probe |
-| 68060 | yes (MC68060UM section 4) | protection |
-| 68LC060 | yes (no FPU) | protection |
-| 68EC060 | none: `URP`, `SRP` and `TCR`'s E bit "are not supported and must not be used" (MC68060UM 1.1.2.2) | found by the probe |
+| 68040 | yes (MC68040UM section 3) | protection (the default: its FPU answers) |
+| 68LC040 | yes (no FPU) | protection with `MMU=ON` (section 19: not told from an EC040) |
+| 68EC040 | none | left alone; with `MMU=ON` found by the probe |
+| 68060 | yes (MC68060UM section 4) | protection (the default: `PCR` 0x0430) |
+| 68LC060 | yes (no FPU) | protection with `MMU=ON` (`PCR` 0x0431, as the EC060) |
+| 68EC060 | none: `URP`, `SRP` and `TCR`'s E bit "are not supported and must not be used" (MC68060UM 1.1.2.2) | left alone, no MMU register touched; with `MMU=ON` found by the probe |
 | Emu68 (the PiStorm) | none: Emu68 stores `TC` with its E bit cleared on purpose and ignores PFLUSH (knowledge base `amiga/emu68-mmu.md`) | never tried: `hwinfo`'s `HW_DT` says Emu68 |
 
 The EC parts must not be given the MMU's instructions (MC68060UM 1.1.2.2: `PFLUSH`, `URP`, `SRP` and `TCR`'s E bit
 "must not be used" on the EC060; MC68040UM appendix B: `PFLUSH`/`PTEST` on the EC040 give "an indeterminate result").
 The 060's `PCR` says 0x0430 for a full 68060 and 0x0431 for both the LC and the EC060, and the 040 has no identity
 register at all, so an LC and an EC part can only be told apart by trying. That is done only when `MMU=ON` asked for it
-(the risk is written here and in zenixboot's page): AttnFlags cannot tell an EC part from a full one, so the kernel
+(the risk is written here and in zenixboot's page; the default leaves a part without an FPU alone, section 19): AttnFlags cannot tell an EC part from a full one, so the kernel
 **tests the MMU it is about to use** (`mmu_probe`,
 section 12): with its real tables built, one test page is mapped onto another page and one is left invalid; with the
 illegal-instruction, line-F, access-fault and MMU-configuration (030 vector 56) vectors caught, translation is switched
@@ -332,8 +335,9 @@ After `cache_setup` (D37), with interrupts masked, before any process exists: `m
    aligned. If not: everything put back, the tables freed, `MEM_USER` means nothing.
 4. The log lines (the kernel prints them; `%u` KB rounded up):
    `mmu: memory protection on: 68060, 4 KB pages, 68 KB of tables`
-   `mmu: memory protection off: not asked for (zenixboot MMU=ON)` (or `MMU=OFF`, `mouse button held`,
-   `no MMU on a 68020`, `Emu68`, `no hardware table`, `no working MMU (the probe gave N)`, `no working MMU (a register is missing)`, `a board above 16 MB at ADDR`,
+   `mmu: memory protection off: MMU=OFF` (or `not asked for (the kernel file's default)`, `mouse button held`,
+   `no MMU on a 68020`, `Emu68`, `no hardware table`, `an LC or EC CPU (MMU=ON tries it)`,
+   `no MMU (the probe found none: N)`, `no MMU (a register is missing)`, `a board above 16 MB at ADDR`,
    `out of memory for the tables`)
 
 ## 13. The switch, and the default
@@ -342,14 +346,15 @@ After `cache_setup` (D37), with interrupts masked, before any process exists: `m
   wins. zenixboot's
   new keyword `MMU=ON|OFF` sets them (an unknown word is an error before anything is loaded, as `DCACHE=`). Neither
   bit (every older loader, the floppy's bootblock): the kernel's default.
-- **The kernel's default is off** (decided here, delegated, recorded in docs/decisions.md): protection has never
-  run on a real 68030/040/060, and a wrong descriptor would stop the machine at boot. **It needs the partner's look
-  on the 1260 before it is turned on by default**: then one word changes (`kopt_default`).
+- **The kernel's default** was off until 2026-11-17 (protection had never run on a real 68030/040/060); since then
+  it is `KOPT_MMU_AUTO` (16): on where the CPU is known to have an MMU (section 19), the partner's order of
+  2026-11-17 (docs/decisions.md), tested in two emulators on every CPU model they have before the 1260 has seen it.
 - **The kernel's default options**, `kopt_default`, are a long in the kernel image after the eight bytes
-  `ZKOPTDEF`; `tools/kopts.py FILE MMU=ON|OFF` sets it in a kernel file (once, found by the marker). The tests use it
-  to boot FS-UAE from the floppy with protection on; it is also how a floppy, which has no options, can be made to
-  start with it. The bits in `kopts` win over the default; the mouse button wins over both (and also turns D37's data
-  cache off: a boot with the cache on and protection off needs `MMU=OFF`, or no `MMU=ON`). `kopts.py` works on an
+  `ZKOPTDEF`; `tools/kopts.py FILE MMU=ON|OFF|AUTO` sets it in a kernel file (once, found by the marker): 4 on wherever
+  the probe passes (LC and EC parts tried), 16 the default, 0 off. The tests use it to boot the emulators from the
+  floppy with protection off or forced on; it is also how a floppy, which has no options, can be made to start
+  without it. The bits in `kopts` win over the default; the mouse button wins over both (and also turns D37's data
+  cache off: a boot with the cache on and protection off needs `MMU=OFF`). `kopts.py` works on an
   unpacked kernel file only (not the demo floppy's packed one), and a kernel changed so is not one a signed update
   carries: test builds and hand-made floppies only.
 
@@ -486,16 +491,147 @@ frozen-interfaces.md and the code; their findings and what was done:
 
 ## 18. The first run on the Apollo 1260
 
-0. The option needs this zenixboot on the card (a new zenixboot is copied by hand, zenixboot(8)). Nothing changes
-   without `MMU=ON`: the boot log says `mmu: memory protection off: not asked for (zenixboot MMU=ON)`.
-1. A line in `S:BootMenu.conf`: `Zenix (protected) = run SYS:zenixboot MMU=ON`. Boot it. `dmesg | grep -e mmu -e
-   cache` must show `mmu: memory protection on: 68060, 4 KB pages, ... KB of tables` and D37's two cache lines as
-   before. A photo of the screen if it stops at boot: then the usual line (no `MMU=ON`) boots as before.
+0. Since revision 3 protection is on by default (section 19), so before the new kernel goes on the card, add a way
+   back: a line in `S:BootMenu.conf`, `Zenix (unprotected) = run SYS:zenixboot MMU=OFF` (this zenixboot on the card,
+   copied by hand, zenixboot(8)); holding the left mouse button while Zenix starts does the same.
+1. Boot the usual line. `dmesg | grep -e mmu -e cache` must show `mmu: memory protection on: 68060, 4 KB pages, ...
+   KB of tables` and D37's two cache lines as before. (If the 1260's CPU is a 68LC060 the line says `an LC or EC CPU
+   (MMU=ON tries it)`: then a line with `MMU=ON` tries it.) A photo of the screen if it stops at boot: then the
+   unprotected line boots as before.
 2. `crash write 0x1000; echo $?` must print the protection line and 139; `crash victim 30 &`, then
    `crash write ADDR` with the address it said: the line names the victim, and 30 s later the victim says "intact".
 3. Daily things with it on: a login on two consoles, `ls -laR / > /dev/null` timed three times (compare with step 1 of
    D37 section 9: the cost of the switches), the desktop (`zdesk`), a `wget` over the FA411, `play` and `modplay`,
    `zine` with a demo and back.
-4. `free` with and without `MMU=ON` after one login: the memory the page rounding takes.
-5. Anything odd: the plain line again; tell what happened. If it only happens with `MMU=ON`, the photo and the
+4. `free` with and without `MMU=OFF` after one login: the memory the page rounding takes.
+5. Anything odd: the unprotected line; tell what happened. If it only happens with protection on, the photo and the
    command are what is needed.
+
+## 19. As built 2 (2026-11-17, branch mmudef): on by default, every CPU model in two emulators
+
+The partner, 2026-11-17 (docs/decisions.md): "The one thing that I would like us to do first is real MMU memory
+protection on by default for computers that has an MMU ... test it using a good emulator and for all the different
+CPU models." Done in the emulators; the 1260's first run (section 18) is still to come.
+
+### 19.1 The default, and the parts nothing safe tells apart
+
+- **On by default where the CPU is known to have an MMU** (`KOPT_MMU_AUTO` 16 in the kernel file's default long,
+  section 13): a **68030** (its MMU goes through the probe of section 3, which is safe on a 68EC030: a missing
+  register traps, or the probe finds no translation), a **68040 with an FPU** (an `FRESTORE` of a null frame runs; it
+  also leaves the FPU in its reset state), a **68060 whose `PCR` says 0x0430**.
+- **An LC or EC 68040/68060 is left alone**, no MMU register touched, the boot line saying `mmu: memory protection off:
+  an LC or EC CPU (MMU=ON tries it)`. The reason: a 68LC040 and a 68EC040 both lack the FPU and the 040 has no
+  identity register; a 68LC060 and a 68EC060 both answer 0x0431 in `PCR` (MC68060UM appendices A and B). Only the MMU
+  itself tells them apart, and its instructions are undefined on the EC parts (MC68060UM 1.1.2.2: `URP`, `SRP` and
+  `TCR`'s E "must not be used", "no exceptions are reported"; MC68040UM B.1: `PFLUSH`/`PTEST` an "indeterminate" number
+  of bus cycles). Section 3's promise (no EC part given an MMU instruction unless asked) is kept. `zenixboot MMU=ON`
+  (or `tools/kopts.py KERNEL MMU=ON`) tries an LC or EC part with the probe as before. A real 68LC060 (common on
+  Amiga accelerators) therefore needs `MMU=ON`; the partner's 1260 has a full 68060 (rev 6) and gets it by default.
+- **Off**: `zenixboot MMU=OFF`, the left mouse button held at boot, `tools/kopts.py KERNEL MMU=OFF` for a floppy.
+  No MMU (a 68020, an EC part, Emu68, no hardware table) is one plain line in the boot log, never an error.
+- **The hand-over (audit 2026-11-12 A6-14, fixed):** zenixboot now switches a 68030's leftover translation off too
+  (section 4), each of `TT0`, `TT1`, `TC` on its own so a trap on one leaves the others done, then both of the
+  030's caches cleared; the 040/060 path lost its `PFLUSHA` (with E clear the ATC is unused; an EC040 must not be
+  given one).
+- **Costs in the kernel**: 130 bytes (`mmu` 5,592 -> 5,722; the mount tests' RAM disk 677 -> 676 KB). One
+  independent review of the kernel and hand-over changes (its six findings: the 030 steps' order and caches, the
+  `PFLUSHA`, `FRESTORE` instead of `FNOP`, the old `kopts.py`'s meaning written in frozen-interfaces.md; fixed).
+
+### 19.2 What each emulator really has
+
+FS-UAE 3.2.35: the 68030, 68040 and 68060 MMU models and a CPU without an FPU (`uae_fpu_model = 0`: line F on FPU
+instructions, the 060's `PCR` 0x0431), so the LC parts; **no EC part** (`uae_mmu_model = 68ec030`, `68ec040`,
+`68ec060` crash FS-UAE at start). Amiberry 8.5.0 has all nine (`mmu_model=68ec0x0`: the registers are taken and
+nothing is translated, so the probe reads the test page's own word). Amiberry runs headless through
+`ZENIX_EMU=amiberry` (`tools/run-test.sh`: the FS-UAE config turned into Amiberry's by `tools/fsuae_conf.py`, its
+serial port on TCP joined to the tap's PTY by `tools/serial-tcp.py`), always at the machine's own speed: with
+`cpu_speed=max` its IDE stopped answering once, as FS-UAE's does in its fastest modes. Knowledge base:
+`amiga/emulator-cpu-models-and-amiberry-serial.md`.
+
+### 19.3 The matrix
+
+`tools/mmu-test.sh MODEL` (section 14's checks where protection is on: six stray accesses killed with the right owner
+named, the victim intact, a protected server editing its client's buffer, 200 calls; where it is off: the reason in
+the boot line and the system going on). `+on`: the kernel made `MMU=ON`. All emulator runs on an A1200 with Kickstart
+3.x, 2 MB chip RAM; the 030 with 8 MB Zorro II fast, the 040/060 with 8 MB Zorro II and 64 MB 32-bit fast.
+
+| CPU | FS-UAE 3.2.35 | Amiberry 8.5.0 |
+|---|---|---|
+| 68020 | off, "no MMU on a 68020": pass | the same: pass |
+| 68030 | **on** (14 KB of tables), every check: pass | **on** (15 KB), every check: pass |
+| 68EC030 | not modelled (crashes) | off, "no MMU (the probe found none: 0)"; the same with `MMU=ON`: pass |
+| 68040 | **on** (79 KB), every check: pass | **on** (80 KB), every check: pass |
+| 68LC040 | off, "an LC or EC CPU"; `+on`: **on**, every check: pass | the same: pass |
+| 68EC040 | not modelled | off, "an LC or EC CPU", no MMU register touched; `+on`: the probe finds none, off: pass |
+| 68060 | **on** (79 KB), every check: pass | **on** (80 KB), every check: pass |
+| 68LC060 | off, "an LC or EC CPU"; `+on`: **on**, every check: pass | the same: pass |
+| 68EC060 | not modelled | off, "an LC or EC CPU", no MMU register touched; `+on`: the probe finds none, off: pass |
+
+The regular suites with protection on (`tools/mmu-suite.sh CPU`: each test unchanged, its machine changed by
+`ZENIX_FSUAE_SET` to the CPU with its MMU and FPU; each test on a fresh copy of the build):
+
+| Test | FS-UAE 030 | FS-UAE 040 | FS-UAE 060 | Amiberry 030 | Amiberry 040 | Amiberry 060 |
+|---|---|---|---|---|---|---|
+| cmds-test | pass | pass | pass | pass (1) | pass | pass |
+| memtest | pass | pass | pass | pass | pass | pass |
+| mounttest | pass (2) | pass | pass | pass | pass | pass |
+| svc-test (all parts but f) | pass | pass but part t (3) | pass | pass but one check (4) | the same (4) | the same (4) |
+| svc-test f, sound-test (stock speed) | - | - | - | pass | pass | pass |
+| lua-test | pass | pass | pass | pass | pass | pass |
+| tcc-test | pass (5) | pass | pass | pass | pass | pass |
+| zdb-test | pass | pass (6) | pass | pass | pass | pass |
+| dpy-test, zdesk-test, files-test (FS-UAE's cage rig, stock speed) | not comparable (8) | | not comparable (8) | | | |
+| zine-emu-test (its own 040 and 060 machines, protection on, still on after every session) | | pass | pass | | protection: pass (7) | protection: pass (7) |
+| matrix (the 030, 040, 060 machines boot protected), bootmem-test | pass | pass | pass | | | |
+
+(1) Failed once because two cmds-tests ran at once on the PC and shared the PC's `/tmp/cmds.t` for their expected
+output: fixed in the test (a lock). (2) D26 9's two programs ended before the next line in warp mode, protection off
+the same: the test's fault, fixed (they run until killed). (3) The tap's greeting byte lands in the first line typed
+after the reboot (`sh: .echo: command not found`), protection off the same: the test's timing on that machine, not
+fixed here. (4) "fsd is pid 3, at nice -10" finds fsd in state `sleep` where FS-UAE shows `msg`, protection off the
+same: Amiberry's timing; every other check passes. (5) Its root image had no room for 101_cleanup's program
+beside today's programs: the test's fault, fixed (a 24 MB image). (6) Once a serial interleave cut a section marker
+(`==fend/`); passed when run again. (7) Protection on at boot and after every session; three other checks (a
+56th 'back' line, zbig's volume, `zine -l` seeing 8,703 KB below 16 MB) fail the same with protection off: Amiberry's
+memory layout, not this. (8) The desktop's programs ran with protection on and none was stopped, but the
+screenshot checks fail on any CPU but the 68020 (the text console's geometry, then every placement), protection off
+the same: these tests are made for the 68020 machine (they pass there). The desktop's protection is shown by the
+runs, not by these checks.
+
+In all these runs no program and no server was stopped by protection other than the tests' own deliberate stray
+accesses: the default found no new bug (the first runs of 2026-11-12 had found sed's, section 15).
+
+### 19.4 The speed and memory cost (emulator figures only)
+
+`bench` and `msgping` in the same runs, protection off (the kernel made `MMU=OFF`) -> on. FS-UAE in warp mode, Amiberry
+at the machine's own speed; both time with the E-clock. Neither emulates the 040/060 caches or the ATC's real cost,
+so these are no estimate of a real CPU; the ratios show where the cost lies.
+
+| | FS-UAE 030 | FS-UAE 040/060 | Amiberry 030 | Amiberry 040/060 |
+|---|---|---|---|---|
+| a null system call | 35 -> 35 us | 17 -> 17 us | 14 -> 14 us | 5 -> 5 us |
+| `stat` through the filesystem server (a system process) | 5,001 -> 5,219 us (+4%) | 2,623 -> 2,716 us (+4%) | 1,235 -> 1,262 us (+2%) | 906 -> 919 us (+1%) |
+| a call to a protected server and back (`msgping`: two retenants and a lend) | 559 -> 1,695 us (x3.0) | 239 -> 941 us (x3.9) | 183 -> 415 us (x2.3) | 67 -> 311 us (x4.6) |
+| a message round trip between two protected programs (`bench`: two retenants) | 544 -> 2,265 us (x4.2) | 243 -> 1,397 us (x5.7) | 180 -> 555 us (x3.1) | 66 -> 477 us (x7.2) |
+| fast RAM free after one login | 7,559 -> 7,528 KB | 73,094 -> 72,999 KB | 8,070 -> 8,039 KB | 73,606 -> 73,510 KB |
+
+So a call to a system server (every file, disk, network and display request) costs a few per cent, and a switch
+between two protected programs (a pipe, a protected server) costs several times what it did: the page flips and the
+ATC refills of section 9. On a real 50 MHz 68060 section 9 estimates 40-80 us per retenant. The two later steps of
+section 9 (flipping whole 256 KB page tables at the pointer level; keeping a client flipped in while a protected server
+holds its request) are where that cost would be won back; not built (they need the partner's word, being speed work
+on the golden path).
+
+### 19.5 The tests
+
+- `tools/mmu-test.sh`: every model above (`020 030 ec030 040 lc040 ec040 060 lc060 ec060`, each also `+on`); the EC
+  models say SKIP on FS-UAE. `make check` runs `020 030 lc040` and `040 060 lc060` (two jobs).
+- `tools/mmu-suite.sh 030|040|060`: the regular suites with protection on; `make check` runs it for each CPU.
+- The matrix's 68030 machine has FS-UAE's MMU model now, so `matrix` boots the 030, 040 and 060 with protection on.
+- `zine-emu-test`: its 040 and 060 machines boot with protection on; after their ZINE sessions a stray write is still
+  stopped (`prot`).
+- `bootmem-test`: protection off now means a kernel made `MMU=OFF`; on is the kernel as built.
+- `zenixboot-test a1200-030mmu`: the A6-14 hand-over (a 68030 left with an identity translation and `TT1` on by
+  `tools/tests/mmuleft.S`; with the old hand-over the kernel had to switch it off itself).
+- Not in the emulators: a real EC part's answer to the MMU instructions (the reason for 19.1), the 040/060 caches'
+  pushes, the real cost of a retenant: the 1260 (section 18).
