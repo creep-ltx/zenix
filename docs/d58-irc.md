@@ -13,7 +13,8 @@ new system call, message, port or claimed number; one new file format (the setti
   lag), and the input row. Windows: the status window, one for each channel, one for each private conversation;
   F1-F10, Ctrl-N/Ctrl-P or Shift-Left/Right switch them, Ctrl-X goes to the next one with something new.
 - **TLS (port 6697) as wget does it**, the certificate checked against `/etc/ssl/anchors` and your own roots in
-  `/etc/ssl/local/`. The TLS code lives in a helper, `/lib/irc/tlspipe`, loaded only for a TLS server: `irc` itself
+  `/etc/ssl/local/`. The TLS code lives in a helper, `/lib/tls/tlspipe` (`/lib/irc/tlspipe` until D59 shared it with
+  the e-mail client; the package `tls`), loaded only for a TLS server: `irc` itself
   is 53 KB on the disk; with TLS the helper adds 107 KB while connected.
 - **A settings file** (`~/.config/irc/config`: server, port, tls, nick, SASL, autojoin, highlight words, charset...),
   written with every setting commented out the first time; **every key** in `~/.config/irc/keys`, the format of
@@ -77,7 +78,7 @@ irc [-c FILE] [-n NICK] [-p PORT] [-t] [SERVER [#CHANNEL...]]      irc -K
 ## 5. TLS: a helper, not a library in `irc`
 
 The crypto library (BearSSL and Zenix's glue, D21) is about 90 KB of code. Linked into `irc` it would be 140 KB on
-every machine, also for plain servers. So `irc` starts `/lib/irc/tlspipe HOST PORT` once its TCP connection is made
+every machine, also for plain servers. So `irc` starts `/lib/tls/tlspipe HOST PORT` once its TCP connection is made
 (the time limit, the errors and the name lookup stay in `irc`): the socket is the helper's descriptor 2, the plain
 text goes in on 0 and comes out on 1 (two pipes). The helper does what wget does (`user/tlstrust.c`, moved out of
 wget.c so both have one copy: the clock's rules of D21 8.3, the seed, the anchors and the owner's roots), then says
@@ -86,7 +87,8 @@ on its first line `ok`, `ok clock YYYY-MM-DD` (the clock is not trusted: dates c
 to it is non-blocking on irc's side: a stalled server fills it, the keys go on. BearSSL's one buffer serves both ways (16 KB rather than 33 KB): data that arrives while
 a line waits to go out is passed on first. A certificate that is refused is not retried; a network failure is.
 The helper is not a command (no page; this note and `irc`'s page name it); the e-mail client (item 3 of the same
-approval) can use it as it is, and then it moves to a package of its own (two packages may not own one file).
+approval, D59) uses it as it is, so it moved to `/lib/tls/tlspipe` in a package of its own, `tls`, which `irc` and
+`mail` depend on (two packages may not own one file; 2026-11-17, before any release of `irc`).
 
 ## 6. Text and safety
 
@@ -102,7 +104,7 @@ server or another user ever reaches the console. What we send is UTF-8, or ISO-8
 | | on the disk | notes |
 |---|---|---|
 | `irc` | 53,936 bytes | all at -Os; 92 KB in memory with a channel open (FS-UAE) |
-| `/lib/irc/tlspipe` | 107,352 bytes | only while connected to a TLS server: 182 KB in memory with its buffers (FS-UAE) |
+| `/lib/tls/tlspipe` | 107,352 bytes | only while connected to a TLS server: 182 KB in memory with its buffers (FS-UAE) |
 | wget | 121,424 -> 121,636 bytes | the shared trust code's call through a pointer |
 
 Scrollback: 300 lines a window by default (`scrollback`, 20-5,000), each line its own allocation of its length; at

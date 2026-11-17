@@ -221,3 +221,53 @@ int keys_code(const struct dpyev *e)
     }
     return 0;
 }
+
+/* a key from a terminal (DESIGN D59: one reader for irc and mail): a character (a byte of UTF-8 text: 0x10000 + the
+ * byte), the code of a sequence (xterm's and Zenix's console's: arrows with Shift and Ctrl, F1-F10, Home and End as
+ * <C-a> and <C-e>, Del as <C-d>, PageUp and PageDown as <S-Up> and <S-Down>, Help), 27 for a lone Esc, 0 for a
+ * sequence not known, -1 at the end of the input */
+static int tgetb(int fd, int ms)
+{
+    unsigned char c;
+    struct pollfd pf = { fd, POLLIN, 0 };
+    if (poll(&pf, 1, ms) <= 0 || sys_read(fd, &c, 1) != 1) return -1;
+    return c;
+}
+int keys_tty(int fd)
+{
+    unsigned char c;
+    if (sys_read(fd, &c, 1) != 1) return -1;
+    if (c == 10) return 13;
+    if (c >= 0x80) return 0x10000 | c;
+    if (c != 27) return c;
+    int s1 = tgetb(fd, 30), ch = 0, num = 0, mod = 0, semi = 0;
+    if (s1 < 0) return 27;
+    if (s1 == 'O') { ch = tgetb(fd, 30); return ch >= 'P' && ch <= 'S' ? KM_F1 + ch - 'P' : ch == 'A' ? KM_UP :
+                     ch == 'B' ? KM_DOWN : ch == 'C' ? KM_RIGHT : ch == 'D' ? KM_LEFT : ch == 'H' ? 1 : ch == 'F' ? 5 : 0; }
+    if (s1 != '[') return 0;
+    while ((ch = tgetb(fd, 30)) >= 0 && ((ch >= '0' && ch <= '9') || ch == ';')) {
+        if (ch == ';') semi = 1;
+        else if (semi) mod = mod * 10 + ch - '0';
+        else num = num * 10 + ch - '0';
+    }
+    if (ch >= 'A' && ch <= 'D') {       /* xterm's modified arrows: ESC [ 1 ; m A (2 Shift, 5 Ctrl) */
+        int b = mod == 2 ? KM_SUP : mod >= 5 ? KM_CUP : KM_UP;
+        static const unsigned char o[4] = { 0, 1, 3, 2 };   /* A up, B down, C right, D left */
+        return b + o[ch - 'A'];
+    }
+    switch (ch) {
+    case 'H': return 1;                 /* Home */
+    case 'F': return 5;                 /* End */
+    case 'Z': return 0;                 /* Shift-Tab */
+    case 'P': case 'Q': case 'R': case 'S': return KM_F1 + ch - 'P';
+    case '~':
+        if (num == 1 || num == 7) return 1;
+        if (num == 4 || num == 8) return 5;
+        if (num == 3) return 4;         /* Del: as Ctrl-D */
+        if (num == 5) return KM_SUP;
+        if (num == 6) return KM_SDOWN;
+        if (num == 2) return KM_HELP;   /* Help (Insert) */
+        return num >= 11 && num <= 15 ? KM_F1 + num - 11 : num >= 17 && num <= 21 ? KM_F1 + num - 12 : 0;
+    }
+    return 0;
+}

@@ -238,6 +238,8 @@ FAMILIES = [
     ("nettools", "the network's interfaces, routes, ping, netstat, host", "ifconfig route ping netstat host"),
     ("telnet", "a terminal to another computer over the network", "telnet"),
     ("irc", "an IRC client: channels, private messages, TLS", "irc"),
+    ("mail", "an e-mail client: IMAP, POP3 and SMTP, MIME, TLS", "mail"),
+    ("tls", "TLS for irc and mail: the helper /lib/tls/tlspipe", ""),
     ("ssh", "the secure shell and its keys", "ssh ssh-keygen"),
     ("wget", "fetch files over HTTP and HTTPS", "wget"),
     ("sntp", "set the clock from the network", "sntp"),
@@ -290,7 +292,9 @@ FAMILY_LICENSES = {"zine": [("user/zine/msp/060/README", "m68060sp"), ("user/zin
 # directory, None an empty file; kind "c" is kept when changed (a score file). tools/mkroot.sh stages the same list
 # (mkzup.py stage FAMILY ROOT BUILD), so an image holds what the package holds. The games: the Lua games as #!
 # scripts (they need the package lua), the data the games read, the score files every user may write.
-FAMILY_EXTRA = {"irc": [("f", 0o755, "build:tlspipe.zx", "/lib/irc/tlspipe")],     # DESIGN D58: irc's TLS helper
+# DESIGN D58/D59: the TLS helper of irc and mail, a package of its own (two packages may not own one file); a family
+# with no program, built for its files
+FAMILY_EXTRA = {"tls": [("f", 0o755, "build:tlspipe.zx", "/lib/tls/tlspipe")],
                 "games": [("f", 0o755, "games/gridrun.lua", "/bin/gridrun"),
                           ("f", 0o644, "build:bg/fortunes", "/usr/share/games/fortune/fortunes"),
                           ("f", 0o644, "build:bg/fortunes.dat", "/usr/share/games/fortune/fortunes.dat"),
@@ -300,7 +304,7 @@ FAMILY_EXTRA = {"irc": [("f", 0o755, "build:tlspipe.zx", "/lib/irc/tlspipe")],  
                           ("d", 0o1777, None, "/var/games"),
                           ("c", 0o666, None, "/var/games/robots_roll"),
                           ("c", 0o666, None, "/var/games/tetris.scores")]}
-FAMILY_DEPS = {"games": ["lua"]}
+FAMILY_DEPS = {"games": ["lua"], "irc": ["tls"], "mail": ["tls"]}
 
 
 def extra_src(build, src):
@@ -391,7 +395,7 @@ def std_packages(build, uapps):
         taken = set()
         for fam, desc, members in FAMILIES:
             mine = [p for p in members.split() if p in progs]
-            if not mine:
+            if not mine and (members or fam not in FAMILY_EXTRA):     # (a family of files only: tls)
                 continue
             ents = [("f", 0o4755 if p in SETUID else 0o755, 0, 0, zx(p), "/bin/" + binname(p)) for p in mine]
             for p in FAMILY_SBIN.get(fam, []):           # a server beside the family's programs (not a command)

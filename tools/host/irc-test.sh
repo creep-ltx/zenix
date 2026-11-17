@@ -46,7 +46,7 @@ part_sessions() {
 part_size() {
     local b=${ZENIX_BUILD:-build}
     if [ -f "$b/irc.zx" ] && [ -f "$b/tlspipe.zx" ]; then
-        echo "irc-test: size: irc $(stat -c %s "$b/irc.zx") bytes, /lib/irc/tlspipe $(stat -c %s "$b/tlspipe.zx") bytes (ZEXE files)"
+        echo "irc-test: size: irc $(stat -c %s "$b/irc.zx") bytes, /lib/tls/tlspipe $(stat -c %s "$b/tlspipe.zx") bytes (ZEXE files)"
         [ "$(stat -c %s "$b/irc.zx")" -le 61440 ] || bad "irc is over 60 KB"
     else
         echo "SKIPPED irc-test: size (make first)"

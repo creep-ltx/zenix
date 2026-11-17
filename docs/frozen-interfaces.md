@@ -443,5 +443,6 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   line, `#` comments; the settings `server port tls nick user realname password sasl quit charset scrollback
   reconnect bell autojoin highlight`, the last two up to 8 words; an unknown setting is an error), its keys file
   `~/.config/irc/keys` (files' format, D48) with the action names of docs/man/irc.txt; the command's options
-  (`-c -n -p -t -K`); `/lib/irc/tlspipe HOST PORT`'s contract (the socket its descriptor 2, the plain text on 0 and
-  1, its first line `ok`, `ok clock DATE` or `error TEXT`, `info TEXT` lines before it, exit 0/1/3), which the e-mail client may share.
+  (`-c -n -p -t -K`); `/lib/tls/tlspipe HOST PORT`'s contract (the socket its descriptor 2, the plain text on 0 and
+  1, its first line `ok`, `ok clock DATE` or `error TEXT`, `info TEXT` lines before it, exit 0/1/3), shared with the
+  e-mail client (D59; it was `/lib/irc/tlspipe` until D59 moved it into the package `tls`, before any release).

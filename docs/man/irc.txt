@@ -60,8 +60,8 @@ DESCRIPTION
     and your own roots in /etc/ssl/local/, for the server's name, its
     dates by the clock's rules (sntp(1)). The handshake takes up to a
     minute on a 68020. A certificate that is refused is said and not tried
-    again. The TLS code is a helper, /lib/irc/tlspipe, started only for a
-    TLS server (it is not a command).
+    again. The TLS code is a helper, /lib/tls/tlspipe (the package tls,
+    shared with mail(1)), started only for a TLS server (not a command).
 
     SASL (the setting "sasl"): logs you in to your account before the
     registration ends (PLAIN, best over TLS); a server without SASL, or a
@@ -146,8 +146,8 @@ FILES
         An unknown setting is an error, with its line.
     ~/.config/irc/keys
         the keys (KEYS above)
-    /lib/irc/tlspipe
-        the TLS helper
+    /lib/tls/tlspipe
+        the TLS helper (the package tls)
     /etc/ssl/anchors, /etc/ssl/local/
         the certificates TLS trusts (wget(1))
 
@@ -164,4 +164,4 @@ NOTES
     run on the real A1200 yet. DESIGN D58 (docs/d58-irc.md).
 
 SEE ALSO
-    telnet(1), ssh(1), wget(1), sntp(1), files(1)
+    telnet(1), ssh(1), wget(1), sntp(1), files(1), mail(1)

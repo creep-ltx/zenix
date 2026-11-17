@@ -1,13 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* /lib/irc/tlspipe HOST PORT: TLS for a program that does not carry the crypto library itself (DESIGN D58 section 5;
- * irc starts it for a TLS server, so irc stays small and the library is loaded only when TLS is used). The socket,
+/* /lib/tls/tlspipe HOST PORT: TLS for a program that does not carry the crypto library itself (DESIGN D58 section 5,
+ * D59 section 4; irc and mail start it for a TLS server, mail also after STARTTLS, so they stay small and the library
+ * is loaded only when TLS is used; the package tls). The socket,
  * already connected to HOST, is descriptor 2; the plain text comes in on 0 and goes out on 1. The handshake is the
  * crypto library's (crypto/zc/zc_tls.h, as wget's: TLS 1.2, the chain checked against /etc/ssl/anchors and the
  * owner's roots in /etc/ssl/local/, the name HOST, the dates by zc_clock's rules: user/tlstrust.h). The first line on
  * 1 says how it went: "ok\n", "ok clock YYYY-MM-DD\n" (the clock is not trusted: dates checked only against that
  * floor) or "error TEXT\n" (then the end, status 3), after "info TEXT\n" lines while it waits (the random pool); after "ok" the stream both ways until either side ends it: an
  * end of 0 sends close_notify (status 0); the server's end: status 0 with its close_notify, 1 without or on a
- * network error, 3 on a TLS error. Not a command: no page; docs/man/irc.txt names it. */
+ * network error, 3 on a TLS error. Not a command: no page; docs/man/irc.txt and mail.txt name it. */
 #include "socket.h"
 #include "tlstrust.h"
 #include "builddate.h"

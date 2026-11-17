@@ -3,13 +3,13 @@
  * docs/man/irc.txt). The protocol and the windows are irc's core (net/irc/, shared with the PC tests); this file is
  * the screen (a title row, the window's lines, a status row, the input row; 80 columns first), the keys (configurable:
  * ~/.config/irc/keys in the format of files, show and modplay, display/keys.h), the connection (plain, or TLS through
- * /lib/irc/tlspipe, which carries the crypto library so that irc does not) and the reconnect. One process, one loop:
- * poll on the keys and the server, a tick a second for the clock, the keepalive and the reconnect. */
+ * /lib/tls/tlspipe, shared with mail, which carries the crypto library so that irc does not) and the reconnect. One
+ * process, one loop: poll on the keys and the server, a tick a second for the clock, the keepalive and the reconnect. */
 #include "socket.h"
 #include "../net/irc/irc.h"
 #include "../display/keys.h"
 
-#define TLSPIPE "/lib/irc/tlspipe"
+#define TLSPIPE "/lib/tls/tlspipe"
 #define CONFMAX 8192
 #define EDMAX 1000
 #define HISTN 32
@@ -188,7 +188,7 @@ static void net_up(void)
     wfd = in[1];
     rfd = out[0];
     if (tlspid < 0) {
-        irc_print(&S, 0, IRC_K_ERR, "-!- cannot start %s: %s (the irc package's TLS helper)", TLSPIPE,
+        irc_print(&S, 0, IRC_K_ERR, "-!- cannot start %s: %s (the package tls)", TLSPIPE,
                   zstrerror(tlspid) ? zstrerror(tlspid) : "failed");
         tlspid = -1;
         net_close(0);
@@ -513,45 +513,7 @@ static int getb(int ms)
     return c;
 }
 
-/* a key: a character (a byte of UTF-8 text: 0x10000 + the byte), or the shared parser's code for a sequence */
-static int read_key(void)
-{
-    unsigned char c;
-    if (sys_read(0, &c, 1) != 1) return -1;
-    if (c == 10) return 13;
-    if (c >= 0x80) return 0x10000 | c;
-    if (c != 27) return c;
-    int s1 = getb(30), ch = 0, num = 0, mod = 0, semi = 0;
-    if (s1 < 0) return 27;
-    if (s1 == 'O') { ch = getb(30); return ch >= 'P' && ch <= 'S' ? KM_F1 + ch - 'P' : ch == 'A' ? KM_UP :
-                     ch == 'B' ? KM_DOWN : ch == 'C' ? KM_RIGHT : ch == 'D' ? KM_LEFT : ch == 'H' ? 1 : ch == 'F' ? 5 : 0; }
-    if (s1 != '[') return 0;
-    while ((ch = getb(30)) >= 0 && ((ch >= '0' && ch <= '9') || ch == ';')) {
-        if (ch == ';') semi = 1;
-        else if (semi) mod = mod * 10 + ch - '0';
-        else num = num * 10 + ch - '0';
-    }
-    if (ch >= 'A' && ch <= 'D') {       /* xterm's modified arrows: ESC [ 1 ; m A (2 Shift, 5 Ctrl) */
-        int b = mod == 2 ? KM_SUP : mod >= 5 ? KM_CUP : KM_UP;
-        static const unsigned char o[4] = { 0, 1, 3, 2 };   /* A up, B down, C right, D left */
-        return b + o[ch - 'A'];
-    }
-    switch (ch) {
-    case 'H': return 1;                 /* Home */
-    case 'F': return 5;                 /* End */
-    case 'Z': return 0;                 /* Shift-Tab */
-    case 'P': case 'Q': case 'R': case 'S': return KM_F1 + ch - 'P';
-    case '~':
-        if (num == 1 || num == 7) return 1;
-        if (num == 4 || num == 8) return 5;
-        if (num == 3) return 4;         /* Del: as Ctrl-D */
-        if (num == 5) return KM_SUP;
-        if (num == 6) return KM_SDOWN;
-        if (num == 2) return KM_HELP;   /* Help (Insert) */
-        return num >= 11 && num <= 15 ? KM_F1 + num - 11 : num >= 17 && num <= 21 ? KM_F1 + num - 12 : 0;
-    }
-    return 0;
-}
+static int read_key(void) { return keys_tty(0); }   /* the shared reader (display/lib/keys.c) */
 
 /* ---- the input line: editing, history, nick completion ---- */
 static char *hist[HISTN];
