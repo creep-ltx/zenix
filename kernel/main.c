@@ -72,7 +72,9 @@ void diag_stage(int n, u16 colour)
     }
 #endif
 #ifdef DIAG_PANIC
-    if (n == DIAG_PANIC) {
+    static volatile int panic_at = DIAG_PANIC;  /* opaque: with a constant, gcc drops everything after stage N as
+                                                 * dead, and D45's check-init then misses mmu_disarm (the full audit) */
+    if (n == panic_at) {
         kprintf("diag: test panic at stage %d (DIAG_PANIC test build)\n", n);
         panic("test panic (DIAG_PANIC)");
     }
