@@ -2510,8 +2510,8 @@ again. Measured (the Top 100's folders, the harness's staging):
   still ask for more than the machine has (Little Nell 14 MB in one block, Surfing Great Victoria 129 KB more even
   at 4 KB with 15.2 MB). The 68020 machine's (8 MB) memory-bound ones need more than its 8 MB either way.
 - Nothing lost: the six working productions with the most files between 64 and 256 KB (fake elektronik lightshow,
-  closer, lapsuus, killer, e255, J; 10 to 16 such files each) still work on all three machines (lapsuus fails on the 68020 either way) (18 runs at 64 KB; the
-  4 KB setting was not run on them).
+  closer, lapsuus, killer, e255, J; 10 to 16 such files each) still work on all three machines (lapsuus fails on
+  the 68020 either way; 18 runs at 64 KB, the 4 KB setting not run on them).
 - Why not lower: 4 KB would put 14 times as many files on the disk (each a drive command while the program waits,
   a few milliseconds a small file on an A1200's IDE port, not measured on hardware) and saved no further production
   in these runs; 64 KB keeps a demo's small files (its tables, palettes, scripts) in memory and its pictures, music
@@ -2523,6 +2523,15 @@ budget's path to the disk is still tested) and zbig-pack.lha 40 KB (left out as 
 *Verified* in FS-UAE: `tools/zine-emu-test.sh` (zwrite: SetProtection of a written file, SetComment of one of its
 own, SetFileDate by another name, SetProtection of a deleted file refused with 205; FGetC, UnGetC and FGets read a
 written file a line at a time, then 0 at the end; zbig with its 60 KB files over the budget, read from the disk).
+
+**Elysium** (16.23's open case) played in 8 of 8 runs at the start of the round and stayed black in 1 of the final
+rerun's. It makes no library call before it fails. So this is timing inside the demo itself, and it was not chased
+further.
+
+**The reruns** (zine-top100-findings.md "Round 15"): 68020 248 -> 248, 68030 313 -> 313 (Jesus Christ Motocross
+gained; superkewl found failing, the same with round 14's build), 68060 361 -> 362 (Shake Off The Dust). Nothing
+was lost to this round's changes. Of 20 black screens rerun at five times the limit, 17 stayed
+black: they are stuck, not slow, and none of them was traced to ZINE.
 
 ## 17. Questions for the owner (what ZINE should be)
 
