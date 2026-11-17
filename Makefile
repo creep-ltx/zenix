@@ -1207,7 +1207,10 @@ BG_CFLAGS := $(LIBC_PFLAGS) -std=gnu99 -D_DEFAULT_SOURCE -Iports/bsdgames/zenix/
              -include ports/bsdgames/zenix/include/zgames.h -I$(BG_SRC)/fortune/strfile \
              -DMAX_PER_UID=5 -DFANCY -Wno-unused-parameter -Wno-sign-compare -Wno-unused-variable \
              -Wno-implicit-fallthrough -Wno-missing-field-initializers -Wno-char-subscripts -Wno-format-truncation \
-             -Wno-unused-but-set-variable -Wno-old-style-declaration -Wno-type-limits
+             -Wno-unused-but-set-variable -Wno-old-style-declaration -Wno-type-limits \
+             -fmacro-prefix-map=$(BG_SRC)/=bsdgames/
+# (the prefix map: assert's file names do not carry the build folder, so the games package is the same from any
+# build folder: the full audit 2026-11-14, sysupdate-test's "the builds differ")
 BG_HDRS := $(wildcard ports/bsdgames/zenix/include/*.h ports/bsdgames/zenix/include/*/*.h) $(LIBC_HDRS)
 $(BG_SRC)/.patched: $(shell find ports/bsdgames/upstream -type f) $(wildcard ports/bsdgames/zenix/*.patch)
 	rm -rf $(BG_SRC) && mkdir -p $(BG_SRC) && cp -r ports/bsdgames/upstream/. $(BG_SRC)/
@@ -1577,7 +1580,7 @@ $(BUILD)/zenix-rdb.hdf: $(BUILD)/zenix.hdf tools/mkrdb.py
 # the same root disk with ZenixFS as the root filesystem instead of ext2 (needs the host tool: make -C zenixfs build/zenixfs-tool)
 $(BUILD)/zenix-zroot.hdf: $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs -type f) tools/mkroot-zenixfs.sh tools/mkrdb.py tools/mkman.py $(wildcard zenixfs/*.c zenixfs/*.h zenixfs/tools/*.c)
 	make -s -C zenixfs build/zenixfs-tool
-	tools/mkroot-zenixfs.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 12
+	tools/mkroot-zenixfs.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 16   # 12 MB no longer held block 7's programs (the full audit, FA-43)
 
 # ---- booting without a floppy (zenixboot; docs/how-it-works.md, docs/pi-first-boot.md) ----
 # The AmigaDOS boot volume Kickstart starts from: S/Startup-Sequence (one line), zenixboot, the kernel as "zenix".
