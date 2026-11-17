@@ -672,8 +672,17 @@ $(BUILD)/snddec.uo $(BUILD)/modrep.uo: $(BUILD)/%.uo: user/%.c user/snddec.h use
 	$(CC) $(UCFLAGS) -c $< -o $@
 $(BUILD)/play.uelf: $(BUILD)/play.uo $(BUILD)/snddec.uo $(BUILD)/sndlib.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/play.uo $(BUILD)/snddec.uo $(BUILD)/sndlib.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
-$(BUILD)/modplay.uelf: $(BUILD)/modplay.uo $(BUILD)/modrep.uo $(BUILD)/sndlib.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/modplay.uo $(BUILD)/modrep.uo $(BUILD)/sndlib.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+# the tracker player (DESIGN D56, docs/d56-tracker-player.md): modplay over the replayers behind trk.h (MOD through
+# modrep.c, MED, S3M, XM) and the mixer; the replayers at -Os (a tick's work, 50 a second), the mixer's loop at -O2
+TRKOBJS := $(BUILD)/trk.uo $(BUILD)/medrep.uo $(BUILD)/s3mrep.uo $(BUILD)/xmrep.uo $(BUILD)/trkmix.uo
+$(BUILD)/trk.uo $(BUILD)/medrep.uo $(BUILD)/s3mrep.uo $(BUILD)/xmrep.uo: $(BUILD)/%.uo: user/%.c user/trk.h user/modrep.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/trkmix.uo: user/trkmix.c user/trkmix.h user/trk.h | $(BUILD)
+	$(CC) $(UCFLAGS) -c $< -o $@
+# (its keys through the desktop programs' shared parser, display/keys.h)
+$(BUILD)/modplay.uo: user/trk.h user/trkmix.h display/keys.h
+$(BUILD)/modplay.uelf: $(BUILD)/modplay.uo $(BUILD)/modrep.uo $(TRKOBJS) $(BUILD)/keys.no $(BUILD)/sndlib.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/modplay.uo $(BUILD)/modrep.uo $(TRKOBJS) $(BUILD)/keys.no $(BUILD)/sndlib.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 # the crypto library (DESIGN D21 3.5, docs/d21-crypto-ssh-https.md): BearSSL and Monocypher (only the files used,
 # crypto/*/README) and Zenix's crypto/zc/, as one archive linked with --gc-sections into the programs that use it
 # (cryptotest, ssh, ssh-keygen). Cold code at -Os; the files a handshake waits on at -O2 (D21 3.6 step 1: the curve25519

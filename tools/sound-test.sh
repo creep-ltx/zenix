@@ -65,7 +65,7 @@ has "Ctrl-C ends play (status 130)" '^(.*# )?p7=130'
 S=$(after p7=130)
 echo "$S" | grep -qE '0 stream\(s\).*DMACONR [0-9a-f]{3}0$' && echo "PASS after Ctrl-C: no stream, the channels' DMA off" || { echo "FAIL after Ctrl-C: $S"; pass=0; }
 # 8: modplay
-has "modplay: its title line" '/snd/test.mod: "zenix sound test", 31 samples, 2 positions, 2 patterns \(PAL\)'
+has "modplay: its title line" '/snd/test.mod: "zenix sound test", ProTracker, 4 channels, 2 positions \(Paula, PAL\)'
 has "modplay: the status line reaches the second position" 'pos 001/002 pat 01 row [0-9]{2} spd  6 bpm 150'
 has "... exit 0" '^(.*# )?m1=0'
 S=$(after M8)
