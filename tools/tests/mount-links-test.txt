@@ -51,8 +51,9 @@ sleep 3
 send echo c8c=$(cat /tmp/l8); umount /tmp/p8/m; echo c8d=$?\r
 sleep 4
 # 9: a shared program (D13) run through a link into the mount; text file busy through a link; rm through a link
-# (the two run until killed at the end, not for a fixed time: typing the next line takes longer in warp mode)
-send cp /ro/hp /mnt/w/hp; chmod 755 /mnt/w/hp; ln -s /mnt/w/hp /tmp/lhp; /tmp/lhp 700 > /dev/null & h1=$!; /tmp/lhp 700 > /dev/null & h2=$!; sleep 1; echo ==s2; /ro/free\r
+# (the two run until killed at the end, not for a fixed time: typing the next line takes longer in warp mode; 100000
+# rounds, not 700: on the 68030 in warp mode 700 rounds of 0.2 s ended before the next line, 2026-11-17)
+send cp /ro/hp /mnt/w/hp; chmod 755 /mnt/w/hp; ln -s /mnt/w/hp /tmp/lhp; /tmp/lhp 100000 > /dev/null & h1=$!; /tmp/lhp 100000 > /dev/null & h2=$!; sleep 1; echo ==s2; /ro/free\r
 sleep 4
 send echo x >> /tmp/lhp; echo c9a=$?; cp /ro/hp /tmp/lhp; echo c9b=$?; rm /tmp/dl/hp; echo c9c=$?; cp /ro/hp /mnt/w/hp; chmod 755 /mnt/w/hp; /tmp/lhp 20 > /dev/null & sleep 1; echo ==s3; /ro/free; kill $h1 $h2; echo s9-$(echo done)\r
 wait s9-done 30

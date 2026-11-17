@@ -266,7 +266,9 @@ RAMDISK_K := 640
 # since DESIGN D53 (2026-11-13, scripts started by their #! line: 712 bytes of kernel.bin). 678 since DESIGN D54
 # (2026-11-13, the live debugger: 4.9 KB of kernel.bin, kernel/dbg.c and its hooks).
 # 677 with both (D54 and d29 16.23, merged 2026-11-14).
-RAMDISK_MOUNT_K := 677
+# 676 since D41 section 19 (2026-11-17, protection on by default: telling a full 68040/060 from an LC or EC one, 130
+# bytes of kernel.bin).
+RAMDISK_MOUNT_K := 676
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/check-init.py tools/ksize-check.sh tools/ksize-budget
@@ -1611,7 +1613,7 @@ $(BUILD)/zenix-rdb.hdf: $(BUILD)/zenix.hdf tools/mkrdb.py
 # the same root disk with ZenixFS as the root filesystem instead of ext2 (needs the host tool: make -C zenixfs build/zenixfs-tool)
 $(BUILD)/zenix-zroot.hdf: $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs -type f) tools/mkroot-zenixfs.sh tools/mkrdb.py tools/mkman.py $(wildcard zenixfs/*.c zenixfs/*.h zenixfs/tools/*.c)
 	make -s -C zenixfs build/zenixfs-tool
-	tools/mkroot-zenixfs.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 12
+	tools/mkroot-zenixfs.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 16
 
 # ---- booting without a floppy (zenixboot; docs/how-it-works.md, docs/pi-first-boot.md) ----
 # The AmigaDOS boot volume Kickstart starts from: S/Startup-Sequence (one line), zenixboot, the kernel as "zenix".

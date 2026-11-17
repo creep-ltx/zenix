@@ -117,11 +117,14 @@ zb_go:
     move.w  #0x0200,0x100(%a0)      /* BPLCON0: no bitplanes, colour on */
     move.w  #0,0x106(%a0)           /* BPLCON3: bank 0, no border blanking */
 
-    /* 68040/68060: the MMU off. 68040.library/68060.library (SetPatch) switch it on with tables in fast RAM that the
-     * kernel would overwrite; Zenix runs with no MMU. Probed with the illegal-instruction and line-F vectors caught,
-     * because an EC/LC part may not have the registers: then the rest is skipped (it had no MMU to switch off). */
+    /* The MMU off: the kernel starts with translation off (D41 builds its own tables later). 68040.library and
+     * 68060.library (SetPatch) switch a 040/060's on with tables in fast RAM that the kernel would overwrite; on a
+     * 68030 Enforcer, MMULib or CPU FASTROM do the same (audit 2026-11-12 A6-14: the kernel switched that off only
+     * after copying itself and building its memory lists under the old tables). Probed with the illegal-instruction
+     * and line-F vectors caught, because an EC part may not have the registers: on a 68040/060 the rest is then
+     * skipped (it had no MMU to switch off), on a 68030 each step goes on by itself (below). A 68020 has none. */
     move.w  296(%a6),%d0
-    and.w   #0x0088,%d0
+    and.w   #0x008C,%d0             /* AFF_68030, AFF_68040, AFF_68060 */
     beq.s   mmuskip
     movec   %vbr,%a1
     move.l  0x10(%a1),%d5           /* vector 4, illegal instruction */
@@ -130,10 +133,31 @@ zb_go:
     move.l  %a2,0x10(%a1)
     move.l  %a2,0x2C(%a1)
     move.l  %sp,%a5
+    and.w   #0x0088,%d0
+    bne.s   mmu040
+    /* 68030: each step resumes at its own label if it traps (a2), so a missing TC (a 68EC030: Motorola documents only
+     * AC0/AC1 there) does not leave TT0/TT1 (its AC0/AC1) on; the transparent windows first, TC (E off, ATC flushed)
+     * last. Then both caches cleared: the 030's caches hold logical addresses, and a tool that remapped pages (CPU
+     * FASTROM) leaves lines that now name the wrong RAM (its data cache is write-through: nothing dirty is lost). */
+    clr.l   -(%sp)
+    move.l  %sp,%a5                 /* a trap comes back with the zero long still on the stack */
+    lea     1f(%pc),%a2
+    .long   0xF0170800              /* pmove (sp),tt0 */
+1:  lea     2f(%pc),%a2
+    .long   0xF0170C00              /* pmove (sp),tt1 */
+2:  lea     3f(%pc),%a2
+    .long   0xF0174000              /* pmove (sp),tc: translation off, the ATC flushed */
+3:  addq.l  #4,%sp                 /* the zero long dropped (a5 is not needed after this) */
+    movec   %cacr,%d0
+    or.w    #0x0808,%d0             /* CD, CI: clear the data and instruction caches */
+    movec   %d0,%cacr
+    bra.s   mmuback
+mmu040:
+    lea     mmuback(%pc),%a2
     .word   0xF4F8                  /* cpusha bc: nothing dirty may be lost when the mapping goes */
     moveq   #0,%d0
-    .long   0x4E7B0003              /* movec d0,tc: translation off */
-    .word   0xF518                  /* pflusha */
+    .long   0x4E7B0003              /* movec d0,tc: translation off (with E clear the ATC is not used: no PFLUSHA,
+                                     * which an EC040 must not be given, MC68040UM B.1) */
     .long   0x4E7B0004              /* movec d0,itt0 */
     .long   0x4E7B0005              /* movec d0,itt1 */
     .long   0x4E7B0006              /* movec d0,dtt0 */
@@ -145,9 +169,9 @@ mmuskip:
     lea     0xDFF000,%a0
     handoff_jump                    /* never returns */
 
-mmutrap:                            /* one of the MMU instructions does not exist here: drop the frame, go on */
+mmutrap:                            /* one of the MMU instructions does not exist here: drop the frame, go on at a2 */
     move.l  %a5,%sp
-    bra.s   mmuback
+    jmp     (%a2)
 
     handoff_subs
 

@@ -165,6 +165,9 @@ H=$BD/zenix.hdf
 est=0
 for run in 1 3 2; do
     rm -f "$H"; make -s BUILD=$BD "$H" >>"$OUT/build.log" 2>&1 || { echo "FAIL the root image"; exit 1; }
+    # 24 MB instead of 16: the files below and 101_cleanup's 1.9 MB program unpacked no longer fit beside today's
+    # programs (2026-11-17: "no space left on device", the program cut short and refused)
+    truncate -s 24M "$H" && resize2fs -f "$H" >>"$OUT/build.log" 2>&1 || { echo "FAIL growing the root image"; exit 1; }
     FF=$OUT/files$run
     {
         if [ $run = 2 ]; then   # the development files tcc uses (not the shared-code ones)

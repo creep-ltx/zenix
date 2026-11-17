@@ -11,12 +11,16 @@ SCRIPT="$3"
 # stopped by a signal: the tap and FS-UAE are ended first. mktemp puts it in TMPDIR (tools/check.sh gives every job
 # one in its own run folder).
 DIR="$(mktemp -d)"
-TAP=; EMU=
+TAP=; EMU=; BRIDGE=
 cleanup() {
-    [ -n "$EMU" ] && kill -TERM $EMU 2>/dev/null && wait $EMU 2>/dev/null
+    [ -n "$BRIDGE" ] && kill -TERM $BRIDGE 2>/dev/null && wait $BRIDGE 2>/dev/null
+    if [ -n "$EMU" ]; then
+        [ "$EMUKIND" = amiberry ] && pkill -KILL -P $EMU 2>/dev/null          # it ignores SIGTERM
+        kill -TERM $EMU 2>/dev/null && wait $EMU 2>/dev/null
+    fi
     [ -n "$TAP" ] && kill -TERM $TAP 2>/dev/null && wait $TAP 2>/dev/null
     rm -rf "$DIR"
-    EMU=; TAP=
+    EMU=; TAP=; BRIDGE=
 }
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT
@@ -26,8 +30,20 @@ LOG="$DIR/serial.log"
 # always copied (tools/fsuae_conf.py): the Kickstart directory (ZENIX_KICKSTART_DIR), the build directory and the
 # serial port are filled in, so the configs in fsuae/ name no path of this machine.
 SERIAL="${ZENIX_SERIAL:-/tmp/zenix-serial}"
-python3 "$(dirname "$0")/fsuae_conf.py" "$CONF" "$DIR/test.fs-uae"
-CONF="$DIR/test.fs-uae"
+# ZENIX_EMU=amiberry: the same machine in Amiberry instead (DESIGN D41's CPU matrix: the partner trusts its correctness
+# more), headless (SDL's offscreen video, no sound, a runtime folder of its own for its IPC socket), its serial port on
+# TCP joined to the tap's PTY by tools/serial-tcp.py. A1200 configs only (tools/fsuae_conf.py to_amiberry).
+EMUKIND="${ZENIX_EMU:-fs-uae}"
+case "$EMUKIND" in
+fs-uae)
+    python3 "$(dirname "$0")/fsuae_conf.py" "$CONF" "$DIR/test.fs-uae"
+    CONF="$DIR/test.fs-uae" ;;
+amiberry)
+    PORT=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+    python3 "$(dirname "$0")/fsuae_conf.py" --amiberry "$PORT" "$CONF" "$DIR/test.uae"
+    CONF="$DIR/test.uae"; mkdir -m 700 "$DIR/xdg" ;;
+*) echo "run-test: ZENIX_EMU=$EMUKIND: say fs-uae or amiberry"; exit 2 ;;
+esac
 # Up to ZENIX_EMU_SLOTS (default 6) FS-UAEs run on this machine at once, each with its own serial port and images
 # (several runs sharing a port or an image file spoil each other; FS-UAE itself runs side by side fine). A run takes
 # the first free slot, a lock file it holds until its run ends: slot 0 is /tmp/zenix-emulator.lock (other projects on
@@ -61,15 +77,26 @@ fi
 # (e.g. for grim screenshots).
 # A script's `stop` (tools/serial-tap.py) leaves $SERIAL.stop: FS-UAE is killed at once (a power cut, or simply the end).
 rm -f "$SERIAL.stop"
+if [ "$EMUKIND" = amiberry ]; then
+    # Amiberry ignores SIGTERM: the time limit and the stop below end it with SIGKILL
+    env -u DISPLAY -u WAYLAND_DISPLAY XDG_RUNTIME_DIR="$DIR/xdg" SDL_VIDEODRIVER=offscreen SDL_VIDEO_DRIVER=offscreen \
+        SDL_AUDIODRIVER=dummy SDL_AUDIO_DRIVER=dummy \
+        timeout -s KILL "$SECS" amiberry -G -f "$CONF" >"$DIR/amiberry.out" 2>&1 9>&- &
+    EMU=$!
+    python3 "$(dirname "$0")/serial-tcp.py" "$SERIAL" "$PORT" >"$DIR/bridge.out" 2>&1 9>&- &
+    BRIDGE=$!
+else
 SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" \
 timeout "$SECS" fs-uae "$CONF" >/dev/null 2>&1 9>&- &
 EMU=$!
+fi
 while kill -0 $EMU 2>/dev/null; do
     if [ -e "$SERIAL.stop" ]; then pkill -KILL -P $EMU 2>/dev/null; break; fi
     sleep 0.2
 done
 wait $EMU 2>/dev/null || true
 EMU=
+if [ -n "$BRIDGE" ]; then kill $BRIDGE 2>/dev/null || true; wait $BRIDGE 2>/dev/null || true; BRIDGE=; fi
 rm -f "$SERIAL.stop"
 if [ -n "$TAP" ]; then kill $TAP 2>/dev/null || true; wait $TAP 2>/dev/null || true; TAP=; fi   # the tap says whether the run ended during a wait
 echo "=== serial output ($CONF, ${SECS}s):"

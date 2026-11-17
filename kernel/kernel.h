@@ -45,6 +45,8 @@ struct bootinfo {
 #define KOPT_DCACHE_WT  2u              /* the 040/060 data cache write-through instead of copyback */
 #define KOPT_MMU_ON     4u              /* DESIGN D41: memory protection on (a 68030/040/060 with a working MMU) */
 #define KOPT_MMU_OFF    8u              /* DESIGN D41: memory protection off (wins over the kernel's default) */
+#define KOPT_MMU_AUTO   16u             /* D41 section 19: only in the kernel file's default (ZKOPTDEF): protection on
+                                         * where the CPU is known to have an MMU (LC/EC 040/060 not tried) */
 
 /* serial.c */
 void serial_init(void);

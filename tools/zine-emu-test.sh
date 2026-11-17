@@ -157,6 +157,15 @@ echo "$log4" | grep -aq '^zcache: all answered' && echo "$log4" | grep -aq '^zca
 echo "$log4" | grep -aq '^ztake-rc=0' && echo "$log4" | grep -aq '^zcrash-rc=1' && ok "68040: ztake and zcrash, Zenix back each time (the MMU registers and caches restored)" || no "68040 ztake/zcrash: $(echo "$log4" | grep -a 'ztake-rc\|zcrash-rc' | tail -2)"
 g1=$(echo "$log4" | grep -a -m1 '^fast RAM free' | tr -dc 0-9); g2=$(echo "$log4" | grep -a '^fast RAM free' | sed -n 2p | tr -dc 0-9)
 [ -n "$g1" ] && [ "$g1" = "$g2" ] && echo "$log4" | grep -aq '^zine-040-done' && echo "$log4" | grep -aq '^disk-ok' && ok "68040: free memory as before, the disk written afterwards" || no "68040: memory $g1 -> $g2 KB, or the end not reached"
+# D41 section 19: memory protection is on there by default (FS-UAE's MMU model): every session switched it off and back
+# on (the kernel's 'back' lines), and after them a stray write is still stopped
+prot() {    # prot NAME LOG
+    echo "$2" | grep -aq "^mmu: memory protection on: $1" && echo "$2" | grep -aq '^prot-rc=139' &&
+        echo "$2" | grep -aq 'memory protection: a write to 0x1000 (the kernel.s memory): killed' &&
+        ok "$1: memory protection on at boot, and on again after the sessions (a stray write stopped, status 139)" ||
+        no "$1 protection: $(echo "$2" | grep -a '^mmu:\|prot-rc\|memory protection' | tail -3)"
+}
+prot 68040 "$log4"
 echo "$log4" | grep -aiE 'panic|exception|guru' && no "68040: the kernel log has a panic or exception"
 # 16.14 on a 68060 with its FPU (fsuae/zine: FS-UAE's 68060 FPU, PCR ID 0x0430, switched off at the start as on a real
 # 68060 before 68060.library): Motorola's 68060 package (/lib/zine/sp060) for the FPU's and the integer unit's
@@ -177,6 +186,7 @@ f1=$(echo "$log6" | grep -a -m1 '^ZINE: zexit had' | sed 's/.* and \([0-9]*\) KB
 echo "$log6" | grep -aq '^ZINE: zalloc sees chip RAM and the fast RAM below 16 MB only (-l)' && [ -n "$fl" ] && [ "$fl" -gt 1024 ] && [ "$fl" -le 8192 ] && [ -n "$f1" ] && [ "$f1" -gt 16384 ] && echo "$log6" | grep -aq '^zallocl-rc=0' && ok "68060: zine -l: zalloc sees $fl KB of fast RAM below 16 MB (zexit without -l: $f1 KB), its AllocMem of 1 MB fast and the pool there; return code 0" || no "68060 zine -l: fast $f1 -> $fl KB: $(echo "$log6" | grep -a 'zalloc' | tail -3)"
 h1=$(echo "$log6" | grep -a -m1 '^fast RAM free' | tr -dc 0-9); h2=$(echo "$log6" | grep -a '^fast RAM free' | sed -n 2p | tr -dc 0-9)
 [ -n "$h1" ] && [ "$h1" = "$h2" ] && echo "$log6" | grep -aq '^zine-060-done' && echo "$log6" | grep -aq '^disk-ok' && ok "68060: free memory as before, the disk written afterwards" || no "68060: memory $h1 -> $h2 KB, or the end not reached"
+prot 68060 "$log6"
 echo "$log6" | grep -aiE 'panic|exception|guru' && no "68060: the kernel log has a panic or exception"
 echo "$log" | grep -aiE 'panic|exception|guru' && no "the kernel log has a panic or exception"
 exit $((1 - pass))

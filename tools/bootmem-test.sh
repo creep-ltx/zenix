@@ -3,8 +3,8 @@
 # DESIGN D45 (docs/d45-boot-memory.md section 10): the boot's memory given back. First the build's check of the spans
 # (tools/check-init-test.py: tools/check-init.py refuses each kind of reference it is there to refuse), then boots in
 # FS-UAE: the stock A1200 (68020, 2 MB chip RAM only: the span is chip RAM there), and a 68030 and a 68060 with memory
-# protection off (the default) and on (030m, 060m: a copy of the build whose kernel defaults to MMU=ON, as
-# tools/mmu-test.sh makes it). Each boot must say "mem: N bytes of boot code given back" with N the boot span's size
+# protection off (030, 060: a copy of the build whose kernel defaults to MMU=OFF, tools/kopts.py) and on (030m, 060m:
+# the kernel as built, protection on by default there since D41 section 19). Each boot must say "mem: N bytes of boot code given back" with N the boot span's size
 # read from kernel.elf, the pool's free count grown by exactly N, the CD span given back too (no CD drive in these
 # machines), the memory protection span (section 13) given back with protection off and kept with it on, then run
 # programs, a victim's memory intact, and no exception or panic.
@@ -32,9 +32,9 @@ span() {
 NB=$(span zinit) NC=$(span zhwcd) NM=$(span zhwmmu)
 echo "  the spans in kernel.elf: boot $NB bytes, CD drive $NC bytes, memory protection $NM bytes"
 
-B="$OUT/build-mmu"
+B="$OUT/build-nommu"
 rm -rf "$B"; cp -a "$BD" "$B" || exit 1
-python3 tools/kopts.py "$B/kernel.bin" MMU=ON >/dev/null || exit 1
+python3 tools/kopts.py "$B/kernel.bin" MMU=OFF >/dev/null || exit 1
 make -s BUILD="$B" "$B/zenix.adf" >/dev/null || { echo "FAIL: the floppy with the patched kernel"; exit 1; }
 
 P='zenix:\S*[#$] '
@@ -56,10 +56,10 @@ EOF
 for cpu in $CPUS; do
     case $cpu in
     020) conf=fsuae/a1200-020.fs-uae; set=''; bd="$BD"; ram=chip ;;
-    030) conf=fsuae/matrix/a1200-030.fs-uae; set='uae_mmu_model=68030'; bd="$BD"; ram=fast ;;
-    060) conf=fsuae/matrix/a1200-060.fs-uae; set=''; bd="$BD"; ram=fast ;;
-    030m) conf=fsuae/matrix/a1200-030.fs-uae; set='uae_mmu_model=68030'; bd="$B"; ram=fast ;;
-    060m) conf=fsuae/matrix/a1200-060.fs-uae; set=''; bd="$B"; ram=fast ;;
+    030) conf=fsuae/matrix/a1200-030.fs-uae; set=''; bd="$B"; ram=fast ;;
+    060) conf=fsuae/matrix/a1200-060.fs-uae; set=''; bd="$B"; ram=fast ;;
+    030m) conf=fsuae/matrix/a1200-030.fs-uae; set=''; bd="$BD"; ram=fast ;;
+    060m) conf=fsuae/matrix/a1200-060.fs-uae; set=''; bd="$BD"; ram=fast ;;
     *) echo "bootmem-test: $cpu: say 020, 030, 060, 030m or 060m"; exit 2 ;;
     esac
     L="$OUT/$cpu.log"
