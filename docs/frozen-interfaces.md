@@ -439,3 +439,9 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   at least; a held region's memfree -EBUSY; its owner's end hands the block to the grab's process); the grab's record
   `GEV_GONE` 6 (x the hold's slot, ch the base big-endian), and a record of type 0 that says nothing (readers skip it:
   an unread `GEV_GONE` whose block was let go becomes one).
+- **D58 (the IRC client, branch irc, 2026-11-17):** `irc`'s settings file `~/.config/irc/config` (`SETTING VALUE` a
+  line, `#` comments; the settings `server port tls nick user realname password sasl quit charset scrollback
+  reconnect bell autojoin highlight`, the last two up to 8 words; an unknown setting is an error), its keys file
+  `~/.config/irc/keys` (files' format, D48) with the action names of docs/man/irc.txt; the command's options
+  (`-c -n -p -t -K`); `/lib/irc/tlspipe HOST PORT`'s contract (the socket its descriptor 2, the plain text on 0 and
+  1, its first line `ok`, `ok clock DATE` or `error TEXT`, `info TEXT` lines before it, exit 0/1/3), which the e-mail client may share.

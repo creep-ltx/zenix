@@ -35,8 +35,8 @@
 cd "$(dirname "$0")/.." || exit 1
 MODE=""
 while :; do case "$1" in --fast) MODE=fast; shift ;; --stock) MODE=stock; shift ;; *) break ;; esac; done
-HOST="docs-check tap-test usize-test signal-host-test mkzexe-test zup-host-test ext2-host-test disk-host-test fat-host-test ffs-host-test pfs3-host-test iso9660-host-test exfat-host-test usb-host-test arc-host-test zenixfs-test mfm-test emmc-test genet-test ne2000-test plipbox-test serial-test term-test confont-test mem-test a3000-test stage0-test stage0-68k-test net-test random-host-test sock-host-test telnet-test crypto-test clock-host-test zpkg-test tls-test nfs-test wasabi-test libc-host-test libc-size zmalloc-test dos-host-test zine-test zinstall-host-test cache-host-test demoload-host-test amifont-host-test ttf-host-test sound-host-test trk-host-test rtg-host-test show-host-test lua-host-test make-host-test shebang-host-test zld-host-test zas-host-test tcc-host-test games-host-test"
-EMU="matrix cmds-test cmds2-test users-test jobs-test signal-test pty-test gcon-test dpy-test zdesk-test zdesk-draw-test drag-test lace-test font-test ttf-test prefs-test files-test show-test readdir-test dlogin-test prio-test kbd-test con-test cu-test diag-test colour-test memtest mounttest zenixfstest fat-test ffs-test pfs3-test cd-test exfat-test arc-test paths-test zroot-test zroot-card-test ide-speed-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test update-test useradd-test rootcheck-test random-test sock-test netd-test slip-test drv-test eth-test bbs-test time-test crypto68k-test ssh-test wget-test zpkg-emu-test sysupdate-test remote-test nfs-emu-test libc-test tui-test sumi-test maki-test markdown-test ahiru-test ctop-test zine-emu-test zine-input-test zinstall-test halt-test lineedit-test scroll-test conspeed-test box-test demo-test sound-test tracker-test mmu-test bootmem-test rtg-test usb-test lua-test make-test shebang-test zld-test zas-test tcc-test zdb-test games-test luagame-test screen-test intro-test"
+HOST="docs-check tap-test usize-test signal-host-test mkzexe-test zup-host-test ext2-host-test disk-host-test fat-host-test ffs-host-test pfs3-host-test iso9660-host-test exfat-host-test usb-host-test arc-host-test zenixfs-test mfm-test emmc-test genet-test ne2000-test plipbox-test serial-test term-test confont-test mem-test a3000-test stage0-test stage0-68k-test net-test random-host-test sock-host-test telnet-test irc-host-test crypto-test clock-host-test zpkg-test tls-test nfs-test wasabi-test libc-host-test libc-size zmalloc-test dos-host-test zine-test zinstall-host-test cache-host-test demoload-host-test amifont-host-test ttf-host-test sound-host-test trk-host-test rtg-host-test show-host-test lua-host-test make-host-test shebang-host-test zld-host-test zas-host-test tcc-host-test games-host-test"
+EMU="matrix cmds-test cmds2-test users-test jobs-test signal-test pty-test gcon-test dpy-test zdesk-test zdesk-draw-test drag-test lace-test font-test ttf-test prefs-test files-test show-test readdir-test dlogin-test prio-test kbd-test con-test cu-test diag-test colour-test memtest mounttest zenixfstest fat-test ffs-test pfs3-test cd-test exfat-test arc-test paths-test zroot-test zroot-card-test ide-speed-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test update-test useradd-test rootcheck-test random-test sock-test netd-test slip-test drv-test eth-test bbs-test irc-test time-test crypto68k-test ssh-test wget-test zpkg-emu-test sysupdate-test remote-test nfs-emu-test libc-test tui-test sumi-test maki-test markdown-test ahiru-test ctop-test zine-emu-test zine-input-test zinstall-test halt-test lineedit-test scroll-test conspeed-test box-test demo-test sound-test tracker-test mmu-test bootmem-test rtg-test usb-test lua-test make-test shebang-test zld-test zas-test tcc-test zdb-test games-test luagame-test screen-test intro-test"
 DEFMODE=fast
 case "$1" in
 "") LIST="$HOST $EMU"; DEFMODE=stock ;;          # the full run (the nightly, before a merge): stock speed
@@ -95,6 +95,7 @@ STOCK[sysupdate-test:z]="the same downloads (zpkg -Syu over the A2065)"
 STOCK[eth-test:e]="UDP echo and DNS from servers on the PC over the A2065: the Amiga's time-outs run in emulated seconds"
 STOCK[wget-test]="HTTPS and sntp against servers on the PC: wget's and sntp's time-outs run in emulated seconds"
 STOCK[ssh-test]="ssh against sshd on the PC: the same time-outs"
+STOCK[irc-test]="the fake IRC server on the PC: irc's connect, TLS and reconnect times and termtest's waits run in emulated seconds"
 STOCK[nfs-emu-test]="the NFS server on the PC: RPC time-outs and retries in emulated seconds (soft, hard, the server killed)"
 STOCK[remote-test]="Wasabi clients on the PC talk to wasabid (PUT/GET, restarts after seconds of the PC's clock)"
 STOCK[matrix:a1200-020]="the stock A1200, chip RAM only: how many logins fit, the display depth by memory"
@@ -215,6 +216,7 @@ run_job() {
     docs-check) cmd=(tools/docs-check.sh) ;;
     net-test) cmd=(tools/host/net-test.sh) ;;
     telnet-test) cmd=(tools/host/telnet-test.sh) ;;
+    irc-host-test) cmd=(env IRC_TEST_OUT="$RUN/$j" tools/host/irc-test.sh) ;;
     crypto-test) cmd=(tools/host/crypto-test.sh) ;;
     zpkg-test) cmd=(tools/host/zpkg-test.sh) ;;
     zine-test) cmd=(tools/host/zine-test.sh) ;;

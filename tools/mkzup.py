@@ -237,6 +237,7 @@ FAMILIES = [
     ("zmodem", "receive and send files with Zmodem (rz, sz)", "rz"),
     ("nettools", "the network's interfaces, routes, ping, netstat, host", "ifconfig route ping netstat host"),
     ("telnet", "a terminal to another computer over the network", "telnet"),
+    ("irc", "an IRC client: channels, private messages, TLS", "irc"),
     ("ssh", "the secure shell and its keys", "ssh ssh-keygen"),
     ("wget", "fetch files over HTTP and HTTPS", "wget"),
     ("sntp", "set the clock from the network", "sntp"),
@@ -289,7 +290,8 @@ FAMILY_LICENSES = {"zine": [("user/zine/msp/060/README", "m68060sp"), ("user/zin
 # directory, None an empty file; kind "c" is kept when changed (a score file). tools/mkroot.sh stages the same list
 # (mkzup.py stage FAMILY ROOT BUILD), so an image holds what the package holds. The games: the Lua games as #!
 # scripts (they need the package lua), the data the games read, the score files every user may write.
-FAMILY_EXTRA = {"games": [("f", 0o755, "games/gridrun.lua", "/bin/gridrun"),
+FAMILY_EXTRA = {"irc": [("f", 0o755, "build:tlspipe.zx", "/lib/irc/tlspipe")],     # DESIGN D58: irc's TLS helper
+                "games": [("f", 0o755, "games/gridrun.lua", "/bin/gridrun"),
                           ("f", 0o644, "build:bg/fortunes", "/usr/share/games/fortune/fortunes"),
                           ("f", 0o644, "build:bg/fortunes.dat", "/usr/share/games/fortune/fortunes.dat"),
                           ("f", 0o644, "ports/bsdgames/upstream/wump/wump.info", "/usr/share/games/wump.info"),

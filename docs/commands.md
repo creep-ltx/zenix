@@ -1,6 +1,6 @@
 # Command reference
 
-Zenix has 175 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
+Zenix has 176 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
 page in `docs/man/NAME.txt`; a few more pages are for names that start the same program (`gunzip`, `zcat`, `chgrp`,
 `more`, `pkill`, `ifup`, `ifdown`, `unlzx`). The pages use the exact format that Zenix's own `man` reads (plain text of at most 78 columns, a
 `NAME(section)` header, `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`, `EXAMPLES`, `EXIT STATUS`, `SEE ALSO`); the
@@ -93,6 +93,7 @@ spot-checked against the code that day.
 | [netstat](man/netstat.txt) | the network's connections and listening sockets (`-tuwla`) |
 | [host](man/host.txt) | look a name up (`/etc/hosts`, then DNS) |
 | [telnet](man/telnet.txt) | a terminal to another computer over the network: Amiga and PC boards, Unix hosts, Zmodem, a phone book (DESIGN D20) |
+| [irc](man/irc.txt) | an IRC client for the terminal: channels and private messages in windows, TLS, SASL, a reconnect, configurable keys (DESIGN D58) |
 | [rz, sz](man/rz.txt) | receive and send files with Zmodem over standard input and output (DESIGN D20) |
 | [ssh](man/ssh.txt) | a secure shell on another computer (OpenSSH's sshd): keys, known hosts, ~. (DESIGN D21) |
 | [ssh-keygen](man/ssh-keygen.txt) | make the Amiga's ssh key; fingerprints, public key lines, known_hosts entries removed (DESIGN D21) |
@@ -136,7 +137,7 @@ In the games package (`zpkg -S games`; roadmap block 7 item 7, "fun"; DESIGN D52
 
 ## Run on AmigaOS, not on Zenix
 [zenixboot](man/zenixboot.txt) starts Zenix from files on a hard disk, CF or SD card partition, so that no floppy is
-needed (not one of the 175 programs: it is an AmigaOS program on the AmigaDOS boot partition).
+needed (not one of the 176 programs: it is an AmigaOS program on the AmigaDOS boot partition).
 [bootmenu](man/bootmenu.txt) is the boot menu of a disk with AmigaOS and Zenix on it (the SD card of
 `tools/mkdualcard.sh`): it boots a chosen AmigaOS partition or runs zenixboot.
 
