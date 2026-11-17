@@ -35,12 +35,12 @@ DESCRIPTION
     ("ham.iff 320x64 HAM6").
 
     By default (and with -s) the picture is on a screen of its own
-    (DESIGN D55): its own mode (lores or
-    hires, interlaced, HAM6, HAM8, Extra Half-Brite) and its own colours,
-    HAM in full colour. On that screen s, q, Esc or a click go back to the
-    window (q there again quits); n, Space and p the next and previous picture there; the
-    arrows (or h j k l) move a bigger picture (lines; across in steps of
-    64 pixels). Left Amiga+N shows the desktop meanwhile.
+    (DESIGN D55): its own mode (lores or hires, interlaced, HAM6, HAM8,
+    Extra Half-Brite) and its own colours, HAM in full colour. On that
+    screen s, q, Esc or a click go back to the window (q there again
+    quits); n, Space and p the next and previous picture there; the arrows
+    (or h j k l) move a bigger picture (lines; across in steps of 64
+    pixels). Left Amiga+N shows the desktop meanwhile.
 
 KEYS
     n, Space               the next picture
