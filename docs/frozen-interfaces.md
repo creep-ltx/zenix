@@ -446,3 +446,10 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   (`-c -n -p -t -K`); `/lib/tls/tlspipe HOST PORT`'s contract (the socket its descriptor 2, the plain text on 0 and
   1, its first line `ok`, `ok clock DATE` or `error TEXT`, `info TEXT` lines before it, exit 0/1/3), shared with the
   e-mail client (D59; it was `/lib/irc/tlspipe` until D59 moved it into the package `tls`, before any release).
+- **D59 (the e-mail client, branch mail, 2026-11-17):** `mail`'s settings file `~/.config/mail/config` (`SETTING VALUE`
+  a line, `#` comments; the settings `imap pop tls port user password passcmd smtp smtp_tls smtp_port smtp_user
+  smtp_password smtp_passcmd from sent folder editor limit plain_auth`; `tls`/`smtp_tls` take `on`, `starttls`, `off`;
+  an unknown setting is an error; refused when others may change it, or read it while it holds a password), its keys
+  file `~/.config/mail/keys` (files' format, D48) with the action names of docs/man/mail.txt; the command's options
+  (`-c -f -s -K`) and `mail -s SUBJECT ADDRESS...` reading the text from standard input; the package `tls` owning
+  `/lib/tls/tlspipe`; `keys_tty` in display/keys.h (a key from a terminal: the codes of the shared parser).

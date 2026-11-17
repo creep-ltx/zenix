@@ -1,0 +1,177 @@
+MAIL(1)			Zenix manual
+
+NAME
+    mail - an e-mail client for the terminal
+
+SYNOPSIS
+    mail [-c FILE] [-f FOLDER]
+    mail [-c FILE] -s SUBJECT ADDRESS... < TEXT
+    mail -K
+
+DESCRIPTION
+    mail reads your mail on an IMAP server (or a POP3 one) and sends
+    through an SMTP server, over TLS. It is online only: messages stay on
+    the server and nothing is kept on the disk but a draft while you write
+    it. The screen, 80 columns first:
+
+    row 1        the folder, its messages and how many are unread; in a
+                 message, which one it is
+    the middle   the index, a message, the folders or the keys
+    a row        the main keys (from your keys file)
+    last row     what happens, and questions
+
+    The index lists the newest messages first (at most "limit", 300 by
+    default): a mark (N unread, D deleted, r answered), + for a message
+    with attachments, the date (the time for today's; UTC), who sent it,
+    the subject. Unread messages are bold, the cursor's row reversed.
+
+    A message shows Date, From, To, Cc, Reply-To (when it differs) and
+    Subject, then its text: the plain-text part (an HTML-only message is
+    made text: paragraphs, lists, links as <URL>, no scripts or styles),
+    quoted-printable and base64 decoded, ISO-8859-1, ISO-8859-15,
+    Windows-1252 and UTF-8 shown right (another charset: UTF-8 where it
+    is valid, else ISO-8859-1). Quoted lines are cyan. A forwarded message
+    inside is shown in place. The attachments are listed at the end with
+    their numbers; s saves one to a file. h shows every header. A message
+    is read whole up to 512 KB (of a bigger one its first 512 KB, and that
+    is said); its text is shown up to 1 MB.
+
+    Nothing in a message or from a server can move the cursor or change
+    the screen: control characters, escape sequences (also C1 ones such
+    as U+009B) and bidirectional overrides are dropped before anything is
+    shown, file names of attachments lose '/', '\' and ':'.
+
+    Writing: m a new message, r a reply (to Reply-To, else From), g a
+    reply to everyone (To and Cc, without you), f forward. mail starts
+    the editor (the setting "editor", else $EDITOR, else edit(1)) on a
+    draft in ~/.config/mail/ (readable by you only): headers (From, To,
+    Cc, Bcc, Subject; a reply also In-Reply-To and References), a blank
+    line, the text (a reply's quoted with "> "). Leave the editor and mail
+    asks: y send, e edit again, q drop it. A draft not changed is not
+    sent. The message goes out as UTF-8 (quoted-printable when it is not
+    ASCII), names and subjects outside ASCII as RFC 2047 words, Bcc only
+    to the server, never in the message; a copy is appended to the
+    "sent" folder (IMAP). A message that cannot be sent is said, and you
+    may try again or edit it.
+
+    mail -s sends TEXT from standard input to the ADDRESSes with the
+    SUBJECT, through the settings' SMTP server, with no screen (the
+    password must be in the settings or come from "passcmd"; no copy is
+    kept). A control character in SUBJECT or an ADDRESS is refused.
+    Exit 0 when the server took it.
+
+    TLS: "tls on" (port 993, POP3 995) or "smtp_tls on" (465) encrypt from
+    the start; "starttls" (IMAP 143, POP3 110, SMTP 587) after the
+    server's STARTTLS (STLS); a server that will not is refused, never
+    used plain. The certificate is checked as wget(1) checks it: against
+    /etc/ssl/anchors and your roots in /etc/ssl/local/, for the server's
+    name, its dates by the clock's rules (sntp(1)). The TLS code is the
+    helper /lib/tls/tlspipe (the package tls, shared with irc(1)),
+    started for each encrypted connection; a handshake takes up to a
+    minute on a 68020. A password is never sent without TLS unless the
+    setting "plain_auth on" asks for it (a test server at home).
+
+    The password: "password" in the settings, or the first line that
+    "passcmd" prints (run with sh -c), else mail asks for it (not shown
+    as you type). Sending uses the same unless smtp_user, smtp_password
+    or smtp_passcmd say otherwise. A refused password is asked again.
+
+    A lost connection (the server's idle limit) is made again at the
+    next key.
+
+OPTIONS
+    -c FILE      the settings from FILE instead of ~/.config/mail/config
+    -f FOLDER    open FOLDER first (else the setting "folder", INBOX)
+    -s SUBJECT   send standard input to the ADDRESSes (no screen)
+    -K           print the default keys and end
+
+KEYS
+    The defaults; every key can be changed in ~/.config/mail/keys
+    (written with these the first time; the format of files(1): KEY
+    ACTION a line, <Name> for special keys, "KEY none" takes a key away;
+    the action's name in brackets). ? shows the keys as they are.
+
+    Up, k / Down, j      the previous, next line (up, down)
+    Shift-Up, PageUp, -  a page back (page_up)
+    Shift-Down, PageDown, Space   a page on (page_down)
+    Home, Ctrl-A, <      the first (top)
+    End, Ctrl-E, >       the last (bottom)
+    Return, Right        open the message or the folder (open)
+    q, Left              back: from a message or the folders to the
+                         index; in the index, quit (back)
+    Q                    quit (quit)
+    c                    the folders (folders)
+    m                    a new message (compose)
+    r                    reply (reply)
+    g                    reply to everyone (reply_all)
+    f                    forward (forward)
+    d / u                delete, undelete: marked D (delete, undelete)
+    N                    read or unread (toggle_read)
+    M                    move to a folder: Tab offers the folders (move)
+    s                    save an attachment (save)
+    $                    remove the deleted messages now, and read the
+                         folder again (sync)
+    h                    every header, or the usual ones (headers)
+    n, p                 the next, previous message (next, prev)
+    ?, Help              the keys (help)
+    Ctrl-L               draw the screen again (redraw)
+
+    Deleted messages are removed from the server by $ or when you quit
+    (mail asks). Moving copies the message and marks it deleted. In a
+    question on the last row: Return answers, Esc (or Ctrl-G, Ctrl-C)
+    gives up, Ctrl-U clears, Backspace erases.
+
+FILES
+    ~/.config/mail/config
+        the settings, one "SETTING VALUE" a line, # a comment. Written
+        the first time with every setting commented out, mode 600 in a
+        folder of mode 700. mail refuses a file that is not yours, one
+        others may change, and one with a password that others may read
+        (chmod 600).
+        imap HOST          the IMAP server (or:)
+        pop HOST           a POP3 server (one folder, no read marks)
+        tls on|starttls|off   reading's TLS (on)
+        port N             its port (993/143; POP3 995/110)
+        user NAME          the login
+        password TEXT      the password (the rest of the line)
+        passcmd COMMAND    a command that prints the password
+        smtp HOST          the server to send through
+        smtp_tls on|starttls|off   (starttls)
+        smtp_port N        (587; 465 with "on")
+        smtp_user NAME, smtp_password TEXT, smtp_passcmd COMMAND
+                           when sending logs in otherwise
+        from ADDRESS       you: Your Name <you@example.org>
+        sent FOLDER        keep a copy of what you send there (IMAP)
+        folder FOLDER      the folder opened first (INBOX)
+        editor COMMAND     the editor, words allowed ($EDITOR, edit)
+        limit N            the newest messages in the index (300;
+                           10-5000)
+        plain_auth on|off  send the password without TLS (off)
+        An unknown setting is an error, with its line.
+    ~/.config/mail/keys
+        the keys (KEYS above)
+    ~/.config/mail/draft-PID
+        a message while it is written (removed when sent or dropped)
+    /lib/tls/tlspipe
+        the TLS helper (the package tls)
+    /etc/ssl/anchors, /etc/ssl/local/
+        the certificates TLS trusts (wget(1))
+
+EXIT STATUS
+    0 at the end (mail -s: the message was taken); 1 when mail -s could
+    not send; 2 for a wrong option or setting, a settings file others may
+    read or change, no server, or when the keys or the screen are not a
+    terminal.
+
+NOTES
+    Not done: attachments in what you send (only text), a local mailbox
+    or a cache (online only), searching, threads, sorting other than the
+    server's order, S/MIME and PGP, OAuth2 logins (servers that need it,
+    such as Gmail without an app password, refuse LOGIN), format=flowed,
+    charsets beyond the four above, IMAP IDLE (new mail shows at $), POP3
+    read marks. A message's text over 1 MB is cut and said. Times are UTC
+    (Zenix has no time zones yet). Never run on the real A1200 yet.
+    DESIGN D59 (docs/d59-mail.md).
+
+SEE ALSO
+    irc(1), wget(1), sntp(1), edit(1), files(1)

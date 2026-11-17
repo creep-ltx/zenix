@@ -94,6 +94,7 @@ spot-checked against the code that day.
 | [host](man/host.txt) | look a name up (`/etc/hosts`, then DNS) |
 | [telnet](man/telnet.txt) | a terminal to another computer over the network: Amiga and PC boards, Unix hosts, Zmodem, a phone book (DESIGN D20) |
 | [irc](man/irc.txt) | an IRC client for the terminal: channels and private messages in windows, TLS, SASL, a reconnect, configurable keys (DESIGN D58) |
+| [mail](man/mail.txt) | an e-mail client for the terminal: IMAP or POP3 and SMTP over TLS, MIME and HTML read, attachments saved, replies in your editor, configurable keys; `mail -s` for scripts (DESIGN D59) |
 | [rz, sz](man/rz.txt) | receive and send files with Zmodem over standard input and output (DESIGN D20) |
 | [ssh](man/ssh.txt) | a secure shell on another computer (OpenSSH's sshd): keys, known hosts, ~. (DESIGN D21) |
 | [ssh-keygen](man/ssh-keygen.txt) | make the Amiga's ssh key; fingerprints, public key lines, known_hosts entries removed (DESIGN D21) |
