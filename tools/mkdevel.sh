@@ -19,9 +19,9 @@ D=$B/devel
 rm -rf "$D.new"
 mkdir -p "$D.new/usr/lib/zenix" "$D.new/usr/include/pico"
 for f in libc.a libc-pure.a crt0.o crt0-pure.o; do
-    "${P}objcopy" --strip-debug "$B/$f" "$D.new/usr/lib/$f"
+    "${P}objcopy" -D --strip-debug "$B/$f" "$D.new/usr/lib/$f"
 done
-"${P}objcopy" --strip-debug "$LIBGCC" "$D.new/usr/lib/libgcc.a"
+"${P}objcopy" -D --strip-debug "$LIBGCC" "$D.new/usr/lib/libgcc.a"
 cp link/user.ld link/pure.ld "$D.new/usr/lib/zenix/"
 # tcc's own headers (stdarg.h, stddef.h, float.h, ...; tccdefs.h is built into the program), from the Makefile's patched
 # copy of ports/tcc: /usr/lib/tcc/include, the first directory tcc searches

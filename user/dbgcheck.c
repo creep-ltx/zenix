@@ -172,6 +172,16 @@ int main(int argc, char **argv)
     sys_close(p[1]);
     int ws = t > 0 ? sys_wait(t) : -1;
     ok("a step left pending at a detach: the program runs on to its end (status 3)", good && ws == 3);
+
+    /* audit 2026-11-14 K2: the target becomes a system process (a reserved port: detached, its record freed) while
+     * its debugger waits; the wait ends (the old code read the freed record and waited for good) */
+    char *sv[] = { "/tests/dbgtest", "sysport", 0 };
+    t = start(sv, 0);
+    good = t > 0 && sys_debug(DBG_CONT, t, 0) == 0;
+    int w = good ? dwait(t) : 0;
+    ws = t > 0 ? sys_wait(t) : -1;
+    ok("a target made a system process while its debugger waits: the wait ends (ESRCH), status 6",
+       good && w == -ESRCH && ws == 6);
     oprintf("dbgcheck: done, %d failed\n", fails);
     oflush();
     return fails != 0;

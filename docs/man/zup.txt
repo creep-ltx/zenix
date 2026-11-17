@@ -129,6 +129,9 @@ EXIT STATUS
 NOTES
     zup ignores SIGPIPE: zup | less, and quitting less early, never ends
     an install half-way (its messages just go nowhere then).
+    zup sets its own umask (022) first, whatever the caller's (sudo keeps
+    it): no file or folder of an install, half-way or kept, is writable
+    by others.
     The bundle lies in memory that is no process's own: zup copies what it
     writes through its own buffers (a system call would refuse a pointer
     into the bundle). Only the root filesystem is changed; /home and other

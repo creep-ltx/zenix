@@ -59,10 +59,11 @@ KCOLD int port_create(const char *name, int owner)
     int i = port_slot(name);
     if (i >= 0)
         return i < NSVC && svc_handover(i) ? PORT_ID(i) : -EBUSY;
-    if (reserved(name) && current->uid != 0)
-        return -13;
-    if (reserved(name))
+    if (reserved(name)) {
+        if (current->uid != 0)
+            return -EACCES;
         mmu_sysmark(current);           /* D41 7: the kernel sends it requests whose message is on a kernel stack */
+    }
     for (i = NSVC; i < NPORT; i++)
         if (!ports[i].used) {
             u32 gen = (ports[i].gen + 1) & 0x7FFFFF;          /* positive port numbers: 23 bits of generation */

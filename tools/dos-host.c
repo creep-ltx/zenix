@@ -32,6 +32,7 @@ int sys_klog(u32 off, void *buf, u32 n) { (void)off; (void)buf; (void)n; return 
 int sys_utimes(const char *p, u32 t) { (void)p; (void)t; return 0; }
 int tui_zenix_tfd = -1;                 /* (the text-UI library's, which Wait reads: not linked here) */
 unsigned long tui_zenix_tsig;
+volatile int tui_zenix_winch;            /* (the library's SIGWINCH flag, ports/tui/zenix: 0 here, no resizes) */
 
 static int fails;
 static void check(const char *what, int ok)

@@ -96,10 +96,10 @@ put() {     # put IMG FILE PATH MODE
     debugfs -w -R "sif $3 mode 0100$4" $1 >/dev/null 2>&1
 }
 mkd() { debugfs -w -R "mkdir $2" $1 >/dev/null 2>&1; debugfs -w -R "sif $2 uid 0" $1 >/dev/null 2>&1; debugfs -w -R "sif $2 mode 040755" $1 >/dev/null 2>&1; }
-root_img() {    # IMG FROM: a root of 16 MB (room for the downloads and the kept versions), the network, the scripts
+root_img() {    # IMG FROM: a root of 24 MB (room for the downloads and the kept versions; 16 MB was too small after block 7: the full audit FA-44), the network, the scripts
     local img=$1
     cp $2 $img
-    e2fsck -fy $img >/dev/null 2>&1; resize2fs $img 16M >/dev/null 2>&1 || return 1
+    e2fsck -fy $img >/dev/null 2>&1; resize2fs $img 24M >/dev/null 2>&1 || return 1
     mkd $img /etc/network; mkd $img /tests
     printf 'auto eth0\niface eth0 inet dhcp\n    driver a2065\n' >$OUT/interfaces
     put $img $OUT/interfaces /etc/network/interfaces 644

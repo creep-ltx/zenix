@@ -864,7 +864,7 @@ pattern (section 6).
 
 `TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 97 system calls (the numbers and
 a line on each are in `kernel/kernel.h`; numbers 1-100, of which 39, 40 and 68 are unused; the next free number is
-claimed in CLAUDE.md first): the network (`sock`, `netsrv`, `drv`: section 11, "Sockets" and "The network's drivers"), files (`open close read write lseek readdir readdirs stat fstat lstat chdir getcwd mkdir unlink
+claimed in docs/claims.md first): the network (`sock`, `netsrv`, `drv`: section 11, "Sockets" and "The network's drivers"), files (`open close read write lseek readdir readdirs stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
 index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority setpgid`, and `debug`, the debugger's: section 6),
 events and signals (`evwait sigaction sigprocmask sigreturn alarm`, section 6), the machine (`reboot`,
@@ -1434,7 +1434,7 @@ reads one record a call (`zdir`: a 2 KB buffer a directory; `dir_list_some`, `di
 500 names, a record 1.04 ms one a call, 0.58 ms in batches, an lstat 10 ms (the server walks the directory to the
 name); `ls` 5.66 -> 1.05 s, `ls -l` 6.83 -> 2.19 s, the file view 6.6 -> 1.7 s.
 
-## 10. The filesystem## 10. The filesystem
+## 10. The filesystem
 
 - **ext2**, revision 0/1, inodes of 128 bytes or more, 1, 2 or 4 KB blocks, read **and write** (bitmaps, group
   descriptors, direct/indirect/double-indirect blocks, growing directories, rename, hard and symbolic links, fast

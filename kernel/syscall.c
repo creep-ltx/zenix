@@ -651,8 +651,8 @@ void syscall_c(u32 *rb)
         }
         break;
     case SYS_setfg:                     /* on the caller's own tty; 0 = nobody, else a process the caller may signal, or
-                                         * (a2 1, D16) a process group with a member the caller may signal */
-        if (a1 == 0 || !(r = a2 ? (s32)sig_group((int)a1, 0, 1) : may_signal(proc_by_pid((int)a1)))) {
+                                         * (a2 1, D16) a process group whose every member the caller may signal */
+        if (a1 == 0 || !(r = a2 ? (s32)sig_group((int)a1, 0, 2) : may_signal(proc_by_pid((int)a1)))) {
             tty_setfg(tty_of(current), (int)a1, a2 != 0);
             r = 0;
         }

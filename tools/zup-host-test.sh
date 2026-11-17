@@ -307,6 +307,12 @@ done
 [ $bad = 0 ] && check "a power cut before each of the rollback's $nrb changes, then again: the old version" ok || check "power cuts during the rollback ($bad bad)" bad
 zup $U/c $V2 $U/b2.zup >/dev/null 2>&1
 snap $U/c | cmp -s - $U/s2 && check "after the rollback the bundle installs again (the new version)" ok || check "after the rollback the bundle installs again" bad
+rm -rf $U/u0; cp -a $U/r1 $U/u0; cp $U/fsclean1 $U/fsclean   # audit 2026-11-14 U1: the caller's umask (sudo keeps it)
+rm -f $U/trace; (umask 000; zup $U/u0 $V2 $U/b2.zup >/dev/null 2>&1)
+snap $U/u0 | cmp -s - $U/s2 && [ -z "$(find $U/u0 ! -type l -perm -002)" ] && ! grep -q '^WRITABLE-BY-OTHERS' $U/trace &&
+    check "an update run with umask 000: installed, no file or folder writable by others, not even half-way" ok ||
+    { check "an update run with umask 000: no file or folder writable by others, not even half-way" bad
+      find $U/u0 ! -type l -perm -002 | head -3; grep -m3 '^WRITABLE-BY-OTHERS' $U/trace; }
 env ZUP_ROOT=$U/c $U/zup >$U/out 2>&1; rc=$?
 [ $rc = 0 ] && [ ! -s $U/out ] && check "a kernel without SYS_update: zup does nothing and says nothing" ok || check "a kernel without SYS_update: nothing" bad
 

@@ -157,6 +157,9 @@ EXIT STATUS
     wrong argument.
 
 NOTES
+    zpkg sets its own umask (022) first, whatever the caller's (sudo
+    keeps it): its lists, cache and downloads are never writable by
+    others.
     Plain http:// servers only for now (the owner's NAS, D22 owner
     decision 4); https:// comes with the stable channel on GitHub Pages
     (D22 step 9). The shipped /etc/zpkg.conf names no server: add one,

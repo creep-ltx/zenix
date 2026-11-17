@@ -1559,6 +1559,8 @@ int main(int argc, char **argv)
     const char *op = 0, *back = 0, *reset = 0, *fetchdir = 0;
     int fetchz = 0;
     signal(SIGPIPE, SIG_IGN);
+    sys_umask(022);                     /* not the caller's (sudo keeps it): the cache, lists and downloads are never
+                                         * writable by others before zup checks them (audit 2026-11-14 U1) */
     cn.fd = -1;
     if (argc > 0 && argv[0]) { const char *s = strrchr(argv[0], '/'); myname = s ? s + 1 : argv[0]; }
     for (int i = 1; i < argc; i++) {

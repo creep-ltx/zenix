@@ -67,6 +67,7 @@ struct uproc { u32 pid, ppid, state, mem; char name[16]; int nice; u32 pri; u32 
 #define FS_MARK 25
 
 int sys_open(const char *p, int fl);
+u32 sys_umask(u32 mask);
 int sys_close(int fd);
 int sys_read(int fd, void *b, u32 n);
 int sys_write(int fd, const void *b, u32 n);

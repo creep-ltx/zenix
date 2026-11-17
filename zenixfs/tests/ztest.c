@@ -701,6 +701,62 @@ static void reseal(uint8_t *b, uint32_t n)        /* the library's checksum (zen
     for (uint32_t i = 4; i < n; i += 4) { uint32_t w = be32(b + i); s = ((s << 1) | (s >> 31)) + w; }
     put32(b, s);
 }
+/* audit 2026-11-14 F1: an extent item with good checksums but a run outside the volume, over the system area, empty,
+ * huge or wrapping: the read answers ZENIXFS_ECORRUPT (never another block's data), and freeing the file neither
+ * frees blocks outside the volume nor loops for billions of blocks */
+static int test_crafted_extent(void)
+{
+    const uint32_t B = 1024, NB = 2048;
+    struct zmem *m = zmem_new(10, NB, 0);
+    struct zenixfs *fs; uint32_t f, ino;
+    static char data[3 * 1024];
+    memset(data, 'x', sizeof data);
+    CHECK(zenixfs_mkfs(&m->dev, NULL, 0, 5) == 0);
+    CHECK(zenixfs_mount(&fs, &m->dev, 64) == 0);
+    CHECK(zenixfs_create(fs, ZENIXFS_ROOT_INO, "f", 1, 0644, 0, 0, &f) == 0);
+    CHECK(zenixfs_write(fs, f, 0, data, sizeof data) == (int)sizeof data);
+    CHECK(zenixfs_unmount(fs) == 0);
+    static const uint32_t bad[][2] = { { NB + 7, 1 }, { 100, 0x100000 }, { 100, 0xFFFFFFF0u }, { 3, 2 }, { 100, 0 },
+                                       { 0xFFFFFFF0u, 0x20 } };
+    int cases = 0, good = 0;
+    for (unsigned v = 0; v < sizeof bad / sizeof bad[0]; v++) {
+        struct zmem *c = zmem_clone(m);
+        int patched = 0;
+        for (uint32_t blk = 0; blk < NB; blk++) {   /* every leaf holding the file's extent (old copies too) */
+            uint8_t *b = c->img + (size_t)blk * B;
+            if (!(b[4] == 0x5A && b[5] == 0x42 && b[6] == 4 && be32(b + 8) == blk)) continue;
+            uint32_t n = (uint32_t)b[24] << 8 | b[25];
+            for (uint32_t i = 0; i < n && 32 + 16 * i + 16 <= B; i++) {
+                uint8_t *ih = b + 32 + 16 * i;
+                uint32_t off = (uint32_t)ih[12] << 8 | ih[13];
+                if (be32(ih) != f || ih[4] != 3 || off + 8 > B) continue;
+                put32(b + off, bad[v][0]); put32(b + off + 4, bad[v][1]);
+                reseal(b, B);
+                patched++;
+            }
+        }
+        if (!patched) { zmem_free(c); continue; }
+        cases++;
+        struct zenixfs *x; char buf[64];
+        if (zenixfs_mount(&x, &c->dev, 64) != 0) { good++; zmem_free(c); continue; }
+        int r = zenixfs_read(x, f, 0, buf, sizeof buf), ok = r == ZENIXFS_ECORRUPT;
+        if (ok) {                                   /* the old code looped for 4 billion blocks here: only when refused */
+            zenixfs_unlink(x, ZENIXFS_ROOT_INO, "f", 1);
+            ok = zenixfs_lookup(x, ZENIXFS_ROOT_INO, "new", 3, &ino) == ZENIXFS_ENOENT &&
+                 zenixfs_create(x, ZENIXFS_ROOT_INO, "new", 3, 0644, 0, 0, &ino) >= 0;
+        }
+        zenixfs_unmount(x);
+        if (ok) good++;
+        else printf("  extent %u+%u: read answered %d\n", bad[v][0], bad[v][1], r);
+        zmem_free(c);
+    }
+    printf("  %d crafted extents (good checksums), %d answered ZENIXFS_ECORRUPT and freed nothing outside\n", cases, good);
+    CHECK(cases == 6);
+    CHECK(good == cases);
+    zmem_free(m);
+    return 0;
+}
+
 static int test_crafted(void)
 {
     const uint32_t B = 1024, NB = 2048;
@@ -868,7 +924,7 @@ int main(int argc, char **argv)
     struct { const char *name; int (*fn)(void); } tests[] = {
         { "basic", test_basic }, { "random", test_random }, { "powercut", test_powercut },
         { "bitflip", test_bitflip }, { "full", test_full }, { "orphan", test_orphan }, { "collide", test_collide }, { "readdir-delete", test_readdir_delete },
-        { "crafted", test_crafted }, { "readonly", test_readonly }, { "bigvol", test_bigvol }, { "bigpower", test_bigpower },
+        { "crafted", test_crafted }, { "crafted-extent", test_crafted_extent }, { "readonly", test_readonly }, { "bigvol", test_bigvol }, { "bigpower", test_bigpower },
         { "renamecut", test_renamecut },
     };
     int ran = 0;

@@ -145,6 +145,11 @@ static void formats(void)
               want[i].format);
     }
     check(!fb_format_ok(1, 1) && !fb_format_ok(0, 1) && !fb_format_ok(14, 2), "CLUT, planar and YUV refused", 0);
+    /* audit A6-27: a pretend card's record was allocated as bpr * height before bpr was checked (a huge bpr wrapped) */
+    check(fb_size_ok(640, 480, 4, 2560) && fb_size_ok(4096, 4096, 4, 65536), "card sizes in range taken", 0);
+    check(!fb_size_ok(640, 480, 4, 0x80000000u) && !fb_size_ok(640, 480, 4, 65540), "a row over 65,536 bytes refused", 0);
+    check(!fb_size_ok(640, 480, 4, 2556) && !fb_size_ok(319, 480, 2, 640) && !fb_size_ok(640, 4097, 2, 1280) &&
+          !fb_size_ok(640, 480, 0, 2560), "a row shorter than the width, sizes out of range, 0 bytes a pixel refused", 0);
     u8 o[4];
     fb_colour(6, 0xFFF, o);
     check(o[1] == 0xFF && o[2] == 0xFF && o[3] == 0xFF, "white is 0xFF", 0);

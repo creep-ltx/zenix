@@ -440,14 +440,13 @@ static int card_take(void)
     if (h->magic != HWINFO_MAGIC || h->fb.magic != HWFB_MAGIC)
         return 0;
     struct hwfb *f = (struct hwfb *)&h->fb;
-    if ((f->flags & HWFB_TEST) && !f->base && f->bpp && f->width <= 4096 && f->height <= 4096 &&
+    if ((f->flags & HWFB_TEST) && !f->base && fb_size_ok(f->width, f->height, f->bpp, f->bpr) &&
         (f->base = (u32)sys_memalloc(f->bpr * f->height)) != 0) {
         memset((void *)f->base, 0x5A, f->bpr * f->height);     /* a test's pretend card (dpytest -fb): ours, so it
                                          * lives exactly as long as we draw on it; a pixel never drawn shows */
         test_card = f;
     }
-    if (!fb_format_ok(f->format, f->bpp) || f->width < 320 || f->height < 200 || f->width > 4096 ||
-        f->height > 4096 || f->bpr < (u32)f->width * f->bpp || f->bpr > 65536 || !f->base ||
+    if (!fb_format_ok(f->format, f->bpp) || !fb_size_ok(f->width, f->height, f->bpp, f->bpr) || !f->base ||
         f->base + f->bpr * f->height < f->base) {
         dprintf(2, "displayd: the boot's RTG screen (%ux%u, format %u, %u bytes a pixel, %u a row) is not one I can "
                 "draw on: the chipset's screen\n", f->width, f->height, f->format, f->bpp, f->bpr);
@@ -1062,17 +1061,21 @@ static int req(struct umsg *m)
     struct win *w;
     switch (m->type) {
     case DPY_WIN_NEW: {
-        struct dpywin *d = (struct dpywin *)a[0];
-        if (peer(m, PEER_WR, a[0], DPYWIN_FIRST) < 0 || d->size < DPYWIN_FIRST)
+        struct dpywin *d = (struct dpywin *)a[0], q;
+        if (peer(m, PEER_WR, a[0], DPYWIN_FIRST) < 0)
             return -EFAULT;
-        if ((d->kind == WK_BAR || d->kind == WK_DESKTOP) && cl != wm_cl)
+        memcpy(&q, d, DPYWIN_FIRST);    /* checked and used once (audit 2026-11-14 D2): a second read of kind after
+                                         * the check gave a client the manager's kinds */
+        if (q.size < DPYWIN_FIRST)
+            return -EFAULT;
+        if ((q.kind == WK_BAR || q.kind == WK_DESKTOP) && cl != wm_cl)
             return -EPERM;              /* the manager's kinds */
-        int s = win_new(cl, d);
+        int s = win_new(cl, &q);
         if (s < 0)
             return s;
         w = &wins[s];
         if (wm_cl >= 0 && cl != wm_cl)
-            ev_wm(EV_WM_NEW, w->id, 0, w->kind, d->x, d->y, w->iw, w->ih);
+            ev_wm(EV_WM_NEW, w->id, 0, w->kind, q.x, q.y, w->iw, w->ih);
         else
             win_show(s, 1, 0);
         d->x = w->fx; d->y = w->fy; d->w = w->iw; d->h = w->ih;
@@ -1148,8 +1151,12 @@ static int req(struct umsg *m)
         return 0;
     }
     case DPY_IMAGE: {
-        struct dpyimage *d = (struct dpyimage *)a[0];
-        if (peer(m, PEER_RD, a[0], DPYIMAGE_FIRST) < 0 || d->size < DPYIMAGE_FIRST)
+        struct dpyimage q, *d = &q;     /* read once (audit 2026-11-14 D1): the client's memory may change while we
+                                         * copy, and a second read of h or depth past the checks wrote outside */
+        if (peer(m, PEER_RD, a[0], DPYIMAGE_FIRST) < 0)
+            return -EFAULT;
+        memcpy(&q, (const void *)a[0], DPYIMAGE_FIRST);
+        if (q.size < DPYIMAGE_FIRST)
             return -EFAULT;
         int planes = d->depth + (d->flags & IMG_MASK ? 1 : 0);
         u32 wpr = (u32)(d->w + 15) / 16 * 2;
@@ -1180,6 +1187,7 @@ static int req(struct umsg *m)
             im->mask = malloc(wpr * d->h);
             if (!im->mask) {
                 bm_free(&im->bm);
+                cls[cl].imgbytes -= bytes;  /* the budget back (audit 2026-11-14 D4) */
                 return -ENOMEM;
             }
             memcpy(im->mask, src + (u32)d->depth * d->h * wpr, wpr * d->h);

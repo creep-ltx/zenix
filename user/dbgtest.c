@@ -47,6 +47,10 @@ int main(int argc, char **argv)
             sys_sleep(2);
         }
     }
+    if (!strcmp(a, "sysport")) {        /* becomes a system process (a reserved port) while its debugger waits */
+        sys_sleep(20);
+        return sys_port_create("fs.dbgk") >= 0 ? 6 : 7;
+    }
     if (!strcmp(a, "wait")) {
         char c;
         oprintf("ready\n");

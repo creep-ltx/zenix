@@ -103,6 +103,12 @@ int fb_format_ok(int format, int bpp)
     return 0;
 }
 
+int fb_size_ok(unsigned width, unsigned height, unsigned bpp, unsigned bpr)
+{
+    return width >= 320 && height >= 200 && width <= 4096 && height <= 4096 && bpp >= 1 && bpp <= 4 &&
+           bpr >= width * bpp && bpr <= 65536;
+}
+
 void fb_colour(int format, unsigned rgb12, u8 out[4])
 {
     u32 r = (rgb12 >> 8 & 15) * 17, g = (rgb12 >> 4 & 15) * 17, b = (rgb12 & 15) * 17, v = 0;

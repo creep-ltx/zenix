@@ -35,6 +35,7 @@ int sys_open(const char *p, int fl)
     fds[fd].used = 1; fds[fd].ino = (u32)r; fds[fd].off = 0; fds[fd].append = (fl & O_APPEND) != 0;
     return fd;
 }
+u32 sys_umask(u32 mask) { (void)mask; return 022; }   /* zup-fsd.c's requests carry umask 022 (the ext2 run tests power cuts) */
 static int bad_fd(int fd) { return fd < 3 || fd >= NFD || !fds[fd].used; }
 int sys_close(int fd)
 {

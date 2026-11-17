@@ -1591,6 +1591,8 @@ static int live_main(int argc, char **argv)            /* zup -f FILE [-d], zup 
 int main(int argc, char **argv)
 {
     signal(SIGPIPE, SIG_IGN);           /* DESIGN D16 rule 11: `zup | less` and quitting less never end an update half-way */
+    sys_umask(022);                     /* not the caller's (sudo keeps it): no file of an install half-way is
+                                         * writable by others (audit 2026-11-14 U1) */
     int stage2 = argc > 1 && !strcmp(argv[1], "-2");
     if (argc > 1 && !strcmp(argv[1], "-l")) return list();
     if (argc > 1 && (!strcmp(argv[1], "-f") || !strcmp(argv[1], "-r"))) return live_main(argc, argv);

@@ -492,6 +492,9 @@ long dbg_sys(u32 op, u32 pid, u32 arg)
             long e = ev_block(EV_CHILD, 0, 0, 0);
             if (e)
                 return e;
+            if (!(d = mine((int)pid)))          /* detached meanwhile (it became a system process, dbg_sysmark): d
+                                                 * was freed (audit 2026-11-14 K2) */
+                return -ESRCH;
         }
         memcpy((void *)arg, &s, (u32)n < sizeof s ? (u32)n : sizeof s);
         return 0;

@@ -414,7 +414,7 @@ static void scr_on(void)
     memset(smem, 0, bytes);
     int perm[8];                        /* HAM8: the file's control planes (its top two) are the hardware's 1 and 2 */
     for (int k = 0; k < 8; k++)
-        perm[k] = (P.flags & PIC_HAM8) ? (k < 2 ? 6 + k : k - 2) : k;
+        perm[k] = k < P.depth ? pic_plane(&P, k) : k;
     for (int y = 0; y < P.h; y++) {
         u8 *o = smem + (u32)y * (u32)sbpr;
         if (!chunky) {

@@ -44,6 +44,9 @@ const char *pic_kind(const unsigned char *f, unsigned n);
 void pic_row(const struct pic *p, int y, unsigned char *rgb);
 /* the mode in words for a title: "HAM6", "EHB", "32 colours", "24-bit", with ", hires", ", lace" */
 void pic_mode(const struct pic *p, char *o, unsigned osz);
+/* the file's plane shown as the screen's plane k (0..depth-1): HAM8's control planes are the file's top two, the
+ * hardware's first two (a 7-plane HAM8 file too: audit 2026-11-14 D3, plane 7 is not there) */
+int pic_plane(const struct pic *p, int k);
 
 /* ---- the renderer: the whole picture scaled (nearest pixel) to a canvas of w x h pixels in the screen's pens,
  * planar, as show draws it ---- */

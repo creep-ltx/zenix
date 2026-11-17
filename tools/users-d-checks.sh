@@ -27,6 +27,8 @@ users_d_checks() {
     line "... and exits 0" "tar-abs=0"
     line "tar x refuses to write through a link from the same archive" "tar: lnk/f: refused: it goes through the symbolic link lnk from this archive"
     line "... the file behind the link is unchanged" "changed"
+    line "tar x refuses a link's name in another case (FFS, FAT: the same name)" "tar: cl/f: refused: it goes through the symbolic link CL from this archive"
+    line "... and exits 1" "tar-case=1"
     line "find -delete does not follow a link out of the tree" "keep"
     line "... and succeeds" "find-delete=0"
     rx   "a here-document file is 0600 with a random name" '-rw------- 1 root root +2 .* /tmp/\.sh[0-9]+_[a-z0-5]{8}'

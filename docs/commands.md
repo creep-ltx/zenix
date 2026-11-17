@@ -132,7 +132,6 @@ In the games package (`zpkg -S games`; roadmap block 7 item 7, "fun"; DESIGN D52
 [socktest](man/socktest.txt), [socktestd](man/socktestd.txt) (the socket layer and its test server, DESIGN D19),
 [nettest](man/nettest.txt) (the network over the loopback, D19), [cryptotest](man/cryptotest.txt) (the crypto library's known answers and times, D21).
 [dbgtest](man/dbgtest.txt), [dbgcheck](man/dbgcheck.txt) (the debugger's test programs, D54; on the test images only, not in `UAPPS`).
-[dbgtest](man/dbgtest.txt), [dbgcheck](man/dbgcheck.txt) (the debugger's test programs, D54; on the test images only, not in `UAPPS`).
 
 ## Run on AmigaOS, not on Zenix
 [zenixboot](man/zenixboot.txt) starts Zenix from files on a hard disk, CF or SD card partition, so that no floppy is

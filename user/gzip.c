@@ -76,6 +76,8 @@ static int decompress_buf(const unsigned char *in, u32 len)
         if (flg & 8) { while (pos < len && in[pos++]) ; }
         if (flg & 16) { while (pos < len && in[pos++]) ; }
         if (flg & 2) pos += 2;
+        if (pos > len - 8) { dprintf(2, "gzip: data error (the header runs past the end)\n"); return -1; }   /* audit
+                                         * 2026-11-14 F4: a long extra field made len - pos wrap */
         tinfl_init(dec);
         size_t dofs = 0; u32 crc = 0, total = 0;
         for (;;) {

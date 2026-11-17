@@ -35,6 +35,15 @@ static const char *P(const char *p, char *buf)
     return buf;
 }
 static int err(void) { return -errno; }
+/* audit 2026-11-14 U1: a file or folder made writable by others (the caller's umask) is said in the trace, not a change */
+static void others_w(const char *p, const char *host)
+{
+    struct stat st;
+    if (trace && !lstat(host, &st) && !S_ISLNK(st.st_mode) && (st.st_mode & 002)) {
+        fprintf(trace, "WRITABLE-BY-OTHERS %s\n", p);
+        fflush(trace);
+    }
+}
 static void change(const char *what, const char *a, const char *b)
 {
     init();
@@ -51,9 +60,12 @@ int sys_open(const char *p, int fl)
     char b[4096];
     int hf = (fl & 3) | (fl & O_CREAT ? O_CREAT : 0) | (fl & O_EXCL ? O_EXCL : 0) | (fl & O_TRUNC ? O_TRUNC : 0) | (fl & O_APPEND ? O_APPEND : 0);
     if (fl & 3) change("open-write", p, 0);
-    int fd = open(P(p, b), hf | O_NOFOLLOW * 0, 0644);
-    return fd < 0 ? err() : fd;
+    int fd = open(P(p, b), hf | O_NOFOLLOW * 0, 0666);         /* 0666 less the umask, as Zenix's fsp_new_file_mode */
+    if (fd < 0) return err();
+    if (fl & O_CREAT) others_w(p, b);
+    return fd;
 }
+u32 sys_umask(u32 mask) { return (u32)umask((mode_t)(mask & 0777)); }
 int sys_close(int fd) { return close(fd) < 0 ? err() : 0; }
 int sys_read(int fd, void *b, u32 n) { ssize_t r = read(fd, b, n); return r < 0 ? err() : (int)r; }
 static void *bundle;
@@ -83,7 +95,7 @@ int sys_unlink(const char *p)
     change("unlink", p, 0);
     return unlink(b) < 0 ? err() : 0;
 }
-int sys_mkdir(const char *p) { char b[4096]; struct stat st; if (lstat(P(p, b), &st) == 0) return -EEXIST; change("mkdir", p, 0); return mkdir(b, 0755) < 0 ? err() : 0; }
+int sys_mkdir(const char *p) { char b[4096]; struct stat st; if (lstat(P(p, b), &st) == 0) return -EEXIST; change("mkdir", p, 0); if (mkdir(b, 0777) < 0) return err(); others_w(p, b); return 0; }
 int sys_rmdir(const char *p) { char b[4096]; change("rmdir", p, 0); return rmdir(P(p, b)) < 0 ? err() : 0; }
 int sys_chmod(const char *p, u32 mode) { char b[4096], m[16]; snprintf(m, sizeof m, "%o", mode); change("chmod", p, m); return chmod(P(p, b), mode & 07777) < 0 ? err() : 0; }
 int sys_chown(const char *p, u32 uid, u32 gid) { char b[4096], m[24]; struct stat st; snprintf(m, sizeof m, "%u:%u", uid, gid); change("chown", p, m); return lstat(P(p, b), &st) < 0 ? err() : 0; }

@@ -68,6 +68,10 @@ u32 get_usp(void) { return usp_reg; }
 void set_usp(u32 u) { usp_reg = u; }
 void kprintf(const char *fmt, ...) { (void)fmt; }
 int may_signal(const struct proc *p) { return p->uid == 7 ? -EACCES : 0; }
+/* D54's hooks (kernel/dbg.c): no process in the model is traced (dbgf 0), so signal.c never calls these */
+static int dbg_calls;
+int dbg_held(const struct proc *p) { (void)p; dbg_calls++; return 0; }
+int dbg_sigint(struct proc *p) { (void)p; dbg_calls++; return 0; }
 void *kmalloc(u32 n) { static u32 pool[64]; return n <= sizeof pool ? pool : 0; }
 struct proc *proc_by_pid(int pid) { for (int i = 0; i < NPROC; i++) if (procs[i].state && procs[i].pid == pid) return &procs[i]; return 0; }
 static int data_ready;                  /* the object of the interleaving test: a tty with a line or not */
@@ -235,6 +239,20 @@ int main(void)
     procs[3].state = P_READY; procs[3].pgid = 60; procs[3].uid = 7;
     EXPECT_TRUE(sig_group(60, SIGTERM, 1) == -EPERM && !kills, "... none allowed: -EPERM");
     EXPECT_TRUE(sig_group(61, SIGTERM, 1) == -ESRCH, "... an empty group: -ESRCH");
+    clear();                            /* audit 2026-11-14 K1: another user's group can be neither joined nor fg'd */
+    for (int i = 3; i < 5; i++) { procs[i].state = P_READY; procs[i].pgid = 70; }
+    procs[4].uid = 7;
+    current->uid = 5;                   /* a normal user (root may join any group) */
+    EXPECT_TRUE(sig_group(70, 0, 2) == -EPERM && !kills, "K1: setfg's form (check 2): one member not allowed: -EPERM");
+    EXPECT_TRUE(sig_setpgid(0, 70) == -EPERM && current->pgid == current->pid, "K1: joining a group with a member the "
+                "caller may not signal: -EPERM");
+    procs[4].uid = 0;
+    EXPECT_TRUE(sig_group(70, 0, 2) == 0 && sig_setpgid(0, 70) == 0 && current->pgid == 70,
+                "K1: ... every member allowed: joined, and fg allowed");
+    procs[5].state = P_ZOMBIE; procs[5].pgid = 71;
+    EXPECT_TRUE(sig_setpgid(0, 71) == 0, "K1: a group of only a zombie still exists (rule 7)");
+    procs[5].uid = 7;
+    EXPECT_TRUE(sig_setpgid(0, 70) == 0 && sig_setpgid(0, 71) == -EPERM, "K1: ... but not another user's zombie's");
     clear();
     procs[1].state = P_READY;
     EXPECT_TRUE(sig_action(SIGKILL, 0) == 0 && sig_action(SIGSTOP, 0) == 0, "sigaction may ask about KILL and STOP");
@@ -316,6 +334,7 @@ int main(void)
     c->sig_catch = c->sig_pend = SIGBIT(SIGUSR1);
     if (!setjmp(out)) sig_deliver(rb, 0);
     EXPECT_TRUE(killed_exit == 130, "rule 3: a kill is acted on before any handler");
+    EXPECT_TRUE(dbg_calls == 0, "D54: no untraced process asks the debugger (dbg_held, dbg_sigint)");
 
     printf("%s: %d failure(s)\n", bad ? "FAIL" : "PASS", bad);
     return bad != 0;

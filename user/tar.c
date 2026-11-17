@@ -119,15 +119,27 @@ static void remember_link(const char *name)
 {
     char **n = realloc(links, (nlinks + 1) * sizeof *n);
     char *c = strdup(name);
-    if (!n || !c) { free(c); if (n) links = n; return; }
+    if (!n || !c) { dprintf(2, "tar: %s: out of memory for the list of links: stopped\n", name); _zexit(1); }  /* never
+                                         * forget one: a later member could be written through it */
     links = n; links[nlinks++] = c;
 }
-/* does NAME go through (or is it) a link this archive made? */
+/* does NAME go through (or is it) a link this archive made? Letters compared without their case: on FFS, FAT and
+ * PFS3 "X/f" is "x/f" (audit 2026-11-14 F3) */
+static int same_ci(const char *a, const char *b, u32 l)
+{
+    for (u32 k = 0; k < l; k++) {
+        char x = a[k], y = b[k];
+        if (x >= 'A' && x <= 'Z') x += 32;
+        if (y >= 'A' && y <= 'Z') y += 32;
+        if (x != y) return 0;
+    }
+    return 1;
+}
 static const char *through_link(const char *name)
 {
     for (u32 i = 0; i < nlinks; i++) {
         u32 l = strlen(links[i]);
-        if (!strncmp(name, links[i], l) && (name[l] == '/' || name[l] == 0)) return links[i];
+        if (strlen(name) >= l && same_ci(name, links[i], l) && (name[l] == '/' || name[l] == 0)) return links[i];
     }
     return 0;
 }

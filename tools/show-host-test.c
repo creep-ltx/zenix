@@ -247,6 +247,26 @@ int main(int argc, char **argv)
     printf("%s %d pictures decoded and compared pixel by pixel, %d damaged files refused or cut as expected\n",
            f1 ? "FAIL" : "PASS", ngood, nbad);
     render_tests();
+    {   /* audit 2026-11-14 D3: a HAM8 file of 7 planes: every screen plane taken from a plane the file has, each once */
+        struct pic hp;
+        memset(&hp, 0, sizeof hp);
+        hp.flags = PIC_HAM8;
+        for (int dp = 7; dp <= 8; dp++) {
+            hp.depth = dp;
+            int seen = 0, ok = 1;
+            for (int k = 0; k < dp; k++) {
+                int q = pic_plane(&hp, k);
+                if (q < 0 || q >= dp || (seen & 1 << q)) ok = 0;
+                else seen |= 1 << q;
+            }
+            ok = ok && pic_plane(&hp, 0) == dp - 2 && pic_plane(&hp, 1) == dp - 1 && pic_plane(&hp, 2) == 0;
+            checks++;
+            if (!ok) bad("HAM8's planes", dp == 7 ? "7 planes" : "8 planes", "a plane outside the file or twice");
+        }
+        hp.flags = 0; hp.depth = 5;
+        checks++;
+        if (pic_plane(&hp, 4) != 4) bad("planes in order", "5 planes", 0);
+    }
     printf("%s the renderer: the pens' own colours in their pens (nearest, Floyd-Steinberg, ordered; whole, halved, 37 across with its padding 0), a grey in one pen nearest and in more ordered and Floyd-Steinberg\n",
            fails > f1 ? "FAIL" : "PASS");
     int f2 = fails, decoded = 0;

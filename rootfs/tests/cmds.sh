@@ -49,6 +49,7 @@ t touch;     rm -f $T/tt1; touch $T/tt1; ls $T | grep -c '^tt1$'; touch -c $T/no
 t cpself;    rm -f $T/s1 $T/s2 $T/s3; cp fruit.txt $T/s1; cp $T/s1 $T/s1; echo "rc=$?"; ln $T/s1 $T/s2; cp $T/s1 $T/s2; echo "rc=$?"; cp $T/s1 $T/../cmds.t/s1; echo "rc=$?"; ln -s s1 $T/s3; cp $T/s3 $T/s1; echo "rc=$?"; cmp fruit.txt $T/s1; echo "rc=$?"
 t gzip;      rm -f $T/gz1 $T/gz1.gz; cp text.txt $T/gz1; gzip $T/gz1; [ -f $T/gz1 ] || echo orig-gone; gunzip $T/gz1.gz; cmp $T/gz1 text.txt; echo "rc=$?"
 t gzip2;     gzip -c fruit.txt | gzip -dc | cmp - fruit.txt; echo "rc=$?"; gzip -c fruit.txt | zcat | wc -l; gzip -9 -c text.txt | gunzip | cmp - text.txt; echo "rc=$?"
+t gzip-hdr;  printf '\037\213\010\004\0\0\0\0\0\003\377\377\0\0\0\0\0\0' | gzip -dc 2>/dev/null | wc -c; printf '\037\213\010\004\0\0\0\0\0\003\377\377\0\0\0\0\0\0' | gzip -dc >/dev/null 2>&1; echo "rc=$?"
 t tar;       rm -rf $T/tx $T/ty $T/t1.tar; mkdir $T/tx; cp -r sub fruit.txt text.txt $T/tx/; ln -s fruit.txt $T/tx/lnk; (cd $T && tar cf $T/t1.tar tx); tar tf $T/t1.tar | sort; mkdir $T/ty; tar xf $T/t1.tar -C $T/ty; cmp $T/tx/fruit.txt $T/ty/tx/fruit.txt; echo "rc=$?"; cat $T/ty/tx/sub/deep.txt; readlink $T/ty/tx/lnk
 t tar2;      tar cf - fruit.txt colon.txt | gzip -c | gunzip | tar tf -; tar cf - fruit.txt | tar xf - -C $T/ty; cmp fruit.txt $T/ty/fruit.txt; echo "rc=$?"
 t printf;     printf '%d|%5d|%-5d|%05d|%+d|% d\n' 42 42 42 42 42 42; printf '%x %X %o %#x %#o\n' 255 255 8 255 8; printf '%s|%10s|%-10s|%.3s|%10.3s|\n' hello hello hello hello hello

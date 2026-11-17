@@ -495,6 +495,13 @@ static int put(char *o, unsigned osz, int at, const char *s)
     o[at] = 0;
     return at;
 }
+int pic_plane(const struct pic *p, int k)
+{
+    if (!(p->flags & PIC_HAM8) || p->depth < 2)
+        return k;
+    return k < 2 ? p->depth - 2 + k : k - 2;
+}
+
 void pic_mode(const struct pic *p, char *o, unsigned osz)
 {
     int at = 0;

@@ -79,8 +79,9 @@ static void sig_unblocked(struct proc *p)
         }
 }
 
-/* kill (new form) and the tty's ^C/^Z: a group. check: the may_signal rule per member (syscall.c). Rule 15: 0 if at
- * least one process got the signal, -EPERM if none was allowed, -ESRCH if the group is empty */
+/* kill (new form) and the tty's ^C/^Z: a group. check: the may_signal rule per member (syscall.c); check 2 (setfg's
+ * group form, audit 2026-11-14 K1): every member must pass, else -EPERM. Rule 15: 0 if at least one process got the
+ * signal, -EPERM if none was allowed, -ESRCH if the group is empty */
 long sig_group(int g, int sig, int check)
 {
     int found = 0, sent = 0;
@@ -89,8 +90,11 @@ long sig_group(int g, int sig, int check)
         if (p->state == P_FREE || p->state == P_ZOMBIE || p->pgid != g)
             continue;
         found = 1;
-        if (check && may_signal(p))
+        if (check && may_signal(p)) {
+            if (check == 2)
+                return -EPERM;
             continue;
+        }
         sent = 1;
         if (sig)
             sig_send(p, sig);
@@ -186,7 +190,8 @@ long sig_alarm(u32 t)
 }
 
 /* SYS_setpgid: pid (0: the caller), pgid (0: pid). Rule 7: only oneself or one's own children (a zombie child too);
- * the group is the process's own pid or one that exists */
+ * the group is the process's own pid or one that exists, every member of it one the caller may signal (audit
+ * 2026-11-14 K1: joining root's or another user's group, then making it the foreground, gave ^C and ^Z over it) */
 long sig_setpgid(int pid, int pg)
 {
     struct proc *p = pid ? proc_by_pid(pid) : current;
@@ -199,8 +204,11 @@ long sig_setpgid(int pid, int pg)
     if (pg != p->pid) {
         int ok = 0;
         for (int i = 1; i < NPROC; i++)
-            if (procs[i].state != P_FREE && procs[i].pgid == pg)     /* a zombie member keeps it */
+            if (procs[i].state != P_FREE && procs[i].pgid == pg) {   /* a zombie member keeps it */
+                if (may_signal(&procs[i]))
+                    return -EPERM;
                 ok = 1;
+            }
         if (!ok)
             return -EPERM;
     }

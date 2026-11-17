@@ -120,6 +120,9 @@
 # 2026-11-14 (D55, screens of their own): gfx 8,900 -> 9,050 (the vertical blank's count and CON_VBLANK), gcon 3,600 ->
 # 4,250 (CON_HOLD, GEV_GONE, the ring's kept slots); kernel.bin 205,136 -> 205,992, TOTAL 205,200 -> 206,000; the mount
 # tests' floppy 856 bytes left (ROOM 800).
+# 2026-11-14 (the full audit's K1: setpgid and setfg's group form only over processes the caller may signal; K2: the
+# debugger's record looked up again after DBG_WAIT blocks): signal 2,100 -> 2,150; kernel.bin 205,992 -> 206,060,
+# TOTAL 206,000 -> 206,100; the mount tests' RAM disk 677 -> 676 KB for the floppy's ROOM.
 start     4850   8200
 main      5950   1100
 serial    6100   6500
@@ -144,7 +147,7 @@ ipc       4150   2150
 svc       5600   1420
 seg       1300    256
 event      700      0
-signal    2100      0
+signal    2150      0
 random    3800    280
 sock      4700   1060
 drv       3100    640
@@ -154,5 +157,5 @@ gcon      4250     16
 dbg       4100     20
 mmu       5700    160
 embed    49900      0
-TOTAL   206000
+TOTAL   206100
 ROOM       800

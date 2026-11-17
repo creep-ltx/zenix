@@ -19,7 +19,9 @@ DESCRIPTION
     EFAULT; SIGCONT does not end a debugger's stop; a detached process
     runs on; a raw step over TRAP #0 (no panic on any CPU) and the
     program's own end; a target blocked in a system call stops and its
-    registers read; a step left pending at a detach does no harm. It
+    registers read; a step left pending at a detach does no harm; a
+    target made a system process while its debugger waits ends the wait
+    (ESRCH) and runs to its end. It
     expects /tmp/sid (a set-user-id copy of /bin/id) and /tmp/sidx (the
     same without read for others) and /tests/dbgtest.
 

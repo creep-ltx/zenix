@@ -253,6 +253,7 @@ static u32 alloc_block(struct zenixfs *fs, int data, int *err)
 static inline int isnew(struct zenixfs *fs, u32 b) { struct cb *c = cb_find(fs, b); return c && c->fresh; }
 static void free_block(struct zenixfs *fs, u32 b)
 {
+    if (b < fs->dstart || b >= fs->nblocks) { fs->failed = 1; return; }    /* never outside the data area (F1) */
     int fresh = isnew(fs, b);
     cb_drop(fs, b);
     fs->free_blocks++; fs->txn_dirty = 1;
@@ -1061,6 +1062,12 @@ int zenixfs_readdir(struct zenixfs *fs, uint32_t dir, uint64_t *cookie, char *na
 }
 
 /* ---------- file data ---------- */
+/* an extent read from the tree (good checksums do not make it sane, audit 2026-11-14 F1): not empty, its blocks inside
+ * the data area, its logical range not wrapping */
+static int ext_ok(const struct zenixfs *fs, u32 s, u32 p, u32 n)
+{
+    return n && p >= fs->dstart && p < fs->nblocks && n <= fs->nblocks - p && s + n > s;
+}
 static int ext_floor(struct zenixfs *fs, u32 ino, u32 lb, u32 *s, u32 *p, u32 *n)
 {
     u8 key[KEYLEN], k2[KEYLEN], val[VMAX]; int vl;
@@ -1069,7 +1076,7 @@ static int ext_floor(struct zenixfs *fs, u32 ino, u32 lb, u32 *s, u32 *p, u32 *n
     if (e) return e;
     if (rd32(k2) != ino || k2[4] != K_EXTENT) return ZENIXFS_ENOENT;
     *s = rd32(k2 + 8); *p = rd32(val); *n = rd32(val + 4);
-    return 0;
+    return ext_ok(fs, *s, *p, *n) ? 0 : ZENIXFS_ECORRUPT;
 }
 static int ext_put(struct zenixfs *fs, u32 ino, u32 s, u32 p, u32 n)
 {
@@ -1134,6 +1141,7 @@ static int f_map_clear_from(struct zenixfs *fs, u32 ino, u32 lb)
         if (e) return e;
         if (rd32(k2) != ino || k2[4] != K_EXTENT) return 0;
         u32 s = rd32(k2 + 8), p = rd32(val), n = rd32(val + 4);
+        if (!ext_ok(fs, s, p, n)) return ZENIXFS_ECORRUPT;
         if (s + n <= lb) return 0;
         if (s >= lb) { e = ext_del(fs, ino, s); if (e) return e; for (u32 i = 0; i < n; i++) free_block(fs, p + i); }
         else {

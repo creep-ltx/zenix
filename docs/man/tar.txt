@@ -42,6 +42,11 @@ NOTES
     are not supported. Owners are recorded as numbers. A symbolic link whose
     target is longer than 100 bytes (the header's field) is reported and
     skipped, never stored cut short.
+    Extracting (x), a member that would go through a symbolic link the
+    same archive made is refused ("it goes through the symbolic link"),
+    its letters compared without their case (on FFS, FAT and PFS3 "X/f"
+    is "x/f"); running out of memory for the list of those links stops
+    tar with status 1.
     An access the user is not allowed is reported as "permission denied".
     Directories with any number of entries are walked, as deep as paths go. A
     path longer than 255 bytes (what a system call takes) is reported

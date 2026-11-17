@@ -35,6 +35,8 @@ NOTES
     An access the user is not allowed is reported as "permission denied".
     Running out of memory is reported ("out of memory") and ends the command
     with a non-zero status; nothing is cut short silently.
+    A damaged header (its optional fields running past the end) is
+    "data error (the header runs past the end)", status 1.
 
 EXIT STATUS
     0, 1 on a problem with a file, 2 unknown option.
