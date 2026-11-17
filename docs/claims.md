@@ -64,7 +64,9 @@ branch nfs12, 2026-10-28); the C library's (D27 section 5, Linux's numbers, bloc
 the bootinfo's) flags bits: 1 `UPD_F_ROLLBACK` (D15), 2 `UPD_F_TRIAL` (D22 4.3, claimed 2026-10-28: an unconfirmed trial;
 the kernel keeps it after `UPD_RELEASE`; zenixboot sets it from D22 step 7). The bootinfo's boot options at `+0x84` (`kopts`, D37, branch cache,
 2026-11-04): 1 `KOPT_DCACHE_OFF`, 2 `KOPT_DCACHE_WT`; 4 `KOPT_MMU_ON` and 8 `KOPT_MMU_OFF` (D41, branch mmu,
-2026-11-12: memory protection on, off; both set: off). The hardware table's growth after `board[]` (D43, branch rtg, 2026-11-12): `struct hwfb` at offset 408 (`HWFB_OFF`), its magic `HWFB_MAGIC` 0x5A464231 ("ZFB1"), flags `HWFB_HVS` 1 and `HWFB_TEST` 2. Poll bits on a port (D23 step 1, branch nfs12, 2026-10-28; recorded by audit 2026-10-29 B2-7): `POLLPRI` 2 (Linux's
+2026-11-12: memory protection on, off; both set: off); 16 `KOPT_MMU_AUTO` (D41 section 19, branch mmudef, 2026-11-17:
+only in the kernel file's default long after `ZKOPTDEF`, never set by a loader: protection on where the CPU is known to
+have an MMU, LC and EC 68040/68060 parts left alone). The hardware table's growth after `board[]` (D43, branch rtg, 2026-11-12): `struct hwfb` at offset 408 (`HWFB_OFF`), its magic `HWFB_MAGIC` 0x5A464231 ("ZFB1"), flags `HWFB_HVS` 1 and `HWFB_TEST` 2. Poll bits on a port (D23 step 1, branch nfs12, 2026-10-28; recorded by audit 2026-10-29 B2-7): `POLLPRI` 2 (Linux's
 value) on a port: a message sent to it was cancelled (`UMSG_CANCEL`) since its owner last saw one. Socket options: `SO_LINGER` 13 (Linux's, D23 steps 3-4, branch nfs34,
 2026-10-28; recorded by the same audit). The display protocol (DESIGN D38 step 3, `display/proto.h`, version 1): port `display` (the D11 service of
 `/sbin/displayd`; a client's own ports `dpy.PID`), requests `DPY_HELLO` 1 .. `DPY_IMAGE_FREE` 11 and the window
