@@ -71,7 +71,6 @@ STOCK[screen-test]="screenshots by the cage rig (shot.py) at times on the PC's c
 STOCK[lace-test]="screenshots by the cage rig (shot.py) at times on the PC's clock (found by the full audit 2026-11-14)"
 STOCK[zine-input-test]="keys typed by the cage rig (wtype through shot.py) in the PC's time, as kbd-test (the full audit)"
 STOCK[demo-test]="screenshots by the cage rig (shot.py) of the loading bar and the desktop at times on the PC's clock; n: slirp on the PC (the full audit)"
-STOCK[ctop-test:n]="the net box's traffic from slip-host.py on the PC, in the PC's time (the full audit)"
 STOCK[intro-test]="screenshots by the cage rig (shot.py) 8 s apart while zintro runs on the Amiga's clock; its frame times"
 STOCK[zdesk-draw-test]="screenshots by the cage rig (shot.py) at times on the PC's clock; time seq at the stock speed"
 STOCK[random-test]="keys typed by the cage rig seed the pool: their timing in the PC's time is the input"
