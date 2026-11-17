@@ -86,7 +86,7 @@ if [ "$1" = "--staged" ] || [ "$1" = "--commit" ]; then
         user/zinstall/*) ;;      # zinstall's parts (DESIGN D35: tables, the boot partition writers): its page is zinstall.txt
         user/*.c)
             b=$(basename "$c" .c); n=$(echo "$b" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')
-            case "$b" in libz|regex|miniz|fsd|pw|clockfile|sha|sha256|zenixfsd|zenixfs_disk|zpkgfmt|zmalloc|zenv|zout|zerrtab|zsig|zpoll|zsock|zhelp|zpw|zpty|cfgfile|libctest|tuitest|sndlib|snddec|modrep|trk|trkmix|medrep|s3mrep|xmrep) continue;; esac     # libraries, servers, the libraries' test programs: no page of their own
+            case "$b" in libz|regex|miniz|fsd|pw|clockfile|sha|sha256|zenixfsd|zenixfs_disk|zpkgfmt|zmalloc|zenv|zout|zerrtab|zsig|zpoll|zsock|zhelp|zpw|zpty|cfgfile|libctest|tuitest|sndlib|snddec|modrep|trk|trkmix|medrep|s3mrep|xmrep|tlstrust|tlspipe) continue;; esac     # libraries, servers, the libraries' test programs: no page of their own
             [ "$b" = nfscd ] && n=mount     # an NFS mount's server (D23): described in mount's page
             # a change of the licence line only changes no behaviour
             [ -z "$(git diff "${range[@]}" -U0 -- "$c" | grep '^[-+]' | grep -v '^+++\|^---\|SPDX-License-Identifier')" ] && continue

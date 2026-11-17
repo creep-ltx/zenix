@@ -88,5 +88,8 @@ NOTES
     cookies, no passwords, no recursion, no time stamps. A file name
     longer than 63 bytes cannot be made (a folder's names).
 
+    irc(1)'s TLS checks certificates with the same rules and files (one
+    copy of the code, user/tlstrust.c).
+
 SEE ALSO
-    sntp(8), ssh(1), host(1)
+    sntp(8), ssh(1), host(1), irc(1)
