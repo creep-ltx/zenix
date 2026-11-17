@@ -697,8 +697,8 @@ static void zb_dump(u32 a, u32 n)
     a &= ~31u;
     for (u32 o = 0; o < n; o += 32) {
         u32 v[10];
-        if (!c_TypeOfMem(a + o) || !c_TypeOfMem(a + o + 31))
-            continue;
+        if (a + o >= 0x1000 && (!c_TypeOfMem(a + o) || !c_TypeOfMem(a + o + 31)))
+            continue;                   /* (the low page and below $1000: chip RAM in no MemHeader, always there) */
         v[0] = a + o;
         for (int k = 0; k < 8; k++)
             v[1 + k] = ((const u32 *)(a + o))[k];
@@ -722,6 +722,9 @@ static void zb_trace_pass(void)
     zb_serial_hex('L', ring, 32);
     if (zr_how == ZH_CRASH && Z.blk->pc >= 0x400)
         zb_dump(Z.blk->pc - 1024, 2048);
+    if ((zr_how == ZH_CRASH && Z.blk->pc < 0x1000) || (zr_how == ZH_UNSUP && zr_callpc < 0x1000))
+        zb_dump(0, 0x1000);             /* round 15: a program running in low memory (Elysium's decruncher at $100,
+                                         * its code at $800): the first 4 KB as it left them */
     for (int i = 15; i >= 0 && ns < 8; i--) {
         u32 r = ring[2 * i + 1], k;
         for (k = 0; k < ns && (seen[k] > r ? seen[k] - r : r - seen[k]) >= 512; k++)

@@ -6,7 +6,7 @@ too big for ZINE's volume there: a small data file (in), a large one and an arch
 object (zbig.S, position-independent; its longwords at 4 and 8 are relocated to the data hunks):
     hunk 0 code; hunk 1 data in chip RAM, CHIPKB KB, longword i = 0xC0000000 | i;
     hunk 2 data in fast RAM, FASTKB KB, longword i = 0xFA000000 | i; a BSS hunk of 64 KB (any memory)
-usage: mkbigtest.py zbig.o OUTDIR      (writes OUTDIR/zbig, zbig.small, zbig.huge, zbig.mid1-6, zbig-pack.lha)
+usage: mkbigtest.py zbig.o OUTDIR      (writes OUTDIR/zbig, zbig.small, zbig.huge, zbig.mid1-20, zbig-pack.lha)
 Also OUTDIR/../lean/zlean (d29 16.19): a plain program whose file is big beside the test machine's memory (LEANKB KB,
 a fast data hunk of longwords 0xFA000000 | i) but fits with its hunks, so zine loads it from its file and does not
 keep the file (16.18's lean path B), its fast hunk asked for below 16 MB; it exits 0 when the hunk's first and last
@@ -45,14 +45,15 @@ open(os.path.join(out, "zbig.small"), "wb").write(b"SMALL DATA FILE\n" * 64)
 # (400 KB since 2026-11-14: with 1.5 MB and the files below the test disk had too little room left for
 # tools/ide-speed-test.sh's three 1 MB files)
 open(os.path.join(out, "zbig.huge"), "wb").write(b"".join(struct.pack(">I", 0x4E000000 | i) for i in range(400 * 256)))
-# d29 16.23: six files of 200 KB (under the 256 KB that stay on the disk anyway), together more than the volume's
+# d29 16.23/16.24: twenty files of 60 KB (under the 64 KB that stay on the disk anyway), together more than the volume's
 # budget on the test machine (about 1 MB; 1,200 KB is the margin: should its free fast RAM grow by 200 KB, zine-emu-test
-# fails loudly and a seventh file is needed): the ones it leaves out stay on the disk instead; longword i of zbig.midK =
+# fails loudly and more files are needed): the ones it leaves out stay on the disk instead; longword i of zbig.midK =
 # 0x4D000000 | K << 20 | i
-for k in range(1, 7):
+for k in range(1, 21):
     open(os.path.join(out, "zbig.mid%d" % k), "wb").write(b"".join(struct.pack(">I", 0x4D000000 | k << 20 | i)
-                                                              for i in range(200 * 256)))
-open(os.path.join(out, "zbig-pack.lha"), "wb").write(b"\x00-lh5-" + bytes(100 * 1024))
+                                                              for i in range(60 * 256)))
+# an archive under 64 KB, so it is not on the disk by its size: the folder over the budget leaves it out (archives first)
+open(os.path.join(out, "zbig-pack.lha"), "wb").write(b"\x00-lh5-" + bytes(40 * 1024))
 
 # zlean (d29 16.19)
 LEANKB = 420

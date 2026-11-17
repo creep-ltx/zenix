@@ -966,3 +966,62 @@ not kept). Counted as failing.
 programs whose hunks alone need more than 8 MB; on the 68030, memory (16 MB is less than many AGA demos of the 2010s
 need) and black screens at the limit; on the 68060, black screens at the limit. The volume's in-memory part still
 takes up to half the free fast RAM for files under 256 KB; a lower threshold would give memory-bound programs more.
+
+## Round 15 (2026-11-14/17, branch zine15, d29 16.24)
+
+**What changed.** Data files of 64 KB or more stay on the disk (was 256 KB); dos SetProtection, SetComment,
+SetFileDate, FGetC, UnGetC and FGets; the trace build dumps the low 4 KB when a session ends there (d29 16.24).
+
+**Round 14's open questions.**
+- *Shake Off The Dust* (68060) was never stuck, and too much free memory was not the cause. With its files on the
+  disk it loads, plays its whole 272 s soundtrack and then shows black, waiting for a key. In warp mode all of that
+  takes less than the 120 s limit, so the last screenshot was black. The two runs that "played" in round 14 were
+  still on its loading picture. With 32 MB it runs out of memory and loops. Escape at the end now ends it with
+  return code 0, after it saves its settings with SetProtection, which ZINE lacked until now. No AvailMem cap was
+  built: no Top 100 production has been seen to fail because it had too much memory.
+- *The 256 KB threshold*: 64 KB gives the 68030 machine's memory-bound demos 1.2-3.0 MB more (d29 16.24 has the
+  numbers). Jesus Christ Motocross now plays (it then needed FGetC). Nothing was lost in 18 runs of the working
+  productions with the most 64-256 KB files. 4 KB saved nothing more and puts 14 times as many files on the disk.
+- *Elysium* (68EC020): it played in 8 of 8 runs at the start of the round (4 plain, 4 trace), then stayed black
+  once in the final rerun. So it fails about 1 run in 9, with nothing in ZINE's calls to show why (it makes none
+  before it fails). Taken as timing inside the demo itself and not chased further. Still counted as failing.
+
+**Black at the limit: slow or stuck?** 20 of the black ones were rerun at five times the limit (8 on the 68060 at
+600 s, 7 on the 68030 and 5 on the 68020 at 300 s), with screenshots in between:
+- 2 had played: Shake Off The Dust (it ends within the limit), and Cyboman 6 on the 68020 (precalc longer than 50 s,
+  then it plays and ends black).
+- 1 crashed instead (scifi, an illegal instruction).
+- 17 stayed black throughout. They are stuck, not slow. What the traces show:
+  - The Fall (LDOS): black on the 68030 and 68060 with 8, 16, 32 or 64 MB of fast RAM, plays on the 68EC020.
+    With `zine -c` on the 68030 it shows LDOS's own crash screen.
+  - Silkcut (68060): loops in its startup's argument check with an argument count it should not have. The 68030
+    machine never gets that far: it is out of memory before.
+  - Point of No Return and Bantam take the machine over within seconds; ZINE sees no more calls.
+  - The Martini Effect and Knarkzilla are still calling the OS (7.9 million CopyMem calls; a SetSignal and
+    GetSysTime poll).
+  - None was found to be ZINE's fault in this round. All stay open.
+
+**The reruns.** 213 runs on the branch before its last merge of main: every production with a data file between
+64 and 256 KB (53), Jesus Christ Motocross, Shake Off The Dust and Elysium on each machine, plus 15 working ones at
+random (seed 15) on each. Limits: 50 s on the 020 and 030, 120 s on the 060 (Shake Off The Dust: Escape at 120 s).
+After merging main, 17 runs on the merged build: Jesus Christ Motocross, Elysium, Shake Off The Dust with Escape,
+and 5 working ones at random (seed 1517) on each machine.
+
+| Machine | Round 14 | Round 15 | Now working | No longer working |
+|---|---|---|---|---|
+| 68EC020, 8 MB fast | 248 | **248** | none | none |
+| 68030 + 68882, 16 MB in one block | 313 | **313** | Jesus Christ Motocross | superkewl (see below) |
+| 68060 with FPU, 64 MB in one block | 361 | **362** | Shake Off The Dust | none |
+
+superkewl: the merged build's random sample found it ending with alert `$81000009` (a FreeMem ZINE refuses,
+16.22) after its 736 s, where round 12's run had return code 0. Round 14's own build does the same, so this is no
+round-15 regression. The round 14 count of 313 still held it as working from round 12's run. Elysium played in 1 of
+the 2 final runs (black before the merge, playing after), so it stays uncounted.
+
+**The biggest remaining blockers** (by reason group, round 14's state with these changes; counts out of 426):
+- 68020: hunks or file plus hunks larger than 8 MB (47 "does not fit", 19 "could not be loaded"), FPU
+  instructions (42, plus 7 that say they need one), black at the limit (27).
+- 68030: black at the limit (33), memory (18 "does not fit", 12 that say "out of memory"), MOVE16 (9).
+- 68060: black at the limit (36), illegal instructions (8).
+
+From the sample above, about 17 in 20 of the black ones are stuck, not slow.
