@@ -988,7 +988,7 @@ static void open_ent(int viewonly)
         char *av[] = { "/bin/less", opath, 0 };
         in_term(av, 1);
     } else if (k == 4) {
-        char *av[] = { "/bin/show", opath, 0 };    /* a desktop program: its own window, no terminal */
+        char *av[] = { "/bin/show", opath, 0 };    /* a desktop program: no terminal; show opens a screen of its own by default (D55) */
         char cwd[ZPATH_MAX];
         int back = sys_getcwd(cwd, sizeof cwd) >= 0 && L.dir && sys_chdir(L.dir) == 0;
         int pid = sys_spawn(av[0], av, 0);
