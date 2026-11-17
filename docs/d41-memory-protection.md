@@ -114,11 +114,14 @@ boards are unknown, as D37), and a 68040/68060 with a board that is not RAM abov
 - **Translation stays on** from boot to reset while protection is on (`TCR`/`TC` E = 1; the 060's `TCR` 0x8200: D37's
   `DCO` kept, `NAD`, `NAI`, `FOTC`, `FITC` 0); it goes off only for ZINE's session (section 11) and before a software
   reset.
-- **The state the loader leaves.** On the 040/060 the hand-over (`boot/handoff-c.S`) switches AmigaOS's translation
-  off and D37 sets the windows. A 68030's translation is not touched there, and AmigaOS tools leave it on (Enforcer,
-  MMULib, `CPU FASTROM`), through tables in memory Zenix will use: so on every 68030 boot, protection asked for or not,
-  `mmu_setup` reads `TC`, `TT0` and `TT1` (a missing register traps, as on the EC030) and, if any is on, switches them
-  off ("mmu: the 68030's translation was left on: switched off"). "Off" in this note always means this clean state
+- **The state the loader leaves.** zenixboot's hand-over (`boot/handoff-c.S`, `zb_go`) switches AmigaOS's
+  translation off on every 68030, 68040 and 68060 before the kernel is copied (AmigaOS tools leave it on through
+  tables in memory Zenix will use: 68040.library and 68060.library, and on a 68030 Enforcer, MMULib or `CPU FASTROM`;
+  the 68030's part since 2026-11-17, audit 2026-11-12 A6-14), with the illegal and line-F vectors caught for an EC part;
+  D37 then sets the windows. The kernel checks again: on every 68030 boot, protection or not, `mmu_setup` reads `TC`,
+  `TT0` and `TT1` (a missing register traps, as on the EC030) and, if any is on (a loader without that step), switches
+  them off ("mmu: the 68030's translation was left on: switched off"). The floppy's bootblock starts from a reset,
+  with no AmigaOS tool run before it. "Off" in this note always means this clean state
   (040/060: D37's windows, `TCR` with E clear, `ITT0`/`ITT1` 0; 030: all 0), never the loader's.
 
 ## 5. The tables
