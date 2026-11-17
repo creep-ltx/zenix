@@ -148,7 +148,7 @@ rig refuses a cage whose display has the user's name; it is headless either way)
 
 ## 4. Sizes, and what could leave the always-loaded path
 
-Measured (`make`): `kernel.bin` 205,992 bytes on main, 206,060 with this audit's fixes (budget 206,100; 840 bytes left on
+Measured (`make`): `kernel.bin` 205,992 bytes on main at c248d4d, 206,060 with this audit's fixes (206,192 with main's later D41 work merged, budget 206,200; 840 bytes left on
 the mount tests' floppy, ROOM 800). Resident (loaded and kept on every machine) by part, from the objects' sections:
 the embedded servers 42,144 (fsd 29,404 and diskd 12,740 as files), term 14,488, vfs 11,735, proc 10,483, syscall
 10,296, gfx 7,749 ... dbg 4,030, gcon 4,153, emmc 2,515, a3000 1,670. Already given back after the boot (D45): 25,984
