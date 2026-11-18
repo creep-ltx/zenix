@@ -332,7 +332,10 @@ EOF
     # on how the image was built: block 7's bigger root made the state behind c.img's two records damaged, FA-47), so
     # two runs: (a) the two slots after the newest record filled with garbage, as if two later commits had been lost
     # before they reused anything: the state behind them is whole by construction, --old builds on it; (b) c.img itself:
-    # --old must do what the PC's fsck of that state says: build if it is clean, refuse and write nothing if it is not
+    # --old must do what the PC's repair of that state (zenixfs-tool repair --rollback 0, the same choice) does: build if
+    # its tree is whole (a free-space map that differs is rebuilt from the tree, so the PC's fsck counting those
+    # differences is no refusal), refuse and write nothing if it is not. Which one c.img is depends on the image's layout,
+    # and that on the order the scratch folder lists the tree's files in (tmpfs in tools/check.sh, 2026-11-18)
     python3 -I -c '
 import os, struct, sys
 d = bytearray(open(sys.argv[1], "rb").read())
@@ -376,10 +379,19 @@ open(sys.argv[2], "wb").write(d[i - 32:])' $d/c2.hdf $d/c2.img
     check "r: ... the PC's fsck, clean, the file there" "$($Z fsck $d/c2.img >/dev/null 2>&1 && $Z cat $d/c2.img /after-old.txt | grep -q after-old && echo ok || echo bad)"
     cp $d/c-before.hdf $d/c3.hdf
     old_run 7 $d/c3.hdf
-    if $Z fsck $d/c.img >$d/c-fsck.txt 2>&1; then
-        check "r: the two newest records destroyed, the state behind clean on the PC: --old builds on it, a file written" "$(grep -aq 'ro=0' $d/7.log && grep -aq '^after-old' $d/7.log && echo ok || echo bad)"
+    $Z fsck $d/c.img >$d/c-fsck.txt 2>&1
+    cp $d/c.img $d/c-pc.img
+    if $Z repair $d/c-pc.img --rollback 0 >$d/c-repair.txt 2>&1; then
+        python3 -I -c '
+import sys
+d = open(sys.argv[1], "rb").read()
+i = d.find(b"ZNFS", 512)
+while i >= 0 and not (i % 512 == 32 and d[i - 28:i - 26] == b"ZB"):
+    i = d.find(b"ZNFS", i + 1)
+open(sys.argv[2], "wb").write(d[i - 32:])' $d/c3.hdf $d/c3.img
+        check "r: the two newest records destroyed, the PC's repair builds on the state behind (its fsck: $(grep -c . $d/c-fsck.txt) lines): --old builds on it, a file written, the PC's fsck clean" "$(grep -aq 'ro=0' $d/7.log && grep -aq '^after-old' $d/7.log && $Z fsck $d/c3.img >/dev/null 2>&1 && $Z cat $d/c3.img /after-old.txt | grep -q after-old && echo ok || echo bad)"
     else
-        check "r: the two newest records destroyed, the state behind damaged on the PC ($(grep -c . $d/c-fsck.txt) lines): --old refuses, the disk unchanged" "$(grep -aq 'ro=1' $d/7.log && grep -aq 'nothing changed' $d/7.log && grep -aq 'read-only file system' $d/7.log && cmp -s $d/c3.hdf $d/c-before.hdf && echo ok || echo bad)"
+        check "r: the two newest records destroyed, the PC's repair refuses the state behind (its fsck: $(grep -c . $d/c-fsck.txt) lines): --old refuses, the disk unchanged" "$(grep -aq 'ro=1' $d/7.log && grep -aq 'nothing changed' $d/7.log && grep -aq 'read-only file system' $d/7.log && cmp -s $d/c3.hdf $d/c-before.hdf && echo ok || echo bad)"
     fi
     rm -rf $d/out2; check "r: the PC's salvage still brings the files back" "$($Z salvage $d/c.img $d/out2 >/dev/null 2>&1 && [ -f $d/out2/etc/motd ] && echo ok || echo bad)"
 }
