@@ -27,7 +27,7 @@ send sigtest _jobber\r
 wait (?m)^sigtest: jobber ready 20
 sleep 1
 send \x1a
-wait (?m)^\[1\]\+ +Stopped 20
+wait (?m)^\[1\]\+ +Stopped +sigtest 20
 send bg\r
 wait sigtest: CONT handler ran 20
 send fg\r
