@@ -13,6 +13,9 @@
 # ceiling below: the figure of 2026-11-07 (D28 21) and 30% (FS-UAE runs the same cycles each time; the figures moved
 # by a few percent between runs), so a console that falls back to slow drawing fails. Before D28 21 the parts were
 # 020: 8.07 6.77 8.29 6.27 s, 060: 5.66 3.84 4.65 3.70 s (after: 2.35 3.42 5.76 3.66, 1.77 2.29 3.48 2.40).
+# lsR's output is the root image's, which grows with every program: its ceiling is for LSR0 lines (the image of
+# 2026-11-07, 712 lines) and scales with the lines counted in the run (1,283 on 2026-11-18, the full audit's FA-49:
+# 6.53 s and 4.28 s, 5.09 and 3.34 ms a line against 5.14 and 3.37 then: the same speed, a bigger root).
 # usage: tools/conspeed-test.sh [020|060 ...]   (default both)
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
@@ -22,6 +25,7 @@ OUT=${ZENIX_OUT:-$(mktemp -d /tmp/zenix-conspeed.XXXXXX)}; mkdir -p "$OUT"
 RUNS=${*:-020 060}
 declare -A CEIL=([020-seq]=3.1 [020-long]=4.5 [020-colour]=7.5 [020-lsR]=4.8
                  [060-seq]=2.3 [060-long]=3.0 [060-colour]=4.5 [060-lsR]=3.2)
+LSR0=712
 pass=1
 check() { if [ "$2" = 0 ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 printf '%s\n' 'wait zenix:/# 120' 'sleep 1' 'send sh /tests/conspeed.sh\r' 'waitecho (?m)^cs-done 1200' 'stop' > "$OUT/script.txt"
@@ -39,6 +43,12 @@ for r in $RUNS; do
         printf '%s: %-7s %8ss %8ss\n' "$r" "$k" "${s:-?}" "${n:-?}"
         if [ -z "$s" ] || [ -z "$n" ]; then check "$r $k: measured (see $OUT/$r.log)" 1; continue; fi
         c=${CEIL[$r-$k]}
+        if [ $k = lsR ]; then
+            nl=$(grep -ao "^cs-lsR-lines-[0-9]*l" <<<"$L" | tail -1 | sed 's/.*-\([0-9]*\)l/\1/')
+            if [ -z "$nl" ]; then check "$r lsR: its lines counted" 1; continue; fi
+            c=$(awk -v c="$c" -v n="$nl" -v z=$LSR0 'BEGIN { printf "%.2f", c * n / z }')
+            echo "$r: lsR     $nl lines (the ceiling for $LSR0 lines scaled)"
+        fi
         awk -v s="$s" -v n="$n" -v c="$c" 'BEGIN { exit !(s - n <= c) }'
         check "$r $k: the console's part (screen alone - /dev/null) at most $c s" $?
     done

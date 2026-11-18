@@ -14,5 +14,6 @@ time cat /tmp/col 2> /tmp/t; printf '\033[0m'; r colour-scr
 time cat /tmp/col > /dev/null 2> /tmp/t; r colour-nul
 time ls -laR / 2> /tmp/t; r lsR-scr
 time ls -laR / > /dev/null 2> /tmp/t; r lsR-nul
+echo "cs-lsR-lines-$(ls -laR / | wc -l)l" > /dev/ttyS0
 conmirror on
 echo cs-done > /dev/ttyS0
