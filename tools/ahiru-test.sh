@@ -11,7 +11,8 @@
 # space, the place in the list), the colours of directories, the highlight and links, the yank and cut tags, the
 # question, Sumi's screen, the archive's card and its member; and on the disk: the copy byte for byte with its mode kept, the move, the delete, the link
 # left as it was, the member unpacked with its date; the settings folder ($HOME/.config/Ahiru: the keys, the theme, the config, the places, mode 700) and
-# $HOME/.config/FileColours. The memory with Ahiru open is printed (free and ps). Every wait is for an event (the
+# $HOME/.config/FileColours. A third start: a zip's member folder named ".." pasted is refused, nothing written
+# outside the target (FA-11). The memory with Ahiru open is printed (free and ps). Every wait is for an event (the
 # grid, the shell's lines), none for a time.
 cd "$(dirname "$0")/.." || exit 1
 OUT=${ZENIX_OUT:-/tmp/zenix-ahiru}; mkdir -p $OUT
@@ -93,6 +94,16 @@ check(re.search(r"^drwx------ .*\.config/Ahiru$", f, re.M) is not None and
       re.search(r"^-rw-r--r-- .* \S*\.config/FileColours$", f, re.M) is not None,
       "the settings: $HOME/.config/Ahiru (this user's only) with the config, the keys, the places and the theme; "
       "$HOME/.config/FileColours", f[:1200])
+# FA-11 (B3-6): a zip whose member is "../esc.txt" (a folder named ".." at its top): picked and pasted into /tmp/y/t,
+# it would land in /tmp/y; the paste is refused with a message and nothing is written
+y = [rows(part("y%d" % i, "y%d" % (i + 1))) for i in range(2)] + [rows(part("y2", "yfile"))]
+yf = part("yfile", "ydone")
+check(L.status("st3") == 0, "a third start (/tmp/y/t) ended with status 0 (q)", L.status("st3"))
+check(y[1].get(0) == " /tmp/y/t/d.zip/..", "l: inside the zip, its member folder named '..' under the cursor", y[1].get(0))
+check(any("names no file here - nothing pasted" in v for v in y[2].values()),
+      "yy h pp: the paste of a member named '..' is refused with a message", y[2])
+check(re.search(r"^/tmp/y:$", yf, re.M) is not None and re.search(r"^/tmp/y/t:$", yf, re.M) is not None and "esc.txt" not in yf,
+      "nothing written outside the target: no esc.txt in /tmp/y (or in the target)", yf[:300])
 L.memory(f, "ahiru", "Ahiru")
 L.waits()
 L.done()

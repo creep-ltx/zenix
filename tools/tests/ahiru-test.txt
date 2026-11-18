@@ -17,4 +17,12 @@ send (termtest screen /dev/tty1 'LhA ''archive' 60 'l' > /tmp/scr9.txt; termtest
 waitecho st2=0 120
 send for i in 0 1 2 3 4 5 6 7 8 9 10 11; do echo ==scr$i; cat /tmp/scr$i.txt; done; echo ==file; ls -l /tmp/a /tmp/a/sub; cat /tmp/a/sub/one.txt /tmp/a/sub/two.txt /tmp/a/sub/keep.txt /tmp/z/in.txt; ls -l /tmp/z; readlink /tmp/a/sub/link; ls -ld $HOME/.config/Ahiru; ls -l $HOME/.config/Ahiru $HOME/.config/FileColours; cat /tmp/f0.txt /tmp/f1.txt /tmp/ps1.txt; cat /tmp/k.sh; echo ==a""done\r
 wait ==adone 60
+send mkdir -p /tmp/y/t; printf '\\120\\113\\003\\004\\024\\000\\000\\000\\000\\000\\000\\140\\136\\135\\343\\166\\374\\316\\010\\000\\000\\000\\010\\000\\000\\000\\012\\000\\000\\000\\056\\056\\057\\145\\163\\143\\056\\164\\170\\164\\145\\163\\143\\141\\160\\145\\144\\012\\120\\113\\001\\002\\024\\003\\024\\000\\000\\000\\000\\000\\000\\140\\136' > /tmp/y/t/d.zip; echo ==z""1\r
+wait ==z1 30
+send printf '\\135\\343\\166\\374\\316\\010\\000\\000\\000\\010\\000\\000\\000\\012\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\244\\001\\000\\000\\000\\000\\056\\056\\057\\145\\163\\143\\056\\164\\170\\164\\120\\113\\005\\006\\000\\000\\000\\000\\001\\000\\001\\000\\070\\000\\000\\000\\060\\000\\000\\000\\000\\000' >> /tmp/y/t/d.zip; echo ==z""ip\r
+wait ==zip 30
+send (termtest screen /dev/tty1 't/d.''zip' 60 'l' > /tmp/y0.txt; termtest screen /dev/tty1 'zip/.''.' 60 'yyhpp' > /tmp/y1.txt; termtest screen /dev/tty1 'names no ''file' 60 'q' > /tmp/y2.txt) & ahiru /tmp/y/t; echo st3=$?\r
+wait st3=[0-9] 240
+send for i in 0 1 2; do echo ==y$i; cat /tmp/y$i.txt; done; echo ==yfile; ls -a /tmp/y /tmp/y/t; echo ==ydone\r
+wait ==ydone 60
 stop

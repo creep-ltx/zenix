@@ -37,8 +37,12 @@ zenix/     Zenix's own files (GPL-2.0-only):
                       opens inside it; Zenix's console has no screens or windows (ports/common/gui.c)
            list.c     upstream's ahiru/src/list.c, compiled unchanged with the parent of a Unix path: "/tmp" goes up
                       to "/", "/" to the volume list (upstream's AmigaDOS shapes would take "/tmp" straight there)
-           (term.c and list.c rename upstream's function by a define and declare it static first, so it is
-           compiled and never emitted, as ports/tui/zenix/core.c does)
+           ops.c      upstream's fs/ops.c, compiled unchanged with one check of Zenix's before a paste: a picked
+                      archive member or disk image folder named "..", "." or "" refuses the paste with a message
+                      (on AmigaDOS ".." is an ordinary name; on Zenix "TARGET/.." is the target's parent: the full
+                      audit FA-11, B3-6). Inside a pasted folder upstream's safename leaves such names out already
+           (term.c, list.c and ops.c rename upstream's function by a define and declare it static first, so it is
+           compiled and only the Zenix wrapper is called, as ports/tui/zenix/core.c does)
 
 The AmigaOS layer is ports/common (shared with Sumi, Maki and Markdown, no copy): dos.c compiled with the names Ahiru
 maps ("Ahiru": PROGDIR:Ahiru.keys, .theme, .config, .places, .marks as $HOME/.config/Ahiru/Ahiru.*, the folder made

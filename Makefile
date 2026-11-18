@@ -1304,8 +1304,8 @@ $(foreach g,$(BSDGAMES),$(eval $(call BSDGAME_RULES,$(g))))
 AHIRU_UP := main ui preview ops fe keys more more2 filecol
 AHIRU_CORE := core util arc zip adf adfw iso dms version rename sums
 AHIRU_ARC := arcread arclha arclzx       # Zenix's clean readers (DESIGN D33), the commands' own files
-AHIRU_FS := find place ops icon kind arcfs arcw keymap sync renames usercmd sums
-AHIRU_ZX := os none term list
+AHIRU_FS := find place icon kind arcfs arcw keymap sync renames usercmd sums
+AHIRU_ZX := os none term list ops     # ops: upstream's fs/ops.c with a check before a paste (FA-11)
 AHIRU_OBJS := $(AHIRU_UP:%=$(BUILD)/ahiru/ahiru/%.o) $(AHIRU_CORE:%=$(BUILD)/ahiru/core/%.o) \
               $(AHIRU_FS:%=$(BUILD)/ahiru/fs/%.o) $(AHIRU_ZX:%=$(BUILD)/ahiru/zenix/%.o) $(AHIRU_ARC:%=$(BUILD)/ahiru/arc/%.o) \
               $(BUILD)/ahiru/zenix-dos.o $(BUILD)/ahiru/zenix-gui.o
@@ -1325,7 +1325,7 @@ $(BUILD)/ahiru/core/%.o: ports/ahiru/upstream/core/%.c $(AHIRU_HDRS) tools/purec
 $(BUILD)/ahiru/fs/%.o: ports/ahiru/upstream/fs/%.c $(AHIRU_HDRS) tools/purecc.sh
 	@mkdir -p $(dir $@)
 	tools/purecc.sh $(CC) $(AHIRU_CFLAGS) -c $< -o $@
-$(BUILD)/ahiru/zenix/%.o: ports/ahiru/zenix/%.c $(AHIRU_HDRS) $(wildcard ports/ahiru/upstream/ahiru/src/*.c) tools/purecc.sh
+$(BUILD)/ahiru/zenix/%.o: ports/ahiru/zenix/%.c $(AHIRU_HDRS) $(wildcard ports/ahiru/upstream/ahiru/src/*.c) ports/ahiru/upstream/fs/ops.c tools/purecc.sh
 	@mkdir -p $(dir $@)
 	tools/purecc.sh $(CC) $(AHIRU_CFLAGS) -c $< -o $@
 $(BUILD)/ahiru/zenix-dos.o: ports/common/dos.c $(TT_HDRS) tools/purecc.sh Makefile
