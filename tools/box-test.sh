@@ -30,7 +30,10 @@ tools/run-test.sh fsuae/a1200-020-fast.fs-uae 360 tools/tests/box-test.txt 2>&1 
 grep -aq "^box: 73 names run, 0 not dispatched" $OUT/run.log && ok "every name runs its command from the box (73 names)" || { no "names not dispatched:"; grep -a "^box: " $OUT/run.log | head -20; }
 grep -aq "^box: unknown name status 2" $OUT/run.log && ok "an unknown name exits 2" || no "an unknown name's status"
 [ "$(grep -a -A2 '^box: unknown name' $OUT/run.log | tail -2 | tr '\n' ' ')" = "1 1 " ] && ok "... saying so and listing the names" || no "an unknown name's message and list"
-ZENIX_OUT=$OUT/cmds ZENIX_BOX=1 tools/cmds-test.sh || pass=0
+# the box's run of cmds.sh takes longer than the separate programs' (every command loads the whole box): at stock speed on
+# the 020 with fast RAM 151 s on the Amiga's clock, 63 s without the box (2026-11-18; 143 s already on 2026-11-12's
+# tree), past cmds-test's 100 s for its wait; 300 s here
+ZENIX_OUT=$OUT/cmds ZENIX_BOX=1 CMDS_WAIT=${CMDS_WAIT:-300} tools/cmds-test.sh || pass=0
 ZENIX_OUT=$OUT/cmds2 ZENIX_BOX=1 tools/cmds2-test.sh || pass=0
 rm -f $BD/zenix.hdf      # the next test builds the plain image again
 exit $((1 - pass))
