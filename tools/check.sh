@@ -290,7 +290,7 @@ row() {
 }
 
 for t in $LIST; do
-    case "$t" in docs-check|zenixfs-test|stage0-68k-test|confont-test|net-test|telnet-test|crypto-test|zpkg-test|zine-test|nfs-test|tls-test|wasabi-test) ;; *) [ -x "tools/$t.sh" ] || { echo "check: no test called $t"; DONE=1; free_images; exit 2; } ;; esac
+    case "$t" in docs-check|zenixfs-test|stage0-68k-test|confont-test|net-test|telnet-test|crypto-test|zpkg-test|zine-test|nfs-test|tls-test|wasabi-test|irc-host-test|mail-host-test) ;; *) [ -x "tools/$t.sh" ] || { echo "check: no test called $t"; DONE=1; free_images; exit 2; } ;; esac
 done
 if [ $MODE = fast ]; then echo "check: fast mode: the emulator tests in FS-UAE's warp mode, except the ones in STOCK"
 else echo "check: stock mode: every emulator test at stock speed"; fi
