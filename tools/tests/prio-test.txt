@@ -16,7 +16,7 @@ send echo u5=$(nice -n 5 nice) uc=$(nice -n 3 nice -n 2 nice); nice -n -1 nice; 
 sleep 4
 send sleep 300 &\r
 sleep 2
-send renice 5 $!; echo lower=$?; renice 2 $!; echo raise=$?; renice 5 1; echo server=$?; renice 5 -u user; echo user=$?\r
+send renice 5 $!; echo lower=$?; renice 2 $!; echo raise=$?; renice 5 1; echo server=$?; renice 5 -u user; echo user=$?; renice 6 -u 1000; echo uid=$?\r
 sleep 4
 send ps | grep sleep; kill $!; exit\r
 sleep 3

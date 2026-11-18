@@ -32,7 +32,9 @@ line "a user may not renice a server" "renice: 1: permission denied"
 line "... status 1" "server=1"
 line "renice -u lowers all of a user's processes" "1000 (user ID) old priority 0, new priority 5"
 line "... status 0" "user=0"
-rx   "ps shows PRI 20 and NI 5 for the user's process" " +[0-9]+ +[0-9]+ +20 +5 sleep +[0-9]+ +[0-9]+ sleep"
+line "renice -u takes a user's number above 40 (1000: it was clamped to 40, FA-46)" "1000 (user ID) old priority 5, new priority 6"
+line "... status 0" "uid=0"
+rx   "ps shows PRI 20 and NI 6 for the user's process (level (6 + 20) * 4 / 5)" " +[0-9]+ +[0-9]+ +20 +6 sleep +[0-9]+ +[0-9]+ sleep"
 for t in fair prio wake inherit stale; do
     l=$(grep -a "^priotest $t: " $OUT/run.log | head -1)
     case "$l" in *": PASS"*) echo "PASS ${l#priotest }" ;; *) echo "FAIL priotest $t: ${l:-no result}"; pass=0 ;; esac

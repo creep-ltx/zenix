@@ -13,6 +13,16 @@ static int num(const char *s, int *out)
     return 1;
 }
 
+/* a process or user id: the whole number, never clamped as a niceness is (a pid of 46 was taken for 40: FA-46) */
+static int idnum(const char *s, int *out)
+{
+    char *end;
+    long v = strtol(s, &end, 10);
+    if (!*s || *end || v < 0 || v > 0x7FFFFFFFL) return 0;
+    *out = (int)v;
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
     int i = 1, n, which = PRIO_PROCESS, rc = 0;
@@ -27,14 +37,14 @@ int main(int argc, char **argv)
         int id;
         struct pw pw;
         if (which == PRIO_USER) {
-            if (!num(argv[i], &id)) {
+            if (!idnum(argv[i], &id)) {
                 if (pw_byname(argv[i], &pw) < 0) { dprintf(2, "renice: %s: no such user\n", argv[i]); rc = 1; continue; }
                 id = (int)pw.uid;
             }
             if (id < 0 || (id == 0 && sys_getuid() != 0)) {      /* who 0 would mean "my own" to the kernel */
                 dprintf(2, "renice: %s: permission denied\n", argv[i]); rc = 1; continue;
             }
-        } else if (!num(argv[i], &id) || id <= 0) {
+        } else if (!idnum(argv[i], &id) || id <= 0) {
             dprintf(2, "renice: %s: not a process number\n", argv[i]); rc = 1; continue;
         }
         zerrno = 0;

@@ -30,6 +30,8 @@ OPTIONS
     -p      the following arguments are process ids (the default)
     -u      the following arguments are user names or user ids
 
+    Process and user ids are taken whole (only N is brought into range).
+
 EXAMPLES
     renice 10 123          let process 123 run only when nothing better is
                            ready
