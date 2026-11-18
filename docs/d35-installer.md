@@ -3,7 +3,8 @@
 
 Status: **built on branch install (2026-11-01 to 11-03), the last feature of block 4 (ROADMAP "The order of work", item 4). The outline is
 the owner's ("an installer: partition, format, copy, boot menu"; a boot floppy or an existing Zenix; no PC); the details were delegated and
-are decided here. Tested on image files and in FS-UAE only: it has never run on a real disk, and nothing here touches the owner's card.**
+are decided here. Tested on image files and in FS-UAE, and run by the partner on the real A1200 (2026-11-03/04: the live tests below, a split install,
+a ZenixFS root on the 1260's CF card); from the install floppies on a real drive: not yet. Nothing here touches a card by itself.**
 What was measured is in section 11. Section 3b (set it up yourself, the owner 2026-11-04) was built on branch inst2, 2026-11-05.
 
 ## 1. What it is
@@ -170,12 +171,27 @@ disk with `zinstall` and what it runs, then the first part of the set. The set i
 the disks after a small header sector (`ZSET`, set id, disk number). The kernel on disk 1 is the one the set installs, so it is not stored twice. `/etc/zinstall.set`
 in the RAM disk lists every item with its place and SHA-256; a floppy's content is trusted because the boot floppy says what it must be. Other
 drives are looked at too, so with several drives (or a Gotek) nothing needs swapping; with one drive it asks for the next disk. Core
-programs come first, optional ones on the last disk; the person may skip those (then `zpkg -S` later). **A ZenixFS root needs the second
+programs come first, the rest of the set on the last disk; the person may skip that disk (then `zpkg -S` later).
+
+**What the install set holds (2026-11-18, the main session's decision for the full audit's FA-3):** the base system
+that boots, logs in, uses the network and runs zpkg, nothing more. `tools/mkinstall.py`'s `CORE` (on disks 1-3: the
+base group zup, base and zpkg; the everyday commands' families; shadow, disktools with the filesystems' servers,
+archive, edit, nettools, zinstall) and `SETX` (alone on the last disk, which may be skipped: awk, base-man, telnet,
+ssh, wget, sntp, zmodem, cu, usb, the desktop with its servers). Every other package is optional and on no disk:
+devel (tcc, zld, zas, zdb and the C library), games, lua, make, sumi, maki, markdown, ahiru, ctop, irc, mail and their
+tls, sound (the server and the players), zine, wasabid; `zpkg -S NAME` brings each from the package server after
+installing, and the start from AmigaOS says so at its prompt. Why: block 7 grew the packages to 4.0 MB (devel 0.9 MB,
+games 0.4 MB), and the start from AmigaOS carried "the whole set" in a RAM disk of 3,400 KB that no longer held it
+(the build failed) and would not load beside AmigaOS on the 4 MB minimum anyway. The desktop stays whole: `files` and
+`show` are in its package, and splitting a package is a change of the package set (D22's takes), not of the
+installer. The build checks the size: `mkinstall.py` adds up the set (each file's blocks with its indirect blocks)
+against the RAM disk's free blocks and inodes, keeps 64 KB free, and stops with both numbers and what to do if the set
+outgrows it. **A ZenixFS root needs the second
 disk for its kernel** (kernel-zfs).
 
 **No floppy at all: from AmigaOS** (for a machine with fast RAM, such as the A1200 with the Apollo 1260). `make install-floppies` also makes
-`install/from-amigaos/`: `zenixboot`, the kernel `zenix`, and `zinstall-ram.img` (3.4 MB: the installer's RAM disk with the whole set inside
-as files, each checked against `/etc/zinstall.set`). Steps, from AmigaOS:
+`install/from-amigaos/`: `zenixboot`, the kernel `zenix`, and `zinstall-ram.img` (2,900 KB, `RAMDISK_INSTALL_HD_K`: the installer's RAM
+disk with the install set inside as files, each checked against `/etc/zinstall.set`; 2,018 KB of it the set, 291 KB free, 2026-11-18). Steps, from AmigaOS:
 1. Copy the three files to a folder, e.g. `Work:Zenix-Install/` (they are written nowhere else).
 2. In a Shell: `Work:Zenix-Install/zenixboot Work:Zenix-Install/zenix RAM=Work:Zenix-Install/zinstall-ram.img`
    (zenixboot's own `RAM=`, docs/man/zenixboot.txt). AmigaOS stops; Zenix starts with the installer's RAM disk as its root.
@@ -183,8 +199,8 @@ as files, each checked against `/etc/zinstall.set`). Steps, from AmigaOS:
 Verified in FS-UAE on an A1200 with a 68060 and 8 MB of fast RAM (`zinstall-test` h, the files on an FFS DH0 started by Kickstart's
 own shell). The partition the files are on is only read.
 
-**The first time on a new machine** (real hardware Zenix has not met): **Zenix's Gayle IDE driver with a real drive and Zenix on a real
-68060 have never run** (the owner's A1200 runs Zenix from the PiStorm's SD card, Emu68; everything here is FS-UAE). So: start the installer,
+**The first time on a new machine** (real hardware Zenix has not met): Zenix's Gayle IDE driver with a real CF card and Zenix on a real
+68060 have run since 2026-11-04 (the A1200 with the Apollo 1260, d37), but a disk Zenix has not read before is still new. So: start the installer,
 `zinstall --list` (it only reads: the table as Zenix reads it, each partition's name, size, type, dostype, start and end cylinder, the
 cylinder size), compare it with HDToolBox, `reboot` back to AmigaOS; only if it agrees, start again and install.
 
@@ -252,8 +268,8 @@ install must pass there (`zinstall-test` m, z). 2 MB of chip RAM alone is best e
 | | |
 |---|---|
 | `zinstall` | 145,268 bytes (ZEXE), -Os, with the password code it shares with passwd and useradd, and zpkg's boot partition writer (2026-11-05, section 3b; it was 113,900) |
-| The install floppies | 4 disks: disk 1 the bootblock, the kernel (172 KB), a RAM disk of 632 KB (600 before section 3b) and part of the set, core first, the optional ones on disks 3-4 |
-| No floppy (`install/from-amigaos/`) | zenixboot 53 KB, the kernel 172 KB, `zinstall-ram.img` 3,400 KB (needs fast RAM) |
+| The install floppies | 4 disks: disk 1 the bootblock, the kernel (172 KB), a RAM disk of 632 KB (600 before section 3b) and part of the set, core on disks 1-3, the rest of the set (SETX) alone on disk 4 (2026-11-18: 2,375 KB of bundles with the padding) |
+| No floppy (`install/from-amigaos/`) | zenixboot 53 KB, the kernel 172 KB, `zinstall-ram.img` 2,900 KB (needs fast RAM; 3,400 KB with the whole set until 2026-11-18, which no longer fitted: FA-3) |
 | Free at the prompt, booted from disk 1 | 2 + 4 MB: 1,255 KB chip and 3,505 KB fast; 2 MB chip alone: 729 KB |
 | Lowest free memory seen while installing (sampled at each file and program end; a child's peak in between is not seen) | 2 + 4 MB: 4,198 KB with ext2, 4,075 KB with ZenixFS; 2 MB chip alone: 220 KB with ext2 (one partition), ZenixFS refused (2026-11-05, after section 3b: 87 KB, 87 KB and 57 KB less than on 11-04, the bigger RAM disk and program) |
 | What zinstall wants free before it writes anything | 350 KB (ext2), 500 KB (ZenixFS): measured use plus a margin; less, and it says so and writes nothing |

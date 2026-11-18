@@ -35,11 +35,20 @@ DESCRIPTION
     install/from-amigaos/ (zenixboot, zenix, zinstall-ram.img) to a folder
     and run there: zenixboot zenix RAM=zinstall-ram.img
 
+    The install set is the base system: what boots, logs in, uses the
+    network and runs zpkg (the base, the everyday commands, the disk and
+    filesystem tools, the network's programs, the desktop and its
+    servers, the base's manual pages, zinstall itself). Everything else
+    (the compiler and its library, games, Lua, make, Sumi, Maki, Ahiru,
+    irc, mail, sound, ZINE, ...) is not on it: after installing,
+    zpkg -S NAME brings it from the package server (zpkg -Sl lists them).
+
     Run from the floppies, the files come from the set on the floppies:
-    disk 2 and on, in any drive, or swapped in one drive when it asks. The
-    optional programs are on the last disks: type skip at a disk it asks
-    for, and zpkg -S brings them later. On an existing Zenix they come
-    from the package server (zpkg --fetch, zpkg(8)), signed and checked.
+    disk 2 and on, in any drive, or swapped in one drive when it asks.
+    The last disk holds the set's network programs, the desktop and the
+    manual pages: type skip when it asks for that disk, and zpkg -S
+    brings them later. On an existing Zenix they come from the package
+    server (zpkg --fetch, zpkg(8)), signed and checked.
 
 WHERE IT CAN GO
     Free space is the default, and never touches another partition:

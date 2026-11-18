@@ -347,8 +347,10 @@ RAMDISK_INSTALL_K := 632
 $(BUILD)/root-install.img: $(USERZX) $(SBINZX) $(shell find rootfs -type f) tools/mkroot.sh
 	NOMAN=1 NOPURE=1 NOTESTS=1 MOUNTDIRS="mnt" tools/mkroot.sh $@ $(BUILD) "$(INSTALLAPPS)" $(RAMDISK_INSTALL_K)K 96
 # and, for a start from AmigaOS with no floppy (install/from-amigaos/: zenixboot, the kernel, zinstall-ram.img), the same programs with
-# the whole set as files: RAMDISK_INSTALL_HD_K, for a machine with fast RAM (zenixboot loads it whole)
-RAMDISK_INSTALL_HD_K := 3400
+# the install set as files (tools/mkinstall.py CORE: the optional packages come by zpkg -S later): RAMDISK_INSTALL_HD_K, for a
+# machine with fast RAM (zenixboot loads it whole; kept small enough for the 4 MB minimum: 3,400 with the whole set failed,
+# FA-3). mkinstall.py fails with the numbers when the set outgrows it.
+RAMDISK_INSTALL_HD_K := 2900
 $(BUILD)/root-install-hd.img: $(USERZX) $(SBINZX) $(shell find rootfs -type f) tools/mkroot.sh
 	NOMAN=1 NOPURE=1 NOTESTS=1 MOUNTDIRS="mnt" tools/mkroot.sh $@ $(BUILD) "$(INSTALLAPPS)" $(RAMDISK_INSTALL_HD_K)K 128
 install-floppies: $(BUILD)/install/zenix-install-1.adf

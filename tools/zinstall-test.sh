@@ -875,8 +875,8 @@ EOS
 }
 
 # ---- h: no floppy at all: from AmigaOS on an A1200 with a 68060, as the owner's Apollo 1260 has it: zenixboot loads the kernel and the
-#      installer's RAM disk (install/from-amigaos/, the whole set inside) from files on DH0; zinstall --list, then the install into free
-#      space; DH0 (which the files came from) and DH1 byte-identical ----
+#      installer's RAM disk (install/from-amigaos/, the install set inside: the optional packages come by zpkg -S, FA-3) from files on
+#      DH0; zinstall --list, then the install into free space; DH0 (which the files came from) and DH1 byte-identical ----
 part_h() {
     local d=$OUT/h.hdf A=$F/from-amigaos
     printf 'SYS:Zenix-Install/zenixboot SYS:Zenix-Install/zenix RAM=SYS:Zenix-Install/zinstall-ram.img\n' >$OUT/h-ss
@@ -922,6 +922,16 @@ EOS
     check "h: the install says it is done" "$(has $OUT/h1.log '^Done\. Zenix is on this disk')"
     $CK sums $d DH0 DH1 >$OUT/h.after
     check "h: DH0 (where the installer came from) and DH1 byte-identical" "$(yes_if cmp $OUT/h.before $OUT/h.after)"
+    # FA-3: the RAM disk holds the install set, the optional packages left for zpkg -S (said at the prompt); the new root's
+    # package database lists the set, no optional package
+    debugfs -R 'ls -l /install' $A/zinstall-ram.img 2>/dev/null >$OUT/h.ram
+    check "h: the RAM disk holds the install set (base, zpkg, zinstall, desktop, telnet)" "$(for p in base zpkg zinstall desktop telnet; do grep -q " $p.zup" $OUT/h.ram || echo bad; done | grep -q bad && echo bad || echo ok)"
+    check "h: and no optional package (devel, games, lua, sound, irc)" "$(grep -qE ' (devel|games|lua|sound|irc|zenix-tests)\.zup' $OUT/h.ram && echo bad || echo ok)"
+    check "h: the prompt says the optional programs come by zpkg -S" "$(has $OUT/h1.log 'zpkg -S NAME brings them')"
+    $CK cut $d ZR0 $OUT/h-db.bin
+    debugfs -R 'ls /var/lib/zpkg' $OUT/h-db.bin 2>/dev/null >$OUT/h.db
+    empty $OUT/h-db.bin
+    check "h: the new root's package database lists the set (desktop, ssh) and no optional package" "$(grep -q 'desktop.manifest' $OUT/h.db && grep -q 'ssh.manifest' $OUT/h.db && ! grep -qE '(devel|games|lua)\.manifest' $OUT/h.db && echo ok || echo bad)"
     host_fs h $d ZR0 ext2
     boot_vol h $d $BD/kernel.bin
     empty $d $OUT/h-dh0.img

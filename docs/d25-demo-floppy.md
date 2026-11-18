@@ -91,7 +91,7 @@ picolibc and the text-UI library each.
   stage0, the memory list, AmigaOS off, the kernel copied home, the jump). The RAM disk stays in memory as the root
   `ram0`: no fsck, no random seed written (Part 2, T7.5). `kernel.bin` leaves 61,228 bytes on that floppy.
 - **zenixboot** (`boot/`, the start from AmigaOS) already places a big RAM disk in fast RAM (the installer's
-  `RAMDISK_INSTALL_HD_K`, 3,400 KB) with the same hand-over code.
+  `RAMDISK_INSTALL_HD_K`, 3,400 KB then, 2,900 since 2026-11-18) with the same hand-over code.
 - **The desktop** (D38): `login graphical` in `/etc/console` makes init start `/sbin/dlogin` on console 1; dlogin's
   sessions come from `/etc/dlogin`; it refuses root and starts a session with `login -f -s PROGRAM NAME`; autologin is
   "not yet". zdesk's menu and icons are command lines in `/etc/zdesk/menu` and `/etc/zdesk/icons`.
