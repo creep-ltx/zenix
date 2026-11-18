@@ -245,8 +245,9 @@ smash() {   # IMAGE BLOCK B: garbage over one block of the root image
 }
 part_r() {
     local d=$OUT/r; rm -rf $d; mkdir -p $d
-    # a tree of three levels: the full root at 1 KB blocks has them
-    mkimg $d/root.img 15 /dev/null || { check "r: the root image" bad; return; }
+    # a tree of three levels: the full root at 1 KB blocks has them (20 MB, 1 KB blocks asked for: 15 MB no longer held the
+    # tree with the devel package, FA-7, and 16 MB and up get 2 KB blocks: a tree of two levels)
+    ZFS_BSHIFT=10 mkimg $d/root.img 20 /dev/null || { check "r: the root image" bad; return; }
     read -r node blk < <(inner_node $d/root.img) || true
     if [ -z "$node" ]; then check "r: the image has an inner node to damage" bad; return; fi
     check "r: the image has an inner node to damage (block $node of $blk bytes)" ok
@@ -326,8 +327,24 @@ EOF
     check "r: two newest commits destroyed: boot's choices, no read-write among them" "$(grep -aq 'mounted read-only. Choose' $d/5.log && ! grep -aq 'go on read-write anyway' $d/5.log && echo ok || echo bad)"
     check "r: a write in the rescue shell is refused; a read works" "$(grep -aq 'read-only file system' $d/5.log && grep -aq '^r=0' $d/5.log && echo ok || echo bad)"
     check "r: fsck.zenixfs -y refuses to build on this state: nothing written to the disk" "$(grep -aq 'nothing changed' $d/5.log && cmp -s $d/c.hdf $d/c-before.hdf && echo ok || echo bad)"
-    # --old: on the owner's word, build on it; the shell's exit goes on read-write
-    cat >$d/k6.txt <<'EOF'
+    # --old: on the owner's word, build on it if the older state checks out; the shell's exit goes on read-write. Format
+    # rule 3 promises nothing two commits back (the two last transactions may have reused its blocks, and how much depends
+    # on how the image was built: block 7's bigger root made the state behind c.img's two records damaged, FA-47), so
+    # two runs: (a) the two slots after the newest record filled with garbage, as if two later commits had been lost
+    # before they reused anything: the state behind them is whole by construction, --old builds on it; (b) c.img itself:
+    # --old must do what the PC's fsck of that state says: build if it is clean, refuse and write nothing if it is not
+    python3 -I -c '
+import os, struct, sys
+d = bytearray(open(sys.argv[1], "rb").read())
+B = 1 << struct.unpack(">I", d[40:44])[0]
+g = max(struct.unpack(">Q", d[n * B + 16:n * B + 24])[0] for n in range(1, 9) if d[n * B + 4:n * B + 7] == b"ZB\x02")
+for k in (1, 2):
+    s = 1 + (g + k) % 8
+    d[s * B:(s + 1) * B] = os.urandom(B)
+open(sys.argv[2], "wb").write(d)' $d/root.img $d/o.img
+    python3 tools/mkrdb.py $d/o.img $d/c2.hdf zenixfs >/dev/null
+    old_run() {    # NAME HDF: boot, choose the rescue shell, fsck.zenixfs --old, exit, a file written
+        cat >$d/k$1.txt <<'EOF'
 wait 4  reboot 600
 send 3
 wait zenix:/# 120
@@ -336,7 +353,7 @@ send fsck.zenixfs --old ide0p1; echo ro=$?\r
 wait (?m)^ro= 300
 sleep 1
 send exit\r
-wait the root is clean now 300
+wait (the root is clean now|1  go on read-only) 300
 wait zenix:/# 300
 sleep 2
 send echo after-old > /after-old.txt; sync; cat /after-old.txt; dmesg | tail -1; echo OLD-DONE\r
@@ -344,10 +361,11 @@ wait (?m)^OLD-DONE 60
 sleep 1
 stop
 EOF
-    cp $d/c-before.hdf $d/c2.hdf
-    conf $d/m6.fs-uae $d/c2.hdf $BD/zenix-zfs.adf
-    run $d/m6.fs-uae 800 $d/k6.txt $d/6.log
-    check "r: fsck.zenixfs --old: built on the old state with a warning, read-write after the shell, a file written" "$(grep -aq 'ro=0' $d/6.log && grep -aq '^after-old' $d/6.log && echo ok || echo bad)"
+        conf $d/m$1.fs-uae $2 $BD/zenix-zfs.adf
+        run $d/m$1.fs-uae 800 $d/k$1.txt $d/$1.log
+    }
+    old_run 6 $d/c2.hdf
+    check "r: two lost commits over a whole state: boot's choices, then fsck.zenixfs --old builds on it, read-write after the shell, a file written" "$(grep -aq 'mounted read-only. Choose' $d/6.log && grep -aq 'ro=0' $d/6.log && grep -aq 'the root is clean now' $d/6.log && grep -aq '^after-old' $d/6.log && echo ok || echo bad)"
     python3 -I -c '
 import sys
 d = open(sys.argv[1], "rb").read()
@@ -356,6 +374,13 @@ while i >= 0 and not (i % 512 == 32 and d[i - 28:i - 26] == b"ZB"):
     i = d.find(b"ZNFS", i + 1)
 open(sys.argv[2], "wb").write(d[i - 32:])' $d/c2.hdf $d/c2.img
     check "r: ... the PC's fsck, clean, the file there" "$($Z fsck $d/c2.img >/dev/null 2>&1 && $Z cat $d/c2.img /after-old.txt | grep -q after-old && echo ok || echo bad)"
+    cp $d/c-before.hdf $d/c3.hdf
+    old_run 7 $d/c3.hdf
+    if $Z fsck $d/c.img >$d/c-fsck.txt 2>&1; then
+        check "r: the two newest records destroyed, the state behind clean on the PC: --old builds on it, a file written" "$(grep -aq 'ro=0' $d/7.log && grep -aq '^after-old' $d/7.log && echo ok || echo bad)"
+    else
+        check "r: the two newest records destroyed, the state behind damaged on the PC ($(grep -c . $d/c-fsck.txt) lines): --old refuses, the disk unchanged" "$(grep -aq 'ro=1' $d/7.log && grep -aq 'nothing changed' $d/7.log && grep -aq 'read-only file system' $d/7.log && cmp -s $d/c3.hdf $d/c-before.hdf && echo ok || echo bad)"
+    fi
     rm -rf $d/out2; check "r: the PC's salvage still brings the files back" "$($Z salvage $d/c.img $d/out2 >/dev/null 2>&1 && [ -f $d/out2/etc/motd ] && echo ok || echo bad)"
 }
 
