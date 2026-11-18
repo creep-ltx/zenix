@@ -1,7 +1,7 @@
 # D37: the data cache on 68040 and 68060 without an MMU
 
 Approved by the owner on 2026-11-04 ("yes to 060 cache"; `docs/decisions.md`). Built on branch `cache`, 2026-11-04.
-**Never run on a real 040 or 060 yet** (section 9 has the steps for the first run on the Apollo 1260).
+**Run on the Apollo 1260 (68060) 2026-11-04** ("Measured on the real hardware" below: 4.23 s -> 0.95 s); never on a real 68040.
 
 ## 1. What the owner gets, in plain words
 

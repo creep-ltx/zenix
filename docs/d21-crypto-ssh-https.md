@@ -936,7 +936,7 @@ URL); `sntp` 15,420. Neither links `time`, `__divdi3` or `__moddi3`.
   `date -s` clear the mark; a reboot after `sntp -r` raises the floor back to the true time.
 
 
-## As built: step 5, signatures (branch sig5, 2026-10-28; not yet on the A1200)
+## As built: step 5, signatures (branch sig5, 2026-10-28; checked on the A1200 with the 1260 2026-11-04: zpkg -Syu installed release 2026110401, d37)
 
 - **zenixboot 0.3b1** (`boot/zenixboot.c`, man/zenixboot.txt "SIGNATURES") checks in 6.4's order: the sizes and the
   table, the digest computed over header bytes 0-63 and the table and compared with bytes 64-95 (the version used

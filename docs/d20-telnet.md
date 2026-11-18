@@ -693,7 +693,7 @@ planes (`termtest pcfont /usr/share/consolefonts/cp437-8x8.psf`) and matches eve
 file's own bitmaps (bytes with identical bitmaps count as one, and the three shades and the full block as one: their
 one-pixel checkerboards blur together in the scaled screenshot); Topaz on the same page fails that check.
 
-## As built: step 2, telnet in the Unix mode (branch t12, 2026-10-27; not yet run on the A1200)
+## As built: step 2, telnet in the Unix mode (branch t12, 2026-10-27; telnet ran on the A1200 2026-11-03, to a BBS)
 
 `user/telnet.c` over the core in `net/telnet/` (step 0), `docs/man/telnet.txt`. One process: `poll` on the socket and
 the keys; the decoder, the filter (the Unix mode: UTF-8 to Latin-1) and the key translation are the core's; the
@@ -769,7 +769,7 @@ ring back after the close, no memory), `term-test` (a piece ends early and the s
 write). The owner's A1200 measurement (8.3) still decides whether anything else is needed; on a real 68020 the scroll
 should be faster than FS-UAE's, never slower.
 
-## As built: step 3, the BBS modes (branch t3, 2026-10-27; not yet run on the A1200)
+## As built: step 3, the BBS modes (branch t3, 2026-10-27; a BBS reported working on the A1200 2026-11-03)
 
 `user/telnet.c` over the step-0 core: `-a` (the default now, the owner's decision 6), `-p`, `-x`, `-i`; the modes'
 rules as 3.5's table (PC 111, Amiga 46, Unix 64); the PC font loaded from `/usr/share/consolefonts/cp437-8x8.psf` with
@@ -792,7 +792,7 @@ b16 (4 MB fast RAM, 4 planes) over the A2065 with screenshots: 32 checks each (t
 Del key's `ESC[3~` is not typed there (serial input arrives a byte at a time and the core maps Del only when the
 sequence is whole in one read, as the keyboard gives it; the core's own test covers it).
 
-## As built: steps 4 and 5, Zmodem and the phone book (branch m4, 2026-10-27; not yet run on the A1200)
+## As built: steps 4 and 5, Zmodem and the phone book (branch m4, 2026-10-27; downloads reported working on the A1200 2026-11-03)
 
 **rz and sz** (`user/rz.c`, one program, `sz` a link to it as `ifup` is `ifconfig`; `docs/man/rz.txt`) over the step-0
 engine (`user/xfer/zmodem.c` at -O2, `detect.c`) and the download rules (`user/xfer/rzrules.c`), given Zenix's file

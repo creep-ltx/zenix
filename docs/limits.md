@@ -57,7 +57,8 @@ pointers.
   made**; the TRAP cost, message cost and cache effects are unmeasured on a real 68020+.
 - Disk access on the user's own A1200 (a PiStorm): its disk is the Pi's SD card behind Emu68's drivers, which
   die when Zenix kills AmigaOS. Done in code (`kernel/emmc.c`, stage0 device-tree handover; see architecture.md
-  section 3) but **never run on a real Pi**: the SD controller is modelled from the SD Host Controller and SD
+  section 3), **verified on the A1200 2026-10-23/24** (the root and /home mounted from the card; the mailbox fix of
+  2026-10-24, audit-2026-10-22.md); the SD controller is modelled from the SD Host Controller and SD
   Physical Layer specifications, so clocks, the mailbox calls and card-detect are unverified.
   Partition tables: an RDB or a PC MBR (primary entries; verified in FS-UAE with disk images). The Emu68 boot card
   holds Emu68 and the Kickstart ROM in its FAT partition: `mount -t fat` can write there, so never do without a plan. Not done: extended
@@ -100,7 +101,8 @@ pointers.
   index server for `locate`/`fzf`.
 - ext2: a journal (an ext3 volume mounts read-only, ext4 is refused), moving a directory to another parent (`mv`
   copies it; ZenixFS moves it), triple-indirect blocks, files over 4 GB. ZenixFS: what zenixfs.md lists as not done.
-- ZenixFS as the root: verified in FS-UAE only (DESIGN D34), not on real hardware, and only with the kernel `kernel-zfs.bin`
+- ZenixFS as the root: verified in FS-UAE (DESIGN D34) and run on the real A1200 (2026-11-04: the A1200 with the Apollo 1260's CF card, d37's
+  measurement; the partner's PiStorm card has a ZenixFS root and /home, reported), and only with the kernel `kernel-zfs.bin`
   (the shipped one has no ZenixFS server built in). A ZenixFS mount needs `/sbin/zfsd` on the root, and its restart reads that file from the root.
 - Kernel is single-CPU by design. Priorities have no ageing and no CPU-time share (DESIGN D10, "Not taken").
 - 68000 support (not a target).

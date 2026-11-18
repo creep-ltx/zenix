@@ -57,7 +57,7 @@ their fixes. **Verdict: not ready for 1.0 yet** (section 5).
 | FA-32 | low (docs) | `docs/man/zfsd.txt` | The ZenixFS server has no manual page or commands.md line (its siblings fatd ... usbd have) | Write it | open |
 | FA-33 | low (docs) | `docs/commands.md:3` | "each with a manual page ... OPTIONS, EXAMPLES, EXIT STATUS": 75 pages have no EXIT STATUS, 152 no EXAMPLES, 137 no OPTIONS heading | Say what the pages hold, or add the sections | open |
 | FA-34 | low (docs) | `docs/man/zld.txt`, `zas.txt`, `zup.txt` | Accepted but undocumented: zld `--stack=N`, `-h`; zas's gas-compatible no-ops (`-g`, `--gdwarf*`, `-W`, ...); zup's internal `-2` | One line each | open |
-| FA-35 | low (docs) | `docs/features.md:25`, `:109`, `:130`; `docs/limits.md:59`, `:102`; `docs/d34-zenixfs-root.md:5`, `:134`; d19/d20/d21 "As built" headings | Still say "never on real hardware" for things later run there (D37's cache on the 1260, the ZenixFS root installed on the A1200, the SD card that Zenix booted from, telnet to a BBS) | Bring each to its d-note's record | open (FA411 and plipbox corrected here, FA-40) |
+| FA-35 | low (docs) | `docs/features.md:25`, `:109`, `:130`; `docs/limits.md:59`, `:102`; `docs/d34-zenixfs-root.md:5`, `:134`; d19/d20/d21 "As built" headings | Still say "never on real hardware" for things later run there (D37's cache on the 1260, the ZenixFS root installed on the A1200, the SD card that Zenix booted from, telnet to a BBS) | Bring each to its d-note's record | fixed 2026-11-18 (FA411 and plipbox corrected here, FA-40): features.md (D37's cache on the 1260 with its 4.23 -> 0.95 s, the SD driver verified 2026-10-23/24, the installer's live runs, telnet to a BBS and its downloads 2026-11-03, ZINE's demos with sound 2026-11-03), limits.md (the SD card, the ZenixFS root), d34, d35, d37, ROADMAP, the d20/d21 headings; what is still not run says so (the floppies on a real drive, uploads, a 68040) (read: each against its record; docs-check) |
 | FA-43 | medium (build) | `Makefile:1583` `zenix-zroot.hdf`, `tools/zroot-test.sh:19` | The ZenixFS-root disk image (12 MB) no longer holds every program (block 7's tcc, the tests' libctest: "error -28 (no space)"), so `make build/zenix-zroot.hdf` fails, and with it svc-test and zroot-test. Verified | 16 MB | fixed (the image builds: 192 programs; svc-test, zroot-test) |
 | FA-44 | low (test) | `tools/sysupdate-test.sh:102` root_img | Part m failed on main: "zup: not enough space on the root: 174 KB and 18 files needed": the test's 16 MB root no longer held the downloads and kept versions beside the full image. Verified | 24 MB | fixed (sysupdate-test m) |
 | FA-45 | low (test) | `kernel/main.c:74` stage, `tools/check-init.py:172` | diag-test's `DIAG_PANIC=11` kernel no longer built: with the stage a constant, gcc dropped everything after it as dead, `mmu_disarm` with it, and D45's check refuses a kernel where a name it trusts is missing. Verified | The stage compared through a `volatile` copy (test builds only) | fixed (diag-test) |
@@ -207,7 +207,7 @@ Each item names the d-note section that says how to check it. **(1.0)**: needed 
 15. **(1.0)** Memory protection `zenixboot MMU=ON`: d41 section 18 (also never on a real 68030 or 68040).
 16. Faster IDE (the boot line ends "long reads"): d42 section 6.
 17. D45's give-back on the 060: d45 section 10.
-18. **(1.0)** The installer on a real disk or card from the floppies (after FA-3): d35 section 9 (features.md: installed twice in 2026-11; to be reconciled with d35's "never").
+18. **(1.0)** The installer on a real disk or card from the floppies (after FA-3): d35 section 9 (features.md and d35 now both say: run on the A1200 2026-11-03/04, not from the floppies; FA-35).
 19. A CD drive as the IDE slave, and A6-23's reset: d44 section 9.
 20. ZINE's 060 stand-ins (missing instructions, CAAR): d29 16.14-16.19.
 21. The FA411's TCP transfer and a BBS over it: d36 section 8 (steps 1-4 done).
@@ -216,7 +216,7 @@ Each item names the d-note section that says how to check it. **(1.0)**: needed 
 **The PiStorm A1200 (Emu68, CM4)**
 23. The CM4's GENET Ethernet, the whole list: a1200-checklist-network.md sections 1-9.
 24. Stage0's stop and the device-tree table with D45: d45 section 10.
-25. The SD card driver (`emmc.c`), and which driver served the card on 2026-10-23 (limits.md vs features.md): d34, limits.md.
+25. The SD card driver (`emmc.c`): limits.md and features.md now agree (Zenix's own driver, verified on the A1200 2026-10-23/24, FA-35); left: its speed and card-detect: d34, limits.md.
 26. USB sticks (`usbd`, steps U1-U3): d46 section 6.2.
 27. exFAT on the partner's stick: d47 section 9.
 28. RTG (`zenixboot RTG`, the desktop on the Picasso96 screen): d43 section 11.

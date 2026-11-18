@@ -2,8 +2,9 @@
 # D34: ZenixFS as the root on a real machine (design note)
 
 Status: **built on branch zroot (2026-11-01), the next item of block 4 (ROADMAP "The order of work", item 4). Everything here is
-verified in FS-UAE and on the host, on test images. Nothing has run on the real A1200, and nothing here changes what the owner's
-card boots: choosing ZenixFS for the owner's root is the owner's decision.** The trial's steps and risks are in section 7.
+verified in FS-UAE and on the host, on test images. Since 2026-11-04 it has run on the real A1200 (the partner's choice): the
+root on a CF card of the A1200 with the Apollo 1260 (d37's measurement ran on it), and the PiStorm card's root and /home
+(reported). Nothing here changes what a card boots by itself.** The trial's steps and risks are in section 7.
 
 ## 1. What was missing
 `zroot-test` passed, but what it tests is not a machine anyone could use:
@@ -132,7 +133,8 @@ not a real disk's behaviour; what proves the order of writes and flushes is the 
 inside each flush), which this does not replace. No real power has been cut (section 7).
 
 ## 7. A real-hardware trial
-**Nothing below has been done, and it is the owner's decision.** It changes partition 3 of the card and one file on `BOOT:`, and all of it can be put back.
+**The partner chose it and did it (2026-11-04: the PiStorm card's root and /home are ZenixFS, reported); the steps stay
+here as the way to do it.** It changes partition 3 of the card and one file on `BOOT:`, and all of it can be put back.
 
 1. On the PC, the root image, in the size of p3 or less (SIZE in MB; sizes of 256 MB and up get 4 KB blocks):
    `make build/kernel-zfs.bin build/pkg/list`, then
