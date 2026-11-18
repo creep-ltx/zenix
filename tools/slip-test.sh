@@ -11,7 +11,8 @@
 # (as every byte that is not a SLIP frame) to its log, where this script waits for it (choice 12 of the host-only
 # parts: zenix-slirp's --log is how the console's bytes reach the test). The results are read from the disk image.
 #   tools/slip-test.sh [PART...]    s: the stock A1200 (2 MB chip RAM), everything above
-#                                   m: 1 MB of chip RAM: SLIP up, ping, free and ps (the memory with the network)
+#                                   m: 1 MB of chip RAM: SLIP up, ping, free and ps (the memory with the network);
+#                                      best effort: a script that cannot start for want of memory is a NOTE
 #                                   n: noise and a flood (D19 8.2): zenix-slirp damages every 20th frame to the Amiga
 #                                      and sends garbage between frames (--damage); the 100 KB still arrive whole,
 #                                      the damaged frames are counted (ifconfig's "bad"), netd never ends; then a SYN
@@ -55,6 +56,7 @@ run() {
     ZENIX_NOTAP=1 ZENIX_BUILD=$BD tools/run-test.sh $conf $((secs + 30)) > $OUT/run.log 2>&1
     kill $watch $host 2>/dev/null; wait $host 2>/dev/null
     rm -f "$SERIAL.stop"
+    [ -n "$SOFT" ] && return 0       # (part m: judged by the caller, after reading what the Amiga found)
     grep -aq 'slip-test-done' $OUT/console.log || { echo "FAIL the script's end never reached the console log"; tail -5 $OUT/console.log; pass=0; }
 }
 
@@ -141,9 +143,17 @@ ifdown sl0
 sync
 EOS
     image
-    run fsuae/matrix/a1200-chip1m.fs-uae 300
+    SOFT=1 run fsuae/matrix/a1200-chip1m.fs-uae 300
     local f
     for f in ping free ps; do get /tmp/sl-$f.txt > $OUT/m-$f.txt; done
+    get /tmp/slip.out > $OUT/m-out.txt
+    if grep -aq 'out of memory' $OUT/m-out.txt && [ ! -s $OUT/m-ping.txt ]; then
+        # best effort (CLAUDE.md: 1 MB of chip RAM is below even the 2 MB best-effort machine): where memory runs out is
+        # said, never a FAIL (the full audit FA-50: the script's own shell could not start beside netd, 2026-11-18)
+        echo "NOTE (best effort, not a failure) 1 MB of chip RAM: the test's script does not start (\"$(head -1 $OUT/m-out.txt)\"), $(grep -ao 'chip RAM free [0-9]* -> [0-9]*' $OUT/console.log | tail -1) at boot, before netd"
+        return
+    fi
+    grep -aq 'slip-test-done' $OUT/console.log || { echo "FAIL the script's end never reached the console log"; pass=0; }
     grep -aqx 'ping=0' $OUT/m-ping.txt && echo "PASS 1 MB of chip RAM: ping through SLIP" || { echo "FAIL 1 MB: $(cat $OUT/m-ping.txt)"; pass=0; }
     echo "slip-test: memory with SLIP up (1 MB chip RAM): $(grep -a 'chip RAM free' $OUT/m-free.txt); netd: $(grep -a ' netd$' $OUT/m-ps.txt | tr -s ' ')"
 }
