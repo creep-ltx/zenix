@@ -36,12 +36,21 @@ part_c() {
 rm -f $BD/zenix.hdf                     # a fresh root: no keys file from an earlier run
 make -s BUILD=$BD $BD/zenix.hdf >>$OUT/build.log 2>&1 || { echo "FAIL the image"; tail -5 $OUT/build.log; exit 1; }
 noprobe_file $BD/zenix.hdf              # the net box first without netd: none at boot
+# the root's size as ctop shows it, from the image's superblock (the image grows with the system: FA-7 made it 20 MB)
+rootkb=$(dumpe2fs -h $BD/zenix.hdf 2>/dev/null | awk -F: '/^Block count/ { n = $2 } /^Block size/ { b = $2 }
+    END { if (n && b) print n * b / 1024 }')
 ZENIX_BUILD=$BD tools/run-test.sh fsuae/a1200-020.fs-uae 400 tools/tests/ctop-test.txt 2>&1 | tr -d '\r' > $OUT/run.log
-python3 - "$OUT/run.log" <<'PY'
+python3 - "$OUT/run.log" "$rootkb" <<'PY'
 import re, sys
 sys.path.insert(0, "tools")
 from screenlog import Log, rows
 L = Log(sys.argv[1])
+def sbytes(v):      # ctop's own size format (ports/ctop/upstream/src/ctop.c sbytes)
+    k, whole, frac = 0, v, 0
+    while whole >= 1000 and k < 4:
+        frac = (whole % 1024) * 10 // 1024; whole //= 1024; k += 1
+    return str(whole) + ("." + str(frac) if k and whole < 10 else "") + "BKMGT"[k]
+rootsz = sbytes(int(sys.argv[2]) * 1024) if sys.argv[2].isdigit() else None
 check, part = L.check, L.part
 s = [part("c%d" % i, "c%d" % (i + 1)) for i in range(4)] + [part("c4", "file")]
 f = part("file", "cdone")
@@ -59,8 +68,9 @@ check(re.search(r"chip \d+%", c0) is not None and re.search(r"Tasks \d+, \d+ run
 m0 = col(r0, 0, 36)
 check(re.search(r"Chip: .* 1\.7M", m0) is not None and re.search(r"Used: .* \d+% \d", m0) is not None,
       "the mem box: chip memory's size (the kernel's boot log: 1,812 KB) and what is in use", m0)
-check(re.search(r"disks", m0) is not None and re.search(r"^│/ +\S+ +\d+% +16M│$", m0, re.M) is not None,
-      "the disks: the root (/) with its meter, its use and its size (16 MB)", m0)
+check(rootsz is not None and re.search(r"disks", m0) is not None and
+      re.search(r"^│/ +\S+ +\d+% +" + re.escape(rootsz) + "│$", m0, re.M) is not None,
+      "the disks: the root (/) with its meter, its use and its size (%s, the image's)" % rootsz, m0)
 check("no bsdsocket.library:" in m0 and "no network" in m0, "the net box while netd is not running: no network", m0)
 p0 = col(r0, 36, 80)
 check(re.search(r"Program:", p0) is not None and re.search(r"- ctop +0 run ", p0) is not None and
