@@ -20,7 +20,9 @@
 #      otherwise)
 #   s  the screen (part s, D24 step 3): TEXT and its wait, KEY text and raw keys, INPUTS, SCREEN, WINDOWS, SUM, GRAB
 #      against termtest's own CON_LINE picture of the same moment at 3 and 4 planes, a console never used
-#   l  the 1 MB machine (part l): 100 KB both ways, the memory with the daemon idle and with a session
+#   l  the 1 MB machine (part l): 100 KB both ways, the memory with the daemon idle and with a session; best effort: if
+#      the daemon does not start for want of memory, a NOTE says so with the free memory (2026-11-18: 160 KB free with
+#      SLIP up, "out of memory")
 #   b  init's daemons (part b, D24 7): /etc/daemons starts wasabid at boot (its lines in the kernel log, /dev/kmsg
 #      root's and write only), RESTART starts it again at once (status 75), five more RESTARTs each after 5 s of
 #      running are not given up but five quick ends with status 75 are (B2-5), a missing configuration is a stop, a
@@ -74,6 +76,7 @@ run() {
     for _ in $(seq 50); do [ -e $OUT/pc-$what.status ] && break; sleep 0.2; done
     kill $host 2>/dev/null; wait $host 2>/dev/null
     rm -f "$SERIAL.stop"
+    [ -n "$SOFT" ] && return 0       # (part l: the caller judges, after reading what the Amiga found)
     grep -a '^PASS \|^FAIL \|^mem: \|^wasabi-remote: \|^Traceback\|Error' $OUT/pc-$what.log
     [ "$(cat $OUT/pc-$what.status 2>/dev/null)" = 0 ] || { echo "FAIL the PC's checks ($what): $OUT/pc-$what.log"; pass=0; }
     grep -aq 'remote-test-done' $OUT/console.log || { echo "FAIL the script's end never reached the console log"; tail -5 $OUT/console.log; pass=0; }
@@ -143,14 +146,28 @@ free > /tmp/l-free0.txt
 /sbin/wasabid 2> /tmp/wd.log &
 sleep 8
 free > /tmp/l-free1.txt; ps > /tmp/l-ps1.txt
-i=0; while [ ! -e /tmp/pc-done ] && [ $i -lt 900 ]; do sleep 1; i=$((i+1)); done
+if pgrep -x wasabid > /dev/null; then
+    i=0; while [ ! -e /tmp/pc-done ] && [ $i -lt 900 ]; do sleep 1; i=$((i+1)); done
+else
+    echo none > /tmp/l-nodaemon.txt         # it did not start: the shell's reason is in /tmp/wd.log
+fi
 ifdown sl0
 sync
 EOS
     image
-    run fsuae/matrix/a1200-chip1m.fs-uae 900 l
+    SOFT=1 run fsuae/matrix/a1200-chip1m.fs-uae 900 l
     local f
-    for f in free0 free1 ps1; do get /tmp/l-$f.txt > $OUT/l-$f.txt; done
+    for f in free0 free1 ps1 nodaemon; do get /tmp/l-$f.txt > $OUT/l-$f.txt; done
+    get /tmp/wd.log > $OUT/l-wd.log
+    if grep -aq none $OUT/l-nodaemon.txt; then
+        # best effort (CLAUDE.md: below the stock A1200 + 4 MB fast; 1 MB of chip RAM is below even the 2 MB best-effort
+        # machine): where memory runs out is said, the PC's checks are not judged (FA-13: they waited 500 s for nothing)
+        echo "NOTE (best effort, not a failure) the 1 MB machine: wasabid does not start (\"$(head -1 $OUT/l-wd.log)\") with $(grep -a 'chip RAM free' $OUT/l-free0.txt | sed 's/chip RAM free: //') of chip RAM free, SLIP up"
+    else
+        grep -a '^PASS \|^FAIL \|^mem: \|^wasabi-remote: \|^Traceback\|Error' $OUT/pc-l.log
+        [ "$(cat $OUT/pc-l.status 2>/dev/null)" = 0 ] || { echo "FAIL the PC's checks (l): $OUT/pc-l.log"; pass=0; }
+    fi
+    grep -aq 'remote-test-done' $OUT/console.log || { echo "FAIL the script's end never reached the console log"; pass=0; }
     echo "remote-test: the 1 MB machine, SLIP up (emulator figures): before wasabid $(grep -a 'chip RAM free' $OUT/l-free0.txt | sed 's/chip RAM free: //'), with it idle $(grep -a 'chip RAM free' $OUT/l-free1.txt | sed 's/chip RAM free: //'); $(grep -a ' wasabid$' $OUT/l-ps1.txt | tr -s ' ')"
     e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-l.log 2>&1 && echo "PASS the host's e2fsck finds the root clean (l)" || { echo "FAIL e2fsck (l)"; pass=0; }
 }

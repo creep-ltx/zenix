@@ -89,6 +89,7 @@ STOCK[zinstall-test:b]="2 MB of chip RAM alone (best effort): where memory runs 
 STOCK[netd-test:s]="the stock A1200's small profile: memory and the network on the stock machine"
 STOCK[zpkg-emu-test:m]="1 MB of chip RAM: where memory runs out"
 STOCK[remote-test:l]="1 MB of chip RAM: where memory runs out"
+STOCK[remote-test:s]="the PC's client times TEXT's waits and the 10 s progress rule on its own clock: in warp mode the Amiga's runs ahead and they fail (the full audit FA-13; it passes at stock speed)"
 STOCK[sysupdate-test:m]="1 MB of chip RAM: where memory runs out"
 STOCK[update-test:powercut]="the cut: the emulator killed some seconds of the PC's clock after zup starts (in warp mode zup is done by then)"
 STOCK[update-test:zfscut]="the same cut on a ZenixFS root"
