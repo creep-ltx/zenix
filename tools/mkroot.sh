@@ -88,6 +88,9 @@ case " $PROGS " in *" robots "*) lic ports/bsdgames/LICENSE bsdgames;; esac
 # the TLS helper of irc and mail (DESIGN D58, D59), as its package tls holds it, on an image with either
 case " $PROGS " in *" irc "*|*" mail "*) python3 "$(dirname "$0")/mkzup.py" stage tls "$T" "$B";; esac
 case " $PROGS " in *" frotz "*|*" robots "*) python3 "$(dirname "$0")/mkzup.py" stage games "$T" "$B";; esac
+# the development package's C library, start-up code and headers (DESIGN D52 section 2) with tcc, zld, zas and zdb on
+# the full images (PKGDB): the whole package, so zpkg owns and updates its files (the full audit, FA-7)
+if [ -n "$PKGDB" ]; then case " $PROGS " in *" tcc "*) python3 "$(dirname "$0")/mkzup.py" stage devel "$T" "$B" || exit 1;; esac; fi
 # the C library's notice (picolibc, BSD-style licences file by file, DESIGN D27 3.2) on the full images, as the base
 # package; and its test program in /tests
 [ -z "$NOMAN" ] && lic libc/picolibc/COPYING.picolibc picolibc
@@ -176,6 +179,8 @@ if [ -n "$PKGDB" ] && [ -f "$B/pkg/list" ]; then
     # the games' files are staged above from mkzup.py's own list: a mismatch would leave the package out unseen
     case " $PROGS " in *" frotz "*) [ -f "$T/var/lib/zpkg/games.manifest" ] ||
         { echo "mkroot.sh: the games package's files are not on the image as the package has them" >&2; exit 1; };; esac
+    case " $PROGS " in *" tcc "*) [ -f "$T/var/lib/zpkg/devel.manifest" ] ||
+        { echo "mkroot.sh: the devel package's files are not on the image as the package has them" >&2; exit 1; };; esac
 fi
 # the demo floppy's root (DESIGN D25 revision 3, 4.1 and 7.2; DEMO=dd or DEMO=hd, from tools/mkdemo.sh): no test
 # files, the demo's own files over the tree (tools/demo/: /etc's differences, the session, the welcome), the manual

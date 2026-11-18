@@ -131,7 +131,10 @@ libctest (92 KB, the C library's 913 KB archive searched) took 11.1 s, hello 1.0
 **The development package** (`zpkg -S devel`, the family devel in `tools/mkzup.py`, staged by `tools/mkdevel.sh`):
 `/bin/zld`, `/usr/lib/libc.a`, `libc-pure.a`, `libgcc.a` (debug sections stripped), `crt0.o`, `crt0-pure.o`,
 `/usr/lib/zenix/user.ld` and `pure.ld`, the headers (the port's in `/usr/include`, picolibc's in the Makefile's order
-under `/usr/include/pico`); 685 KB packed. Why two levels: the port's headers (`stdio.h`, `stdlib.h`, `regex.h`,
+under `/usr/include/pico`); 685 KB packed. The full images (`zenix.hdf`, the card's `root-card.img`) carry the whole package with
+its four programs, listed in their package database, so zpkg owns and updates every file (2026-11-18, the full audit's FA-7: before,
+only the programs were there and zpkg saw four files no package owned): 3.2 MB unpacked (2.0 MB in `/usr/lib`, 1.2 MB in
+`/usr/include`), so `zenix.hdf` grew from 16 to 20 MB. Why two levels: the port's headers (`stdio.h`, `stdlib.h`, `regex.h`,
 `sys/stat.h`, `sys/syslimits.h`) add to picolibc's by `#include_next`, which finds the next header of that name further
 down the `-I` list, and picolibc's own directories hold headers of the same names; one flat `/usr/include` would keep
 only one of each. So the port's are `/usr/include`, the first on the list, and picolibc's directories stay apart under

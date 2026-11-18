@@ -313,7 +313,22 @@ def extra_src(build, src):
 
 
 def stage_extra(fam, stage, build):
-    """tools/mkroot.sh: FAMILY_EXTRA's files of the family into the image's tree, as the package installs them"""
+    """tools/mkroot.sh: FAMILY_EXTRA's files of the family into the image's tree, as the package installs them; and a
+    FAMILY_TREE's whole tree (the devel package's C library and headers on the full images, FA-7: the whole package or
+    none of it), folders 755 and files 644 as std_packages makes them"""
+    if fam in FAMILY_TREE:
+        top = os.path.join(build, FAMILY_TREE[fam])
+        if not os.path.isdir(top):
+            die("%s: missing (tools/mkdevel.sh)" % top)
+        for d, subs, fs in os.walk(top):
+            rel = os.path.relpath(d, top)
+            dd = stage if rel == "." else os.path.join(stage, rel)
+            os.makedirs(dd, exist_ok=True)
+            if rel != ".":
+                os.chmod(dd, 0o755)
+            for f in fs:
+                shutil.copyfile(os.path.join(d, f), os.path.join(dd, f))
+                os.chmod(os.path.join(dd, f), 0o644)
     for kind, mode, src, path in FAMILY_EXTRA.get(fam, []):
         p = stage + path
         if kind == "d":

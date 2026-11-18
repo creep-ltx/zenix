@@ -9,7 +9,7 @@
 #  - the ABI test (tools/tcc-gen.py abi): 150 functions defined by tcc and called by gcc, and the other three
 #    pairings, each must say "abi: 0 bad";
 #  - 20 random programs (tools/tcc-gen.py fuzz), tcc's and gcc -fwrapv's builds printing the same;
-#  - /bin/tcc on Zenix, with the development files (build/devel) in the image: its objects for hello.c, a random
+#  - /bin/tcc on Zenix, with the development files (build/devel: the devel package, on the full image since FA-7): its objects for hello.c, a random
 #    program and user/zld.c are the cross compiler's byte for byte; "tcc -o" links with zld and the programs run;
 #    ps while it compiles zld.c (its memory, emulator figures); a deep nesting is refused with its message.
 # "tcc-test.sh --list" prints LIST (tools/tcc-host-test.sh compiles the same programs). Needs debugfs and e2fsck.
@@ -169,13 +169,15 @@ for run in 1 3 2; do
     # programs (2026-11-17: "no space left on device", the program cut short and refused)
     truncate -s 24M "$H" && resize2fs -f "$H" >>"$OUT/build.log" 2>&1 || { echo "FAIL growing the root image"; exit 1; }
     FF=$OUT/files$run
+    if [ $run = 1 ]; then       # the full image carries the devel package whole, as the build made it (FA-7)
+        for f in usr/lib/libc.a usr/lib/crt0.o usr/include/stdio.h; do
+            debugfs -R "dump /$f $OUT/img-dv" "$H" >/dev/null 2>&1
+            cmp -s "$OUT/img-dv" "$DV/$f" || { echo "FAIL the root image's /$f is not the build's devel file"; exit 1; }
+        done
+        echo "PASS the root image holds the devel package's files (libc.a, crt0.o, stdio.h, the build's)"
+    fi
     {
-        if [ $run = 2 ]; then   # the development files tcc uses (not the shared-code ones)
-            for d in $(cd "$DV" && find . -mindepth 1 -type d ! -path './usr/lib/zenix*' | sort); do
-                debugfs -R "stat ${d#.}" "$H" 2>&1 | grep -q 'Type: directory' || echo "mkdir ${d#.}"; done
-            for f in $(cd "$DV" && find . -type f ! -name '*-pure*' ! -path './usr/lib/zenix/*' | sort); do
-                echo "write $DV/${f#./} ${f#.}"; done
-        fi
+        # (the development files tcc uses are on the root image itself, the whole devel package: FA-7)
         echo "mkdir /root/tcc"
         for d in $(cd "$FF" && find . -mindepth 1 -type d | sort); do echo "mkdir /root/tcc/${d#./}"; done
         for f in $(cd "$FF" && find . -type f | sort); do echo "write $FF/${f#./} /root/tcc/${f#./}"; done
