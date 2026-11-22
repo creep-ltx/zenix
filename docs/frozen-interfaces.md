@@ -271,6 +271,29 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   caller's memory: SYS_call's message, envset, POST_BUF, CON_GRAB, ...) and "for this call" (also a window of a request
   the caller holds; `read`, `write`, the `usize` structs, the socket calls); the inbox is neither (a slot's copy handed
   to a system call is -EFAULT). Without protection nothing changes: the message is the client's, as before.
+- **D60 stage 3 (every server confined; branch `d60s3`, 2026-11-23; docs/d60-full-protection.md 5.5, 5.8, 7.4, 12
+  and "As built"), growths, while memory protection is on unless said:** no process is a system process any more (the
+  service manager's servers, a reserved port's creator, a mount's server, a driver after `SYS_drv`, the display
+  server after `CON_GRAB` used to see all memory); what a server sees of a client is the kernel's declared buffers,
+  what the client declared and what a server trusted to ask asked for. `SYS_shm` 101 (`SHM_OFFER` 1, `SHM_TAKE` 2,
+  `SHM_DROP` 3, `SHM_INFO` 4, `SHMF_RO` 0x80000000 in the pid argument, `struct ushm` first size 16; at most 8 offers
+  and 8 holds a process; the owner's `SYS_memfree` of a region someone holds, or its end, hands the memory to a holder;
+  without protection ops 1-3 answer 0 and change nothing, `SHM_INFO` -EINVAL). `SYS_callv` 102 (port, message,
+  `struct ucalldecl` {n 0-4, `struct ucallbuf` {addr, len, flags `CALLB_RD` 1 | `CALLB_WR` 2}}; each buffer the
+  caller's memory or a window it holds, never its message: -EINVAL, -EFAULT; without protection `SYS_call`, the list
+  not read). `SYS_peer` `PEER_EXACT` 5 (msg 0, arg a port the caller owns, else -EPERM; a port's mark is cleared when
+  a service's port goes back to held); `PEER_RD`/`PEER_WR` answer as before, and with protection on also lend the
+  range until the reply to a server trusted to ask (a process the service manager started for a service, or one that
+  could debug the client), while any other server gets 0 only within what the client declared and -EFAULT otherwise
+  (also -ENOMEM when no window can be made). A program's request to a port without the mark (an old server) gets D41's
+  lend of the whole client by `SYS_debug`'s rule, else -EACCES, as in stage 2. `SYS_post` `POST_READ` 3 (`struct
+  upost`: at most 16 bytes from the window at `off` into `src`, the poster's own memory; -EINVAL past 16). `SYS_meminfo`
+  size 20 gives a fifth word (0 no protection, 1 D41's, 2 full; a smaller buffer gets the four as before).
+  `SYS_blk_ram` with a2 non-zero: a2 sectors from sector a1 (bit 31: write) to or from buffer a3 (with protection on
+  only, else -EINVAL; the info form unchanged). With protection on the buffers of `SYS_blk_read`/`write`, `SYS_fd_rw`
+  and `SYS_atapi` (its `buf`, `len` bytes) are checked as the caller's memory or a window (-EFAULT): they were the disk
+  server's trust. `user/usys.h`'s `sys_port_create` marks every port it makes `PEER_EXACT`. Without protection nothing
+  else changes.
 - **D43 (RTG, branch `rtg`, 2026-11-12):** the hardware table grows at its end: `struct hwfb` (32 bytes) at offset 408
   (`HWFB_OFF`, after `board[]`): magic `HWFB_MAGIC` "ZFB1", base, width, height (u16), bytes a row, Picasso96's
   `RGBFormat` number (u8), bytes a pixel (u8), flags (u16: `HWFB_HVS` 1, `HWFB_TEST` 2), the Pi's register address and
