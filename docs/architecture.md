@@ -819,7 +819,18 @@ pattern (section 6).
   access fault with protection on prints `[kernel] pid N (name): memory protection: a write to ADDR (WHOSE): killed
   (SIGSEGV)` (the 030's format $A/$B, the 040's $7, the 060's $4 frame read for the address and the direction; WHOSE:
   the memory of pid M (name), the kernel's memory, free memory, shared code, its own code (read only), a driver's DMA
-  memory, no memory) before the usual line and exit 139. ZINE: translation off around the session (`mmu_hand`); a
+  memory, no memory) before the usual line and exit 139. **Messages with protection on** (DESIGN D60 stage 2,
+  docs/d60-full-protection.md section 5 and "As built"): `call()` copies the caller's message into a kernel record
+  (`struct krec`, kernel/mmu.h; one per process slot, a heap one for a nested call), which is what the queues, the
+  priority chain and every kernel reader use; the caller's message is written once at the end (`result`, `a[]`).
+  `ipc_recv` gives the server a copy in its inbox (1 KB slots in pages of its own memory, made at its first receive),
+  with the small buffers the kernel declares for its own requests (a static table per `FS_*` type, `struct netreq`'s
+  pointers by `sock_dirs`) copied after it and the arguments rewritten to them; for a protected server every other
+  buffer of such a request is a **window**: its whole pages mapped as they are, its part pages and pages of the
+  client's code onto bounce pages holding exactly its bytes, taken down at the end (the written bytes back to the
+  client at a reply). A system process gets the copies, no windows (it sees everything). A pointer into a window is
+  accepted for the time of a system call (`user_ok_call_*`); the bounce bytes are then the client's page's again until
+  the call returns (`mmu_unsync`), so the kernel and any server the call reaches work on the client's address. ZINE: translation off around the session (`mmu_hand`); a
   software reset: off before `RESET` (`mmu_before_reset`).
 - **No `fork`.** Without an MMU a copy of a process cannot be given the same addresses. The only way to make a
   process is `spawn(path, argv, stdio)` (a script by its `#!` line and an AmigaOS program through ZINE: section 4): load a ZEXE, give it the parent's cwd and environment, and pass only file
@@ -1017,7 +1028,9 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
 
 - A message lives in the **sender's memory** and only its address moves. The server simply reads and writes the
   client's buffers in place (with memory protection on, D41, a protected server is lent the client's view while it
-  holds the request; system servers see everything): a `read()` of 4 KB is a message holding a pointer to the client's buffer
+  holds the request; system servers see everything; since D60 stage 2 the server works on a copy of the message and,
+  for the kernel's own requests, on copies of the small buffers and windows onto the others, section 2 "Memory
+  protection"): a `read()` of 4 KB is a message holding a pointer to the client's buffer
   and the filesystem server fills it directly. **No copies.**
 - Calls are **synchronous** (send-and-wait-for-reply), like QNX and Minix 3, not asynchronous like AmigaOS
   `PutMsg/GetMsg`. A client in a call (`P_MSG`) is woken only by the reply or by the server dying, never by a

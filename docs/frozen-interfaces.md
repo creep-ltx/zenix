@@ -252,6 +252,25 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   so its `MMU=OFF` leaves a newer kernel file on AUTO; use the tool of the same tree); the boot line's start `mmu: memory protection on:` and the fault line's
   `memory protection:` (programs and tests read them: `crash write`, `tools/mmu-test.sh`); exit status 139 for a
   protection fault, as for every fault. No system call, message, struct or file format changes.
+- **D60 stage 2 (the kernel's records, the inbox, windows; branch `d60s2`, 2026-11-22; docs/d60-full-protection.md
+  sections 5, 12 and 19), a growth of D1's meaning, while memory protection is on:** `SYS_recv` and `SYS_replyrecv`
+  return a *copy* of the message in the server's own memory (its inbox: 1 KB slots in pages counted as its memory, never
+  freed by `SYS_memfree`), not the client's; the copy's `next`, `server` and the `client` word read 0. Every call that
+  names a request (`SYS_reply`, `SYS_replyrecv`, `SYS_peer`, `NETSRV_REPLY`) takes that copy's address; an address
+  that is not a slot of the caller's inbox holding a request in flight is -EINVAL (a second reply too, while the slot
+  is not given to a newer request: a slot is given again only after the others of the inbox, round robin; there is no
+  generation number). The reply carries back `result` and `a[0]`..`a[3]` from the copy, nothing else (an argument the
+  kernel rewrote to point at a copy in the slot gets its own value back); the kernel never reads the client's message
+  after `call()`, so rewriting it in flight changes nothing. For the kernel's own requests (`FS_*`, `NET_*`) the small
+  buffers it declares (paths, `ustat`, `udirent`, the cookie, `ustatfs`, `fsinfo`, `fsrdx`, the `netreq` and its
+  address, lengths and value) are copies in the slot, the arguments (and the `netreq`'s own pointers) rewritten to
+  them; a server that writes them is answered through the copy-back at its reply. A program's own request to a
+  protected server is given D41's lend of the whole client only when the server could debug it (`SYS_debug`'s rule);
+  otherwise it is answered -EACCES at once. A request that cannot be given (no slot, copy or window) is answered
+  -ENOMEM. The pointer checks are two kinds (internal, but what a server may hand a system call grows): "own" (the
+  caller's memory: SYS_call's message, envset, POST_BUF, CON_GRAB, ...) and "for this call" (also a window of a request
+  the caller holds; `read`, `write`, the `usize` structs, the socket calls); the inbox is neither (a slot's copy handed
+  to a system call is -EFAULT). Without protection nothing changes: the message is the client's, as before.
 - **D43 (RTG, branch `rtg`, 2026-11-12):** the hardware table grows at its end: `struct hwfb` (32 bytes) at offset 408
   (`HWFB_OFF`, after `board[]`): magic `HWFB_MAGIC` "ZFB1", base, width, height (u16), bytes a row, Picasso96's
   `RGBFormat` number (u8), bytes a pixel (u8), flags (u16: `HWFB_HVS` 1, `HWFB_TEST` 2), the Pi's register address and

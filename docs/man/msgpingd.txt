@@ -4,8 +4,8 @@ NAME
     msgpingd - test message server
 
 SYNOPSIS
-    msgpingd [-port NAME] [-call NAME]
-             [-fs | -fsstall | -fsbad | -fslinked | -fsdir]
+    msgpingd [-port NAME] [-call NAME] [-uid N]
+             [-fs | -fsstall | -fsbad | -fslinked | -fsdir | -fswin]
              [count]
 
 DESCRIPTION
@@ -16,9 +16,16 @@ DESCRIPTION
     told it at its start (the start count, plus 65536 if the last server
     ended in the middle of a request), type 7 waits a second and then
     crashes (an illegal instruction: for the service manager's tests),
-    type 9 ends the server. It also ends after serving count requests if
-    given. Start it in the background:  msgpingd &
+    type 9 ends the server, type 10 rewrites the client's own message
+    (whose address the client puts in a[0]) while it serves it and then
+    answers 7 with a[2] 4242 (with memory protection on the kernel must
+    not use what the client's memory says: DESIGN D60 5.1). It also ends
+    after serving count requests if given. Start it in the background:
+    msgpingd &
     -port NAME  serve port NAME instead of "ping".
+    -uid N      serve as user N (root only): a server that may not see
+                a root client's memory, whose requests are refused with
+                -13 while memory protection is on (D60 5.8).
     -call NAME  call port NAME once before opening its own port (a server
                 whose start needs another service; D11's tests use it to
                 make a cycle).
@@ -43,6 +50,17 @@ DESCRIPTION
                 ".", ".." and n00 .. n49 through FS_READDIR only and
                 answers FS_READDIRS "not known", so programs read it
                 one record a call (tools/readdir-test.sh).
+    -fswin      a filesystem server for the memory protection tests
+                (DESIGN D60 stage 2, tools/mmu-test.sh): its files f,
+                fwd, over, under, after, forge and where are 20000 bytes of
+                the pattern (i * 7 + i / 256) & 255; f is read as asked,
+                fwd read by the server from /tmp/wsrc straight into the
+                client's buffer, over writes one byte past the buffer,
+                under one before it, after keeps the buffer and writes
+                into it at its next request that is not a read; a stat of
+                forge tries a reply to a forged address, then a second
+                reply, and prints what each got; a stat of where prints
+                whether its path argument is a copy in its own message.
 
     A development tool; see docs/architecture.md, "Ports and messages".
 

@@ -130,6 +130,10 @@
 # and PFLUSHAN, global pages): mmu 5,722 -> 7,623 and bss 124 -> 153, seg + 44 and bss + 16 (the segment's
 # readable-by-all mark, the hook at seg_disown), vfs + 14 (a chmod unlists the mount's segments), mem + 18 (a block with
 # no table is not given); kernel.bin 206,192 -> 208,240, TOTAL 206,200 -> 208,500; the mount tests' RAM disk 676 -> 674 KB.
+# 2026-11-22 (DESIGN D60 stage 2: the kernel's records, the inbox, windows and bounce pages, the declaration tables, the
+# sync; the hot paths at -O2): mmu 7,623 -> 15,196 (in the span, given back when protection is off) and bss 153 -> 195,
+# ipc 4,017 -> 4,381 (the record's gates, ipc_rec), proc + 206 (user_ok_call_*), syscall + 122, sock + 10, vfs + 4, drv
+# + 4; kernel.bin 208,240 -> 216,700, TOTAL 208,500 -> 217,000; the mount tests' RAM disk 674 -> 666 KB (74 blocks free).
 start     4850   8200
 main      5950   1100
 serial    6100   6500
@@ -142,15 +146,15 @@ audio      620     32
 a3000     2400    100
 blk        460     16
 rtc       1550      4
-proc     10650  21500
-syscall  10300      0
+proc     10850  21500
+syscall  10450      0
 vfs      11800   1600
 tty       5900    100
 gfx       9050   2450
 term     14500    256
 confont   3100     32
 kbd       4300    180
-ipc       4150   2150
+ipc       4450   2150
 svc       5600   1420
 seg       1300    272
 event      700      0
@@ -162,7 +166,7 @@ zine      1850     16
 cache     1800     32
 gcon      4250     16
 dbg       4100     20
-mmu       7800    160
+mmu      15400    200
 embed    49900      0
-TOTAL   208500
+TOTAL   217000
 ROOM       800

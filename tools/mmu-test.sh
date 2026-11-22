@@ -9,8 +9,17 @@
 # access must end its process with the protection line naming the right owner, the victim must find its pattern
 # intact, and the system must go on. Then `free` and `bench`'s figures. Where it must stay off: the boot line's reason,
 # and the system goes on.
+# DESIGN D60 stage 2 (docs/d60-full-protection.md 5, 13): the kernel's records and its copies in a server's inbox: a
+# server rewriting its client's message in flight changes nothing, forged and second replies are refused, a server
+# that may not debug its client is refused (-EACCES), the kernel's path arrives as a copy in the server's own message;
+# a filesystem server (msgpingd -fswin on /tmp/w) read into guarded buffers at every alignment, also through itself
+# into the root's server (fwd: a window passed on, the copy pages synced); a read past the end of one's memory is
+# -EFAULT. With +confine (a kernel made DIAG=-DMMU_CONFINE: mounts and reserved ports no longer make their servers
+# system ones, D60 stage 3's preview) the same server is confined: its windows are exact, and a write one byte past
+# the buffer, one before it, or into it after the reply ends it with the protection line naming the client.
 # usage: tools/mmu-test.sh [MODEL ...]           (default: 020 030 040 lc040 060 lc060)
-#   MODEL: 020 030 ec030 040 lc040 ec040 060 lc060 ec060, each also with +on (lc060+on: forced with MMU=ON)
+#   MODEL: 020 030 ec030 040 lc040 ec040 060 lc060 ec060, each also with +on (lc060+on: forced with MMU=ON);
+#   030+confine 040+confine 060+confine
 #   MMU_TEST_OFF=1: the kernel made MMU=OFF (the figures to compare with); every model then expects "off"
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
@@ -18,11 +27,15 @@ OUT=${ZENIX_OUT:-$(mktemp -d "${TMPDIR:-/tmp}/zenix-mmu.XXXXXX")}; mkdir -p "$OU
 CPUS="${*:-020 030 040 lc040 060 lc060}"
 make -s BUILD="$BD" all 2>&1 | grep -v 'RWX permissions' | grep -i 'error\|\*\*\*'; [ "${PIPESTATUS[0]}" = 0 ] || { echo "build failed"; exit 1; }
 # a build copy per kernel default: as built (AUTO), MMU=ON, MMU=OFF
-mkb() {     # mkb NAME WORD: $OUT/build-NAME with its kernel set to WORD (none: as built)
+mkb() {     # mkb NAME WORD: $OUT/build-NAME with its kernel set to WORD (none: as built; CONFINE: made DIAG=-DMMU_CONFINE)
     local b="$OUT/build-$1"
     [ -d "$b" ] && return 0
     cp -a "$BD" "$b" || return 1
-    if [ -n "$2" ]; then
+    if [ "$2" = CONFINE ]; then         # (DIAG is not tracked: the kernel's objects go first, as mmubench-test does)
+        rm -f "$b"/*.o "$b"/kernel*.bin "$b"/kernel*.elf
+        { make -s BUILD="$b" DIAG=-DMMU_CONFINE "$b/kernel.bin" && make -s BUILD="$b" DIAG=-DMMU_CONFINE all; } \
+            >"$b.log" 2>&1 || { echo "FAIL: the build with MMU_CONFINE (see $b.log)"; return 1; }
+    elif [ -n "$2" ]; then
         # the copy brought up to date first, so the floppy's make cannot link a new kernel.bin over the patched one
         make -s BUILD="$b" all >/dev/null 2>&1 || { echo "FAIL: the build copy for $2"; return 1; }
         python3 tools/kopts.py "$b/kernel.bin" "$2" >/dev/null || return 1
@@ -62,6 +75,17 @@ wait $P 30
 send msgpingd > /dev/null &\r
 wait $P 30
 sleep 2
+send msgping rewrite\r
+wait $P 30
+send msgpingd -port pu -uid 1000 > /dev/null & sleep 1; msgping call pu; dmesg | grep 'may not see'\r
+wait $P 30
+send rm -f /tmp/wsrc; mkdir -p /tmp/w; msgpingd -port w -fswin & sleep 1; svctest mount w /tmp/w\r
+wait $P 30
+send cat /tmp/w/f > /tmp/wsrc; ls /tmp/w | wc -l; msgping winread /tmp/w/f\r
+wait $P 60
+send stat /tmp/w/where > /dev/null; stat /tmp/w/forge; msgping readpast /tmp/w/f; echo win-common-done\r
+wait $P 30
+@CONFINE@
 send msgping 200; echo status \$?\r
 wait $P 60
 send bench\r
@@ -74,6 +98,21 @@ send echo done\r
 wait $P 30
 stop
 EOF
+
+# the confined server's stray writes (+confine): each ends msgpingd -fswin, which is started again for the next
+sed -e '/^@CONFINE@$/r /dev/stdin' -e '/^@CONFINE@$/d' "$OUT/script.txt" >"$OUT/script-confine.txt" <<EOF
+send msgping winread /tmp/w/fwd\r
+wait $P 60
+send msgping winread /tmp/w/over 10; msgping winread /tmp/w/under 10\r
+wait $P 30
+send msgping winread /tmp/w/over 11; sleep 1; msgpingd -port w -fswin & sleep 1\r
+wait $P 30
+send msgping winread /tmp/w/under 12; sleep 1; msgpingd -port w -fswin & sleep 1\r
+wait $P 30
+send cat /tmp/w/after > /dev/null; ls /tmp/w > /dev/null; sleep 1; echo win-confine-done\r
+wait $P 30
+EOF
+sed -i '/^@CONFINE@$/d' "$OUT/script.txt"
 
 cat >"$OUT/script-off.txt" <<EOF
 wait zenix:/# 120
@@ -88,8 +127,9 @@ EOF
 
 fail=0
 for cpu in $CPUS; do
-    m=${cpu%+on}; word=
+    m=${cpu%+on}; word=; conf_=
     [ "$m" != "$cpu" ] && word=MMU=ON
+    if [ "${cpu%+confine}" != "$cpu" ]; then m=${cpu%+confine}; word=CONFINE; conf_=1; fi
     [ -n "$MMU_TEST_OFF" ] && word=MMU=OFF
     # the machine: the A1200 with the CPU, its MMU model and its FPU (none: an LC or EC part); what must happen
     case $m in
@@ -117,6 +157,7 @@ for cpu in $CPUS; do
     B="$OUT/build-${word:-auto}"
     L="$OUT/$cpu.log"
     script="$OUT/script.txt"; [ "$want" = on ] || [ -n "$MMU_TEST_OFF" ] || script="$OUT/script-off.txt"
+    [ -n "$conf_" ] && script="$OUT/script-confine.txt"
     echo "mmu-test $cpu (${ZENIX_EMU:-fs-uae}, kernel ${word:-as built}): expects protection $want"
     ZENIX_BUILD="$B" ZENIX_FSUAE_SET="$set${ZENIX_FSUAE_SET:+;$ZENIX_FSUAE_SET}" \
         tools/run-test.sh "$conf" 700 "$script" 2>&1 | sed 's/\x1b\[[0-9;:]*[mK]//g' > "$L"
@@ -155,6 +196,36 @@ for cpu in $CPUS; do
     chk "the victim kept running and its memory is intact" 'crash: victim pid [0-9]+ intact'
     chk "the system goes on" '^alive$'
     chk "a protected server edits its client's buffer in place" 'msgping: ZERO COPY: THE SERVER EDITS MY BUFFER'
+    if [ "$want" = on ] && [ -z "$MMU_TEST_OFF" ]; then     # D60 stage 2
+        chk "a client's message rewritten while it is served changes nothing" \
+            'msgping: message rewritten in flight: result 7, a\[2\] 4242'
+        chk "a server that may not debug its client: refused" 'msgping: call to pu: -13'
+        chk "... and said once" 'mmu: msgpingd \(pid [0-9]+\) may not see the memory of pid [0-9]+ \(msgping\)'
+        chk "the filesystem server mounted" 'svctest mount /tmp/w: 0'
+        chk "reads at every alignment: the bytes and the bytes around them" 'msgping: winread /tmp/w/f ok 9'
+        chk "the kernel's path arrives as a copy in the server's message" 'msgpingd: the path is a copy in my own message'
+        chk "forged and second replies refused" 'msgpingd: forged replies -22 -22, reply 0, second reply -22'
+        chk "a read past the end of one's memory" 'msgping: readpast -14'
+        if [ -n "$conf_" ]; then
+            chk "confined: reads through the server into the root's server (a window passed on)" \
+                'msgping: winread /tmp/w/fwd ok 9'
+            chk "confined: a write past a buffer in a part page lands in the copy page: the client's bytes as they were" \
+                'msgping: winread /tmp/w/over case 10: read 100, the bytes right'
+            chk "... (before it)" 'msgping: winread /tmp/w/under case 10: read 100, the bytes right'
+            chk "confined: past a page's end: the read fails, the client's bytes untouched" \
+                'msgping: winread /tmp/w/over case 11: read -5, untouched'
+            chk "... (before a page's start)" 'msgping: winread /tmp/w/under case 12: read -5, untouched'
+            chk "confined: a write one byte past the buffer ends the server, naming the client" \
+                'pid [0-9]+ \(msgpingd\): memory protection: a write to 0x[0-9a-f]+ \(the memory of pid [0-9]+ \(msgping\)\)'
+            chk "confined: a write into the buffer after the reply ends the server" \
+                'pid [0-9]+ \(msgpingd\): memory protection: a write to 0x[0-9a-f]+ \(the memory of pid [0-9]+ \(cat\)\)'
+            [ "$(grep -caE '\(msgpingd\): memory protection: a write to' "$L")" -ge 3 ] &&
+                echo "  ok   confined: past, before and after the reply: three ends" ||
+                { echo "  FAIL confined: past, before and after the reply: three ends"; ok=0; }
+            chk "... and the system goes on" '^win-confine-done'
+        fi
+        if grep -qa 'winread.*BAD' "$L"; then echo "  FAIL a winread case:"; grep -a 'winread.*BAD' "$L" | head -3; ok=0; fi
+    fi
     chk "... and answers 200 calls" 'msgping: 200 round trips'
     chk "the commands after it" '^done$'
     if grep -q 'exception in the kernel\|panic' "$L"; then echo "  FAIL the kernel stopped"; ok=0; fi

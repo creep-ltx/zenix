@@ -16,6 +16,7 @@
  * Built at -Os (cold: the time goes to the server); tools/sock-host-test.c runs the rules' interleavings on the host. */
 #include "kernel.h"
 #include "netproto.h"
+#include "mmu.h"                        /* D60: the record (ipc_rec), sock_dirs' bits */
 
 _Static_assert(sizeof(struct usockreq) == USOCKREQ_FIRST, "usockreq's first size is frozen");
 #define NSOCK_ROOT 4                    /* the last ksocks are root's: two users cannot take every socket */
@@ -135,7 +136,7 @@ static long net_call(u32 type, u32 name, struct netreq *q, int ns, struct umsg *
         net_cpu = net_idle = 0;         /* the watchdog counts from the first call in flight */
     irq_restore(s);
     current->msg_cancel = (u8)!ns;      /* a kill takes it back while it is queued (O9); NET_CLOSE always goes */
-    long r = ipc_kcall(port, m, ns, 0);
+    long r = ipc_kcall(port, m, ns, 0, KP_NET);
     current->msg_cancel = 0;
     s = irq_save();
     net_inflight--;
@@ -399,14 +400,9 @@ long sock_rw(struct file *f, void *buf, u32 n, int write)
     return write ? sock_send((int)f->ino, &q, nb) : sock_recv((int)f->ino, &q, nb);
 }
 
-/* the directions of each op's pointers (the server reads R, writes W) */
-#define D_BUFR 0x01
-#define D_BUFW 0x02
-#define D_ADDRR 0x04
-#define D_ADDRW 0x08
-#define D_VALR 0x10
-#define D_VALW 0x20
-static const u8 dirs[SOCK_OPS + 1] = {
+/* the directions of each op's pointers (the server reads R, writes W); D_* in mmu.h: mmu.c declares a request's
+ * buffers from this table too (D60 5.4) */
+const u8 sock_dirs[SOCK_OPS + 1] = {
     [SOCK_BIND] = D_ADDRR, [SOCK_CONNECT] = D_ADDRR, [SOCK_ACCEPT] = D_ADDRW,
     [SOCK_SENDTO] = D_BUFR | D_ADDRR, [SOCK_RECVFROM] = D_BUFW | D_ADDRW,
     [SOCK_GETSOCKOPT] = D_VALW, [SOCK_SETSOCKOPT] = D_VALR, [SOCK_GETSOCKNAME] = D_ADDRW, [SOCK_GETPEERNAME] = D_ADDRW,
@@ -417,7 +413,7 @@ static const u8 dirs[SOCK_OPS + 1] = {
 /* a length behind a pointer (alen, vlen): checked, read, clamped. 0, or -EFAULT */
 static long ulen(u32 p, int write, u32 max, u32 *out)
 {
-    if (!user_ok_rd(current, p, 4) || (write && !user_ok_wr(current, p, 4)))
+    if (!user_ok_call_rd(current, p, 4) || (write && !user_ok_call_wr(current, p, 4)))
         return -EFAULT;
     u32 v = *(const u32 *)p;
     *out = v < max ? v : max;
@@ -426,7 +422,7 @@ static long ulen(u32 p, int write, u32 max, u32 *out)
 
 static int ok_dir(u32 p, u32 n, int w)
 {
-    return !n || (w ? user_ok_wr(current, p, n) : user_ok_rd(current, p, n));
+    return !n || (w ? user_ok_call_wr(current, p, n) : user_ok_call_rd(current, p, n));
 }
 
 /* SYS_sock (op | request size << 16, fd, request) */
@@ -438,7 +434,7 @@ long sock_sys(u32 opw, u32 fd, u32 ureq)
     struct netreq q;
     memset(&q, 0, sizeof q);
     u32 n = rsize && rsize < sizeof q.r ? rsize : sizeof q.r;
-    if (!user_ok_rd(current, ureq, n))
+    if (!user_ok_call_rd(current, ureq, n))
         return -EFAULT;
     memcpy(&q.r, (const void *)ureq, n);
     q.pid = (u32)current->pid;
@@ -454,7 +450,7 @@ long sock_sys(u32 opw, u32 fd, u32 ureq)
     }
     if (op == SOCK_IOCTL && q.r.option == FIONBIO && !q.r.val)
         return (f->flags & O_NONBLOCK) != 0;    /* asks (libz's fcntl F_GETFL): an error before step 4 */
-    u8 d = dirs[op];
+    u8 d = sock_dirs[op];
     if (d & (D_ADDRR | D_ADDRW)) {
         if (q.r.addr || q.r.alen) {
             if (!q.r.alen || ulen(q.r.alen, (d & D_ADDRW) != 0, NET_ADDR_MAX, &q.alen) ||
@@ -564,17 +560,20 @@ long netsrv_sys(u32 op, u32 a, u32 b)
     if (op != NETSRV_REPLY)
         return -EINVAL;
     struct umsg *m = (struct umsg *)a;
-    struct proc *c = ipc_client(m);     /* the request must be in flight and served by the caller: before m is read */
-    if (!c)
+    struct umsg *k = ipc_rec(m);        /* the request must be in flight and served by the caller: before m is read;
+                                         * its kernel fields are read from the kernel's record (D60 5.1), the
+                                         * server's answer (a[2]) from its message */
+    if (!k)
         return -EINVAL;
-    if (m->kflags & UMSG_KERNEL) {
+    struct proc *c = k->client;
+    if (k->kflags & UMSG_KERNEL) {
         int ci = (int)(c - procs);
         if (call_name[ci])
             set_bits(call_name[ci], m->a[2] & 0xFFFF);
         if (call_new[ci] && call_new[ci] != call_name[ci])
             set_bits(call_new[ci], m->a[2] >> 16);
     }
-    m->kflags |= UMSG_NETREPLY;
+    k->kflags |= UMSG_NETREPLY;
     net_cpu = net_idle = 0;             /* an answer: the watchdog counts again from here */
     return ipc_reply(m, (s32)b);
 }

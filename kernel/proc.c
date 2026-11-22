@@ -295,6 +295,19 @@ int user_ok_rd(const struct proc *p, u32 ptr, u32 len)
     return p->csize && ptr + len >= ptr && ptr >= p->code && ptr + len <= p->code + p->csize;
 }
 
+/* D60 5.7: own memory, or (protection on) a window of a request p holds; mmu.c gives a copy page back to its client
+ * for the rest of the system call when p is current */
+int user_ok_call_wr(struct proc *p, u32 ptr, u32 len)
+{
+    return user_ok_wr(p, ptr, len) || (__builtin_expect(mmu_on, 0) && mmu_ops->callok(p, ptr, len, 1));    /* (its
+                                                 * inbox, or a window) */
+}
+
+int user_ok_call_rd(struct proc *p, u32 ptr, u32 len)
+{
+    return user_ok_rd(p, ptr, len) || (__builtin_expect(mmu_on, 0) && mmu_ops->callok(p, ptr, len, 0));
+}
+
 u32 user_rd_extent(const struct proc *p, u32 ptr)
 {
     if (ptr >= p->base && ptr < p->base + p->span)

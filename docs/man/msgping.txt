@@ -5,6 +5,7 @@ NAME
 
 SYNOPSIS
     msgping [rounds]
+    msgping winread FILE [CASE] | readpast FILE | rewrite | call PORT
 
 DESCRIPTION
     Talks to msgpingd(1) through its message port "ping": calls it to add
@@ -14,6 +15,17 @@ DESCRIPTION
     microseconds, and finally tells the server to quit. This is not the
     network's ping: it measures Zenix's own messages between two programs
     on one machine (it was called ping before the network, DESIGN D19).
+
+    The other forms are for the memory protection tests (DESIGN D60 stage
+    2, tools/mmu-test.sh). winread FILE reads a file of msgpingd -fswin's
+    pattern into a guarded region at nine alignments and lengths and
+    checks the bytes read and every byte around them ("winread FILE ok
+    9"); with CASE (1-12) only that one read, saying its result and
+    whether the bytes are right or untouched. readpast FILE reads 100
+    bytes into the last 10 bytes of its own memory (-14 expected).
+    rewrite has msgpingd rewrite this program's message while it is
+    served (type 10). call PORT makes one call there and prints its
+    result.
 
 OUTPUT
     msgping: 1000 round trips in 3012 us, 3.0 us each

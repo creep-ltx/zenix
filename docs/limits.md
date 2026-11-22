@@ -33,6 +33,13 @@ through a kept entry (the file is readable by everyone; a `chmod o-r` stops it f
 for those running); a server's tree keeps the tables of its clients' memory until it ends (at most a page table per
 256 KB of RAM, 0.1% of RAM); when no memory is left for a table, the allocation that needed it fails (0), and a
 process whose tree cannot be made is stopped at its first access with the protection line.
+Since D60 stage 2 (2026-11-22) a server receives a copy of each message in its inbox, and a protected one only
+windows onto the buffers of the kernel's requests it holds. Their limits (d60 "As built", stage 2): 8 windows a
+request, 8 bounce pages a window (a buffer in the client's code is copied page by page, so a `write` of more than
+about 7 pages of a program's constants to a protected server fails with -ENOMEM), 32 bounce pages a server, and for
+all servers together 32 windows and 64 bounce pages at once; past one the request is answered -ENOMEM. A program's own
+request to a protected server that could not debug its client is answered -EACCES. A slot handed to a system call
+is refused (-EFAULT). Until stage 3 the system processes still see everything.
 Never run on a real 68030/040/060 yet; not on the stock A1200 (a 68EC020 has no MMU) nor under Emu68.
 
 What the permissions do cover (audit D): a user cannot kill, stop or take over the terminal of another user's or a

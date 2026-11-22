@@ -283,7 +283,7 @@ static __attribute__((noinline)) long fs_call_k(int mi, u32 type, u32 a0, u32 a1
      * must never load a program; FS_SYNC and FS_QUIT skip a server that is not running (it has nothing to write: an
      * ext2 one wrote through, a dead ZenixFS one's uncommitted changes are gone, a starting one wrote nothing yet) */
     int ns = type == FS_CLOSE ? SVC_NS_CLOSE : type == FS_SYNC || type == FS_QUIT ? SVC_NS_SKIP : 0;
-    long r = ipc_kcall(mt->port, &m, ns, (u16)(kfl | UMSG_GROUPS));
+    long r = ipc_kcall(mt->port, &m, ns, (u16)(kfl | UMSG_GROUPS), KP_FS);
 #undef m
     if (r == -ECONNRESET) {             /* the server is gone (D11), or its port closed or its slot reused (G1, A11) */
         mt->port = -1;                  /* look it up again next time */
@@ -1122,7 +1122,7 @@ long vfs_readdirs(struct file *f, u32 buf, u32 size)
     struct fsrdx q;
     if (size < UDIRX_MAX || size > 0xFFFF || (buf & 3))
         return -EINVAL;                 /* bits 16-31 are for request flags later; records are 4-aligned */
-    if (!user_ok_wr(current, buf, size))
+    if (!user_ok_call_wr(current, buf, size))
         return -EFAULT;
     if (f->type != FT_INODE || !S_ISDIR(f->mode))
         return -ENOTDIR;
@@ -1173,8 +1173,12 @@ long vfs_mount(const struct umountreq *r)
     if (port < 0)
         return -ENODEV;                         /* no server on that port */
     struct proc *srv = port_owner(port);
+#ifndef MMU_CONFINE
     if (srv)
-        mmu_sysmark(srv);                       /* D41 7: it gets the kernel's requests, on a kernel stack */
+        mmu_sysmark(srv);                       /* D41 7: it gets the kernel's requests, on a kernel stack (D60 stage
+                                                 * 2's records and windows make that needless; stage 3 drops it: make
+                                                 * DIAG=-DMMU_CONFINE tests the servers so, tools/mmu-test.sh) */
+#endif
     struct mount *mt = &mnt[free];
     memset(mt, 0, sizeof *mt);
     strcpy_(mt->path, abs);

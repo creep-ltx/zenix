@@ -15,7 +15,16 @@
  * valid answer: the kernel goes on at that text, from /); its root opens as a directory, /f as a file; FS_ROOT 2,
  * FS_SYNC and FS_CLOSE 0, FS_QUIT ends it. -fsdir: an older filesystem server (DESIGN D49's fallback): its root lists
  * ".", ".." and n00 .. n49 (inodes 10 .. 59, files) through FS_READDIR only, FS_READDIRS is -ENOSYS as every
- * request it does not know; FS_OPEN, FS_STAT, FS_LSTAT of the root or of a name, FS_FSTAT, FS_CLOSE, FS_SYNC, FS_QUIT. */
+ * request it does not know; FS_OPEN, FS_STAT, FS_LSTAT of the root or of a name, FS_FSTAT, FS_CLOSE, FS_SYNC, FS_QUIT.
+ * -fswin (DESIGN D60 stage 2, tools/mmu-test.sh): a filesystem server whose files are WIN_SIZE bytes of the pattern
+ * (i * 7 + i / 256) & 255, to test the kernel's copies and windows: f is read as asked; fwd is read by this server
+ * from /tmp/wsrc straight into its client's buffer (a window passed on to the kernel and the root's server); over
+ * writes one byte past the buffer, under one before it, after keeps the buffer and writes into it at its next
+ * request (each must end this server with the protection line); a stat of forge tries forged and second replies and
+ * says what they got; a stat of where says whether its path argument is a copy in its own message (the kernel's
+ * stack never shown). -uid N: serve as user N (a server that may not see its root clients: refused, D60 5.8).
+ * Type 10: the client's message, at a[0], rewritten while it is served (next, state, client, kflags), then a[2] 4242
+ * and the result 7 (the kernel must not use what the client's memory says: D60 5.1). */
 #define FS_OPEN 1
 #define FS_READDIR 6
 #define FS_CLOSE 24
@@ -25,6 +34,83 @@
 #define FS_STAT 4
 #define FS_FSTAT 5
 #define FS_LSTAT 19
+#define FS_READ 2
+#define WIN_SIZE 20000u
+static const char *winname[] = { "", "", "", "f", "fwd", "over", "under", "after", "forge", "where" };
+static u32 win_ino(const char *p)               /* the root 2, the files 3 .. 9 */
+{
+    while (*p == '/') p++;
+    if (!*p || !strcmp(p, ".")) return 2;
+    for (u32 i = 3; i < 10; i++) if (!strcmp(p, winname[i])) return i;
+    return 0;
+}
+static void win_fill(unsigned char *b, u32 off, u32 n) { for (u32 i = 0; i < n; i++) b[i] = (unsigned char)((off + i) * 7 + (off + i) / 256); }
+static unsigned char *win_kept;                            /* "after": the buffer of its last read */
+static int fswin(struct umsg *m, int port)
+{
+    u32 ino;
+    if (win_kept && m->type != FS_READ) { win_kept[0] = 1; win_kept = 0; }     /* (the protection line ends it) */
+    switch (m->type) {
+    case FS_ROOT: return 2;
+    case FS_SYNC: case FS_CLOSE: return 0;
+    case FS_OPEN: case FS_STAT: case FS_LSTAT: {
+        const char *p = (const char *)m->a[0];
+        if (!(ino = win_ino(p))) return -2;
+        if (ino == 8 && m->type != FS_OPEN) {   /* forge: forged pointers into the message, a reply, a second */
+            m->next = (struct umsg *)0x1234; m->state = 3; m->client_ = 8; m->kflags |= 1; m->server = 99;
+            int f1 = sys_reply((struct umsg *)((u32)m + 4), 0), f2 = sys_reply((struct umsg *)0x1000, 0);
+            int r1 = sys_reply(m, -2), r2 = sys_reply(m, 0);
+            dprintf(1, "msgpingd: forged replies %d %d, reply %d, second reply %d\n", f1, f2, r1, r2);
+            return 1000000;                     /* (main takes no reply for this one) */
+        }
+        if (ino == 9 && m->type != FS_OPEN)
+            dprintf(1, "msgpingd: the path is %s\n", m->a[0] - (u32)m < 1024 ? "a copy in my own message" : "elsewhere");
+        u32 *st = (u32 *)(m->type == FS_OPEN ? m->a[3] : m->a[2]);
+        memset(st, 0, 28);
+        st[0] = ino; st[1] = ino == 2 ? 040755 : 0100644; st[2] = ino == 2 ? 0 : WIN_SIZE; st[6] = 1;
+        return m->type == FS_OPEN ? (int)ino : 0;
+    }
+    case FS_FSTAT: {
+        u32 *st = (u32 *)m->a[1];
+        memset(st, 0, 28);
+        st[0] = m->a[0]; st[1] = m->a[0] == 2 ? 040755 : 0100644; st[2] = m->a[0] == 2 ? 0 : WIN_SIZE; st[6] = 1;
+        return 0;
+    }
+    case FS_READDIR: {
+        struct udirent *d = (struct udirent *)m->a[2];
+        u32 c = m->a[1];
+        if (m->a[0] != 2) return -20;
+        if (c >= 9) { *(u32 *)m->a[3] = 9; return 0; }
+        memset(d, 0, sizeof *d);
+        if (c < 2) { strcpy(d->name, c ? ".." : "."); d->ino = 2; d->type = 2; }
+        else { strcpy(d->name, winname[c + 1]); d->ino = c + 1; d->type = 1; }
+        *(u32 *)m->a[3] = c + 1;
+        return 1;
+    }
+    case FS_READ: {
+        unsigned char *b = (unsigned char *)m->a[2];
+        u32 off = m->a[1], n = m->a[3];
+        if (m->a[0] < 3 || m->a[0] > 9) return -21;
+        if (off >= WIN_SIZE) return 0;
+        if (n > WIN_SIZE - off) n = WIN_SIZE - off;
+        if (m->a[0] == 4) {                     /* fwd: the root's server writes into the window */
+            int fd = sys_open("/tmp/wsrc", 0);
+            if (fd < 0) return fd;
+            sys_lseek(fd, (int)off, 0);
+            int r = sys_read(fd, b, n);
+            sys_close(fd);
+            return r;
+        }
+        win_fill(b, off, n);
+        if (m->a[0] == 5) b[n] = 0x55;          /* over */
+        if (m->a[0] == 6) b[-1] = 0x55;         /* under */
+        if (m->a[0] == 7) win_kept = b;         /* after: written at the next request that is not a read (the close) */
+        return (int)n;
+    }
+    }
+    (void)port;
+    return -38;
+}
 /* -fsdir's inode of PATH (from the root: "/", "", "." are the root, "nNN" and "/nNN" a file), 0 for none */
 static u32 fsdir_ino(const char *p)
 {
@@ -73,7 +159,7 @@ static int fsdir(struct umsg *m)
 int main(int argc, char **argv)
 {
     const char *pname = "ping";
-    int left = -1, fs = 0;
+    int left = -1, fs = 0, uid = -1;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-port") && i + 1 < argc) pname = argv[++i];
         else if (!strcmp(argv[i], "-fs")) fs = 1;
@@ -81,6 +167,8 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-fsstall")) fs = 4;
         else if (!strcmp(argv[i], "-fslinked")) fs = 3;
         else if (!strcmp(argv[i], "-fsdir")) fs = 5;
+        else if (!strcmp(argv[i], "-fswin")) fs = 6;
+        else if (!strcmp(argv[i], "-uid") && i + 1 < argc) uid = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-call") && i + 1 < argc) {
             struct umsg c;
             memset(&c, 0, sizeof c);
@@ -91,12 +179,19 @@ int main(int argc, char **argv)
     }
     int port = sys_port_create(pname);
     if (port < 0) { dprintf(1, "msgpingd: port busy\n"); return 1; }
+    if (uid >= 0 && sys_setuid((u32)uid) < 0) { dprintf(1, "msgpingd: setuid %d failed\n", uid); return 1; }
     struct umsg *m = sys_recv(port, 1);
     for (;;) {
         if ((int)m == -1) return 1;
         int r = 0;
         if (fs == 5 && m->type == FS_QUIT) { sys_reply(m, 0); return 0; }
         if (fs == 5) { m = sys_replyrecv(m, fsdir(m), port); continue; }
+        if (fs == 6 && m->type == FS_QUIT) { sys_reply(m, 0); return 0; }
+        if (fs == 6) {
+            int w = fswin(m, port);
+            m = w == 1000000 ? sys_recv(port, 1) : sys_replyrecv(m, w, port);
+            continue;
+        }
         if (fs) {
             if (m->type == FS_SYNC && fs != 3) for (;;) sys_sleep(100);
             if (fs == 4 && m->type != FS_ROOT && m->type != FS_CLOSE && m->type != FS_QUIT) for (;;) sys_sleep(100);
@@ -119,6 +214,12 @@ int main(int argc, char **argv)
         else if (m->type == 3) r = sys_svc_self();
         else if (m->type == 7) { sys_sleep(100); __asm__ volatile("illegal"); }
         else if (m->type == 9) { sys_reply(m, 0); return 0; }
+        else if (m->type == 10) {               /* the client's own message rewritten in flight */
+            struct umsg *c = (struct umsg *)m->a[0];
+            c->next = (struct umsg *)0x1234; c->state = 3; c->client_ = 0; c->kflags = 1; c->server = 0; c->from = 1;
+            m->a[2] = 4242;
+            r = 7;
+        }
         else r = -1;
         if (left > 0 && --left == 0) { sys_reply(m, r); return 0; }
         m = sys_replyrecv(m, r, port);

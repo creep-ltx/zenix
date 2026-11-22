@@ -24,10 +24,44 @@ void mmu_disarm(void);                          /* D45 13: the table back to the
  * It is reached only through this table: mmu_ops points at resident stubs until mmu_setup arms it (at the span's own
  * table, mmu_ops_on) and again after the release; the gates below test mmu_on first (for speed: the stubs make a missed
  * test harmless). Armed exactly when mmu_on is set, and then the span is never given back. */
+/* D60 stage 2 (docs/d60-full-protection.md 5.1): the kernel's record of a call while protection is on. The message as
+ * the kernel keeps it comes first (queue link, state, the stamped ids; the caller's groups right after it, as
+ * UMSG_GROUPS_AT reads them): the caller's message is read once at call() and written once at its end (result and
+ * a[0..3]; for the kernel's own messages also kflags), never trusted in between. The server works on a copy in its
+ * inbox (slot). Internal, not frozen. */
+#define NKCOPY 6                /* small buffers copied into a slot (two paths and a ustat; a netreq and four) */
+struct kcopy { u32 at; u16 len, off; u8 wr, pad[3]; };     /* the buffer's address, its bytes, where in the slot */
+struct krec {
+    struct umsg m;
+    struct umsg_groups g;
+    u16 gpad;                   /* (the longs below aligned) */
+    struct umsg *um;            /* the caller's message (in its memory, or the kernel's on its stack) */
+    u32 slot;                   /* the server's copy, 0 while none (queued, or answered) */
+    u32 orig[4];                /* a[] as sent: an argument the kernel rewrote to a copy gets its value back */
+    u8 kp;                      /* KP_* */
+    u8 rw;                      /* bit i: a[i] rewritten */
+    u8 ncopy, nwin;             /* copies (c[]), windows (in mmu.c's table) */
+    u8 srv;                     /* the server's slot index (procs[]) while slot is set */
+    u8 heap;                    /* from the kernel heap (a call made while the process's own record is in use) */
+    u8 done;                    /* answered by the server's reply (its copies and windows go back to the client) */
+    u8 sj;                      /* the slot's number in the server's inbox */
+    struct kcopy c[NKCOPY];
+};
+/* sock.c's table of each SOCK_* op's pointers (the server reads R, writes W): the checks there, the declaration here */
+#define D_BUFR  0x01
+#define D_BUFW  0x02
+#define D_ADDRR 0x04
+#define D_ADDRW 0x08
+#define D_VALR  0x10
+#define D_VALW  0x20
+extern const u8 sock_dirs[];
+extern u32 mmu_winners;         /* bit n: procs[n] holds a window of a request (resident) */
+extern u32 mmu_syncing;         /* bit n: procs[n] is in a system call with a window's copy page given back to its
+                                 * client (D60 5.7); resident, tested at every system call's end */
+
 struct mmu_ops {
     void (*sw)(struct proc *);
     void (*forget)(struct proc *);
-    void (*lend)(struct proc *);
     void (*redo)(struct proc *);
     int (*block)(u32, u32, u32);
     void (*upd_gone)(void);
@@ -35,6 +69,14 @@ struct mmu_ops {
     void (*hand)(int);
     void (*before_reset)(void);
     int (*fault)(const u8 *, u32);
+    struct umsg *(*rec)(struct umsg *, u32);
+    void (*unrec)(struct umsg *);
+    int (*give)(struct krec *, u32 *);
+    void (*take)(struct krec *);
+    void (*end)(struct krec *);
+    int (*callok)(struct proc *, u32, u32, int);
+    void (*unsync)(void);
+    struct umsg *(*held)(struct umsg *);
 };
 extern const struct mmu_ops *mmu_ops;           /* &the stubs, or &the span's table while protection is on */
 
@@ -42,8 +84,6 @@ extern const struct mmu_ops *mmu_ops;           /* &the stubs, or &the span's ta
 static inline __attribute__((always_inline)) void mmu_switch(struct proc *n) { if (__builtin_expect(mmu_on, 0)) mmu_ops->sw(n); }
 /* proc_exit: p's tree given back, its view out of every server's */
 static inline __attribute__((always_inline)) void mmu_forget(struct proc *p) { if (__builtin_expect(mmu_on, 0)) mmu_ops->forget(p); }
-/* ipc_recv gave c's request to the current process (section 8) */
-static inline __attribute__((always_inline)) void mmu_lend(struct proc *c) { if (__builtin_expect(mmu_on, 0)) mmu_ops->lend(c); }
 /* seg_disown: p's code is its private copy now (no longer global): its tree made again */
 static inline __attribute__((always_inline)) void mmu_redo(struct proc *p) { if (__builtin_expect(mmu_on, 0)) mmu_ops->redo(p); }
 /* mem.c: a MEM_USER block was made: valid now in its owner's tree */
@@ -58,6 +98,12 @@ static inline __attribute__((always_inline)) void mmu_hand(int back) { if (__bui
 static inline __attribute__((always_inline)) void mmu_before_reset(void) { if (__builtin_expect(mmu_on, 0)) mmu_ops->before_reset(); }
 /* exc_c, a user-mode exception: 1 if it was protection (said) */
 static inline __attribute__((always_inline)) int mmu_fault(const u8 *frame, u32 pc) { return __builtin_expect(mmu_on, 0) ? mmu_ops->fault(frame, pc) : 0; }
+
+/* D60 stage 2, ipc.c: call()'s record of the caller's message m (kp: KP_*): m itself while protection is off; 0 if no
+ * record could be had (a nested call with the kernel heap full) */
+static inline __attribute__((always_inline)) struct umsg *mmu_rec(struct umsg *m, u32 kp) { return __builtin_expect(mmu_on, 0) ? mmu_ops->rec(m, kp) : m; }
+/* syscall.c, at the end of every system call: the windows' copy pages made the server's again (D60 5.7) */
+static inline __attribute__((always_inline)) void mmu_unsync(void) { if (__builtin_expect(mmu_syncing, 0)) mmu_ops->unsync(); }
 
 /* mem.c, for mmu_fault's line: the owner of the block holding a (*used 0: free), or MEM_NOT_POOL outside the pools */
 #define MEM_NOT_POOL 0xFFFFFFFFu

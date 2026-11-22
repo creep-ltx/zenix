@@ -62,7 +62,9 @@ KCOLD int port_create(const char *name, int owner)
     if (reserved(name)) {
         if (current->uid != 0)
             return -EACCES;
+#ifndef MMU_CONFINE                     /* (the D60 stage 3 preview, as vfs.c's mount) */
         mmu_sysmark(current);           /* D41 7: the kernel sends it requests whose message is on a kernel stack */
+#endif
     }
     for (i = NSVC; i < NPORT; i++)
         if (!ports[i].used) {
@@ -123,6 +125,8 @@ int ipc_serving(int pid)
 
 void ipc_finish(struct umsg *m, s32 result)
 {
+    if (__builtin_expect(mmu_on, 0) && ((struct krec *)m)->slot)
+        mmu_ops->end((struct krec *)m);         /* D60: the server's copy and its windows go (the reply took its answer) */
     m->result = result;
     m->state = MSG_DONE;
     struct proc *c = m->client;
@@ -197,7 +201,8 @@ KCOLD long ipc_peer(u32 msg, u32 op, u32 arg)
     const struct upeermem *m = (const struct upeermem *)arg;
     if (!m->len)
         return 0;
-    return (op == PEER_RD ? user_ok_rd(c, m->addr, m->len) : user_ok_wr(c, m->addr, m->len)) ? 0 : -EFAULT;
+    /* D60 5.6: the client's own memory, or a window it holds (a server passing its client's buffer on) */
+    return (op == PEER_RD ? user_ok_call_rd(c, m->addr, m->len) : user_ok_call_wr(c, m->addr, m->len)) ? 0 : -EFAULT;
 }
 
 /* SYS_post: a port's owner opens a window in its memory that the owner of one other port may write into (the display
@@ -286,6 +291,8 @@ void ipc_cancel_mark(struct proc *p)
     struct umsg *m = p->wait_msg;
     if (m && !p->exiting && m->state != MSG_DONE && !(m->kflags & UMSG_CANCEL)) {
         m->kflags |= UMSG_CANCEL;
+        if (mmu_on && ((struct krec *)m)->slot)     /* D60 5.1: in the record, and in the server's copy */
+            ((struct umsg *)((struct krec *)m)->slot)->kflags |= UMSG_CANCEL;
         struct port *pt = port_of(p->wait_port);
         if (pt) {
             pt->ncancel++;
@@ -316,13 +323,19 @@ long ipc_wait(struct umsg *m)
     return m->result;
 }
 
-static long call(int port, struct umsg *m, u16 kflags, int ns)
+/* um: the caller's message; with protection on the kernel works on its record (D60 5.1), and um is written once more,
+ * at the end (mmu.c's unrec) */
+static long call(int port, struct umsg *um, u16 kflags, int ns, u32 kp)
 {
     struct port *p = port_of(port);
     if (!p)
         return -ECONNRESET;                     /* closed or reused (G1): its server is gone (A11: was a bare -1) */
     if (p->owner == current->pid)
         return -EINVAL;                         /* one's own port: that would wait for ever */
+    struct umsg *m = mmu_rec(um, kp);
+    if (!m)
+        return -ENOMEM;
+    long r;
     m->next = 0;
     m->from = current->pid;
     m->client = current;
@@ -344,22 +357,25 @@ static long call(int port, struct umsg *m, u16 kflags, int ns)
     current->wait_msg = m;
     current->call_ns = (u8)(ns ? ns : current->exiting);   /* every call from proc_exit is a no-start call */
     if (!p->op) {                               /* a held port: svc.c starts the server or queues */
-        long r = svc_call((int)(p - ports), m, current->call_ns);
+        r = svc_call((int)(p - ports), m, current->call_ns);
         /* every way out of svc_call ends the call: a failed load or watch left wait_msg naming m (in a frame about to
          * die: kill_now and the stop check would refuse for ever) and kept a loader's boost from the queued clients */
         current->wait_msg = 0;
         current->svc_role = 0;
         prio_recalc(current);
-        return r;
+    } else {
+        ipc_enqueue(p, m, 0);
+        r = ipc_wait(m);
     }
-    ipc_enqueue(p, m, 0);
-    return ipc_wait(m);
+    if (m != um)
+        mmu_ops->unrec(m);                      /* (protection is on) the answer into the caller's message */
+    return r;
 }
 
-long ipc_call(int port, struct umsg *m) { return call(port, m, 0, 0); }
+long ipc_call(int port, struct umsg *m) { return call(port, m, 0, 0, KP_PROG); }
 /* the kernel's requests on behalf of the current process (its ids are stamped as usual): the filesystem servers do
  * inode-number operations (FS_READ, FS_WRITE, FS_CLOSE, ...) only for these, or for root */
-long ipc_kcall(int port, struct umsg *m, int ns, u16 kfl) { return call(port, m, (u16)(UMSG_KERNEL | kfl), ns); }
+long ipc_kcall(int port, struct umsg *m, int ns, u16 kfl, u8 kp) { return call(port, m, (u16)(UMSG_KERNEL | kfl), ns, kp); }
 
 /* wait: 0 = do not wait (0 if nothing is queued), 1 = wait for a message, N > 1 = wait at most N-1 ticks (then 0).
  * A timed wait sleeps as P_SLEEP with the port's waiter set, so either a message (ipc_call readies the waiter) or
@@ -370,6 +386,7 @@ struct umsg *ipc_recv(int port, int wait)
     if (!p || p->owner != current->pid || current->killed)
         return (struct umsg *)-1;               /* a kill acts between requests: before the next one is taken */
     u32 until = ticks + (u32)(wait - 1);
+again:
     while (!p->head) {
         if (!wait)
             return 0;
@@ -403,30 +420,64 @@ struct umsg *ipc_recv(int port, int wait)
     m->next = 0;
     m->state = MSG_SERVING;
     m->server = current->pid;
-    mmu_lend(m->client);            /* D41 8: a protected server sees its client's memory while it serves it */
+    if (__builtin_expect(mmu_on, 0)) {
+        /* D60 5.1-5.4: the server gets a copy of the record in its inbox, the small buffers the kernel declared copied
+         * after it, the others lent as windows; a program's request to a protected server: D41's lend of the whole
+         * client, only when the server could debug it (5.8). Refused: answered at once, the next one taken */
+        u32 slot;
+        int e = mmu_ops->give((struct krec *)m, &slot);
+        if (e) {
+            ipc_finish(m, e);
+            if (current->prio < current->blevel)
+                prio_recalc(current);           /* (no boost from a refused client) */
+            if (!port_of(port) || current->killed)
+                return (struct umsg *)-1;
+            if (!wait)
+                return 0;
+            goto again;
+        }
+        return (struct umsg *)slot;
+    }
     return m;
 }
 
 /* m comes from user space (a server's reply): it is looked up among the requests that are really in flight before
- * anything in it is read, so a stray or forged pointer cannot make the kernel read or write elsewhere */
-struct proc *ipc_client(struct umsg *m)
+ * anything in it is read, so a stray or forged pointer cannot make the kernel read or write elsewhere. With protection
+ * on it names the server's copy (D60 5.1): the record is the one whose slot it is; only the record is read */
+struct umsg *ipc_rec(struct umsg *m)
 {
-    struct proc *c = 0;
-    if (m)
+    struct umsg *k = 0;
+    if (__builtin_expect(mmu_on, 0)) {
+        k = mmu_ops->held(m);           /* the record whose copy m is, among the slots of current's inbox */
+        if (!k || k->client->state != P_MSG || k->client->wait_msg != k)
+            return 0;
+    } else if (m) {
         for (int i = 1; i < NPROC; i++)
             if (procs[i].state == P_MSG && procs[i].wait_msg == m) {
-                c = &procs[i];
+                k = m;
+                if (k->client != &procs[i])
+                    return 0;
                 break;
             }
-    if (!c || m->client != c || m->state != MSG_SERVING || m->server != current->pid)
+    }
+    if (!k || k->state != MSG_SERVING || k->server != current->pid)
         return 0;
-    return c;
+    return k;
+}
+
+struct proc *ipc_client(struct umsg *m)
+{
+    struct umsg *k = ipc_rec(m);
+    return k ? k->client : 0;
 }
 
 long ipc_reply(struct umsg *m, s32 result)
 {
-    if (!ipc_client(m))
+    m = ipc_rec(m);
+    if (!m)
         return -EINVAL;
+    if (mmu_on)
+        mmu_ops->take((struct krec *)m);        /* D60 5.1-5.2: a[] and the written copies back to the client */
     ipc_finish(m, result);
     if (current->prio < current->blevel)        /* the boost from this client ends with the reply */
         prio_recalc(current);

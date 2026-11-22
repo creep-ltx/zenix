@@ -53,7 +53,7 @@ _Static_assert(__builtin_offsetof(struct uconline, palette) + 32 == UCONLINE_FIR
 static __attribute__((noinline)) s32 usize(u32 p, u32 given, u32 sizes)
 {
     u32 n = usize_n(given, sizes >> 16, sizes & 0xFFFF);
-    return !n ? -EINVAL : user_ok_wr(current, p, n) ? (s32)n : -EFAULT;
+    return !n ? -EINVAL : user_ok_call_wr(current, p, n) ? (s32)n : -EFAULT;     /* (for this call, D60 5.7) */
 }
 
 static struct file *getfd(u32 fd)
@@ -235,7 +235,7 @@ static __attribute__((noinline)) s32 sys_path1(u32 nr, u32 a1, u32 a2, u32 a3)
     case SYS_utimes: return (s32)vfs_path1(FS_UTIMES, path, a2, 0);
     case SYS_chown:  return (s32)vfs_path1(FS_CHOWN, path, a2, a3);
     case SYS_readlink:
-        return user_ok_wr(current, a2, a3) ? (s32)vfs_path1(FS_READLINK, path, a2, a3) : -EFAULT;
+        return user_ok_call_wr(current, a2, a3) ? (s32)vfs_path1(FS_READLINK, path, a2, a3) : -EFAULT;
     case SYS_stat: case SYS_lstat: {                /* the buffer checked after the path, as always */
         s32 n = usize(a2, a3, USTAT_FIRST << 16 | USTAT_SIZE);
         if (n <= 0)
@@ -280,9 +280,11 @@ void syscall_c(u32 *rb)
     /* the checks, each setting r when it fails (so a condition reads as "all of these hold") */
 #define CSTR(dst, u)  ((r = copy_str(dst, u, sizeof dst)) == 0)
     /* user pointers (D13): UOKW where the kernel (or a server answering for it) writes into the caller's memory - its
-     * own only; UOKR where it only reads - its shared code too (string literals live there) */
-#define UOKW(p, n)    (user_ok_wr(current, p, n) || ((r = -EFAULT), 0))
-#define UOKR(p, n)    (user_ok_rd(current, p, n) || ((r = -EFAULT), 0))
+     * own only; UOKR where it only reads - its shared code too (string literals live there). Both are D60 5.7's kind
+     * "for this call" (a window of a request the caller holds is accepted too); the kind "own" is user_ok_wr/rd,
+     * named where the kernel keeps the pointer or must have the caller's own memory (SYS_call's message, envset) */
+#define UOKW(p, n)    (user_ok_call_wr(current, p, n) || ((r = -EFAULT), 0))
+#define UOKR(p, n)    (user_ok_call_rd(current, p, n) || ((r = -EFAULT), 0))
 #define GETFD(f_, fd) (((f_) = getfd(fd)) || ((r = -EBADF), 0))
     /* a struct written into the caller's buffer p of size given (usize): n_ the bytes it gets */
 #define UOKS(n_, p, given, first, now) (((n_) = usize(p, given, (first) << 16 | (now))) > 0 || ((r = (n_)), 0))
@@ -366,8 +368,13 @@ void syscall_c(u32 *rb)
         break;
     }
     case SYS_call:
-        if (UOKW(a2, sizeof(struct umsg)))     /* the server answers into it */
+        r = -EFAULT;
+        if (user_ok_wr(current, a2, sizeof(struct umsg))) {    /* (own: the server answers into it) */
+            if (__builtin_expect(mmu_winners, 0) && (mmu_winners & (1u << (current - procs))))
+                mmu_ops->callok(current, 0, 0, 2);   /* D60 5.6: the caller's windows' copy pages are their clients'
+                                                     * again for the call (its message may name them) */
             r = (s32)ipc_call((int)a1, (struct umsg *)a2);
+        }
         break;
     case SYS_recv:
         r = (s32)ipc_recv((int)a1, (int)a2);
@@ -433,7 +440,7 @@ void syscall_c(u32 *rb)
         break;
     case SYS_envset:                    /* a new block of the caller's (proc.c), then the old one goes */
         r = -E2BIG;
-        if (a2 <= ENVMAX && UOKR(a1, a2)) {
+        if (a2 <= ENVMAX && (user_ok_rd(current, a1, a2) || ((r = -EFAULT), 0))) {    /* (own) */
             char *e = a2 ? mem_alloc(a2, 0, (u32)current->pid) : 0;
             r = -ENOMEM;
             if (e)
@@ -808,6 +815,7 @@ void syscall_c(u32 *rb)
         break;
     }
     rb[0] = (u32)r;
+    mmu_unsync();                       /* D60 5.7: a window's copy page given back to its client is the server's again */
     if (kwork_pending)
         kwork();                        /* queued input: done here, on the way back to user mode (main.c) */
     if (need_resched)

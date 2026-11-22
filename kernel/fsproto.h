@@ -5,7 +5,9 @@
  * type = op, a[0..3] = arguments, result = a value >= 0 or -errno (kernel/errno.h; -EIO: the server is gone), or, only
  * for a sender that set UMSG_LINKS, the FS_LINKED answer below.
  * All pointers are plain addresses: no MMU, the server reads and writes
- * the caller's buffers in place.
+ * the caller's buffers in place. With memory protection on (DESIGN D60 stage 2) the message is a copy in the
+ * server's memory, the small buffers (paths, ustat, udirent, the cookie, ustatfs, fsinfo, fsrdx) copies after it
+ * with the arguments pointing at them, the others the caller's own addresses (windows for a protected server).
  * Who may send them: the kernel (struct umsg kflags UMSG_KERNEL, set only by ipc_kcall for a system call, with the
  * caller's ids) and root. Any other message - a user's own SYS_call to the port - is answered -13: inode numbers
  * (FS_READ, FS_WRITE, ...) and FS_QUIT would bypass every permission check (audit D). */

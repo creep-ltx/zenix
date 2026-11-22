@@ -877,3 +877,72 @@ Tests (FS-UAE in fast mode unless said; all with protection where the machine ha
 - Not done: the desktop and sound rows of 9.4; any real CPU. **The 1260 run** (9.4: the judge, the end of stage 1)
   wants three kernels: as built, `DIAG=-DMMU_PAGE8` and `DIAG=-DMMU_PFLUSH_PAGES`, each with `bench mmu` and
   `MMU=OFF` for the ratios (`tools/kopts.py`), and `MMU=OFF` itself as the way back (`MMU=D41` is not built yet).
+
+## 19. As built: stage 2 (2026-11-22, branch d60s2)
+
+The kernel's records, the inbox and the message copy, windows, the declaration tables, the split checks and the sync,
+forwarding (section 14's stage 2). D41's system processes stay (the brief: stage 3 converts them): a system process
+gets the copies and no windows, since it sees everything; only protected servers get windows.
+
+### 19.1 What was built
+
+`kernel/mmu.c` (the block "D60 stage 2", in the span), `struct krec` in `kernel/mmu.h`, the gates in `ipc.c`,
+`proc.c` (`user_ok_call_*`), `syscall.c` (UOKW/UOKR, `SYS_call`, the end of every call), `sock.c` (NETSRV_REPLY,
+`sock_dirs`), `vfs.c`/`drv.c` (the protocol of their requests, `KP_FS`/`KP_NET`), `tools/uok-check.py` (13's pointer
+check, run at every build of kernel.bin).
+
+- **Records (5.1)**: `call()` copies the caller's `type` and `a[]` into a record (one per process slot; a call inside
+  a call, a service's load, gets one from the kernel heap) and stamps it there; the queues, the priority chain,
+  `ipc_best_client`, svc.c, `ipc_cancel_mark`, vfs.c's count of FS_OPENs in flight and `NETSRV_REPLY` work on it only.
+  The caller's message is written once, when the caller runs again (`result`, `a[0..3]`; `kflags` too for the
+  kernel's own messages, for `UMSG_NETREPLY`). 176 bytes a record (the copies' list: 6 entries), 5.6 KB for 32,
+  with protection on only (5.1 estimated 76 bytes).
+- **The inbox (5.1)**: at its first receive a server gets an inbox: pages of its own memory (`MEM_USER`, owned by it,
+  valid in its tree, not a region: `SYS_memfree` refuses them), cut into 1 KB slots; a page more only when every slot
+  is busy, up to NPROC slots. `ipc_recv` copies the record's public fields (`next`, `client`, `server` 0) and the
+  groups into a free slot, round robin among the slots it has, and returns the slot. A reply's pointer is looked up
+  among the slots of the server's inbox (`mmu_held_`). There is no generation: a reply to a slot given to a newer
+  request answers that one (the same server holds both; before D60 a client's reused message did the same);
+  frozen-interfaces.md says so.
+- **Declarations (5.2, 5.4)**: `fsdecl`, a nibble per argument and FS_* type (in resident data: the span's data holds
+  only `mmu_ops_on`, tools/check-init.py): paths copied up to their 0 (with `UMSG_LINKS` the arguments `fsl_ok`
+  allows: 256 bytes, written back), `ustat` (28), `udirent`, the cookie, `ustatfs`, `fsinfo`, `fsrdx` copied and
+  written back; FS_READ/READLINK/READDIRS/BMAP's buffers windows RW, FS_WRITE's R. NET_*: the `netreq` copied (read
+  only), and in the copy its `addr`, `alen`, `val`, `vlen` pointers rewritten to copies by `sock_dirs` (stricter
+  than 5.4's windows for `addr` and `val`: nothing of the program's page is shown); `r.buf` a window. NETDRV_*: the
+  block a window. The rewritten arguments get their values back at the reply.
+- **Windows (5.3)**: for a protected server only. Whole pages of the range mapped as they are (W for R); part pages,
+  and every page that lies in the client's code, mapped onto a bounce page: a page-aligned kernel page (fast RAM
+  first, 4 kept zeroed) holding exactly the window's bytes at their offsets. One bounce page per (server, page),
+  counted, RW if any of its windows is. At the end: an answered RW window's bytes back to the client, its bytes
+  cleared; the last one clears the whole page if it was writable (the server could write all of it) and unmaps it.
+  `tflip` (stage 1's identity flips: views, lends, freed blocks) never takes over or clears a descriptor that maps
+  another address: bounce descriptors belong to the windows. Limits: 8 windows a request, 8 bounce pages a window,
+  32 bounce pages a server; and, all servers together, 32 windows and 64 bounce pages (5.3 names only the first
+  three); past one the request is answered -ENOMEM before the server sees it.
+- **A program's request to a protected server (5.8 in stage 2)**: no server marks its ports `PEER_EXACT` yet, so every
+  protected server is an old one: D41's lend of the whole client (stage 1's, kept while the client's next request is
+  queued) only when SYS_debug's rule allows it (`may_see`: never init, a process without parent, a priv, system or
+  ending one; root may see the others, any other user only a client of the same real and effective user that is not
+  set-user-id or NODEBUG), asked at every request; else -EACCES at once and one line in the log. A kernel request to
+  a protected server takes a kept lend of that client back first: exactly its buffers.
+- **The split checks and the sync (5.7)**: `user_ok_call_wr/rd` accept the caller's own memory or a window it holds
+  (by direction). For the caller's RW windows with bounce pages the bounce bytes are copied to the client's page
+  when the check passes, and back when the system call ends (`mmu_unsync` in syscall.c, a resident mask). At
+  `SYS_call` by a window holder every RW window is given back so (its message may name any). The inbox is not
+  accepted (a slot's page handed on would show every slot to another server).
+- **Forwarding (5.6), a deviation**: 5.3 and 5.6 have an inner window map the outer server's bounce pages, owned by the
+  outermost window. Built instead: every level has its own bounce pages, kept in step through the client's page by
+  the sync: when the outer server passes the window's address to a system call (a `read` into it, a call), its
+  bounce bytes are the client's page's for the time of the call, the inner window (or the kernel, or a system
+  server: diskd, fsd) is made from and writes into the client's page, and the outer bounce page takes the bytes back
+  when the call returns. Why: in stage 2 the inner server is often a system process, which reaches the client's
+  address and never a bounce page; one rule covers both, and nothing is shared between two servers' trees. It rests
+  on calls being synchronous (the inner request ends before the outer call returns) and on the client being unable
+  to end in a call. The exempt raw-disk calls (`SYS_blk_*`, `SYS_fd_rw`: diskd's, priv) are not synced: harmless
+  while diskd is a system process, to be checked when stage 3 confines it.
+- **Test only, `DIAG=-DMMU_CONFINE`**: `SYS_mount` and a reserved port's creation mark nothing (stage 3's preview,
+  for the windows' tests: tools/mmu-test.sh's `+confine` models). Services stay system processes.
+- **Machines without an MMU**: resident are the gates in `call()`, `ipc_recv`, `ipc_finish`, `ipc_rec`, `ipc_reply`,
+  `ipc_cancel_mark`, `SYS_call`, `user_ok_call_*` and the test of `mmu_syncing` at every system call's end.
+

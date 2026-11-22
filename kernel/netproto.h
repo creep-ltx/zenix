@@ -41,7 +41,8 @@ struct usockreq {
 #define USOCKREQ_FIRST 32
 
 /* NET_* messages (kernel to the server, UMSG_KERNEL): a[0] the socket's name (ksock index | generation << 8; SOCKET:
- * the new one), a[1] a struct netreq * (in the caller's kernel stack: read it in place). The server reads and writes
+ * the new one), a[1] a struct netreq * (in the caller's kernel stack: read it in place; with memory protection on a
+ * copy in the server's message, its address, length and value pointers rewritten to copies there too: DESIGN D60 5.4). The server reads and writes
  * the program's buffers in place, within what netreq allows. It answers every request at once (done or -EAGAIN,
  * rule 2) with SYS_netsrv NETSRV_REPLY, after writing into the message: a[2] the socket's new ready bits (POLL*;
  * ACCEPT: the new socket's in the upper 16), a[3] its epoch (NETSRV_HELLO). A name it does not know: -ENETDOWN. */
