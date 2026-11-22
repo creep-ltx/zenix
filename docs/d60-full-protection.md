@@ -946,3 +946,72 @@ check, run at every build of kernel.bin).
 - **Machines without an MMU**: resident are the gates in `call()`, `ipc_recv`, `ipc_finish`, `ipc_rec`, `ipc_reply`,
   `ipc_cancel_mark`, `SYS_call`, `user_ok_call_*` and the test of `mmu_syncing` at every system call's end.
 
+### 19.2 The figures (emulator figures: ratios only)
+
+`tools/mmubench-test.sh`, protection off -> on, the same build; FS-UAE 3.2.35 in warp mode, Amiberry 8.5.0 (the
+machines of 18.3). Stage 1's ratios (18.3) in brackets.
+
+| Figure (budget) | FS-UAE 030 | FS-UAE 040 | FS-UAE 060 | Amiberry 030 | Amiberry 040 | Amiberry 060 |
+|---|---|---|---|---|---|---|
+| `msgcall` (x1.5 target, x2 limit) | x1.75 (x1.44) | x2.00 (x1.56) | x2.00 (x1.56) | x1.58 (x1.31) | x1.99 (x1.68) | x1.99 (x1.68) |
+| `pipetrip` (x1.5, x2) | x1.08 | x1.09 | x1.09 | x1.08 | x1.07 | x1.06 |
+| `stat` (+10%) | +10% (+2%) | +13% (+2%) | +13% (+2%) | +12% (+2%) | +8% (+1%) | +8% (+1%) |
+| `read4k` (+10%) | +10% (+3%) | +12% (+3%) | +12% (+3%) | +11% (+3%) | +9% (+2%) | +9% (+2%) |
+| `bigread`, `pipe`, `lsr` (+10%, +15%) | within 5% | within 6% | within 7% | within 4% | within 4% | within 4% |
+| the null call (+0) | +2% | the same | the same | +3% | the same | the same |
+
+- **Over the budget in the emulators**: `stat` and `read4k` by 1-3 points (FS-UAE's 040/060, Amiberry's 030), and the
+  call to a protected server sits at the limit on the 040/060 models. Each request now copies the record (twice), the
+  slot's header and its small buffers, and looks things up; some 250 instructions, which FS-UAE's 68040/060 model
+  charges 40-60 us for (its null system call takes 18 us), Amiberry a third of that. The hot functions at -O2 instead
+  of -Os took a fifth of the added cost back (1.4 KB of code). Neither emulator models the real CPU's cost; the
+  judge stays the 1260 (9.4), and stage 6's speed pass has the work: the record and the slot copy for system servers
+  (which see everything until stage 3), `PEER_DECLARE`, a direct hand-off in `call()`.
+- **Protection off** (the price of the resident gates, FS-UAE's 040 against stage 1's kernel on the same machine):
+  `msgcall` 236 -> 259 us (+9%), `stat` and `read4k` +1%, the null call 17.6 -> 18.2 us; Amiberry's 040 `msgcall`
+  66 -> 69 us. To be measured on the stock A1200's 68020 (CLAUDE.md), where the gates are a few instructions a call.
+- **Size**: kernel.bin 208,240 -> 216,700 bytes (+8,460): `mmu` 7,623 -> 15,196 bytes (in the span, given back
+  after the boot when protection is off, but for the stubs and tables), `ipc` + 364, `proc` + 206, `syscall` + 122,
+  `sock` + 10, `vfs` + 4, `drv` + 4; section 10 estimated 4-5 KB for stage 2 (the -O2 hot paths are 1.4 KB of the
+  difference). The mount tests' RAM disk 674 -> 666 KB, its floppy keeps 1,412 bytes (74 blocks free on the RAM disk).
+  RAM with protection on: the records 5.6 KB, the window and bounce tables 1.5 KB, an inbox 4 KB a server (more
+  pages only while it holds more than four requests), bounce pages only while windows exist (4 kept).
+
+### 19.3 Reviews and tests
+
+Two independent reviews of the code (2026-11-22). **The MMU mechanics**: no must-fix; fixed: a bounce page that was
+ever writable is cleared whole when let go (the server could write all of it: shown to the next user otherwise);
+making a shared bounce page writable rewrites its descriptor in place (it was unmapped first, and a failed table could
+leave it unmapped); a tree's rebuild keeps a window page that was bounced a bounce page; `tflip` also never takes
+over a bounce descriptor when it sets pages; the sync's copies run with the serial port's level let in, and every RW
+window a range lies in is synced; the old-server rule is asked at every request, not only at the first lend; the inbox
+is not accepted by `user_ok_call_*`. Written down: windows on the client's code are copied page by page (8 a window:
+limits.md); a freed client page under a window would still get its copy-back (unreachable today: no client ends in a
+call, no `SYS_shm` yet; to be marked dead before `SYS_shm`, stage 3); `SYS_peer` accepts a window without syncing it
+(right only because the sync happens at `SYS_call` and in the kernel's calls). **The interface and security model**:
+fixed: the old-server rule is SYS_debug's exactly (`may_see`: no init, priv, system or parentless client, root too);
+a rebuilt tree lends only by that rule, and a protected server without a tree gets no request; an out-of-memory at
+the boot turns translation off again; a refused request ends the server's priority boost; a record starts with no
+state of its last call; the documents (frozen-interfaces.md, architecture.md, limits.md, the headers' comments).
+Written down: slots have no generation (19.1); the window and bounce tables are shared by every server (19.1);
+forwarding by the sync (19.1); a slot handed to a system call is -EFAULT; checks outside syscall.c that stay "own"
+(term.c, tty.c, event.c, gfx.c: a window there is -EFAULT, the stricter choice).
+
+Tests (all with protection where the machine has it unless said; FS-UAE in fast mode):
+- `mmu-test` FS-UAE 020 030 lc040 040 060 lc060 and 030/040/060+confine; Amiberry 030 040 060, 030/040/060+confine,
+  lc060+on, ec060: pass. New checks: a server rewriting its client's message in flight changes nothing (result 7,
+  a[2] 4242); a server that may not debug its client is refused (-13) and said once; the kernel's path is a copy in
+  the server's message; forged and second replies -EINVAL; reads at nine alignments through a filesystem server,
+  every byte around them unchanged; a read into the end of one's memory -EFAULT. +confine: the same through a
+  confined server, and also through it into the root's server (a window passed on); a write past or before a buffer
+  in a part page lands in the bounce page (the client's bytes right); past a page's end, before one's start, and into
+  the buffer after the reply: the server ends with the protection line naming the client, the read fails, the
+  client's bytes untouched.
+- `mmubench-test` 030 040 060 in both emulators: pass (19.2).
+- `mmu-suite` 030 040 060 in FS-UAE: cmds-test, memtest, mounttest, lua-test, tcc-test, zdb-test pass on all three;
+  svc-test passes but its one check of 18.4 ("no msgpingd before the first call", FS-UAE). In Amiberry: the same pass on all
+  three (the 030 also svc-test's part f and sound-test), svc-test but its one check of 18.4 ("fsd is pid 3, at nice
+  -10", Amiberry's timing).
+- Without an MMU (FS-UAE's 68020): cmds-test, svc-test (every part), bootmem-test, zdb-test, readdir-test, sock-test,
+  netd-test, pure-test, prio-test, mounttest: pass.
+- Not done: any real CPU; the desktop's and sound's rows of 9.4; the update path's test (stage 5).
