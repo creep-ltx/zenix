@@ -545,9 +545,7 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
     u32 stk = v2 ? hu->v2.stack_size : h->stack_size;
     u32 stack = stk ? stk : USTACK_DEFAULT;
     u32 span = ((memsz + 15) & ~15u) + ((stack + 15) & ~15u) + argsz;
-    u32 uf = current->svc_depth ? 0 : MEM_USER;     /* D41: whole pages while protection is on, unless it is a system
-                                                     * process from the start (a service's server, section 7) */
-    u8 *base = mem_alloc(span, uf, (u32)pid);
+    u8 *base = mem_alloc(span, MEM_USER, (u32)pid);    /* D41: whole pages while protection is on (D60: services too) */
     u32 *ks = mem_alloc(KSTACK, 0, (u32)pid);
     u32 envlen = parent ? parent->envlen : 0;
     char *env = envlen ? mem_alloc(envlen, 0, (u32)pid) : 0;      /* the parent cannot change it while it spawns */
@@ -613,7 +611,7 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
         kt[9] = (u32)base;
 
     memset(p, 0, sizeof *p);
-    mmu_slot_new(p);                                /* D41: a protected process until it is made a system one */
+    mmu_slot_new(p);                                /* D41: nothing of the slot's last tree */
     p->ksp = kt;
     p->usp = (u32)usp;
     p->entry = v2 ? code : (u32)base;
@@ -698,10 +696,8 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
         rq_push(p);
         irq_restore(s);
     }
-    if (current->svc_depth) {
-        svc_born(pid);                  /* a service's server (D11): its entry is starting from now on */
-        mmu_sysmark(p);                 /* D41 7: it serves clients in place and may drive hardware */
-    }
+    if (current->svc_depth)
+        svc_born(pid);                  /* a service's server (D11): its entry is starting from now on (confined: D60) */
     return pid;
 }
 

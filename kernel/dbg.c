@@ -129,7 +129,7 @@ static void detach(struct dbg *d)
 static long may(const struct proc *p)
 {
     struct proc *c = current;
-    if (!p || p->state == P_ZOMBIE || p->exiting || p->pid <= 1 || !p->ppid || p->priv || mmu_is_sys(p) || p == c)
+    if (!p || p->state == P_ZOMBIE || p->exiting || p->pid <= 1 || !p->ppid || p->priv || p == c)
         return p ? -EPERM : -ESRCH;
     if (p->dbgf & DBGF_TRACED)
         return -EPERM;
@@ -330,13 +330,6 @@ int dbg_sigint(struct proc *p)
     return 1;
 }
 
-void dbg_sysmark(struct proc *p)       /* it became a system process (mmu_sysmark): no debugger stops one (section 4) */
-{
-    struct dbg *d = of(p);
-    if (d && d->p)
-        detach(d);
-}
-
 void dbg_jobstop(struct proc *p)
 {
     struct dbg *d = of(p);
@@ -492,8 +485,8 @@ long dbg_sys(u32 op, u32 pid, u32 arg)
             long e = ev_block(EV_CHILD, 0, 0, 0);
             if (e)
                 return e;
-            if (!(d = mine((int)pid)))          /* detached meanwhile (it became a system process, dbg_sysmark): d
-                                                 * was freed (audit 2026-11-14 K2) */
+            if (!(d = mine((int)pid)))          /* detached meanwhile: d was freed (audit 2026-11-14 K2; D60 stage 3
+                                                 * made no process a system one any more) */
                 return -ESRCH;
         }
         memcpy((void *)arg, &s, (u32)n < sizeof s ? (u32)n : sizeof s);

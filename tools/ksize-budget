@@ -147,26 +147,26 @@ a3000     2400    100
 blk        460     16
 rtc       1550      4
 proc     10850  21500
-syscall  10450      0
+syscall  11000      0
 vfs      11800   1600
 tty       5900    100
 gfx       9050   2450
 term     14500    256
 confont   3100     32
 kbd       4300    180
-ipc       4450   2150
+ipc       4700   2200
 svc       5600   1420
 seg       1300    272
 event      700      0
 signal    2150      0
 random    3800    280
 sock      4700   1060
-drv       3100    640
+drv       3600    640
 zine      1850     16
 cache     1800     32
-gcon      4250     16
+gcon      4350     16
 dbg       4100     20
-mmu      15400    200
-embed    49900      0
-TOTAL   217000
+mmu      18800    240
+embed    51000      0
+TOTAL   222700
 ROOM       800

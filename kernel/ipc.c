@@ -59,13 +59,8 @@ KCOLD int port_create(const char *name, int owner)
     int i = port_slot(name);
     if (i >= 0)
         return i < NSVC && svc_handover(i) ? PORT_ID(i) : -EBUSY;
-    if (reserved(name)) {
-        if (current->uid != 0)
-            return -EACCES;
-#ifndef MMU_CONFINE                     /* (the D60 stage 3 preview, as vfs.c's mount) */
-        mmu_sysmark(current);           /* D41 7: the kernel sends it requests whose message is on a kernel stack */
-#endif
-    }
+    if (reserved(name) && current->uid != 0)
+        return -EACCES;                 /* (D60 stage 3: its server is confined as every process) */
     for (i = NSVC; i < NPORT; i++)
         if (!ports[i].used) {
             u32 gen = (ports[i].gen + 1) & 0x7FFFFF;          /* positive port numbers: 23 bits of generation */
@@ -185,7 +180,15 @@ u16 port_poll(int port, u16 ev)
  * controlling tty, or whether a range is the client's own memory before it reads or writes it in place. */
 KCOLD long ipc_peer(u32 msg, u32 op, u32 arg)
 {
-    struct proc *c = ipc_client((struct umsg *)msg);
+    if (op == PEER_EXACT) {             /* D60 5.8: the port's server asks for every client byte it touches */
+        struct port *p = port_of((int)arg);
+        if (!p || p->owner != current->pid)
+            return -EPERM;
+        p->exact = 1;
+        return 0;
+    }
+    struct umsg *k = ipc_rec((struct umsg *)msg);
+    struct proc *c = k ? k->client : 0;
     if (!c)
         return -EINVAL;
     if (op == PEER_CTTY)
@@ -201,8 +204,11 @@ KCOLD long ipc_peer(u32 msg, u32 op, u32 arg)
     const struct upeermem *m = (const struct upeermem *)arg;
     if (!m->len)
         return 0;
-    /* D60 5.6: the client's own memory, or a window it holds (a server passing its client's buffer on) */
-    return (op == PEER_RD ? user_ok_call_rd(c, m->addr, m->len) : user_ok_call_wr(c, m->addr, m->len)) ? 0 : -EFAULT;
+    /* D60 5.6: the client's own memory, or a window it holds (a server passing its client's buffer on); with
+     * protection on lent to a server trusted to ask, until its reply (stage 3, 5.5) */
+    if (!(op == PEER_RD ? user_ok_call_rd(c, m->addr, m->len) : user_ok_call_wr(c, m->addr, m->len)))
+        return -EFAULT;
+    return mmu_on ? mmu_ops->peer((struct krec *)k, m->addr, m->len, op == PEER_WR) : 0;
 }
 
 /* SYS_post: a port's owner opens a window in its memory that the owner of one other port may write into (the display
@@ -227,7 +233,7 @@ KCOLD long ipc_post(u32 op, u32 port, u32 arg)
         p->pfrom = b->from;
         return 0;
     }
-    if (op != POST_WRITE)
+    if (op != POST_WRITE && op != POST_READ)
         return -EINVAL;
     struct port *f = port_of(p->pfrom);
     if (!p->pbuf || !f || f->owner != current->pid)
@@ -236,6 +242,14 @@ KCOLD long ipc_post(u32 op, u32 port, u32 arg)
         return -EFAULT;
     const struct upost *w = (const struct upost *)arg;
     struct proc *o = p->op;
+    if (op == POST_READ) {              /* D60 5.5: a few bytes out of the window (the display server's ring tail) */
+        if (w->off > p->psize || w->len > p->psize - w->off || w->len > 16)
+            return -EINVAL;
+        if (!o || !user_ok_wr(o, p->pbuf + w->off, w->len) || !user_ok_wr(current, w->src, w->len))
+            return -EFAULT;
+        memcpy((void *)w->src, (const void *)(p->pbuf + w->off), w->len);
+        return 0;
+    }
     if (w->len) {
         if (w->off > p->psize || w->len > p->psize - w->off)
             return -EINVAL;
@@ -425,6 +439,7 @@ again:
          * after it, the others lent as windows; a program's request to a protected server: D41's lend of the whole
          * client, only when the server could debug it (5.8). Refused: answered at once, the next one taken */
         u32 slot;
+        ((struct krec *)m)->ex = p->exact;      /* D60 5.8: its server asks for what it touches (as the port is now) */
         int e = mmu_ops->give((struct krec *)m, &slot);
         if (e) {
             ipc_finish(m, e);

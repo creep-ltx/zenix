@@ -4,8 +4,9 @@
  * (docs/d60-full-protection.md section 4): a translation tree per protected process, valid only for its view and the
  * views of the clients whose requests it holds (lent at the request, taken back at its end); the switch is a root
  * pointer write and a flush of the non-global entries; a world-readable shared segment's pages are global on 040/060.
- * The kernel never uses the trees: the transparent translation registers match its supervisor accesses (and every
- * access of a system process, D41 section 7, still), as D37 set them up. Off, the gates in mmu.h call nothing and
+ * The kernel never uses the trees: the transparent translation registers match its supervisor accesses, as D37 set them
+ * up. DESIGN D60 stage 3: there are no system processes (D41 section 7 is gone): every process, the servers too, sees
+ * only its own memory, the windows of the requests it holds and its grants. Off, the gates in mmu.h call nothing and
  * mem.c lays blocks out as before.
  * DESIGN D45 section 13: the runtime code (KMMU, the asm) lies in the span .zhwmmu, reached only through the table
  * mmu_ops points at, and is given back after the boot when protection is off.
@@ -18,6 +19,15 @@
 #include "zine.h"
 #include "netproto.h"
 #include "mmu.h"
+
+#ifdef MMU_PROF
+static u32 pf_g, pf_e, pf_s, pf_n, pf_ns, pf_fa, pf_fan, pf_r, pf_bn, pf_w, pf_ft, pf_wm, pf_wd, pf_cp, pf_ncp;
+#define PF(x) x
+#else
+#define PF(x)
+#endif
+KMMU static void mmu_switch_i(struct proc *n);
+KMMU static void mmu_switch_(struct proc *n);
 
 /* the registers as one image (offsets used by the assembly below): 030: dtt0 = TT0, dtt1 = TT1, crp = CRP's two longs
  * (crp_hi, root); 040/060: root goes to URP, srp to SRP */
@@ -36,12 +46,11 @@ long cpu_pcr(void);                             /* start.S: the 68060's PCR, -1 
 
 u8 mmu_on;
 static u8 fam;                  /* 1: 68030; 2: 68040/68060 */
-static u8 mode;                 /* the windows now: 0 system (every access), 1 protected (supervisor only) */
+static u8 mode;                 /* the windows now: 0 every access (the boot, before the first process), 1 supervisor only */
 static u8 dpush;                /* the table writes must be pushed (a 040/060 with the data cache on) */
 static u32 tbytes;              /* the pool's bytes */
 static struct mregs on, off;    /* translation on (the windows in system mode), and as it was before (D37's) */
 static u32 win[2][3];           /* the windows' values: [mode][DTT0/TT0, DTT1, ITT0] */
-static u32 sysmask;             /* bit n: procs[n] is a system process */
 static u32 cmlo, cmhi;          /* 040/060: a page's cache mode below and above 16 MB (its kernel window's) */
 
 /* D60 section 4: a tree per protected process, made at its first switch to user mode */
@@ -379,7 +388,7 @@ KMMU static void unit_free(u32 *u, int k)
 }
 
 /* ---- the trees ---- */
-KMMU static inline void dpushd(u32 *a, u32 *b) { if (dpush) cache_push_range((u32)a, (u32)b); }
+KMMU static inline void dpushd(u32 *a, u32 *b) { if (dpush) { PF(u32 t0 = hr_time(); pf_ncp++;) cache_push_range((u32)a, (u32)b); PF(pf_cp += hr_time() - t0;) } }
 
 /* the pages to flush after a change (only changes to the loaded tree, and every global entry cleared anywhere) */
 static u32 fl_n;
@@ -457,7 +466,7 @@ KMMU static int tflip(u32 *r, u32 lo, u32 hi, u32 how)
                 return -1;
         } else {
             u32 *d = pg + ((lo >> PG_SH) & (NPTE - 1)), *d0 = d, ch = 0;
-            u32 bits = how ? D_PAGE | how | (fam == 2 ? (lo < 0x01000000u ? cmlo : cmhi) : 0) : 0;
+            u32 bits = how ? D_PAGE | how | (fam == 2 && !(how & G_IO) ? (lo < 0x01000000u ? cmlo : cmhi) : 0) : 0;
             for (u32 a = lo; a < end; a += MMU_PG, d++) {
                 u32 v = how ? a | bits : 0;
                 if (*d == v || ((*d & D_VALID) && (*d & ~(MMU_PG - 1)) != a))
@@ -493,7 +502,7 @@ KMMU static int tflip(u32 *r, u32 lo, u32 hi, u32 how)
 KMMU static void tflush(void)
 {
     if (fl_g || (fam == 1 && fl_n))
-        mmu_flush(fam);
+        { PF(pf_fa++;) mmu_flush(fam); }
 #ifdef MMU_PFLUSH_PAGES
     else if (fl_n > 8)
         mmu_flushan();
@@ -501,7 +510,7 @@ KMMU static void tflush(void)
         mmu_pflush(fl_a, fl_n);
 #else
     else if (fl_n)
-        mmu_flushan();
+        { PF(pf_fan++; u32 t0 = hr_time();) mmu_flushan(); PF(pf_ft += hr_time() - t0;) }
 #endif
     fl_n = 0;
     fl_g = 0;
@@ -631,15 +640,26 @@ u32 mmu_syncing;                        /* (resident: mmu.h's gate at every syst
 u32 mmu_winners;                        /* (resident) bit n: procs[n] holds a window (SYS_call's gate) */
 struct inbox { u32 pg[NIBPG]; u32 busy; u8 rr; u8 used[NPROC]; struct krec *rec[NPROC]; };   /* used: a slot's
                                          * copies' end, in longs; rec: the request whose copy it holds */
-struct win { struct krec *k; u32 a, n; u8 srv, wr, sync, nb; u8 b[WIN_BNC]; };   /* b: its bounce pages (bncs[]) */
+struct win { struct krec *k; u32 a, n; u8 srv, wr, sync, nb; u8 b[WIN_BNC]; u8 idp, pown; };    /* b: its bounce pages
+                                         * (bncs[]); idp: its part pages that are wholly the client's own memory are
+                                         * mapped as they are (a service's window, D60 stage 3); pown: bit 1 its first
+                                         * page, bit 2 its last, mapped so by it */
 struct bnc { u32 lp, pp; u8 srv, refs, wr, pad; };     /* lp in server srv's tree maps the page pp */
 static struct krec *recs;               /* NPROC: a process's record for its call */
 static struct inbox **ibx;              /* NPROC: a server's inbox (0: it never received with protection on) */
 static struct win *wins;
+static u8 nwins[NPROC];                 /* windows each server holds (mmu_winners' bit while not 0) */
 static struct bnc *bncs;
 static u32 bpool[NBPOOL];
 static u8 nbpool;
 static u8 eacces_said;
+/* D60 stage 3: a process's grants (beside its view) and the shared regions (7.4) */
+#define NGRANT 32                       /* grants, every process together */
+#define NSHMT  24                       /* offers and shares, every process together */
+struct grant { u32 lo, hi; u8 slot, how, pad[2]; };            /* hi 0: free */
+struct shmt { u32 base, size; int owner, to; u8 ro, taken, claim, pad; };   /* size 0: free; one per (region, receiver) */
+static struct grant *grants;
+static struct shmt *shms;
 
 KMMU static u32 cmode(u32 a) { return fam == 2 ? (a < 0x01000000u ? cmlo : cmhi) : 0; }
 
@@ -652,6 +672,7 @@ KMMU static u32 dget(u32 *r, u32 l)
 
 /* page l's descriptor in tree r set to v (0: invalid, its emptied tables given back); the same flush rules as tflip.
  * -1: no memory for a table */
+static u8 dkeep;                        /* dset: an emptied table stays (a window's page: the next request needs it) */
 KMMU static int dset(u32 *r, u32 l, u32 v)
 {
     u32 *pg = pt_of(r, l, v != 0);
@@ -672,7 +693,7 @@ KMMU static int dset(u32 *r, u32 l, u32 v)
 #endif
         fl_n++;
     }
-    if (!v)
+    if (!v && !dkeep)
         tidy(r, l);
     return 0;
 }
@@ -711,9 +732,21 @@ KMMU KHOT static struct umsg *mmu_rec_(struct umsg *um, u32 kp)
     k->m.state = 0;                     /* (nothing of the record's last call is left to be read as this one's) */
     k->m.result = um->result;
     k->slot = 0;
-    k->kp = (u8)kp;
     k->rw = k->ncopy = k->nwin = k->done = 0;
     k->heap = heap;
+    k->kp = (u8)kp;
+    k->ndv = k->dvw = 0;
+    const struct ucalldecl *dc = mmu_decl;      /* D60 5.5: SYS_callv's buffers (checked by syscall.c) */
+    if (dc) {
+        mmu_decl = 0;
+        for (u32 i = 0; i < dc->n; i++)
+            if (dc->b[i].len) {
+                k->dva[k->ndv] = dc->b[i].addr;
+                k->dvn[k->ndv] = dc->b[i].len;
+                k->dvw |= (u8)((dc->b[i].flags & CALLB_WR ? 1u : 0u) << k->ndv);
+                k->ndv++;
+            }
+    }
     return &k->m;
 }
 
@@ -732,12 +765,101 @@ KMMU KHOT static void mmu_unrec_(struct umsg *m)
         kfree(k);
 }
 
-/* ---- bounce pages (5.3): one per (server, page), shared by that server's windows there ---- */
+
+/* the bounce pages' copies and clears (D60 stage 3: the hot part of a window on an unaligned buffer): 32 bytes a
+ * MOVEM pair when both ends share their alignment (a bounce page's offset is the buffer's: they always do) */
+void mmu_fcpy(void *d, const void *s, u32 n);
+void mmu_fzero(void *d, u32 n);
+__asm__(
+    "    .pushsection .zhwmmu.text,\"ax\",@progbits\n"
+    "mmu_fcpy:\n"
+    "    move.l  4(%sp),%a1\n"
+    "    move.l  8(%sp),%a0\n"
+    "    move.l  12(%sp),%d0\n"
+    "    move.l  %a0,%d1\n"
+    "    move.l  %a1,-(%sp)\n"
+    "    eor.l   %d1,(%sp)\n"
+    "    move.l  (%sp)+,%d1\n"
+    "    and.w   #3,%d1\n"
+    "    bne.s   8f\n"                   /* never the same alignment: bytes */
+    "1:  move.l  %a0,%d1\n"
+    "    and.w   #3,%d1\n"
+    "    beq.s   2f\n"
+    "    subq.l  #1,%d0\n"
+    "    bcs.s   9f\n"
+    "    move.b  (%a0)+,(%a1)+\n"
+    "    bra.s   1b\n"
+    "2:  move.l  %d0,%d1\n"
+    "    lsr.l   #5,%d1\n"
+    "    beq.s   4f\n"
+    "    movem.l %d2-%d7/%a2-%a3,-(%sp)\n"
+    "3:  movem.l (%a0)+,%d2-%d7/%a2-%a3\n"
+    "    movem.l %d2-%d7/%a2-%a3,(%a1)\n"
+    "    lea     32(%a1),%a1\n"
+    "    subq.l  #1,%d1\n"
+    "    bne.s   3b\n"
+    "    movem.l (%sp)+,%d2-%d7/%a2-%a3\n"
+    "4:  and.l   #31,%d0\n"
+    "    bra.s   6f\n"
+    "5:  move.l  (%a0)+,(%a1)+\n"
+    "    subq.l  #4,%d0\n"
+    "6:  cmp.l   #4,%d0\n"
+    "    bcc.s   5b\n"
+    "8:  subq.l  #1,%d0\n"
+    "    bcs.s   9f\n"
+    "    move.b  (%a0)+,(%a1)+\n"
+    "    bra.s   8b\n"
+    "9:  rts\n"
+    "mmu_fzero:\n"
+    "    move.l  4(%sp),%a1\n"
+    "    move.l  8(%sp),%d0\n"
+    "1:  move.l  %a1,%d1\n"
+    "    and.w   #3,%d1\n"
+    "    beq.s   2f\n"
+    "    subq.l  #1,%d0\n"
+    "    bcs.s   9f\n"
+    "    clr.b   (%a1)+\n"
+    "    bra.s   1b\n"
+    "2:  move.l  %d0,%d1\n"
+    "    lsr.l   #5,%d1\n"
+    "    beq.s   4f\n"
+    "    movem.l %d2-%d7/%a2-%a3,-(%sp)\n"
+    "    moveq   #0,%d2\n"
+    "    moveq   #0,%d3\n"
+    "    moveq   #0,%d4\n"
+    "    moveq   #0,%d5\n"
+    "    moveq   #0,%d6\n"
+    "    moveq   #0,%d7\n"
+    "    move.l  %d2,%a2\n"
+    "    move.l  %d2,%a3\n"
+    "3:  movem.l %d2-%d7/%a2-%a3,(%a1)\n"
+    "    lea     32(%a1),%a1\n"
+    "    subq.l  #1,%d1\n"
+    "    bne.s   3b\n"
+    "    movem.l (%sp)+,%d2-%d7/%a2-%a3\n"
+    "4:  and.l   #31,%d0\n"
+    "    bra.s   6f\n"
+    "5:  clr.l   (%a1)+\n"
+    "    subq.l  #4,%d0\n"
+    "6:  cmp.l   #4,%d0\n"
+    "    bcc.s   5b\n"
+    "8:  subq.l  #1,%d0\n"
+    "    bcs.s   9f\n"
+    "    clr.b   (%a1)+\n"
+    "    bra.s   8b\n"
+    "9:  rts\n"
+    "    .popsection\n");
+/* ---- bounce pages (5.3): one per (server, page), shared by that server's windows there. A page in the pool (4 kept)
+ * may hold an earlier window's bytes: a new one is cleared around its window's bytes when it is taken, and only
+ * then mapped; one freed to the kernel is cleared first ---- */
 KMMU static void bnc_unmap(struct bnc *b)
 {
     struct tree *t = &trees[b->srv];
-    if (t->root && dget(t->root, b->lp) == (b->pp | D_PAGE | cmode(b->pp) | D_VALID | (b->wr ? 0 : D_WP)))
+    if (t->root && dget(t->root, b->lp) == (b->pp | D_PAGE | cmode(b->pp) | D_VALID | (b->wr ? 0 : D_WP))) {
+        dkeep = 1;                      /* (the tables stay: the server's next window there needs them again) */
         dset(t->root, b->lp, 0);
+        dkeep = 0;
+    }
 }
 
 KMMU static int bnc_map(struct bnc *b)
@@ -758,7 +880,7 @@ KMMU static int bnc_get(int si, u32 lp, u32 lo, u32 hi, int wr)
                 b->wr = 1;
                 bnc_map(b);             /* valid to valid in place: no table made, nothing can fail */
             }
-            memcpy((void *)(b->pp + (lo & PGM)), (const void *)lo, hi - lo);
+            mmu_fcpy((void *)(b->pp + (lo & PGM)), (const void *)lo, hi - lo);
             b->refs++;
             return i;
         }
@@ -772,10 +894,10 @@ KMMU static int bnc_get(int si, u32 lp, u32 lo, u32 hi, int wr)
         return -1;                      /* (a page valid in the tree for another reason: refused, never covered) */
     u32 pp = nbpool ? bpool[--nbpool] : 0;
     if (!pp) {
+        PF(pf_bn++;)
         void *n = mem_alloc(MMU_PG, MEM_USER, 0);   /* page-aligned (protection is on), fast RAM first; the kernel's */
         if (!n)
             return -1;
-        memset(n, 0, MMU_PG);
         pp = (u32)n;
     }
     struct bnc *b = &bncs[fr];
@@ -784,9 +906,10 @@ KMMU static int bnc_get(int si, u32 lp, u32 lo, u32 hi, int wr)
     b->srv = (u8)si;
     b->wr = (u8)wr;
     b->refs = 1;
-    memcpy((void *)(pp + (lo & PGM)), (const void *)lo, hi - lo);
+    mmu_fzero((void *)pp, lo & PGM);                                /* nothing but the window's bytes */
+    mmu_fcpy((void *)(pp + (lo & PGM)), (const void *)lo, hi - lo);
+    mmu_fzero((void *)(pp + (hi - lp)), MMU_PG - (hi - lp));
     if (bnc_map(b)) {
-        memset((void *)(pp + (lo & PGM)), 0, hi - lo);
         b->refs = 0;
         bpool[nbpool++] = pp;           /* (nbpool < NBPOOL: one was just taken or none kept) */
         return -1;
@@ -794,24 +917,26 @@ KMMU static int bnc_get(int si, u32 lp, u32 lo, u32 hi, int wr)
     return fr;
 }
 
-/* a window lets go of bounce page i: its bytes [lo, hi) back to the client first when back, then cleared (so a page
- * used again shows nothing of an earlier client); the last one unmaps it */
+/* a window lets go of bounce page i: its bytes [lo, hi) back to the client first when back, then cleared while
+ * another window of the server still maps the page; the last one unmaps it (into the pool as it is: cleared when it is
+ * taken again, or before it goes back to the kernel) */
 KMMU static void bnc_put(int i, u32 lo, u32 hi, int back)
 {
     struct bnc *b = &bncs[i];
     void *in = (void *)(b->pp + (lo & PGM));
     if (back)
-        memcpy((void *)lo, in, hi - lo);
-    memset(in, 0, hi - lo);
-    if (--b->refs)
+        mmu_fcpy((void *)lo, in, hi - lo);
+    if (--b->refs) {
+        mmu_fzero(in, hi - lo);
         return;
+    }
     bnc_unmap(b);
-    if (b->wr)
-        memset((void *)b->pp, 0, MMU_PG);   /* the server could write all of it: nothing of it is shown again */
     if (nbpool < NBPOOL)
         bpool[nbpool++] = b->pp;
-    else
+    else {
+        mmu_fzero((void *)b->pp, MMU_PG);   /* the server could write all of it: nothing of it shown again */
         mem_free((void *)b->pp);
+    }
 }
 
 /* ---- windows (5.3) ---- */
@@ -832,9 +957,13 @@ KMMU static int wwhole(const struct win *w, u32 p)
     return lo == p && hi - lo == MMU_PG && !(c && c->csize && ovl(p, c->code, c->csize));
 }
 
+/* a window's part page mapped as it is (pown): its first page (1) or its last (2) */
+KMMU static u32 wbit(const struct win *w, u32 p) { return p == (w->a & ~PGM) ? 1u : 2u; }
+
 /* window w's pages out of its server's tree; its bounce pages' bytes back to the client when back (an RW window the
  * server answered, not handed back to the client already: sync) */
-KMMU static void win_drop(struct win *w, int back)
+KMMU static void win_drop(struct win *w, int back);
+KMMU static void win_drop_i(struct win *w, int back)
 {
     struct tree *t = &trees[w->srv];
     const struct proc *s = &procs[w->srv];
@@ -845,22 +974,25 @@ KMMU static void win_drop(struct win *w, int back)
             wpart(w, p, &lo, &hi);
             if (nb < w->nb && bncs[w->b[nb]].lp == p)
                 bnc_put(w->b[nb++], lo, hi, back && w->wr && !w->sync);
-            else if (t->root && !own_page(s, p) && wwhole(w, p) && dget(t->root, p) == (p | D_PAGE | cmode(p) | D_VALID |
-                                                                                       (w->wr ? 0 : D_WP)))
+            else if (t->root && !own_page(s, p) && (wwhole(w, p) || (w->pown & wbit(w, p))) &&
+                     dget(t->root, p) == (p | D_PAGE | cmode(p) | D_VALID | (w->wr ? 0 : D_WP))) {
+                dkeep = 1;              /* D60 stage 3: a server's tree keeps the tables of its clients' memory (as
+                                         * stage 1 did for lends): made and freed at every request they cost more
+                                         * than the request; at most a page table per 256 KB, freed with the tree */
                 dset(t->root, p, 0);
+                dkeep = 0;
+            }
             if (p == last)
                 break;
         }
     w->k->nwin--;
     w->k = 0;
-    for (int i = 0; i < NWIN; i++)
-        if (wins[i].k && wins[i].srv == w->srv)
-            return;
-    mmu_winners &= ~(1u << w->srv);
+    if (!--nwins[w->srv])
+        mmu_winners &= ~(1u << w->srv);
 }
 
 /* [a, a + n) of request k's client lent to server s (current, protected) for the request, read and write if wr */
-KMMU static int win_make(struct krec *k, struct proc *s, u32 a, u32 n, int wr)
+KMMU __attribute__((optimize("no-function-cse"))) static int win_make_i(struct krec *k, struct proc *s, u32 a, u32 n, int wr)
 {
     int si = (int)(s - procs);
     struct tree *t = &trees[si];
@@ -876,6 +1008,7 @@ KMMU static int win_make(struct krec *k, struct proc *s, u32 a, u32 n, int wr)
             w = &wins[i];
     if (!w)
         return -ENOMEM;
+    PF(pf_w++;)
     w->k = k;
     w->a = a;
     w->n = n;
@@ -883,19 +1016,29 @@ KMMU static int win_make(struct krec *k, struct proc *s, u32 a, u32 n, int wr)
     w->wr = (u8)wr;
     w->sync = 0;
     w->nb = 0;
+    w->idp = (u8)svc_any();             /* (s is current: give and peer run in the server) */
+    w->pown = 0;
     k->nwin++;
+    nwins[si]++;
     mmu_winners |= SLOT(s);
     int e = 0;
     u32 p = a & ~PGM, last = (a + n - 1) & ~PGM;
+    const struct proc *c = k->m.client;
     for (;; p += MMU_PG) {
         u32 lo, hi;
         wpart(w, p, &lo, &hi);
-        if (own_page(s, p)) {
+        int code = c && c->csize && ovl(p, c->code, c->csize);
+        int whole = lo == p && hi - lo == MMU_PG && !code;
+        /* wholly the client's own memory (never the server's then): a service's part page is mapped as it is too
+         * (D60 stage 3, as built: it could ask for those bytes anyway; the copies were most of a confined fsd's
+         * cost); a page of the kernel's or another process's is bounced */
+        int cw = (whole || w->idp) && !code && c && user_ok_wr(c, p, MMU_PG);
+        if (!cw && own_page(s, p)) {
             if (wr) {
                 e = -EFAULT;            /* (a buffer to write in the server's own memory: not the client's) */
                 break;
             }
-        } else if (wwhole(w, p)) {
+        } else if (whole) {
             if (dget(t->root, p) & D_VALID) {
                 e = -EBUSY;
                 break;
@@ -904,6 +1047,18 @@ KMMU static int win_make(struct krec *k, struct proc *s, u32 a, u32 n, int wr)
                 e = -ENOMEM;
                 break;
             }
+        } else if (cw) {
+            u32 d = dget(t->root, p);
+            if (d & D_VALID) {          /* a sibling window of the request maps it already (they end together) */
+                if ((d & ~PGM) != p || (wr && (d & D_WP))) {
+                    e = -EBUSY;
+                    break;
+                }
+            } else if (dset(t->root, p, p | D_PAGE | cmode(p) | D_VALID | (wr ? 0 : D_WP))) {
+                e = -ENOMEM;
+                break;
+            } else
+                w->pown |= (u8)wbit(w, p);
         } else {
             int b = w->nb < WIN_BNC ? bnc_get(si, p, lo, hi, wr) : -1;
             if (b < 0) {
@@ -922,6 +1077,20 @@ KMMU static int win_make(struct krec *k, struct proc *s, u32 a, u32 n, int wr)
     return e;
 }
 
+KMMU static void win_drop(struct win *w, int back)
+{
+    PF(u32 t0 = hr_time();)
+    win_drop_i(w, back);
+    PF(pf_wd += hr_time() - t0;)
+}
+KMMU static int win_make(struct krec *k, struct proc *s, u32 a, u32 n, int wr)
+{
+    PF(u32 t0 = hr_time();)
+    int e = win_make_i(k, s, a, n, wr);
+    PF(pf_wm += hr_time() - t0;)
+    return e;
+}
+
 /* ---- the sync (5.7): a window's bounce bytes and the client's page ---- */
 KMMU static void wsync(struct win *w, int out)
 {
@@ -931,9 +1100,9 @@ KMMU static void wsync(struct win *w, int out)
         wpart(w, b->lp, &lo, &hi);
         void *in = (void *)(b->pp + (lo & PGM));
         if (out)
-            memcpy((void *)lo, in, hi - lo);
+            mmu_fcpy((void *)lo, in, hi - lo);
         else
-            memcpy(in, (const void *)lo, hi - lo);
+            mmu_fcpy(in, (const void *)lo, hi - lo);
     }
     w->sync = (u8)out;
 }
@@ -958,6 +1127,12 @@ KMMU static int mmu_callok_(struct proc *p, u32 a, u32 n, int wr)
             wsync(w, 1);
             mmu_syncing |= SLOT(p);
         }
+    }
+    for (int i = 0; wr != 2 && !ok && i < NSHMT; i++) {     /* D60 stage 3: a shared region it took */
+        const struct shmt *e = &shms[i];
+        if (e->size && e->taken && e->to == p->pid && a >= e->base && a + n >= a && a + n <= e->base + e->size &&
+            !(wr && e->ro))
+            ok = 1;
     }
     irq_restore(s);
     return wr == 2 ? 0 : ok;
@@ -1030,7 +1205,7 @@ KMMU KHOT static u8 *slot_get(struct proc *s, int *k)
         *k = j;
         u8 *sl = (u8 *)(*pg + (u32)(j % SPP) * SLOTSZ);
         if (ib->used[j])                /* the copies of the slot's last request: nothing of it shows */
-            memset(sl + SLOTHDR, 0, (u32)ib->used[j] * 4u);
+            mmu_fzero(sl + SLOTHDR, (u32)ib->used[j] * 4u);
         ib->used[j] = 0;
         return sl;
     }
@@ -1065,7 +1240,7 @@ KMMU KHOT static int kcopy(struct krec *k, u8 *sl, u32 *used, u32 *ptr, u32 at, 
     u32 off = (*used + 3) & ~3u;
     if (k->ncopy >= NKCOPY || n > SLOTSZ || off + n > SLOTSZ)
         return -ENOMEM;
-    memcpy(sl + off, (const void *)at, n);
+    mmu_fcpy(sl + off, (const void *)at, n);
     struct kcopy *c = &k->c[k->ncopy++];
     c->at = at;
     c->len = (u16)n;
@@ -1174,11 +1349,11 @@ KMMU static void rec_undo(struct krec *k)
 }
 
 /* D60 5.8: may server s see client c's whole view (D41's lend)? SYS_debug's rule (dbg.c's may()): never init, a
- * process without a parent, a priv one (the disk service), a system one or one ending; root may see the others; any
- * other user only a client of the same real and effective user that is not set-user-id and not NODEBUG */
+ * process without a parent, a priv one (the disk service) or one ending; root may see the others; any other user only
+ * a client of the same real and effective user that is not set-user-id and not NODEBUG */
 KMMU static int may_see(const struct proc *s, const struct proc *c)
 {
-    if (c->pid <= 1 || !c->ppid || c->priv || (sysmask & SLOT(c)) || c->exiting || c->state == P_ZOMBIE)
+    if (c->pid <= 1 || !c->ppid || c->priv || c->exiting || c->state == P_ZOMBIE)
         return 0;
     return s->uid == 0 || (s->uid == c->uid && s->ruid == c->ruid && c->uid == c->ruid && !(c->dbgf & DBGF_NODEBUG));
 }
@@ -1194,7 +1369,7 @@ KMMU static void lend_old(struct tree *t, struct proc *c)
 /* ipc_recv gave request k to current: its copy in current's inbox (*slot), the buffers copied and lent. 0, or the
  * error the request is answered with (-ENOMEM: no slot, copy or window; -EACCES: a program's request to a protected
  * server that could not debug its client) */
-KMMU KHOT static int mmu_give_(struct krec *k, u32 *out)
+KMMU KHOT static int mmu_give_i(struct krec *k, u32 *out)
 {
     struct proc *s = current, *c = k->m.client;
     int si = (int)(s - procs), j;
@@ -1215,18 +1390,11 @@ KMMU KHOT static int mmu_give_(struct krec *k, u32 *out)
     k->sj = (u8)j;
     ibx[si]->rec[j] = k;
     k->ncopy = k->nwin = k->rw = k->done = 0;
-    int sys = (sysmask & SLOT(s)) != 0, e = 0;
+    int e = 0;
     struct tree *t = &trees[si];
-    if (sys) {                          /* (a system process: the copies only, no tree changes) */
-        u32 used = SLOTHDR;
-        if (k->kp && (e = declare(k, s, sl, &used, 0)))
-            slot_put(k, slot_used(k));
-        *out = (u32)sl;
-        return e;
-    }
-    int may = !c || may_see(s, c);
-    if (!k->kp && c && may && (t->lent & SLOT(c))) {    /* (the common case: the client's view still lent; the rule
-                                                         * asked again, the ids may have changed since) */
+    int may = !c || k->ex || may_see(s, c);
+    if (!k->kp && !k->ex && c && may && (t->lent & SLOT(c))) {  /* (an old server's common case: the client's view still
+                                                         * lent; the rule asked again, the ids may have changed since) */
         *out = (u32)sl;
         return 0;
     }
@@ -1234,10 +1402,15 @@ KMMU KHOT static int mmu_give_(struct krec *k, u32 *out)
     if (!k->kp) {
         if (c && !t->root)
             e = -ENOMEM;                /* (no tree: never given unchecked, build() would lend it) */
-        else if (c) {
-            /* D60 5.8 (an old server; every server is one until stage 3 marks ports PEER_EXACT): the whole client
-             * only when SYS_debug's rule would let the server debug it: root, or the same user with a client that is
-             * not set-user-id and not NODEBUG */
+        else if (c && k->ex) {
+            /* D60 5.5 (a server that asks for what it touches): exactly the buffers the client declared */
+            if (t->lent & SLOT(c))
+                unlend(t, s, c);        /* (a lend kept from before the port was marked) */
+            for (u32 i = 0; i < k->ndv && !e; i++)
+                e = win_make(k, s, k->dva[i], k->dvn[i], (k->dvw >> i) & 1);
+        } else if (c) {
+            /* D60 5.8 (an old server: its port is not PEER_EXACT): the whole client only when SYS_debug's rule would
+             * let the server debug it: root, or the same user with a client that is not set-user-id and not NODEBUG */
             if (may)
                 lend_old(t, c);
             else {
@@ -1273,7 +1446,7 @@ KMMU KHOT static void mmu_take_(struct krec *k)
         k->m.a[i] = (k->rw & (1u << i)) ? k->orig[i] : d->a[i];
     for (int i = 0; i < k->ncopy; i++)
         if (k->c[i].wr)
-            memcpy((void *)k->c[i].at, (const u8 *)k->slot + k->c[i].off, k->c[i].len);
+            mmu_fcpy((void *)k->c[i].at, (const u8 *)k->slot + k->c[i].off, k->c[i].len);
     k->done = 1;
 }
 
@@ -1294,13 +1467,338 @@ KMMU KHOT static struct umsg *mmu_held_(struct umsg *m)
 
 /* k ends (ipc_finish: the reply, the server's end, a refusal): its windows go (an answered RW window's bounce bytes
  * back to the client first), its slot is free */
-KMMU KHOT static void mmu_end_(struct krec *k)
+KMMU KHOT static void mmu_end_i(struct krec *k)
 {
     if (!k->nwin)
         return slot_put(k, slot_used(k));
     u16 sr = enter();
     rec_undo(k);
     leave(sr);
+}
+
+/* ======== D60 stage 3 (docs/d60-full-protection.md 3.1, 5.5, 6.2, 7.4): every process confined ========
+ * Beside its view and the windows of the requests it holds, a process's tree has its grants: the register pages of the
+ * device it claimed (inhibited, whatever the address), its claim's DMA memory, and the shared regions it took. A
+ * program's request lends nothing but what its client declared (SYS_callv) and what a server trusted to ask asks for
+ * (SYS_peer: a service the service manager started, or a server that could debug the client); a port not marked
+ * PEER_EXACT is an old server's, which gets D41's lend by SYS_debug's rule (5.8). */
+const struct ucalldecl *mmu_decl;       /* (resident: set by syscall.c's SYS_callv for the call it makes) */
+
+KMMU static int gflip(const struct grant *g, int in)
+{
+    struct tree *t = &trees[g->slot];
+    return t->root ? tflip(t->root, g->lo, g->hi, in ? D_VALID | g->how : TIDY) : 0;
+}
+
+KMMU static int mmu_grant_(struct proc *p, u32 lo, u32 hi, u32 how)
+{
+    int pi = (int)(p - procs);
+    struct grant *g = 0;
+    lo &= ~PGM;
+    hi = (hi + PGM) & ~PGM;
+    for (int i = 0; i < NGRANT; i++) {
+        if (grants[i].hi && grants[i].slot == pi && grants[i].lo == lo)
+            return 0;                   /* (granted already: a second claim's DMA memory in the same pages) */
+        if (!grants[i].hi && !g)
+            g = &grants[i];
+    }
+    if (!g || hi <= lo)
+        return -ENOMEM;
+    g->lo = lo;
+    g->hi = hi;
+    g->slot = (u8)pi;
+    g->how = (u8)how;
+    u16 s = enter();
+    int e = gflip(g, 1);
+    if (e) {
+        gflip(g, 0);                    /* not kept half made */
+        g->hi = 0;
+    }
+    if (trees[pi].root == loaded)
+        fl_n |= 1;                      /* (a 040's prefetch may have left an invalid instruction entry: as mmu_block_) */
+    leave(s);
+    return e ? -ENOMEM : 0;
+}
+
+KMMU static void mmu_ungrant_(struct proc *p, u32 lo)
+{
+    int pi = (int)(p - procs);
+    lo &= ~PGM;
+    u16 s = enter();
+    for (int i = 0; i < NGRANT; i++)
+        if (grants[i].hi && grants[i].slot == pi && grants[i].lo == lo) {
+            gflip(&grants[i], 0);
+            grants[i].hi = 0;
+        }
+    leave(s);
+}
+
+/* SYS_peer PEER_RD / PEER_WR by current, serving request k, for [a, a + n) of its client (ipc.c checked that the range
+ * is the client's memory or a window it holds): 0 if current may touch it now. Within a window of the request (the
+ * client's declaration, an earlier ask) or an old server's lend: at once. Else only a server trusted to ask (a service,
+ * or one that could debug the client) gets it lent, until the request ends; any other server -EFAULT (5.5) */
+KMMU static int wover(const struct win *w, u32 a, u32 n)       /* w and [a, a + n) share a page */
+{
+    return (a & ~PGM) <= ((w->a + w->n - 1) & ~PGM) && (w->a & ~PGM) <= ((a + n - 1) & ~PGM);
+}
+KMMU static long mmu_peer_(struct krec *k, u32 a, u32 n, int wr)
+{
+    struct proc *s = current, *c = k->m.client;
+    int si = (int)(s - procs);
+    if (!n)
+        return 0;
+    if (!c || (trees[si].lent & SLOT(c)))
+        return 0;                       /* (an old server's whole-client lend) */
+    for (int i = 0; i < NWIN; i++) {
+        const struct win *w = &wins[i];
+        if (w->k == k && w->srv == si && a >= w->a && a + n <= w->a + w->n && (w->wr || !wr))
+            return 0;
+    }
+    if (!svc_any() && !may_see(s, c))
+        return -EFAULT;                 /* a server any user runs: only what its client declared */
+    u16 sr = enter();
+    int e = win_make(k, s, a, n, wr);
+    if (e == -EBUSY || e == -ENOMEM) {
+        /* a page of it is already the request's (an earlier window): the windows sharing a page with it and it made
+         * one (their bytes back to the client first) */
+        u32 lo = a, hi = a + n;
+        int any = 0, more = 1;
+        while (more) {
+            more = 0;
+            for (int i = 0; i < NWIN; i++) {
+                struct win *w = &wins[i];
+                if (w->k == k && w->srv == si && wover(w, lo, hi - lo)) {
+                    if (w->a < lo)
+                        lo = w->a;
+                    if (w->a + w->n > hi)
+                        hi = w->a + w->n;
+                    wr |= w->wr;
+                    win_drop(w, 1);
+                    any = more = 1;
+                }
+            }
+        }
+        if (any)
+            e = win_make(k, s, lo, hi - lo, wr);
+    }
+    leave(sr);
+    return e;
+}
+
+/* ---- SYS_shm (7.4) ---- */
+KMMU static struct shmt *shm_find(u32 a, int pid, int as_to)
+{
+    for (int i = 0; i < NSHMT; i++) {
+        struct shmt *e = &shms[i];
+        if (e->size && a - e->base < e->size && (as_to ? e->to == pid : e->owner == pid))
+            return e;
+    }
+    return 0;
+}
+
+/* the region at base goes from its owner to a holder (the owner freed it or ended): 1, or 0 when nobody holds it (its
+ * offers withdrawn: the caller frees it) */
+KMMU static int shm_handover(u32 base, int from)
+{
+    struct shmt *h = 0;
+    for (int i = 0; i < NSHMT; i++) {
+        struct shmt *e = &shms[i];
+        if (e->size && e->base == base && e->owner == from) {
+            if (!e->taken || e->to == from)
+                e->size = 0;            /* an offer not taken is withdrawn */
+            else if (!h)
+                h = e;
+        }
+    }
+    if (!h)
+        return 0;
+    for (int i = 0; i < NSHMT; i++)
+        if (shms[i].size && shms[i].base == base)
+            shms[i].owner = h->to;
+    if (!h->claim)
+        mem_set_owner((void *)base, (u32)h->to);    /* counted to the holder now, freed at its end */
+    return 1;
+}
+
+/* a process ends (mmu_forget_): its shares go, the regions it owned go to a holder */
+KMMU static void shm_exit(int pid)
+{
+    for (int i = 0; i < NSHMT; i++)     /* (a region handed to it: on to another holder below, or freed with its memory) */
+        if (shms[i].size && shms[i].to == pid)
+            shms[i].size = 0;
+    for (int i = 0; i < NSHMT; i++)
+        if (shms[i].size && shms[i].owner == pid) {
+            u32 b = shms[i].base;
+            if (!shm_handover(b, pid))
+                for (int j = 0; j < NSHMT; j++)
+                    if (shms[j].base == b)
+                        shms[j].size = 0;       /* nobody holds it: freed with the process's memory */
+        }
+}
+
+/* SYS_memfree of a region the caller owns: 1 if a holder keeps it (the caller's view loses it, the memory stays) */
+KMMU static int mmu_shmfree_(u32 base)
+{
+    int pid = current->pid;
+    if (!shm_find(base, pid, 0))
+        return 0;
+    u16 s = enter();
+    int kept = shm_handover(base, pid);
+    if (kept) {
+        struct tree *t = &trees[current - procs];
+        for (int i = 0; i < NREG; i++)
+            if (current->reg[i].base == base && t->root)
+                tflip(t->root, base, base + current->reg[i].size, TIDY);
+    }
+    leave(s);
+    return kept;
+}
+
+KMMU static long mmu_shm_(u32 op, u32 a, u32 arg)
+{
+    struct proc *p = current;
+    int pid = p->pid;
+    struct shmt *e = 0;
+    if (op == SHM_OFFER) {
+        u32 size = 0;
+        int claim = 0, n = 0, to = (int)(arg & ~SHMF_RO);
+        for (int i = 0; i < NREG && a; i++)
+            if (p->reg[i].base == a)
+                size = p->reg[i].size;
+        if (!size && drv_dmamem(a, &size))
+            claim = 1;
+        if (!size)
+            return -EINVAL;             /* not a region of the caller's, nor its claim's DMA memory */
+        struct proc *q = proc_by_pid(to);
+        if (!q || q == p || q->exiting || q->state == P_ZOMBIE)
+            return -ESRCH;
+        for (int i = 0; i < NSHMT; i++) {
+            struct shmt *x = &shms[i];
+            if (!x->size) {
+                if (!e)
+                    e = x;
+            } else if (x->owner == pid) {
+                n++;
+                if (x->base == a && x->to == to)
+                    return -EEXIST;
+            }
+        }
+        if (!e || n >= NSHM)
+            return -ENOMEM;
+        e->base = a;
+        e->size = size;
+        e->owner = pid;
+        e->to = to;
+        e->ro = (arg & SHMF_RO) != 0;
+        e->taken = 0;
+        e->claim = (u8)claim;
+        return 0;
+    }
+    if (op == SHM_TAKE) {
+        int n = 0;
+        for (int i = 0; i < NSHMT; i++)
+            if (shms[i].size && shms[i].to == pid) {
+                n += shms[i].taken;
+                if (!shms[i].taken && a - shms[i].base < shms[i].size)
+                    e = &shms[i];
+            }
+        if (!e)
+            return -ENOENT;
+        if (n >= NSHM)
+            return -ENOMEM;
+        if (mmu_grant_(p, e->base, e->base + e->size, e->ro ? G_RO : 0))
+            return -ENOMEM;
+        e->taken = 1;
+        return 0;
+    }
+    if (op == SHM_DROP) {
+        if ((e = shm_find(a, pid, 1)) != 0) {           /* a holder lets go */
+            u32 b = e->base;
+            if (e->taken)
+                mmu_ungrant_(p, b);
+            e->size = 0;
+            if (e->owner == pid) {                       /* it was handed the region: on to another, or freed */
+                if (!shm_handover(b, pid)) {
+                    for (int j = 0; j < NSHMT; j++)
+                        if (shms[j].base == b)
+                            shms[j].size = 0;
+                    mem_free((void *)b);
+                }
+            }
+            return 0;
+        }
+        if (!shm_find(a, pid, 0))
+            return -EINVAL;
+        for (int i = 0; i < NSHMT; i++)                 /* the owner: its offers not taken withdrawn */
+            if (shms[i].size && shms[i].owner == pid && a - shms[i].base < shms[i].size && !shms[i].taken)
+                shms[i].size = 0;
+        return 0;
+    }
+    if (op == SHM_INFO) {
+        if (!(e = shm_find(a, pid, 1)) && !(e = shm_find(a, pid, 0)))
+            return -EINVAL;
+        if (!user_ok_wr(p, arg, sizeof(struct ushm)))
+            return -EFAULT;
+        struct ushm *u = (struct ushm *)arg;
+        u->size = e->size;
+        u->owner = (u32)e->owner;
+        u->holders = 0;
+        for (int i = 0; i < NSHMT; i++)
+            if (shms[i].size && shms[i].base == e->base && shms[i].taken)
+                u->holders++;
+        u->flags = e->ro ? SHMF_RO : 0;
+        return 0;
+    }
+    return -EINVAL;
+}
+
+/* SYS_callv (5.5) with protection on: the list checked (each buffer the caller's memory or a window it holds, never
+ * its message), then SYS_call with the list recorded (mmu_rec_) */
+KMMU static long mmu_callv_(u32 port, u32 msg, u32 list)
+{
+    struct ucalldecl d;
+    struct proc *p = current;
+    if (!user_ok_wr(p, msg, sizeof(struct umsg)))
+        return -EFAULT;
+    if (mmu_winners & SLOT(p))
+        mmu_callok_(p, 0, 0, 2);        /* (as SYS_call: its windows' copy pages are the clients' again) */
+    if (!user_ok_call_rd(p, list, 4))
+        return -EFAULT;
+    d.n = *(const u32 *)list;
+    if (d.n > NCALLB)
+        return -EINVAL;
+    if (d.n && !user_ok_call_rd(p, list + 4, d.n * sizeof(struct ucallbuf)))
+        return -EFAULT;
+    memcpy(d.b, (const void *)(list + 4), d.n * sizeof(struct ucallbuf));
+    for (u32 i = 0; i < d.n; i++) {
+        const struct ucallbuf *b = &d.b[i];
+        if (!b->len)
+            continue;
+        if ((b->flags & ~(u32)(CALLB_RD | CALLB_WR)) || (b->addr < msg + sizeof(struct umsg) && msg < b->addr + b->len))
+            return -EINVAL;             /* (an unknown flag; the message itself is never lent: the server has its copy) */
+        if (!(b->flags & CALLB_WR ? user_ok_call_wr(p, b->addr, b->len) : user_ok_call_rd(p, b->addr, b->len)))
+            return -EFAULT;             /* its own memory, or a window it holds (a buffer passed on, 5.6) */
+    }
+    mmu_decl = &d;
+    long r = ipc_call((int)port, (struct umsg *)msg);
+    mmu_decl = 0;
+    return r;
+}
+
+/* SYS_blk_ram's copy (stage 3): n sectors from sector a (bit 31: write) to or from the disk server's buffer b (its
+ * memory, or a window it holds): the RAM disk is never in its view (its ends share pages with the kernel's image) */
+KMMU static long mmu_ramdisk_(u32 a, u32 n, u32 b)
+{
+    u32 lba = a & 0x7FFFFFFFu, nb = boot_ram_size / 512;
+    if (n > nb || lba > nb - n)
+        return -EINVAL;
+    if (!(a >> 31 ? user_ok_call_rd(current, b, n * 512) : user_ok_call_wr(current, b, n * 512)))
+        return -EFAULT;
+    if (a >> 31)
+        mmu_fcpy((void *)(boot_ram_pa + lba * 512), (const void *)b, n * 512);
+    else
+        mmu_fcpy((void *)b, (const void *)(boot_ram_pa + lba * 512), n * 512);
+    return 0;
 }
 
 /* p's tree made (D60 section 4): its view, the bundle for root, the clients it serves */
@@ -1328,20 +1826,24 @@ KMMU static void build(struct proc *n, struct tree *t)
             int b = 0;                  /* (a page made a bounce at win_make stays one: its kind is not worked out again) */
             for (int j = 0; j < w->nb; j++)
                 b |= bncs[w->b[j]].lp == p;
-            if (!b && !own_page(n, p) && wwhole(w, p) &&
+            if (!b && !own_page(n, p) && (wwhole(w, p) || (w->pown & wbit(w, p))) &&
                 dset(t->root, p, p | D_PAGE | cmode(p) | D_VALID | (w->wr ? 0 : D_WP)))
                 nomem(n);
             if (p == last)
                 break;
         }
     }
+    for (int i = 0; i < NGRANT; i++)    /* D60 stage 3: its grants */
+        if (grants[i].hi && grants[i].slot == ni && gflip(&grants[i], 1))
+            nomem(n);
     for (int i = 1; i < NPROC; i++)
-        if (serves(&procs[i], n) && !((struct krec *)procs[i].wait_msg)->kp && may_see(n, &procs[i]))
-            lendin(t, &procs[i]);       /* (D41's lend: only a program's request, D60 5.8) */
+        if (serves(&procs[i], n) && !((struct krec *)procs[i].wait_msg)->kp && !((struct krec *)procs[i].wait_msg)->ex &&
+            may_see(n, &procs[i]))
+            lendin(t, &procs[i]);       /* (D41's lend: only a program's request to an old server, D60 5.8) */
 }
 
-/* the tree of slot i given back (the process ended, or is a system one now); its view out of every other tree (a slot
- * given to a new process: only the marks go, its old pages being out of every tree since they were freed) */
+/* the tree of slot i given back (the process ended); its view out of every other tree (a slot given to a new process:
+ * only the marks go, its old pages being out of every tree since they were freed) */
 KMMU static void drop(int i, int others)
 {
     struct tree *t = &trees[i];
@@ -1365,14 +1867,6 @@ KMMU static void drop(int i, int others)
     for (int k = 1; others && k < NPROC; k++)
         if (trees[k].lent & (1u << i))
             unlend(&trees[k], &procs[k], &procs[i]);
-}
-
-KMMU static void setmode(int m)
-{
-    if (mode != m) {
-        mode = (u8)m;
-        mmu_ttr(win[m], fam);
-    }
 }
 
 /* the switch's slow part: the tree made, a stale lend taken back, the bundle in or out */
@@ -1401,15 +1895,11 @@ KMMU __attribute__((noinline)) static void fix(struct proc *n, struct tree *t)
     }
 }
 
-KMMU static void mmu_switch_(struct proc *n)
+KMMU static void mmu_switch_i(struct proc *n)
 {
     if (n->pid == 0 || n->exiting)  /* idle and a process in proc_exit never run user code again */
         return;
     int i = (int)(n - procs);
-    if (sysmask & (1u << i)) {
-        setmode(0);
-        return;
-    }
     struct tree *t = &trees[i];
     if (__builtin_expect(!t->root || t->lent || t->upd != (upd_pa && n->uid == 0), 0))
         fix(n, t);
@@ -1427,34 +1917,28 @@ KMMU static void mmu_switch_(struct proc *n)
     }
 }
 
-void mmu_sysmark(struct proc *p)
-{
-    if (p->dbgf & DBGF_TRACED)
-        dbg_sysmark(p);                 /* D54 section 4: a system process has no debugger */
-    if (sysmask & SLOT(p))
-        return;
-    sysmask |= SLOT(p);
-    if (mmu_on)                         /* its tree goes (and from now on, also on its way back to user mode now) */
-        mmu_ops->forget(p);
-}
-/* the slot is given to a new process: a protected one, nothing of the slot's last tree left */
+/* the slot is given to a new process: nothing of the slot's last tree left */
 void mmu_slot_new(struct proc *p)
 {
-    sysmask &= ~SLOT(p);
     if (mmu_on)
         mmu_ops->forget(p);
 }
-int mmu_is_sys(const struct proc *p) { return (sysmask & SLOT(p)) != 0; }
 
-/* proc_exit, at its start (before seg_put drops the code), a process made a system one (mmu_sysmark), and a slot given to a new process: never seen again */
+static void shm_exit(int pid);
+
+/* proc_exit, at its start (before seg_put drops the code, before its memory is freed), and a slot given to a new
+ * process: never seen again */
 KMMU static void mmu_forget_(struct proc *p)
 {
     u16 s = enter();
-    int sys = (sysmask & SLOT(p)) && !p->exiting;
-    wins_forget((int)(p - procs), sys); /* D60: its windows (a system one: their bytes back with the clients first) */
-    drop((int)(p - procs), !sys);       /* made a system one: its lends stay (a server may be serving it) */
-    if (p == current && sys)
-        setmode(0);                     /* every access let through, also on its way back now */
+    int i = (int)(p - procs);
+    wins_forget(i, 0);                  /* D60: its windows */
+    drop(i, 1);
+    for (int j = 0; j < NGRANT; j++)    /* D60 stage 3: its grants (the tree is gone) */
+        if (grants[j].slot == i)
+            grants[j].hi = 0;
+    if (p->exiting)
+        shm_exit(p->pid);               /* what it held of others' goes, what it owned goes to a holder (7.4) */
     leave(s);
 }
 
@@ -1466,7 +1950,7 @@ KMMU static void mmu_redo_(struct proc *p)
     fl_g = 1;                           /* the segment's global entries go, whoever made them */
     if (trees[i].root) {
         drop(i, 1);
-        if (p == current && !(sysmask & (1u << i)))
+        if (p == current)
             mmu_switch_(p);             /* it goes on running: its tree now */
     }
     tflush();
@@ -1526,6 +2010,12 @@ KMMU static void mmu_freed_(u32 data, u32 len, u32 owner)
             tflip(trees[i].root, lo, hi, TIDY);
     if (owner == SEG_OWNER)
         fl_g = 1;
+    for (int i = 0; i < NGRANT; i++)    /* D60 stage 3: grants and shares of the memory are gone with it */
+        if (grants[i].hi && grants[i].lo >= lo && grants[i].hi <= hi)
+            grants[i].hi = 0;
+    for (int i = 0; i < NSHMT; i++)
+        if (shms[i].size && shms[i].base - data < len)
+            shms[i].size = 0;
     leave(s);
 }
 
@@ -1702,7 +2192,8 @@ not_asked:
     memset(trees, 0, NPROC * sizeof *trees);
     /* D60 stage 2: the records, the inboxes' list, the windows and the bounce pages' tables (protection on only) */
     u32 rb = NPROC * sizeof *recs, ib = NPROC * sizeof *ibx, wb = NWIN * sizeof *wins, bb = NBNC * sizeof *bncs;
-    u8 *s2 = res == 3 ? mem_alloc(rb + ib + wb + bb, 0, 0) : 0;
+    u32 gb = NGRANT * sizeof *grants, sb = NSHMT * sizeof *shms;    /* D60 stage 3: grants and shares */
+    u8 *s2 = res == 3 ? mem_alloc(rb + ib + wb + bb + gb + sb, 0, 0) : 0;
     if (!s2) {
         mmu_regs_load(&off);
         mem_free(kblk);
@@ -1710,7 +2201,9 @@ not_asked:
         trees = 0;
         return (void)off_why("out of memory for the tables");
     }
-    memset(s2, 0, rb + ib + wb + bb);
+    memset(s2, 0, rb + ib + wb + bb + gb + sb);
+    grants = (struct grant *)(s2 + rb + ib + wb + bb);
+    shms = (struct shmt *)(s2 + rb + ib + wb + bb + gb);
     recs = (struct krec *)s2;
     ibx = (struct inbox **)(s2 + rb);
     wins = (struct win *)(s2 + rb + ib);
@@ -1731,6 +2224,43 @@ not_asked:
             bi->attn & 0x80 ? "68060" : bi->attn & 0x08 ? "68040" : "68030", MMU_PG / 1024, tbytes / 1024);
 }
 
+
+KMMU static void mmu_switch_(struct proc *n)
+{
+#ifdef MMU_PROF
+    u32 t = hr_time(); u32 *ld = loaded;
+    mmu_switch_i(n);
+    pf_s += hr_time() - t; pf_ns++; if (ld != loaded) pf_r++;
+#else
+    mmu_switch_i(n);
+#endif
+}
+KMMU KHOT static int mmu_give_(struct krec *k, u32 *out)
+{
+#ifdef MMU_PROF
+    u32 t = hr_time();
+    int r = mmu_give_i(k, out);
+    pf_g += hr_time() - t;
+    if (++pf_n % 400 == 0) {
+        kprintf("prof: 400 gives %u ticks, ends %u, switches %u (%u, %u roots), flusha %u flushan %u (%u), bnc new %u, wins %u (make %u, drop %u), pushes %u (%u)\n",
+                pf_g, pf_e, pf_s, pf_ns, pf_r, pf_fa, pf_fan, pf_ft, pf_bn, pf_w, pf_wm, pf_wd, pf_ncp, pf_cp);
+        pf_ncp = pf_cp = pf_wm = pf_wd = pf_ft = pf_g = pf_e = pf_s = pf_ns = pf_r = pf_fa = pf_fan = pf_bn = pf_w = 0;
+    }
+    return r;
+#else
+    return mmu_give_i(k, out);
+#endif
+}
+KMMU KHOT static void mmu_end_(struct krec *k)
+{
+#ifdef MMU_PROF
+    u32 t = hr_time();
+    mmu_end_i(k);
+    pf_e += hr_time() - t;
+#else
+    mmu_end_i(k);
+#endif
+}
 /* ---- a fault (D41 section 10) ---- */
 KMMU static int mmu_fault_(const u8 *f, u32 pc)
 {
@@ -1802,8 +2332,16 @@ static int nop_g(struct krec *k, u32 *s) { (void)k; *s = (u32)k; return 0; }
 static void nop_k(struct krec *k) { (void)k; }
 static int nop_c(struct proc *p, u32 a, u32 n, int w) { (void)p; (void)a; (void)n; (void)w; return 0; }
 static struct umsg *nop_h(struct umsg *m) { (void)m; return 0; }
+static int nop_gr(struct proc *p, u32 a, u32 b, u32 c) { (void)p; (void)a; (void)b; (void)c; return 0; }
+static void nop_ug(struct proc *p, u32 a) { (void)p; (void)a; }
+static long nop_pe(struct krec *k, u32 a, u32 n, int w) { (void)k; (void)a; (void)n; (void)w; return 0; }
+static long nop_sh(u32 op, u32 a, u32 b) { (void)a; (void)b; return op - 1 < 3 ? 0 : -EINVAL; }   /* D60 7.4: without
+                                         * protection SHM_OFFER, TAKE and DROP change nothing (all memory is visible) */
+static int nop_sf(u32 a) { (void)a; return 0; }
+static long nop_cv(u32 a, u32 b, u32 c) { (void)a; (void)b; (void)c; return -ENOSYS; }
 static const struct mmu_ops mmu_ops_off = { nop_p, nop_p, nop_p, nop_b, nop_v, nop_3, nop_i, nop_v, nop_f,
-                                            nop_r, nop_m, nop_g, nop_k, nop_k, nop_c, nop_v, nop_h };
+                                            nop_r, nop_m, nop_g, nop_k, nop_k, nop_c, nop_v, nop_h,
+                                            nop_gr, nop_ug, nop_pe, nop_sh, nop_sf, nop_cv, nop_cv };
 const struct mmu_ops *mmu_ops = &mmu_ops_off;
 
 /* the live table: read-only data in the span (.zhwmmu.rodata), the only place that holds span functions' addresses;
@@ -1811,7 +2349,8 @@ const struct mmu_ops *mmu_ops = &mmu_ops_off;
 __attribute__((section(".zhwmmu.rodata"))) static const struct mmu_ops mmu_ops_on = {
     mmu_switch_, mmu_forget_, mmu_redo_, mmu_block_, mmu_upd_gone_, mmu_freed_,
     mmu_hand_, mmu_before_reset_, mmu_fault_,
-    mmu_rec_, mmu_unrec_, mmu_give_, mmu_take_, mmu_end_, mmu_callok_, mmu_unsync_, mmu_held_ };
+    mmu_rec_, mmu_unrec_, mmu_give_, mmu_take_, mmu_end_, mmu_callok_, mmu_unsync_, mmu_held_,
+    mmu_grant_, mmu_ungrant_, mmu_peer_, mmu_shm_, mmu_shmfree_, mmu_callv_, mmu_ramdisk_ };
 
 /* the only writer of mmu_on besides mmu_before_reset_ (tools/check-init.py): armed exactly while it is set */
 KMMU __attribute__((noinline)) static void mmu_arm(u8 f)

@@ -99,7 +99,7 @@ static void size_checks(void)
         ok = ok && !fill() && sys3(12, (u32)fd, (u32)gb, big) > 0 && written(sizeof(struct udirent));
         ok = ok && !fill() && sys3(43, (u32)gb, 0, big) == 0 && written(sizeof(struct ustatfs));
         ok = ok && !fill() && sys3(71, 0, (u32)gb, big) == 0 && written(sizeof(struct umountinfo));
-        ok = ok && !fill() && sys3(22, (u32)gb, big, 0) == 0 && written(16);
+        ok = ok && !fill() && sys3(22, (u32)gb, big, 0) == 0 && written(big ? 20 : 16);  /* D60: the fifth word */
     }
     ok = ok && !fill() && sys3(13, (u32)"/", (u32)gb, 4) == -EINVAL && sys3(22, (u32)gb, 4, 0) == -EINVAL && written(0);
     ok = ok && !fill() && sys3(13, (u32)"/", (u32)gb, 31) == 0 && written(28);   /* D49 8: 29-31 get the 28 */

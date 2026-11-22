@@ -149,7 +149,16 @@ static void flush(int cl)
     if (!c->used || c->dead || (!c->npend && !c->lost))
         return;
     volatile const struct dpyring *r = (const struct dpyring *)c->ring;
-    u32 tail = r->tail, used = c->head - tail;
+    u32 tail;
+    if (prot_full()) {                  /* D60 5.5: the client's memory is not ours to read: the tail through its window */
+        struct upost q = { 4, (u32)&tail, 4 };
+        if (sys_post(POST_READ, c->port, &q) < 0) {
+            c->dead = 1;
+            return;
+        }
+    } else
+        tail = r->tail;
+    u32 used = c->head - tail;
     if (used > c->nrec)                 /* the client's tail is nonsense: nothing fits, the client is told */
         used = c->nrec;
     int put = 0, rc = 0;
@@ -1086,7 +1095,13 @@ static int req(struct umsg *m)
             return -ENOENT;
         if (a[1] == WS_TITLE) {
             int whole = peer(m, PEER_RD, a[2], DPY_TITLE - 1) == 0, i = 0;    /* else byte by byte (its memory's end) */
-            for (; i < DPY_TITLE - 1; i++) {
+            u32 lim = DPY_TITLE - 1, pg = 4096 - (a[2] & 4095);
+            if (!whole && pg < lim && peer(m, PEER_RD, a[2], pg) == 0) {
+                whole = 1;              /* D60: to its page's end (memory with protection on is whole pages; asking
+                                         * byte by byte would use up the request's windows) */
+                lim = pg;
+            }
+            for (; i < (int)lim; i++) {
                 if (!whole && peer(m, PEER_RD, a[2] + (u32)i, 1) < 0)
                     return -EFAULT;
                 char ch = ((const char *)a[2])[i];
@@ -1094,6 +1109,8 @@ static int req(struct umsg *m)
                     break;
                 w->title[i] = ch;
             }
+            if (i == (int)lim && lim < DPY_TITLE - 1)
+                return -EFAULT;         /* (past its memory's end, as byte by byte said) */
             w->title[i] = 0;
             win_title((int)(w - wins));
             ev_wm(EV_WM_TITLE, w->id, 0, 0, 0, 0, 0, 0);

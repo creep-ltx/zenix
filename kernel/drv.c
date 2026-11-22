@@ -172,10 +172,42 @@ static int quiesce(const struct claim *c)
  * it when its zombie is reaped (audit 2026-10-28 S2). Not at once: when a driver ends, netd learns it only at its next
  * wait for its children, and until then it may still copy a frame into the send buffers there; when netd ends, the
  * driver still runs until it sees its doorbell close and may still touch the region. */
+/* D60 stage 3 (6.2): the pages of the claim's registers in its holder's tree (the custom chips' page for Paula, CIA-A's
+ * and CIA-B's for the parallel port, Gayle's two card pages besides the slot's window), inhibited; in or out */
+static int regs(const struct claim *c, struct proc *p, int in)
+{
+    u32 a = c->base, b = c->base + c->size;
+    if (c->base == DRV_PAULA || c->base == DRV_PARPORT) {
+        a = c->base & ~0xFFFu;
+        b = a + 0x100;
+    }
+    /* the second and third pages: CIA-B's for the parallel port; Gayle's card status and its configuration (0xDA8000,
+     * 0xDAB000, a page each with 4 KB pages; the IDE's latch and the interrupt enable between them stay the kernel's)
+     * for the PC Card slot */
+    u32 x = c->base == DRV_PARPORT ? DRV_PAR_PRA : c->base == DRV_PCMCIA && MMU_PG == 4096 ? 0xDA8000u : 0;
+    u32 y = c->base == DRV_PCMCIA && MMU_PG == 4096 ? 0xDAB000u : 0;
+    if (!in) {
+        mmu_ungrant(p, a);
+        if (x)
+            mmu_ungrant(p, x);
+        if (y)
+            mmu_ungrant(p, y);
+        return 0;
+    }
+    if (mmu_grant(p, a, b, G_IO) || (x && mmu_grant(p, x, x + 0x100, G_IO)) || (y && mmu_grant(p, y, y + 0x100, G_IO))) {
+        regs(c, p, 0);
+        return -ENOMEM;
+    }
+    return 0;
+}
+
 static void release(struct claim *c, const char *why)
 {
     int stuck = quiesce(c);
     stop_base(c, 0);
+    struct proc *p = proc_by_pid(c->pid);
+    if (p)
+        regs(c, p, 0);                  /* (its DMA memory stays in its tree: it is the driver's until it is reaped) */
     if (stuck)                          /* D46: its DMA may still run: the memory stays the claim's, never freed */
         kprintf("drv: the device at %p did not say it stopped: its DMA memory is kept\n", c->base);
     else if (c->blk)
@@ -210,6 +242,17 @@ void drv_zine(void)
             if (p)
                 proc_kill(p);
         }
+}
+
+/* D60 7.4 (mmu.c's SYS_shm): current holds a claim whose DMA memory starts at a: 1 and its bytes */
+int drv_dmamem(u32 a, u32 *size)
+{
+    for (int i = 0; i < NCLAIM; i++)
+        if (claims[i].pid == current->pid && claims[i].dma == a && a) {
+            *size = claims[i].dmalen;
+            return 1;
+        }
+    return 0;
 }
 
 static struct claim *mine(u32 id)
@@ -297,7 +340,6 @@ long drv_sys(u32 opw, u32 a, u32 b)
         if (current->ppid != srv)
             return -EPERM;              /* only the running network server's children */
     }
-    mmu_sysmark(current);               /* D41 7: a driver: its registers and DMA memory in user mode */
     switch (op) {
     case DRV_HWINFO: {
         u32 n = b ? b : HWINFO_FIRST;
@@ -329,9 +371,11 @@ long drv_sys(u32 opw, u32 a, u32 b)
         if (f < 0)
             return -EBUSY;
         memset(&claims[f], 0, sizeof claims[f]);
-        claims[f].pid = current->pid;
         claims[f].base = a;
         claims[f].size = size;
+        if (regs(&claims[f], current, 1))
+            return -ENOMEM;
+        claims[f].pid = current->pid;
         if (a == DRV_PAULA)
             audio_hold(1);              /* D40: the bell stopped and silent; the log line says the base (0xdff0a0) */
         if (a == DRV_PARPORT) {
@@ -350,10 +394,15 @@ long drv_sys(u32 opw, u32 a, u32 b)
         if (!b || b > DMA_MAX)
             return -EINVAL;
         u32 n = (b + 63) & ~63u;
-        void *blk = mem_alloc(n + 64, h && (h->flags & HW_DT) ? MEM_FASTONLY : 0, DRV_OWNER(c - claims));  /* D46: the
-                                         * Pi's DMA reaches Emu68's RAM only, never chip RAM */
+        void *blk = mem_alloc(n + 64, (h && (h->flags & HW_DT) ? MEM_FASTONLY : 0) | MEM_USER, DRV_OWNER(c - claims));
+                                        /* D46: the Pi's DMA reaches Emu68's RAM only, never chip RAM; D60: whole pages
+                                         * with protection on, valid in the driver's tree */
         if (!blk)
             return -ENOMEM;
+        if (mmu_grant(current, (u32)blk, (u32)blk + n + 64, 0)) {
+            mem_free(blk);
+            return -ENOMEM;
+        }
         c->blk = blk;
         c->dma = ((u32)blk + 63) & ~63u;
         c->dmalen = n;

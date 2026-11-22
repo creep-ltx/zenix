@@ -15,9 +15,7 @@ extern u8 mmu_on;               /* 0: off (every hook does nothing); 1: on, a 68
                                  * by mmu_arm and mmu_before_reset_ (tools/check-init.py) */
 
 void mmu_setup(const struct bootinfo *bi);      /* the boot, after cache_setup, before any process (section 12) */
-void mmu_sysmark(struct proc *p);               /* p is a system process from now on (section 7) */
 void mmu_slot_new(struct proc *p);              /* the slot is given to a new process */
-int mmu_is_sys(const struct proc *p);           /* a system process (section 7) */
 void mmu_disarm(void);                          /* D45 13: the table back to the stubs (the release, protection off) */
 
 /* DESIGN D45 section 13: the runtime code lies in the span .zhwmmu, given back after the boot when protection is off.
@@ -45,7 +43,11 @@ struct krec {
     u8 heap;                    /* from the kernel heap (a call made while the process's own record is in use) */
     u8 done;                    /* answered by the server's reply (its copies and windows go back to the client) */
     u8 sj;                      /* the slot's number in the server's inbox */
+    u8 ex;                      /* D60 stage 3: the port is PEER_EXACT (its server asks for what it touches, 5.8): set
+                                 * by ipc_recv as the port is when the server takes the request */
+    u8 ndv, dvw;                /* SYS_callv: the client's declared buffers (dva/dvn), bit i: buffer i written */
     struct kcopy c[NKCOPY];
+    u32 dva[NCALLB], dvn[NCALLB];
 };
 /* sock.c's table of each SOCK_* op's pointers (the server reads R, writes W): the checks there, the declaration here */
 #define D_BUFR  0x01
@@ -77,7 +79,25 @@ struct mmu_ops {
     int (*callok)(struct proc *, u32, u32, int);
     void (*unsync)(void);
     struct umsg *(*held)(struct umsg *);
+    int (*grant)(struct proc *, u32, u32, u32);
+    void (*ungrant)(struct proc *, u32);
+    long (*peer)(struct krec *, u32, u32, int);
+    long (*shm)(u32, u32, u32);
+    int (*shmfree)(u32);
+    long (*callv)(u32, u32, u32);
+    long (*ramdisk)(u32, u32, u32);
 };
+/* D60 stage 3, SYS_callv: the declaration of the call being made (syscall.c sets it, mmu_rec takes it; resident) */
+extern const struct ucalldecl *mmu_decl;
+extern const struct mmu_ops *mmu_ops;
+#define G_IO 0x40u              /* mmu_grant: a page of registers (inhibited, serialized; CI on the 030) */
+#define G_RO 0x04u              /* mmu_grant: read only */
+/* D60 stage 3 (3.1 items 2, 4, 6): [lo, hi) (rounded out to whole pages) valid in p's tree from now on, beside its view:
+ * a claimed device's registers, its claim's DMA memory, a shared region it took. 0, or -ENOMEM. Nothing without
+ * protection */
+static inline int mmu_grant(struct proc *p, u32 lo, u32 hi, u32 how) { return __builtin_expect(mmu_on, 0) ? mmu_ops->grant(p, lo, hi, how) : 0; }
+static inline void mmu_ungrant(struct proc *p, u32 lo) { if (__builtin_expect(mmu_on, 0)) mmu_ops->ungrant(p, lo); }
+int drv_dmamem(u32 a, u32 *size);       /* drv.c: current holds a claim whose DMA memory starts at a (its bytes) */
 extern const struct mmu_ops *mmu_ops;           /* &the stubs, or &the span's table while protection is on */
 
 /* schedule(), interrupts masked, before switch_to (section 9) */

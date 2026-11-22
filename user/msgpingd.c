@@ -24,7 +24,12 @@
  * says what they got; a stat of where says whether its path argument is a copy in its own message (the kernel's
  * stack never shown). -uid N: serve as user N (a server that may not see its root clients: refused, D60 5.8).
  * Type 10: the client's message, at a[0], rewritten while it is served (next, state, client, kflags), then a[2] 4242
- * and the result 7 (the kernel must not use what the client's memory says: D60 5.1). */
+ * and the result 7 (the kernel must not use what the client's memory says: D60 5.1).
+ * DESIGN D60 stage 3 (tools/mmu-test.sh): its port is marked PEER_EXACT (usys.h), so with full protection it sees only
+ * what its clients declare (SYS_callv); -old makes the port without the mark (an old server: D41's lend of the whole
+ * client when it may debug it, 5.8). Type 11: writes the byte a[1] bytes after a[0] (one past a declared buffer);
+ * type 13: SYS_peer PEER_RD of 4 bytes at a[0], the answer in a[2]; type 14: writes a[0] without its client having
+ * declared it (a server touching memory it was not given). */
 #define FS_OPEN 1
 #define FS_READDIR 6
 #define FS_CLOSE 24
@@ -159,7 +164,7 @@ static int fsdir(struct umsg *m)
 int main(int argc, char **argv)
 {
     const char *pname = "ping";
-    int left = -1, fs = 0, uid = -1;
+    int left = -1, fs = 0, uid = -1, old = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-port") && i + 1 < argc) pname = argv[++i];
         else if (!strcmp(argv[i], "-fs")) fs = 1;
@@ -169,6 +174,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-fsdir")) fs = 5;
         else if (!strcmp(argv[i], "-fswin")) fs = 6;
         else if (!strcmp(argv[i], "-uid") && i + 1 < argc) uid = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "-old")) old = 1;
         else if (!strcmp(argv[i], "-call") && i + 1 < argc) {
             struct umsg c;
             memset(&c, 0, sizeof c);
@@ -177,7 +183,7 @@ int main(int argc, char **argv)
             if (r < 0) { dprintf(1, "msgpingd: %s: the call to %s failed (%d)\n", pname, argv[i], r); return 1; }
         } else left = atoi(argv[i]);
     }
-    int port = sys_port_create(pname);
+    int port = old ? sys3(29, (u32)pname, 0, 0) : sys_port_create(pname);    /* (-old: not marked PEER_EXACT) */
     if (port < 0) { dprintf(1, "msgpingd: port busy\n"); return 1; }
     if (uid >= 0 && sys_setuid((u32)uid) < 0) { dprintf(1, "msgpingd: setuid %d failed\n", uid); return 1; }
     struct umsg *m = sys_recv(port, 1);
@@ -220,6 +226,11 @@ int main(int argc, char **argv)
             m->a[2] = 4242;
             r = 7;
         }
+        else if (m->type == 11) ((volatile char *)m->a[0])[m->a[1]] = 1;
+        else if (m->type == 13) {
+            struct upeermem pm = { m->a[0], 4 };
+            m->a[2] = (u32)sys_peer(m, PEER_RD, &pm);
+        } else if (m->type == 14) *(volatile char *)m->a[0] = 1;
         else r = -1;
         if (left > 0 && --left == 0) { sys_reply(m, r); return 0; }
         m = sys_replyrecv(m, r, port);

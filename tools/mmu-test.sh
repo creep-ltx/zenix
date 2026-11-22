@@ -14,12 +14,17 @@
 # that may not debug its client is refused (-EACCES), the kernel's path arrives as a copy in the server's own message;
 # a filesystem server (msgpingd -fswin on /tmp/w) read into guarded buffers at every alignment, also through itself
 # into the root's server (fwd: a window passed on, the copy pages synced); a read past the end of one's memory is
-# -EFAULT. With +confine (a kernel made DIAG=-DMMU_CONFINE: mounts and reserved ports no longer make their servers
-# system ones, D60 stage 3's preview) the same server is confined: its windows are exact, and a write one byte past
-# the buffer, one before it, or into it after the reply ends it with the protection line naming the client.
+# -EFAULT. The filesystem server's windows are exact: a write one byte past the buffer, one before it, or into it after
+# the reply ends it with the protection line naming the client.
+# DESIGN D60 stage 3 (docs/d60-full-protection.md 3.1, 5.5, 7.4, 13): no process is a system one. A server whose port
+# is PEER_EXACT (msgpingd as built) sees only what its client declared: a write one byte past a declared page ends it;
+# a user's server asking for its client's stack gets -EFAULT, and touching it without asking ends it; a service (the
+# service manager started it: trusted to ask) touching memory it was not given ends too, and is started again by the
+# next call, which its asking then serves. An old server (msgpingd -old: its port not marked) gets D41's lend by
+# SYS_debug's rule. SYS_shm: an offer taken by a child, the bytes shared both ways, the owner's early free (the child
+# keeps the memory, then owns it), a drop.
 # usage: tools/mmu-test.sh [MODEL ...]           (default: 020 030 040 lc040 060 lc060)
-#   MODEL: 020 030 ec030 040 lc040 ec040 060 lc060 ec060, each also with +on (lc060+on: forced with MMU=ON);
-#   030+confine 040+confine 060+confine
+#   MODEL: 020 030 ec030 040 lc040 ec040 060 lc060 ec060, each also with +on (lc060+on: forced with MMU=ON)
 #   MMU_TEST_OFF=1: the kernel made MMU=OFF (the figures to compare with); every model then expects "off"
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
@@ -27,15 +32,11 @@ OUT=${ZENIX_OUT:-$(mktemp -d "${TMPDIR:-/tmp}/zenix-mmu.XXXXXX")}; mkdir -p "$OU
 CPUS="${*:-020 030 040 lc040 060 lc060}"
 make -s BUILD="$BD" all 2>&1 | grep -v 'RWX permissions' | grep -i 'error\|\*\*\*'; [ "${PIPESTATUS[0]}" = 0 ] || { echo "build failed"; exit 1; }
 # a build copy per kernel default: as built (AUTO), MMU=ON, MMU=OFF
-mkb() {     # mkb NAME WORD: $OUT/build-NAME with its kernel set to WORD (none: as built; CONFINE: made DIAG=-DMMU_CONFINE)
+mkb() {     # mkb NAME WORD: $OUT/build-NAME with its kernel set to WORD (none: as built)
     local b="$OUT/build-$1"
     [ -d "$b" ] && return 0
     cp -a "$BD" "$b" || return 1
-    if [ "$2" = CONFINE ]; then         # (DIAG is not tracked: the kernel's objects go first, as mmubench-test does)
-        rm -f "$b"/*.o "$b"/kernel*.bin "$b"/kernel*.elf
-        { make -s BUILD="$b" DIAG=-DMMU_CONFINE "$b/kernel.bin" && make -s BUILD="$b" DIAG=-DMMU_CONFINE all; } \
-            >"$b.log" 2>&1 || { echo "FAIL: the build with MMU_CONFINE (see $b.log)"; return 1; }
-    elif [ -n "$2" ]; then
+    if [ -n "$2" ]; then
         # the copy brought up to date first, so the floppy's make cannot link a new kernel.bin over the patched one
         make -s BUILD="$b" all >/dev/null 2>&1 || { echo "FAIL: the build copy for $2"; return 1; }
         python3 tools/kopts.py "$b/kernel.bin" "$2" >/dev/null || return 1
@@ -72,13 +73,14 @@ send /tests/crashpure poke; echo status \$?\r
 wait $P 30
 send echo alive\r
 wait $P 30
-send msgpingd > /dev/null &\r
+send msgpingd -old > /dev/null &\r
 wait $P 30
 sleep 2
 send msgping rewrite\r
 wait $P 30
-send msgpingd -port pu -uid 1000 > /dev/null & sleep 1; msgping call pu; dmesg | grep 'may not see'\r
+send msgpingd -old -port pu -uid 1000 > /dev/null & sleep 1; msgping call pu; dmesg | grep 'may not see'\r
 wait $P 30
+@EXACT@
 send rm -f /tmp/wsrc; mkdir -p /tmp/w; msgpingd -port w -fswin & sleep 1; svctest mount w /tmp/w\r
 wait $P 30
 send cat /tmp/w/f > /tmp/wsrc; ls /tmp/w | wc -l; msgping winread /tmp/w/f\r
@@ -99,8 +101,19 @@ wait $P 30
 stop
 EOF
 
-# the confined server's stray writes (+confine): each ends msgpingd -fswin, which is started again for the next
-sed -e '/^@CONFINE@$/r /dev/stdin' -e '/^@CONFINE@$/d' "$OUT/script.txt" >"$OUT/script-confine.txt" <<EOF
+# D60 stage 3: servers that see only what is declared or asked for; a service's stray write; SYS_shm
+sed -i -e '/^@EXACT@$/r /dev/stdin' -e '/^@EXACT@$/d' "$OUT/script.txt" <<EOF
+send msgpingd -port px > /dev/null & sleep 1; msgping past px\r
+wait $P 30
+send msgpingd -port py -uid 1000 > /dev/null & sleep 1; msgping peer py; msgping wild py\r
+wait $P 30
+send svctest reg pz 0 /bin/msgpingd -port pz; msgping wild pz; msgping peer pz; msgping peer pz\r
+wait $P 30
+send msgping shm; echo shm-status \$?\r
+wait $P 30
+EOF
+# the confined filesystem server's stray writes: each ends msgpingd -fswin, which is started again for the next
+sed -i -e '/^@CONFINE@$/r /dev/stdin' -e '/^@CONFINE@$/d' "$OUT/script.txt" <<EOF
 send msgping winread /tmp/w/fwd\r
 wait $P 60
 send msgping winread /tmp/w/over 10; msgping winread /tmp/w/under 10\r
@@ -112,7 +125,6 @@ wait $P 30
 send cat /tmp/w/after > /dev/null; ls /tmp/w > /dev/null; sleep 1; echo win-confine-done\r
 wait $P 30
 EOF
-sed -i '/^@CONFINE@$/d' "$OUT/script.txt"
 
 cat >"$OUT/script-off.txt" <<EOF
 wait zenix:/# 120
@@ -127,9 +139,8 @@ EOF
 
 fail=0
 for cpu in $CPUS; do
-    m=${cpu%+on}; word=; conf_=
+    m=${cpu%+on}; word=
     [ "$m" != "$cpu" ] && word=MMU=ON
-    if [ "${cpu%+confine}" != "$cpu" ]; then m=${cpu%+confine}; word=CONFINE; conf_=1; fi
     [ -n "$MMU_TEST_OFF" ] && word=MMU=OFF
     # the machine: the A1200 with the CPU, its MMU model and its FPU (none: an LC or EC part); what must happen
     case $m in
@@ -157,7 +168,6 @@ for cpu in $CPUS; do
     B="$OUT/build-${word:-auto}"
     L="$OUT/$cpu.log"
     script="$OUT/script.txt"; [ "$want" = on ] || [ -n "$MMU_TEST_OFF" ] || script="$OUT/script-off.txt"
-    [ -n "$conf_" ] && script="$OUT/script-confine.txt"
     echo "mmu-test $cpu (${ZENIX_EMU:-fs-uae}, kernel ${word:-as built}): expects protection $want"
     ZENIX_BUILD="$B" ZENIX_FSUAE_SET="$set${ZENIX_FSUAE_SET:+;$ZENIX_FSUAE_SET}" \
         tools/run-test.sh "$conf" 700 "$script" 2>&1 | sed 's/\x1b\[[0-9;:]*[mK]//g' > "$L"
@@ -206,24 +216,33 @@ for cpu in $CPUS; do
         chk "the kernel's path arrives as a copy in the server's message" 'msgpingd: the path is a copy in my own message'
         chk "forged and second replies refused" 'msgpingd: forged replies -22 -22, reply 0, second reply -22'
         chk "a read past the end of one's memory" 'msgping: readpast -14'
-        if [ -n "$conf_" ]; then
-            chk "confined: reads through the server into the root's server (a window passed on)" \
-                'msgping: winread /tmp/w/fwd ok 9'
-            chk "confined: a write past a buffer in a part page lands in the copy page: the client's bytes as they were" \
-                'msgping: winread /tmp/w/over case 10: read 100, the bytes right'
-            chk "... (before it)" 'msgping: winread /tmp/w/under case 10: read 100, the bytes right'
-            chk "confined: past a page's end: the read fails, the client's bytes untouched" \
-                'msgping: winread /tmp/w/over case 11: read -5, untouched'
-            chk "... (before a page's start)" 'msgping: winread /tmp/w/under case 12: read -5, untouched'
-            chk "confined: a write one byte past the buffer ends the server, naming the client" \
-                'pid [0-9]+ \(msgpingd\): memory protection: a write to 0x[0-9a-f]+ \(the memory of pid [0-9]+ \(msgping\)\)'
-            chk "confined: a write into the buffer after the reply ends the server" \
-                'pid [0-9]+ \(msgpingd\): memory protection: a write to 0x[0-9a-f]+ \(the memory of pid [0-9]+ \(cat\)\)'
-            [ "$(grep -caE '\(msgpingd\): memory protection: a write to' "$L")" -ge 3 ] &&
-                echo "  ok   confined: past, before and after the reply: three ends" ||
-                { echo "  FAIL confined: past, before and after the reply: three ends"; ok=0; }
-            chk "... and the system goes on" '^win-confine-done'
-        fi
+        chk "a declared buffer: a write one byte past it ends the server, the buffer untouched" \
+            'msgping: past px: -104, a\[2\] 0, untouched'
+        chk "a user's server asking for its client's stack: -EFAULT" 'msgping: peer py: 0, a\[2\] -14, untouched'
+        chk "... and touching it without asking ends it" 'msgping: wild py: -104, a\[2\] 0, untouched'
+        chk "a service touching memory it was not given ends" 'msgping: wild pz: -104, a\[2\] 0, untouched'
+        chk "... is started again by the next call, which its asking serves" 'msgping: peer pz: 0, a\[2\] 0, untouched'
+        [ "$(grep -caE '\(msgpingd\): memory protection: a (write to|read of)' "$L")" -ge 3 ] &&
+            echo "  ok   the three stray servers ended with the protection line" ||
+            { echo "  FAIL the three stray servers ended with the protection line"; ok=0; }
+        chk "SYS_shm: offered, taken, shared both ways, freed early, kept, dropped" 'msgping: shm ok'
+        chk "... exit status" '^shm-status 0'
+        chk "confined: reads through the server into the root's server (a window passed on)" \
+            'msgping: winread /tmp/w/fwd ok 9'
+        chk "confined: a write past a buffer in a part page lands in the copy page: the client's bytes as they were" \
+            'msgping: winread /tmp/w/over case 10: read 100, the bytes right'
+        chk "... (before it)" 'msgping: winread /tmp/w/under case 10: read 100, the bytes right'
+        chk "confined: past a page's end: the read fails, the client's bytes untouched" \
+            'msgping: winread /tmp/w/over case 11: read -5, untouched'
+        chk "... (before a page's start)" 'msgping: winread /tmp/w/under case 12: read -5, untouched'
+        chk "confined: a write one byte past the buffer ends the server, naming the client" \
+            'pid [0-9]+ \(msgpingd\): memory protection: a write to 0x[0-9a-f]+ \(the memory of pid [0-9]+ \(msgping\)\)'
+        chk "confined: a write into the buffer after the reply ends the server" \
+            'pid [0-9]+ \(msgpingd\): memory protection: a write to 0x[0-9a-f]+ \(the memory of pid [0-9]+ \(cat\)\)'
+        [ "$(grep -caE '\(msgpingd\): memory protection: a write to' "$L")" -ge 6 ] &&
+            echo "  ok   confined: past, before and after the reply: three ends" ||
+            { echo "  FAIL confined: past, before and after the reply: three ends"; ok=0; }
+        chk "... and the system goes on" '^win-confine-done'
         if grep -qa 'winread.*BAD' "$L"; then echo "  FAIL a winread case:"; grep -a 'winread.*BAD' "$L" | head -3; ok=0; fi
     fi
     chk "... and answers 200 calls" 'msgping: 200 round trips'

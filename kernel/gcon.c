@@ -206,10 +206,14 @@ long gcon_grab(int con, u32 a2)
         if (w[0] == 0xFFFF && w[1] == 0xFFFE)
             break;
     }
+    if (mmu_grant(current, 0xDFF000u, 0xDFF200u, G_IO) < 0)    /* D60 stage 3: the custom chips' page (it drives the
+                                         * blitter and its Copper list; its chip RAM is its own memory, 6.2) */
+        return -ENOMEM;
     struct gcon *g = kmalloc(sizeof *g);
     struct file *f = g ? file_new(FT_GCON) : 0;
     if (!f) {
         kfree(g);
+        mmu_ungrant(current, 0xDFF000u);
         return g ? -ENFILE : -ENOMEM;
     }
     memset(g, 0, sizeof *g);
@@ -218,11 +222,11 @@ long gcon_grab(int con, u32 a2)
     if (fd < 0) {
         f->type = FT_NONE;
         kfree(g);
+        mmu_ungrant(current, 0xDFF000u);
         return fd;
     }
     g->file = f;
     g->pid = current->pid;
-    mmu_sysmark(current);               /* D41 7: a display server drives the chips and chip RAM itself */
     g->con = (u8)con;
     g->target = (u8)con;
     g->cop = u->cop;
@@ -297,6 +301,9 @@ static void end_grab(struct gcon *g)
         gfx_blit_cpu(0);                /* the server is gone: nobody else writes the blitter */
     ev_wake(&g->wait);
     kprintf("display: console %d given back by pid %d\n", g->con, g->pid);
+    struct proc *gp = proc_by_pid(g->pid);
+    if (gp)
+        mmu_ungrant(gp, 0xDFF000u);     /* D60 stage 3: the chips' page out of its tree */
     kfree(g);
 }
 

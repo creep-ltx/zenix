@@ -367,6 +367,12 @@ void syscall_c(u32 *rb)
             r = port_find(name);
         break;
     }
+    case SYS_callv:                     /* D60 5.5: with protection on, mmu.c records the declared buffers */
+        if (mmu_on) {
+            r = (s32)mmu_ops->callv(a1, a2, a3);
+            break;
+        }                               /* (without it: SYS_call, the list not read) */
+        /* fall through */
     case SYS_call:
         r = -EFAULT;
         if (user_ok_wr(current, a2, sizeof(struct umsg))) {    /* (own: the server answers into it) */
@@ -375,6 +381,9 @@ void syscall_c(u32 *rb)
                                                      * again for the call (its message may name them) */
             r = (s32)ipc_call((int)a1, (struct umsg *)a2);
         }
+        break;
+    case SYS_shm:                       /* D60 7.4 (without protection: 0, nothing changes) */
+        r = (s32)mmu_ops->shm(a1, a2, a3);
         break;
     case SYS_recv:
         r = (s32)ipc_recv((int)a1, (int)a2);
@@ -407,7 +416,11 @@ void syscall_c(u32 *rb)
         break;
     case SYS_blk_ram:
         r = -EPERM;
-        if (current->priv && UOKW(a1, 8)) {
+        if (!current->priv)
+            break;
+        if (a2)                         /* D60 stage 3: the copy in the kernel (mmu.c: only with protection on) */
+            r = mmu_on ? (s32)mmu_ops->ramdisk(a1, a2, a3) : -EINVAL;
+        else if (UOKW(a1, 8)) {
             ((u32 *)a1)[0] = boot_ram_pa;
             ((u32 *)a1)[1] = boot_ram_size;
             r = 0;
@@ -416,16 +429,25 @@ void syscall_c(u32 *rb)
     case SYS_fd_info:
         r = current->priv ? fd_info(a1) : -EPERM;
         break;
-    case SYS_fd_rw:
-        r = current->priv ? fd_rw(a1 >> 28, a1 & 0x07FFFFFF, a2, (void *)a3, (a1 >> 27) & 1) : -EPERM;
+    case SYS_fd_rw:                     /* (with protection on the buffer is checked: the caller's, or a window it holds) */
+        if (!current->priv)
+            r = -EPERM;
+        else if (!mmu_on || (a2 < 0x800000u && ((a1 >> 27) & 1 ? UOKR(a3, a2 * 512) : UOKW(a3, a2 * 512))))
+            r = fd_rw(a1 >> 28, a1 & 0x07FFFFFF, a2, (void *)a3, (a1 >> 27) & 1);
+        else
+            r = -EFAULT;
         break;
     case SYS_blk_size:
         r = current->priv ? (s32)blk_sectors() : -EPERM;
         break;
     case SYS_atapi:                     /* D44: the disk server only; the buffer is a client's, as blk_read's */
         r = -EPERM;
-        if (current->priv && UOKW(a1, UATAPI_FIRST))
+        if (current->priv && UOKW(a1, UATAPI_FIRST)) {
+            const struct uatapi *q = (const struct uatapi *)a1;
+            if (mmu_on && q->len && !UOKW((u32)q->buf, q->len))
+                break;                  /* (D60 stage 3: the buffer is the caller's, or a window it holds) */
             r = ide_atapi((struct uatapi *)a1);
+        }
         break;
     case SYS_ttymode:
         tty_setmode(tty_of(current), (int)a1, current->pid);
@@ -559,8 +581,10 @@ void syscall_c(u32 *rb)
     case SYS_blk_read: case SYS_blk_write:
         /* raw disk: only the disk server (trusted; the buffer is a client's, so
          * it is not checked against this process's own memory) */
-        r = !current->priv ? -EPERM : nr == SYS_blk_read ? blk_read(a1, a2, (void *)a3)
-                                                              : blk_write(a1, a2, (const void *)a3);
+        r = !current->priv ? -EPERM : -EFAULT;
+        if (current->priv && (!mmu_on || (a2 < 0x800000u && (nr == SYS_blk_read ? UOKW(a3, a2 * 512) : UOKR(a3, a2 * 512)))))
+            r = nr == SYS_blk_read ? blk_read(a1, a2, (void *)a3) : blk_write(a1, a2, (const void *)a3);
+            /* (D60 stage 3: with protection on the buffer is checked: the caller's, or a window it holds) */
         break;
     case SYS_input:
         if (UOKW(a1, 16)) {
@@ -600,9 +624,8 @@ void syscall_c(u32 *rb)
                                          * other bits are ignored, as all of a2 was */
         for (int i = 0; i < NREG; i++)
             if (!current->reg[i].base) {
-                void *m = mem_alloc(a1, (a2 & MEMA_CHIP ? MEM_CHIP : 0) | (a2 & MEMA_LOW ? MEM_LOW16M : 0) |
-                                    (mmu_is_sys(current) ? 0 : MEM_USER),
-                                    (u32)current->pid);         /* D41: whole pages for a protected process */
+                void *m = mem_alloc(a1, (a2 & MEMA_CHIP ? MEM_CHIP : 0) | (a2 & MEMA_LOW ? MEM_LOW16M : 0) | MEM_USER,
+                                    (u32)current->pid);         /* D41: whole pages while protection is on */
                 if (m) {
                     current->reg[i].base = (u32)m;
                     current->reg[i].size = a1;
@@ -619,7 +642,8 @@ void syscall_c(u32 *rb)
                     r = -EBUSY;         /* D38: the grab's Copper list or sprite lies there */
                     break;
                 }
-                mem_free((void *)a1);
+                if (!mmu_on || !mmu_ops->shmfree(a1))
+                    mem_free((void *)a1);   /* (D60 7.4: a region others hold stays theirs) */
                 current->reg[i].base = 0;
                 r = 0;
                 break;
@@ -651,9 +675,12 @@ void syscall_c(u32 *rb)
         }
         break;
     case SYS_meminfo:
-        if (UOKS(n, a1, a2, UMEMINFO_FIRST, 16)) {      /* chip free, fast free, shared code in memory, what sharing saves */
+        if (UOKS(n, a1, a2, UMEMINFO_FIRST, UMEMINFO_PROT)) {  /* chip free, fast free, shared code in memory, what
+                                                         * sharing saves; D60 11: memory protection (2 full) */
             mem_stats(&((u32 *)a1)[0], &((u32 *)a1)[1]);
             seg_stats(&((u32 *)a1)[2], &((u32 *)a1)[3]);
+            if (n >= UMEMINFO_PROT)
+                ((u32 *)a1)[4] = mmu_on ? 2 : 0;
             r = 0;
         }
         break;
