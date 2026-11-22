@@ -268,8 +268,9 @@ RAMDISK_K := 640
 # 677 with both (D54 and d29 16.23, merged 2026-11-14).
 # 676 since D41 section 19 (2026-11-17, protection on by default: telling a full 68040/060 from an LC or EC one, 130
 # bytes of kernel.bin), and the full audit (2026-11-14: K1's group checks and K2's debugger record looked up again,
-# 68 bytes of kernel.bin).
-RAMDISK_MOUNT_K := 676
+# 68 bytes of kernel.bin). 674 since DESIGN D60 stage 1 (2026-11-22, a translation tree per process: 2 KB of
+# kernel.bin); 82 blocks free there.
+RAMDISK_MOUNT_K := 674
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/check-init.py tools/ksize-check.sh tools/ksize-budget
