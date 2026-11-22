@@ -156,3 +156,13 @@ char *ptsname(int fd);                          /* "/dev/pts/N" (a static buffer
 int ptsname_r(int fd, char *buf, size_t len);   /* 0, or the error number */
 int openpty(int *amaster, int *aslave, char *name, const void *termp, const struct winsize *winp);
 int setsid(void);                               /* own group; leader of fd 0's terminal if nobody leads it */
+
+/* DESIGN D60 (docs/d60-full-protection.md 5.5, 11): a server asking for the bytes of its client it is about to read
+ * (peer_rd) or write (peer_wr): 1 if it may, 0 if not. With full memory protection the kernel lends the range for the
+ * rest of the request (a system service, or a server that could debug the client, may ask for any range; any other
+ * server only for what the client declared); otherwise no system call is made: 1 */
+int prot_full(void);                            /* full memory protection is on (SYS_meminfo's fifth word, read once) */
+int peer_rd(struct umsg *m, u32 addr, u32 len);
+int peer_wr(struct umsg *m, u32 addr, u32 len);
+int peer_str(struct umsg *m, u32 addr, u32 max);    /* a string of at most max bytes there: peer_rd of max bytes, or up
+                                                 * to the end of its page (memory with protection on is whole pages) */
