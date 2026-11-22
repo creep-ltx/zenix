@@ -164,5 +164,6 @@ int setsid(void);                               /* own group; leader of fd 0's t
 int prot_full(void);                            /* full memory protection is on (SYS_meminfo's fifth word, read once) */
 int peer_rd(struct umsg *m, u32 addr, u32 len);
 int peer_wr(struct umsg *m, u32 addr, u32 len);
-int peer_str(struct umsg *m, u32 addr, u32 max);    /* a string of at most max bytes there: peer_rd of max bytes, or up
-                                                 * to the end of its page (memory with protection on is whole pages) */
+int peer_str(struct umsg *m, u32 addr, u32 max);    /* a string there: peer_rd of the longest range of at most max
+                                                 * bytes that is the client's; 1 if it holds the string's 0 (or is max
+                                                 * bytes: the caller stops there) */
