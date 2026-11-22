@@ -6,6 +6,7 @@ NAME
 SYNOPSIS
     bench
     bench dir [-q] DIRECTORY
+    bench mmu [FILE]
 
 DESCRIPTION
     Times a set of operations with the CIA E-clock (709,379 Hz on PAL, far
@@ -39,6 +40,17 @@ DESCRIPTION
     lstat of the first and the last name; then "bench dir: identical, N
     records, S stats" and status 0, or "bench dir: BAD" lines and status
     1. -q: only the checks.
+
+    bench mmu FILE gives the figures memory protection is judged on
+    (DESIGN D60 section 9.4), one line "mmubench: NAME VALUE UNIT" each:
+    bigread (FILE read once, 16 KB a call, KB/s), nullcall, stat,
+    read4k (a cached 4 KB read and its lseek, us a call), msgcall (a call
+    to a msgpingd it starts and back), pipetrip (a byte to cat and back
+    through two pipes), pipe (cat FILE into a pipe it reads, KB/s) and
+    lsr (ls -laR / to /dev/null, ms). FILE defaults to /bin/tcc. Every
+    result is checked: "mmubench: NAME FAILED" and status 1 if one fails,
+    else "mmubench: done". tools/mmubench-test.sh runs it with protection
+    off and on.
 
     Numbers taken in an emulator are NOT hardware numbers. Run it on the real
     Amiga and write the result down with the date.

@@ -330,8 +330,144 @@ static int bench_dirpath(const char *path, int quiet)
     return bad;
 }
 
+/* bench mmu [BIG] (DESIGN D60 section 9.4, stage 0): the figures the memory protection budget is judged on, each one
+ * line "mmubench: NAME VALUE UNIT" (us a call, or KB/s), the same with protection off and on. BIG: a large file of the
+ * root (default /bin/tcc). Every call's result is checked: a failure prints "mmubench: NAME FAILED" and exit 1. */
+static int mb_bad;
+static void mb_line(const char *what, u32 v, const char *unit) { dprintf(1, "mmubench: %s %u %s\n", what, v, unit); }
+static void mb_fail(const char *what, int r) { dprintf(1, "mmubench: %s FAILED (%d)\n", what, r); mb_bad = 1; }
+/* tenths of a microsecond each, from E-clock ticks e for n calls */
+static u32 mb_each(u32 e, u32 n) { return (u32)(((unsigned long long)e * 10000000ull) / E_HZ / n); }
+static void mb_each_line(const char *what, u32 e, u32 n)
+{
+    u32 t = mb_each(e, n);
+    dprintf(1, "mmubench: %s %u.%u us\n", what, t / 10, t % 10);
+}
+static u32 mb_kbs(u32 bytes, u32 e) { u32 t = us(e); return t ? (u32)(((unsigned long long)bytes * 1000000ull) / t / 1024) : 0; }
+static int bench_mmu(const char *big)
+{
+    static char buf[16384];
+    struct ustat st;
+    int r, fd;
+    u32 t0, e, bytes = 0;
+    /* a big file, read once through the filesystem server and the disk server (the first read since the boot) */
+    if ((fd = sys_open(big, O_RDONLY)) < 0) { mb_fail("bigread", fd); return 1; }
+    t0 = sys_hrtime();
+    while ((r = sys_read(fd, buf, sizeof buf)) > 0) bytes += (u32)r;
+    e = sys_hrtime() - t0;
+    sys_close(fd);
+    if (r < 0 || bytes < 65536) mb_fail("bigread", r); else mb_line("bigread", mb_kbs(bytes, e), "KB/s");
+    t0 = sys_hrtime();
+    for (int i = 0; i < 5000; i++) sys_getpid();
+    mb_each_line("nullcall", sys_hrtime() - t0, 5000);
+    if ((r = sys_stat("/bin/sh", &st)) < 0) { mb_fail("stat", r); return 1; }
+    t0 = sys_hrtime();
+    for (int i = 0; i < 500; i++) if ((r = sys_stat("/bin/sh", &st)) < 0) break;
+    if (r < 0) mb_fail("stat", r); else mb_each_line("stat", sys_hrtime() - t0, 500);
+    /* a cached 4 KB read (one call to the filesystem server each) */
+    if ((fd = sys_open("/bin/sh", O_RDONLY)) < 0) { mb_fail("read4k", fd); return 1; }
+    sys_read(fd, buf, 4096);
+    u32 n4 = 0;
+    t0 = sys_hrtime();
+    for (int i = 0; i < 400; i++) {
+        sys_lseek(fd, 0, 0);
+        if ((r = sys_read(fd, buf, 4096)) != 4096) break;
+        n4++;
+    }
+    e = sys_hrtime() - t0;
+    sys_close(fd);
+    if (n4 != 400) mb_fail("read4k", r); else mb_each_line("read4k", e, 800);  /* the lseek and the read: two calls */
+    /* a call to a protected server and back (msgpingd, started by us: not a service) */
+    {
+        static char *const av[] = { "msgpingd", "-port", "mping", 0 };
+        int pid = sys_spawn("/bin/msgpingd", av, 0), port = -1, tries = 0;
+        if (pid < 0) mb_fail("msgcall", pid);
+        else {
+            while ((port = sys_port_find("mping")) < 0 && ++tries < 200) sys_sleep(1);
+            struct umsg m;
+            if (port < 0) mb_fail("msgcall", port);
+            else {
+                m.type = 1; m.a[0] = 1; m.a[1] = 2;
+                sys_call(port, &m);
+                int ok = 1;
+                t0 = sys_hrtime();
+                for (int i = 0; i < 2000 && ok; i++) { m.type = 1; m.a[0] = (u32)i; m.a[1] = 1; sys_call(port, &m); ok = m.a[2] == (u32)i + 1; }
+                e = sys_hrtime() - t0;
+                if (!ok) mb_fail("msgcall", -1); else mb_each_line("msgcall", e, 2000);
+                m.type = 9; sys_call(port, &m);
+            }
+            if (port < 0) sys_kill(pid);
+            sys_wait(pid);
+        }
+    }
+    /* a round trip between two programs: a byte to cat through one pipe, back through another */
+    {
+        int a[2], b[2];
+        if (sys_pipe(a) < 0 || sys_pipe(b) < 0) mb_fail("pipetrip", -1);
+        else {
+            static char *const av[] = { "cat", 0 };
+            int io[3] = { a[0], b[1], 2 };
+            int pid = sys_spawn("/bin/cat", av, io);
+            sys_close(a[0]); sys_close(b[1]);
+            if (pid < 0) mb_fail("pipetrip", pid);
+            else {
+                char c = 'x';
+                int ok = sys_write(a[1], &c, 1) == 1 && sys_read(b[0], &c, 1) == 1;
+                t0 = sys_hrtime();
+                for (int i = 0; i < 1000 && ok; i++) ok = sys_write(a[1], &c, 1) == 1 && sys_read(b[0], &c, 1) == 1;
+                e = sys_hrtime() - t0;
+                if (!ok) mb_fail("pipetrip", -1); else mb_each_line("pipetrip", e, 1000);
+                sys_close(a[1]);
+                sys_wait(pid);
+            }
+            sys_close(b[0]);
+        }
+    }
+    /* a pipe's throughput: cat BIG | (us), the bytes counted */
+    {
+        int a[2];
+        if (sys_pipe(a) < 0) mb_fail("pipe", -1);
+        else {
+            static char *av[] = { "cat", 0, 0 };
+            av[1] = (char *)big;
+            int io[3] = { 0, a[1], 2 };
+            t0 = sys_hrtime();
+            int pid = sys_spawn("/bin/cat", av, io);
+            sys_close(a[1]);
+            u32 got = 0;
+            if (pid < 0) mb_fail("pipe", pid);
+            else {
+                while ((r = sys_read(a[0], buf, sizeof buf)) > 0) got += (u32)r;
+                e = sys_hrtime() - t0;
+                sys_wait(pid);
+                if (r < 0 || got != bytes) mb_fail("pipe", r); else mb_line("pipe", mb_kbs(got, e), "KB/s");
+            }
+            sys_close(a[0]);
+        }
+    }
+    /* ls -laR / > /dev/null, the whole command */
+    {
+        static char *const av[] = { "ls", "-laR", "/", 0 };
+        int nul = sys_open("/dev/null", O_WRONLY);
+        int io[3] = { 0, nul, nul };
+        t0 = sys_hrtime();
+        int pid = nul < 0 ? nul : sys_spawn("/bin/ls", av, io);
+        if (pid < 0) mb_fail("lsr", pid);
+        else {
+            r = sys_wait(pid);
+            e = sys_hrtime() - t0;
+            if (r != 0) mb_fail("lsr", r); else mb_line("lsr", us(e) / 1000, "ms");
+        }
+        if (nul >= 0) sys_close(nul);
+    }
+    dprintf(1, "mmubench: %s\n", mb_bad ? "FAILED" : "done");
+    return mb_bad;
+}
+
 int main(int argc, char **argv)
 {
+    if (argc >= 2 && !strcmp(argv[1], "mmu"))
+        return bench_mmu(argc >= 3 ? argv[2] : "/bin/tcc");
     if (argc >= 3 && !strcmp(argv[1], "dir")) {
         int q = argc == 4 && !strcmp(argv[2], "-q");
         return bench_dirpath(argv[2 + q], q);

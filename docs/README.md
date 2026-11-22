@@ -142,7 +142,9 @@ tap's PTY (`tools/serial-tcp.py`); the tests' scripts are unchanged. It always r
 mode from a config; `cpu_speed=max` made its IDE stop answering). It models every 68030/040/060 variant, the EC parts
 too, which FS-UAE does not; the cage rig's screenshot tests stay on FS-UAE. **Memory protection's CPU matrix**:
 `tools/mmu-test.sh MODEL...` (every CPU model, protection on or the reason it is off) and `tools/mmu-suite.sh
-030|040|060` (the regular suites with protection on), both in `make check`, and in either emulator.
+030|040|060` (the regular suites with protection on), both in `make check`, and in either emulator; its cost:
+`tools/mmubench-test.sh 030|040|060` (`bench mmu` with protection off and on, against DESIGN D60 section 9.4's
+budget; emulator ratios only, the budget reported, never failed on), also in `make check`.
 
 **Fast mode** (2026-11-04). Most emulator tests check logic, not the stock A1200's speed, so `tools/check.sh NAME...`
 runs them in fast mode by default; the full `tools/check.sh` (the nightly run, before a merge) stays at stock speed;
