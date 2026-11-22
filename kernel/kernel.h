@@ -767,6 +767,7 @@ struct seg {
     u8 listed;                  /* found by seg_find: the key still names an unchanged file */
     u8 m;                       /* the key: mount slot, generation, inode, size, modification time */
     u32 gen, ino, fsize, mtime;
+    u8 world;                   /* DESIGN D60 section 4: the file is readable by everyone (o+r): global pages */
 };
 u32 seg_sum(u32 code, u32 size);
 struct seg *seg_find(const struct exec_src *x, u32 size, const char *path);   /* a reference to a listed, intact one */
