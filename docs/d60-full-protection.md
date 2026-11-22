@@ -869,4 +869,11 @@ Tests (FS-UAE in fast mode unless said; all with protection where the machine ha
 - `mmubench-test` 030 040 060 in both emulators: pass (the figures above).
 - `bootmem-test`, `zdb-test`, `svc-test` (every part), `mounttest`, `cmds-test`: pass (bootmem-test after
   `tools/check-init-test.py` was pointed at a span function that still exists).
-- `mmu-suite` FS-UAE 030, 040, 060 and Amiberry: below.
+- `mmu-suite` 030, 040 and 060 in both emulators (fast mode: without svc-test's part f and sound-test, its STOCK
+  tests): cmds-test, memtest, mounttest, lua-test, tcc-test, zdb-test pass on all six; svc-test passes but one check
+  on each, the same ones d41 19.3 notes 3 and 4 name: FS-UAE "no msgpingd before the first call" (the tap's greeting
+  byte in the first line after the reboot, `sh: .echo: command not found`; D41's kernel of main fails it the same on
+  the 030 in this run), Amiberry "fsd is pid 3, at nice -10" (Amiberry's timing).
+- Not done: the desktop and sound rows of 9.4; any real CPU. **The 1260 run** (9.4: the judge, the end of stage 1)
+  wants three kernels: as built, `DIAG=-DMMU_PAGE8` and `DIAG=-DMMU_PFLUSH_PAGES`, each with `bench mmu` and
+  `MMU=OFF` for the ratios (`tools/kopts.py`), and `MMU=OFF` itself as the way back (`MMU=D41` is not built yet).
