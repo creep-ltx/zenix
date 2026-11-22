@@ -1,12 +1,15 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* DESIGN D41 (docs/d41-memory-protection.md): optional memory protection with the MMU of a 68030, 68040 or 68060.
- * The MMU only protects, never translates: one tree for everybody, every page mapped to itself, a page valid only
- * while it belongs to the protected process flipped in (the tenant) or to a client it serves. The kernel never uses
- * the tree: the transparent translation registers match its supervisor accesses (and every access of a system
- * process), as D37 set them up. Off, the gates in mmu.h call nothing and mem.c lays blocks out as before.
+ * The MMU only protects, never translates: every page is mapped to itself. DESIGN D60 stage 1
+ * (docs/d60-full-protection.md section 4): a translation tree per protected process, valid only for its view and the
+ * views of the clients whose requests it holds (lent at the request, taken back at its end); the switch is a root
+ * pointer write and a flush of the non-global entries; a world-readable shared segment's pages are global on 040/060.
+ * The kernel never uses the trees: the transparent translation registers match its supervisor accesses (and every
+ * access of a system process, D41 section 7, still), as D37 set them up. Off, the gates in mmu.h call nothing and
+ * mem.c lays blocks out as before.
  * DESIGN D45 section 13: the runtime code (KMMU, the asm) lies in the span .zhwmmu, reached only through the table
  * mmu_ops points at, and is given back after the boot when protection is off.
- * Cold code at -Os; the flip loop and the switch at -O2 (they run at a task switch). */
+ * Cold code at -Os; the switch, the flips and the flushes at -O2 (they run at a task switch and at every request). */
 #pragma GCC optimize("Os")
 #include "kernel.h"
 #include "hw.h"
@@ -16,13 +19,16 @@
 #include "mmu.h"
 
 /* the registers as one image (offsets used by the assembly below): 030: dtt0 = TT0, dtt1 = TT1, crp = CRP's two longs
- * (crp_hi, root); 040/060: root goes to URP and SRP */
-struct mregs { u32 fam, tc, dtt0, dtt1, itt0, itt1, crp_hi, root; };
+ * (crp_hi, root); 040/060: root goes to URP, srp to SRP */
+struct mregs { u32 fam, tc, dtt0, dtt1, itt0, itt1, crp_hi, root, srp; };
 
 u32 mmu_regs_load(const struct mregs *m);       /* below: 0, or -1 if a register trapped (nothing is then sure) */
 u32 mmu_regs_save(struct mregs *m);             /* the registers as they are; -1 if one is missing */
 void mmu_ttr(const u32 *v, u32 fam);            /* the windows: 040/060 DTT0, DTT1, ITT0 = v[0..2]; 030 TT0 = v[0] */
 void mmu_flush(u32 fam);                        /* PFLUSHA */
+void mmu_flushan(void);                         /* 040/060: PFLUSHAN (the entries that are not global) */
+void mmu_pflush(const u32 *a, u32 n);           /* MMU_PFLUSH_PAGES: PFLUSH (An) of user entries (DFC 1), n pages */
+void mmu_root(u32 root, u32 fam);               /* the switch: URP and PFLUSHAN on 040/060, CRP (which flushes) on 030 */
 u32 mmu_probe_hw(const struct mregs *m, u32 t, u32 r);
 u32 mmu_fpu(void);                              /* 1: an FPU (a full 68040) */
 long cpu_pcr(void);                             /* start.S: the 68060's PCR, -1 on a 68040 */
@@ -31,22 +37,35 @@ u8 mmu_on;
 static u8 fam;                  /* 1: 68030; 2: 68040/68060 */
 static u8 mode;                 /* the windows now: 0 system (every access), 1 protected (supervisor only) */
 static u8 dpush;                /* the table writes must be pushed (a 040/060 with the data cache on) */
-static u32 *root;
-static void *tblk;              /* the tables' block */
-static u32 tbytes;
+static u32 tbytes;              /* the pool's bytes */
 static struct mregs on, off;    /* translation on (the windows in system mode), and as it was before (D37's) */
 static u32 win[2][3];           /* the windows' values: [mode][DTT0/TT0, DTT1, ITT0] */
 static u32 sysmask;             /* bit n: procs[n] is a system process */
-static struct proc *tenant;     /* the protected process whose view is flipped in (0: none) */
-static u32 lent;                /* bit n: procs[n]'s view is lent to the tenant (it holds that client's request) */
+static u32 cmlo, cmhi;          /* 040/060: a page's cache mode below and above 16 MB (its kernel window's) */
+
+/* D60 section 4: a tree per protected process, made at its first switch to user mode */
+struct tree {
+    u32 *root;                  /* 0: none made (yet) */
+    u32 lent;                   /* bit n: procs[n]'s view is in this tree (this process holds that client's request) */
+    u8 upd;                     /* the update bundle is in it (root's zup, D41 section 6) */
+};
+static struct tree *trees;      /* NPROC of them, allocated by mmu_setup */
+static u32 lentany;             /* bit n: procs[n]'s view may be lent to some tree (set at a lend, cleared by
+                                 * mmu_block_ after it took the stale lends back) */
+static u32 *krt;                /* the kernel's tree: nothing valid (SRP; URP while no protected process ran) */
+static u32 *loaded;             /* the root in URP / CRP now */
 
 #define SLOT(p) (1u << ((p) - procs))
 #define D_TABLE 0x0Au           /* a table descriptor: U, resident (DT/UDT 2; the same bits on 030 and 040/060) */
 #define D_PAGE  0x18u           /* a page descriptor's fixed bits: U and M set (the table search never writes) */
 #define D_VALID 1u              /* bit 0: resident (030 DT 1, 040/060 PDT 01) */
 #define D_WP    4u              /* bit 2: write-protected (030 WP, 040/060 W) */
+#define D_G     0x400u          /* 040/060 bit 10: global, kept by PFLUSHAN (never on the 030: an address bit there) */
 #define CM_INH  0x40u           /* 040/060 CM 10: inhibited, serialized / precise */
 #define CM_CB   0x20u           /* 040/060 CM 01: copyback; 00 write-through */
+#define PG_SH   (MMU_PG == 8192u ? 13 : 12)
+#define NPTE    (0x40000u / MMU_PG)     /* a page table's entries: 64 (4 KB pages) or 32 (8 KB) */
+#define PTSZ    (NPTE * 4u)     /* its bytes, and its alignment */
 
 /* ---- the CPU's registers (supervisor, interrupts masked); 030 PMOVE and 040/060 MOVEC by their encodings. In the span
  * (D45 section 13), local to this file: nothing outside mmu.c can name them ---- */
@@ -74,6 +93,7 @@ __asm__(
     "    .long   0x4E7B0005\n"           /* itt1 */
     "    move.l  28(%a1),%d0\n"
     "    .long   0x4E7B0806\n"           /* urp */
+    "    move.l  32(%a1),%d0\n"
     "    .long   0x4E7B0807\n"           /* srp */
     "    nop\n"
     "    .word   0xF518\n"               /* pflusha */
@@ -259,12 +279,61 @@ __asm__(
     "    rts\n"
     "1:  .long   0xF0002400\n"           /* pflusha (030) */
     "    rts\n"
+    "mmu_flushan:\n"
+    "    nop\n"
+    "    .word   0xF510\n"               /* pflushan: the global entries (a world-readable segment's code) stay */
+    "    nop\n"
+    "    rts\n"
+    /* void mmu_root(u32 root, u32 fam): the next tree. 040/060: the descriptors were pushed when written; the nop
+     * drains the 060's store buffer, then URP and PFLUSHAN. 030: PMOVE to CRP with FD 0 flushes the ATC itself
+     * (MC68030UM 9.7.5.1) */
+    "mmu_root:\n"
+    "    move.l  4(%sp),%d0\n"
+    "    cmp.l   #1,8(%sp)\n"
+    "    beq.s   1f\n"
+    "    nop\n"
+    "    .long   0x4E7B0806\n"           /* movec d0,urp */
+    "    .word   0xF510\n"               /* pflushan */
+    "    nop\n"
+    "    rts\n"
+    "1:  move.l  %d0,-(%sp)\n"
+    "    move.l  #0x80000002,-(%sp)\n"   /* CRP's upper long: no limit, short table descriptors */
+    "    move.l  %sp,%a0\n"
+    "    .long   0xF0104C00\n"           /* pmove (a0),crp */
+    "    addq.l  #8,%sp\n"
+    "    rts\n"
     "    .pushsection .bss\n"
     "    .balign 4\n"
     "mt_pc: .space 4\n"            /* (after the release with protection off, stale: only mt_trap, in the span, reads it) */
     "mt_sp: .space 4\n"
     "    .popsection\n"
     "    .popsection\n");
+
+#ifdef MMU_PFLUSH_PAGES
+/* a variant for the measurements on a real CPU (make DIAG=-DMMU_PFLUSH_PAGES): up to 8 pages flushed one by one
+ * instead of PFLUSHAN. Both emulators' MMU model makes PFLUSH (An) cost milliseconds (D60 "As built"). */
+__asm__(
+    "    .pushsection .zhwmmu.text,\"ax\",@progbits\n"
+    /* void mmu_pflush(const u32 *a, u32 n): PFLUSH (An) for each page, user entries (DFC 1: MC68040UM 3.7.2,
+     * MC68060UM 4.7.2); the global ones at those pages too */
+    "mmu_pflush:\n"
+    "    move.l  4(%sp),%a1\n"
+    "    move.l  8(%sp),%d1\n"
+    "    movec   %dfc,%d0\n"
+    "    move.l  %d0,-(%sp)\n"
+    "    moveq   #1,%d0\n"
+    "    movec   %d0,%dfc\n"
+    "    nop\n"
+    "    bra.s   2f\n"
+    "1:  move.l  (%a1)+,%a0\n"
+    "    .word   0xF508\n"               /* pflush (a0) */
+    "2:  dbra    %d1,1b\n"
+    "    nop\n"
+    "    move.l  (%sp)+,%d0\n"
+    "    movec   %d0,%dfc\n"
+    "    rts\n"
+    "    .popsection\n");
+#endif
 
 /* The kernel's default options (D41 section 13): tools/kopts.py finds the marker in a kernel file and sets the long
  * after it. KOPT_MMU_AUTO in every build (D41 section 19, the partner 2026-11-17): protection on wherever the CPU is
@@ -274,52 +343,188 @@ __asm__(
 __attribute__((used, aligned(4))) static volatile const u32 kopt_default[3] = { 0x5A4B4F50u, 0x54444546u,
                                                                                KOPT_MMU_AUTO };
 
-/* ---- the tree ---- */
-KMMU static u32 *pte(u32 a)          /* the page descriptor of a, or 0 where the pools have no page table */
+/* ---- the table pool (D60 section 4): units of PTSZ and 512 bytes cut from whole pages of the kernel's memory (fast
+ * RAM first), aligned to their size as the manuals ask. A tree's tables go back to the pool when their last valid
+ * entry goes; the pool keeps its pages (its size is the most the trees needed at once) ---- */
+static u32 *fl[2];              /* the free units of each size (0: page tables, 1: roots and pointer tables), linked */
+
+KMMU static u32 usz(int k) { return k ? 512u : PTSZ; }
+
+KMMU static u32 *unit(int k)    /* a zeroed unit, pushed, or 0 */
 {
-    u32 d = root[a >> 25];
-    if (!(d & 2))
-        return 0;
-    d = ((u32 *)(d & ~0x1FFu))[(a >> 18) & 127];
-    if (!(d & 2))
-        return 0;
-    return (u32 *)(d & ~0xFFu) + ((a >> 12) & 63);
+    if (!fl[k]) {
+        u8 *pg = mem_alloc(MMU_PG, MEM_USER, 0);
+        if (!pg)
+            return 0;
+        tbytes += MMU_PG;
+        for (u32 o = 0; o < MMU_PG; o += usz(k)) {
+            u32 *u = (u32 *)(pg + o);
+            *u = (u32)fl[k];
+            fl[k] = u;
+        }
+    }
+    u32 *u = fl[k];
+    fl[k] = (u32 *)*u;
+    memset(u, 0, usz(k));
+    if (dpush)
+        cache_push_range((u32)u, (u32)u + usz(k));
+    return u;
 }
 
-/* every page of [lo, hi) (rounded out to pages): bit 0 and W set to how (0: invalid; D_VALID; D_VALID | D_WP) */
-KMMU __attribute__((optimize("O2"))) static void flip(u32 lo, u32 hi, u32 how)
+KMMU static void unit_free(u32 *u, int k)
+{
+    *u = (u32)fl[k];
+    fl[k] = u;
+}
+
+/* ---- the trees ---- */
+KMMU static inline void dpushd(u32 *a, u32 *b) { if (dpush) cache_push_range((u32)a, (u32)b); }
+
+/* the pages to flush after a change (only changes to the loaded tree, and every global entry cleared anywhere) */
+static u32 fl_n;
+#ifdef MMU_PFLUSH_PAGES
+static u32 fl_a[8];
+#endif
+static u8 fl_g;
+
+KMMU static u32 *pt_of(u32 *r, u32 a, int mk)   /* a's page table in tree r (made if mk), or 0 */
+{
+    u32 *e = &r[a >> 25];
+    if (!(*e & 2)) {
+        u32 *t;
+        if (!mk || !(t = unit(1)))
+            return 0;
+        *e = (u32)t | D_TABLE;
+        dpushd(e, e + 1);
+    }
+    u32 *pt = (u32 *)(*e & ~0x1FFu);
+    e = &pt[(a >> 18) & 127];
+    if (!(*e & 2)) {
+        u32 *t;
+        if (!mk || !(t = unit(0)))
+            return 0;
+        *e = (u32)t | D_TABLE;
+        dpushd(e, e + 1);
+    }
+    return (u32 *)(*e & ~(PTSZ - 1));
+}
+
+KMMU static int all0(const u32 *t, u32 n)
+{
+    while (n--)
+        if (*t++)
+            return 0;
+    return 1;
+}
+
+/* the tables of a's 256 KB in tree r given back when empty (the page table, then its pointer table) */
+KMMU static void tidy(u32 *r, u32 a)
+{
+    u32 *e = &r[a >> 25];
+    u32 *pt = (u32 *)(*e & ~0x1FFu), *pe = &pt[(a >> 18) & 127];
+    if (!all0((u32 *)(*pe & ~(PTSZ - 1)), NPTE))
+        return;
+    unit_free((u32 *)(*pe & ~(PTSZ - 1)), 0);
+    *pe = 0;
+    dpushd(pe, pe + 1);
+    if (!all0(pt, 128))
+        return;
+    unit_free(pt, 1);
+    *e = 0;
+    dpushd(e, e + 1);
+}
+
+/* every page of [lo, hi) (rounded out to pages) in tree r: valid with bits how (D_VALID, | D_WP, | D_G), or invalid
+ * (how 0; how TIDY: invalid and the emptied tables given back). -1: no memory for a table (the pages before it are
+ * done). Interrupts masked. */
+#define TIDY 0x80000000u
+KMMU static int tflip(u32 *r, u32 lo, u32 hi, u32 how)
 {
     lo &= ~(MMU_PG - 1);
     hi = (hi + MMU_PG - 1) & ~(MMU_PG - 1);
+    int ld = r == loaded, td = how == TIDY;
+    if (td)
+        how = 0;
     while (lo < hi) {
         u32 end = (lo | 0x3FFFFu) + 1;              /* the end of this page table's 256 KB */
         if (end > hi || !end)
             end = hi;
-        u32 *d = pte(lo), *d0 = d;
-        if (d) {
-            for (u32 a = lo; a < end; a += MMU_PG, d++)
-                *d = (*d & ~(D_VALID | D_WP)) | how;
-            if (dpush)
-                cache_push_range((u32)d0, (u32)d);  /* the 060's table search does not look in the data cache */
+        u32 *pg = pt_of(r, lo, how != 0);
+        if (!pg) {
+            if (how)
+                return -1;
+        } else {
+            u32 *d = pg + ((lo >> PG_SH) & (NPTE - 1)), *d0 = d, ch = 0;
+            u32 bits = how ? D_PAGE | how | (fam == 2 ? (lo < 0x01000000u ? cmlo : cmhi) : 0) : 0;
+            for (u32 a = lo; a < end; a += MMU_PG, d++) {
+                u32 v = how ? a | bits : 0;
+                if (*d == v)
+                    continue;
+                if (*d & D_G)
+                    fl_g = 1;                       /* a global entry survives every switch: flushed whatever is loaded */
+                /* a page made valid from invalid needs no flush on 040/060 for data: the 060 makes no ATC entry from an
+                 * invalid descriptor (MC68060UM 4.2.2.3), the 040's data ATC holds one only after a data access there,
+                 * which killed the process; the 040's instruction ATC may hold one from a prefetch (MC68040UM 3.2.2.3),
+                 * so a block the process may run code in is flushed (mmu_block_); the 030's one ATC may too */
+                int was = *d & D_VALID;
+                *d = v;
+                ch = 1;
+                if (ld && (was || fam == 1)) {
+#ifdef MMU_PFLUSH_PAGES
+                    if (fl_n < 8)
+                        fl_a[fl_n] = a;
+#endif
+                    fl_n++;
+                }
+            }
+            dpushd(d0, d);                          /* the 060's table search does not look in the data cache */
+            if (td && ch)
+                tidy(r, lo);
         }
         lo = end;
     }
+    return 0;
 }
 
-/* p's view (D41 section 6): what user_ok_wr/rd let it hand to a system call; only page-aligned starts are flipped in */
-KMMU __attribute__((optimize("O2"))) static void view(const struct proc *p, int in)
+/* after the changes: PFLUSH of up to 8 pages, else the entries that are not global; everything when a global entry
+ * went (D60 section 4's ATC rules). The 030 has no global entries and 22 in all: always PFLUSHA. */
+KMMU static void tflush(void)
+{
+    if (fl_g || (fam == 1 && fl_n))
+        mmu_flush(fam);
+#ifdef MMU_PFLUSH_PAGES
+    else if (fl_n > 8)
+        mmu_flushan();
+    else if (fl_n)
+        mmu_pflush(fl_a, fl_n);
+#else
+    else if (fl_n)
+        mmu_flushan();
+#endif
+    fl_n = 0;
+    fl_g = 0;
+}
+
+/* p's code's bits: read only; global on 040/060 for a shared segment of a file everyone may read (D60 section 4) */
+KMMU static u32 codebits(const struct proc *p)
+{
+    return D_VALID | D_WP | (fam == 2 && p->seg && p->seg->world ? D_G : 0);
+}
+
+/* p's view (D41 section 6) in tree r: in (or out); its code only when code is set. Only page-aligned starts (a
+ * protected process's blocks: what user_ok_wr/rd let it hand to a system call), the same both ways. */
+KMMU static int view(u32 *r, const struct proc *p, int in, int code)
 {
     u32 rw = in ? D_VALID : 0;
-    if (!in || !(p->base & (MMU_PG - 1)))
-        flip(p->base, p->base + p->span, rw);
+    int bad = 0;
+    if (!(p->base & (MMU_PG - 1)))
+        bad |= tflip(r, p->base, p->base + p->span, rw);
     for (int i = 0; i < NREG; i++)
-        if (p->reg[i].base && (!in || !(p->reg[i].base & (MMU_PG - 1))))
-            flip(p->reg[i].base, p->reg[i].base + p->reg[i].size, rw);
-    if (p->csize && (!in || !(p->code & (MMU_PG - 1))))
-        flip(p->code, p->code + p->csize, in ? D_VALID | D_WP : 0);
-    if (upd_pa && (p->uid == 0 || !in)) /* D15: zup (root) reads the update bundle in place, read only; out whatever
-                                         * the uid is now (a root tenant that called setuid kept it: audit A6-10) */
-        flip(upd_pa, upd_pa + upd_size, in ? D_VALID | D_WP : 0);
+        if (p->reg[i].base && !(p->reg[i].base & (MMU_PG - 1)))
+            bad |= tflip(r, p->reg[i].base, p->reg[i].base + p->reg[i].size, rw);
+    if (code && p->csize && !(p->code & (MMU_PG - 1)))
+        bad |= tflip(r, p->code, p->code + p->csize, in ? codebits(p) : 0);
+    return bad;
 }
 
 KMMU static int serves(const struct proc *c, const struct proc *s)
@@ -327,8 +532,15 @@ KMMU static int serves(const struct proc *c, const struct proc *s)
     return c->state == P_MSG && c->wait_msg && c->wait_msg->state == MSG_SERVING && c->wait_msg->server == s->pid;
 }
 
-/* the tenant's view and its lent clients' out, n's and its held clients' in, then the ATC flushed */
-/* the flips of a retenant run with the serial port's receive (level 5: it only queues the byte) let in: a big view
+/* c's request waits in a port of s's (s takes it at its next receive) */
+KMMU static int calling(const struct proc *c, const struct proc *s)
+{
+    u32 i = (u32)c->wait_port & 0xFF;
+    return c->state == P_MSG && c->wait_msg && c->wait_msg->state == MSG_QUEUED && i < NPORT && ports[i].used &&
+           ports[i].owner == s->pid;
+}
+
+/* the lends and the flips run with the serial port's receive (level 5: it only queues the byte) let in: a big view
  * takes longer than one character at 115200 baud. Never lowers a mask below 4. */
 KMMU static inline u16 sr_to4(void)
 {
@@ -340,27 +552,95 @@ KMMU static inline u16 sr_to4(void)
 }
 KMMU static inline void sr_back(u16 s) { __asm__ volatile("move.w %0,%%sr" :: "d"(s) : "memory"); }
 
-KMMU __attribute__((optimize("O2"))) static void retenant(struct proc *n)
+/* the runtime calls from outside: every interrupt masked but the serial port's receive; at the end the flushes */
+KMMU static u16 enter(void)
 {
-    u16 sr = sr_to4();
-    if (tenant) {
-        view(tenant, 0);
-        for (int i = 1; i < NPROC; i++)
-            if (lent & (1u << i))
-                view(&procs[i], 0);
+    u16 s = irq_save();
+    sr_to4();
+    return s;
+}
+KMMU static void leave(u16 s)
+{
+    tflush();
+    irq_restore(s);
+}
+
+KMMU static void load(u32 *r)
+{
+    if (loaded != r) {
+        loaded = r;
+        mmu_root((u32)r, fam);
     }
-    lent = 0;
-    tenant = n;
-    if (n) {
-        view(n, 1);
-        for (int i = 1; i < NPROC; i++)
-            if (serves(&procs[i], n)) {
-                view(&procs[i], 1);
-                lent |= 1u << i;
+}
+
+/* c's view out of s's tree t; its code stays if s or another client s serves runs the same. The tables stay (the
+ * next request of a client there needs them again; at most one page table per 256 KB of RAM in a tree, 0.1% of RAM,
+ * freed with the tree or with the memory) */
+KMMU static void unlend(struct tree *t, const struct proc *s, struct proc *c)
+{
+    t->lent &= ~SLOT(c);
+    int keep = s->csize && s->code == c->code;
+    for (int i = 1; i < NPROC && !keep; i++)
+        if ((t->lent & (1u << i)) && procs[i].csize && procs[i].code == c->code)
+            keep = 1;
+    view(t->root, c, 0, !keep);
+}
+
+/* a part of a view could not be made valid: its first access there says "memory protection" */
+KMMU static void nomem(const struct proc *p)
+{
+    kprintf("\n[kernel] mmu: no memory for a table of pid %d (%s)\n", p->pid, p->name);
+}
+
+KMMU static void lendin(struct tree *t, struct proc *c)
+{
+    t->lent |= SLOT(c);
+    lentany |= SLOT(c);
+    if (view(t->root, c, 1, 1)) {
+        nomem(c);
+        unlend(t, current, c);          /* not kept half made: the next request tries again */
+    }
+}
+
+/* p's tree made (D60 section 4): its view, the bundle for root, the clients it serves */
+KMMU static void build(struct proc *n, struct tree *t)
+{
+    if (!(t->root = unit(1)))
+        return nomem(n);
+    t->lent = 0;
+    t->upd = 0;
+    if (view(t->root, n, 1, 1))
+        nomem(n);
+    for (int i = 1; i < NPROC; i++)
+        if (serves(&procs[i], n))
+            lendin(t, &procs[i]);
+}
+
+/* the tree of slot i given back (the process ended, or is a system one now); its view out of every other tree (a slot
+ * given to a new process: only the marks go, its old pages being out of every tree since they were freed) */
+KMMU static void drop(int i, int others)
+{
+    struct tree *t = &trees[i];
+    if (t->root) {
+        if (loaded == t->root)
+            load(krt);
+        for (u32 a = 0; a < 128; a++)           /* every table, then the root: an empty tree needs no flips */
+            if (t->root[a] & 2) {
+                u32 *pt = (u32 *)(t->root[a] & ~0x1FFu);
+                for (u32 b = 0; b < 128; b++)
+                    if (pt[b] & 2)
+                        unit_free((u32 *)(pt[b] & ~(PTSZ - 1)), 0);
+                unit_free(pt, 1);
             }
+        unit_free(t->root, 1);
+        t->root = 0;
     }
-    sr_back(sr);
-    mmu_flush(fam);
+    t->lent = 0;                                /* (the ATC entries of its global pages stay: they show a segment
+                                                 * everyone may read; one freed flushes everything, mmu_freed_) */
+    t->upd = 0;
+    for (int k = 1; others && k < NPROC; k++)
+        if (trees[k].lent & (1u << i))
+            unlend(&trees[k], &procs[k], &procs[i]);
 }
 
 KMMU static void setmode(int m)
@@ -371,91 +651,173 @@ KMMU static void setmode(int m)
     }
 }
 
-KMMU __attribute__((optimize("O2"))) static void mmu_switch_(struct proc *n)
+/* the switch's slow part: the tree made, a stale lend taken back, the bundle in or out */
+KMMU __attribute__((noinline)) static void fix(struct proc *n, struct tree *t)
+{
+    {
+        u16 sr = sr_to4();
+        if (!t->root)
+            build(n, t);
+        if (t->root) {
+            for (int k = 1; t->lent && k < NPROC; k++)      /* lent clients it no longer serves, out */
+                if ((t->lent & (1u << k)) && !serves(&procs[k], n) && !calling(&procs[k], n)) {
+                    if (procs[k].state == P_FREE || procs[k].state == P_ZOMBIE)
+                        t->lent &= ~(1u << k);  /* its pages went out of every tree when they were freed */
+                    else
+                        unlend(t, n, &procs[k]);
+                }
+            u8 u = upd_pa && n->uid == 0;   /* D15: zup reads the bundle in place, read only; out once not root */
+            if (t->upd != u) {          /* (marked in when tried: a half-made map is taken out with the rest) */
+                if (tflip(t->root, upd_pa, upd_pa + upd_size, u ? D_VALID | D_WP : TIDY))
+                    nomem(n);
+                t->upd = u;
+            }
+        }
+        sr_back(sr);
+    }
+}
+
+KMMU static void mmu_switch_(struct proc *n)
 {
     if (n->pid == 0 || n->exiting)  /* idle and a process in proc_exit never run user code again */
         return;
-    if (sysmask & SLOT(n)) {
+    int i = (int)(n - procs);
+    if (sysmask & (1u << i)) {
         setmode(0);
         return;
     }
-    if (n != tenant)
-        retenant(n);
-    setmode(1);
-}
-
-KMMU static void mmu_sysnow_(void)    /* the current process made a system one: system mode now */
-{
-    u16 s = irq_save();
-    setmode(0);
-    irq_restore(s);
+    struct tree *t = &trees[i];
+    if (__builtin_expect(!t->root || t->lent || t->upd != (upd_pa && n->uid == 0), 0))
+        fix(n, t);
+    u32 *r = t->root ? t->root : krt;   /* no tree (no memory): nothing valid, its first access says so */
+    if (loaded != r) {
+        loaded = r;
+        mmu_root((u32)r, fam);          /* (the flush of every entry not global) */
+        fl_n = 0;
+    }
+    if (__builtin_expect(fl_n | fl_g, 0))
+        tflush();
+    if (mode != 1) {
+        mode = 1;
+        mmu_ttr(win[1], fam);
+    }
 }
 
 void mmu_sysmark(struct proc *p)
 {
     if (p->dbgf & DBGF_TRACED)
         dbg_sysmark(p);                 /* D54 section 4: a system process has no debugger */
+    if (sysmask & SLOT(p))
+        return;
     sysmask |= SLOT(p);
-    if (mmu_on && p == current)         /* from now on, also on its way back to user mode now */
-        mmu_ops->sysnow();
+    if (mmu_on)                         /* its tree goes (and from now on, also on its way back to user mode now) */
+        mmu_ops->forget(p);
 }
-void mmu_slot_new(struct proc *p) { sysmask &= ~SLOT(p); }
+/* the slot is given to a new process: a protected one, nothing of the slot's last tree left */
+void mmu_slot_new(struct proc *p)
+{
+    sysmask &= ~SLOT(p);
+    if (mmu_on)
+        mmu_ops->forget(p);
+}
 int mmu_is_sys(const struct proc *p) { return (sysmask & SLOT(p)) != 0; }
 
-
-/* proc_exit, at its start (before seg_put drops the code): never seen again */
+/* proc_exit, at its start (before seg_put drops the code), a process made a system one (mmu_sysmark), and a slot given to a new process: never seen again */
 KMMU static void mmu_forget_(struct proc *p)
 {
-    u16 s = irq_save();
-    if (p == tenant)
-        retenant(0);
-    else if (lent & SLOT(p))
-        retenant(tenant);               /* a lent client that ends: the tenant's set again without it */
-    irq_restore(s);
+    u16 s = enter();
+    int sys = (sysmask & SLOT(p)) && !p->exiting;
+    drop((int)(p - procs), !sys);       /* made a system one: its lends stay (a server may be serving it) */
+    if (p == current && sys)
+        setmode(0);                     /* every access let through, also on its way back now */
+    leave(s);
 }
 
+/* ipc_recv gave c's request to the current process: c's view in its tree until the request ends (D60 5.3, D41 8) */
 KMMU static void mmu_lend_(struct proc *c)
 {
-    if (!c || current != tenant || c == current || (lent & SLOT(c)))
-        return;
+    int i = (int)(current - procs);
+    struct tree *t = &trees[i];
+    if (!c || c == current || c->exiting || (sysmask & (1u << i)) || !t->root || (t->lent & SLOT(c)))
+        return;                         /* (an ending client's calls: its memory is about to go) */
+    u16 s = enter();
+    lendin(t, c);
+    leave(s);
+}
+
+/* seg_disown (D54): p's code is its own copy now, never global: its tree made again */
+KMMU static void mmu_redo_(struct proc *p)
+{
     u16 s = irq_save();
-    sr_to4();                           /* as retenant: the serial port's receive let in while a big view flips (A6-12) */
-    view(c, 1);
-    lent |= SLOT(c);
-    mmu_flush(fam);
+    int i = (int)(p - procs);
+    fl_g = 1;                           /* the segment's global entries go, whoever made them */
+    if (trees[i].root) {
+        drop(i, 1);
+        if (p == current && !(sysmask & (1u << i)))
+            mmu_switch_(p);             /* it goes on running: its tree now */
+    }
+    tflush();
     irq_restore(s);
 }
 
-/* [lo, hi) to how, the ATC flushed (a block made for the tenant; a block freed) */
-KMMU static void flipf(u32 lo, u32 hi, u32 how)
+/* mem.c: a MEM_USER block was made for owner: valid in its tree at once (D41 9). A tree p's view is still lent to (a
+ * server it called before: p runs, so it is served by nobody now) takes it back, so no lend ever lacks a block */
+KMMU static int mmu_block_(u32 data, u32 len, u32 owner)
 {
-    u16 s = irq_save();
-    sr_to4();                           /* (A6-12, as mmu_lend) */
-    flip(lo, hi, how);
-    mmu_flush(fam);
-    irq_restore(s);
-}
-
-KMMU static void mmu_block_(u32 data, u32 len, u32 owner)
-{
-    if (tenant && (u32)tenant->pid == owner)        /* a lent client never allocates: it waits for its reply */
-        flipf(data, data + len, D_VALID);
+    if (!owner || owner >= 0x80000000u)
+        return 0;
+    struct proc *p = proc_by_pid((int)owner);
+    if (!p || !trees[p - procs].root)
+        return 0;                       /* no tree yet: made from p's view at its first switch */
+    u16 s = enter();
+    if (lentany & SLOT(p)) {
+        lentany &= ~SLOT(p);
+        for (int i = 1; i < NPROC; i++)
+            if (trees[i].lent & SLOT(p))
+                unlend(&trees[i], &procs[i], p);
+    }
+    int bad = tflip(trees[p - procs].root, data, data + len, D_VALID);
+    if (bad) {
+        nomem(p);
+        tflip(trees[p - procs].root, data, data + len, TIDY);   /* the block is not given (mem_alloc frees it) */
+    }
+    if (trees[p - procs].root == loaded)
+        fl_n |= 1;                      /* a 040's prefetch may have left an invalid instruction entry there */
+    leave(s);
+    return bad;
 }
 
 KMMU static void mmu_upd_gone_(void)     /* the bundle's pages (their partial ends too) out before it is freed */
 {
-    if (upd_pa)
-        flipf(upd_pa, upd_pa + upd_size, 0);
+    if (!upd_pa)
+        return;
+    u16 s = irq_save();
+    for (int i = 1; i < NPROC; i++)
+        if (trees[i].upd) {
+            tflip(trees[i].root, upd_pa, upd_pa + upd_size, TIDY);
+            trees[i].upd = 0;
+        }
+    tflush();
+    irq_restore(s);
 }
 
-KMMU static void mmu_freed_(u32 data, u32 len)
+/* mem.c: a block is freed: its whole pages invalid in every tree (a shared segment's: every global entry flushed) */
+KMMU static void mmu_freed_(u32 data, u32 len, u32 owner)
 {
     u32 lo = (data + MMU_PG - 1) & ~(MMU_PG - 1), hi = (data + len) & ~(MMU_PG - 1);
-    if (lo < hi)
-        flipf(lo, hi, 0);
+    if (lo >= hi)
+        return;
+    u16 s = enter();
+    for (int i = 1; i < NPROC; i++)
+        if (trees[i].root)
+            tflip(trees[i].root, lo, hi, TIDY);
+    if (owner == SEG_OWNER)
+        fl_g = 1;
+    leave(s);
 }
 
-/* ZINE (D41 section 11), interrupts masked: off as D37 left the registers; back with the windows of the mode now */
+/* ZINE (D41 section 11), interrupts masked: off as D37 left the registers; back with the windows of the mode now and
+ * the tree that was loaded */
 KMMU static void mmu_hand_(int back)
 {
     if (!back) {
@@ -468,6 +830,7 @@ KMMU static void mmu_hand_(int back)
         m.dtt1 = win[mode][1];
         m.itt0 = win[mode][2];
     }
+    m.root = (u32)loaded;
     mmu_regs_load(&m);
 }
 
@@ -486,16 +849,6 @@ KINIT static int off_why(const char *why)
 {
     kprintf("mmu: memory protection off: %s\n", why);
     return 0;
-}
-
-KINIT static u32 *table(u32 *slot, u8 **next, u32 size)   /* the table *slot names, made from *next if there is none */
-{
-    if (!(*slot & 2)) {
-        u32 *t = (u32 *)*next;
-        *next += size;
-        *slot = (u32)t | D_TABLE;
-    }
-    return (u32 *)(*slot & ~(size - 1));
 }
 
 KINIT void mmu_setup(const struct bootinfo *bi)
@@ -548,7 +901,8 @@ not_asked:
     /* the kernel's windows (section 4). A page's cache mode is its window's: the first 16 MB inhibited, the fast
      * block D37's mode, so the kernel and a program never see one line two ways; with the data cache off everything is
      * write-through, cachable: only instruction fetches use it then, as they did before */
-    u32 cmhi = cache_dmode == CACHE_D_CB ? CM_CB : 0, cmlo = cache_dmode == CACHE_D_OFF ? 0 : CM_INH;
+    cmhi = cache_dmode == CACHE_D_CB ? CM_CB : 0;
+    cmlo = cache_dmode == CACHE_D_OFF ? 0 : CM_INH;
     if (fam == 2) {
         unsigned io[8], base = 0, mask = 0;
         int pk = cache_block(bi, bi->attn & 0x80, &base, &mask, io);
@@ -566,88 +920,86 @@ not_asked:
         win[0][2] = 0x00FFC000u;        /* ITT0: every address, cachable, every access */
         for (int i = 0; i < 3; i++)     /* protected mode: S = 01, supervisor accesses only */
             win[1][i] = win[0][i] ? (win[0][i] & ~0x6000u) | 0x2000u : 0;
-        on.tc = (bi->attn & 0x80 ? 0x0200u : 0) | 0x8000u;  /* E, 4 KB pages; the 060's DCO as D37 */
+        on.tc = (bi->attn & 0x80 ? 0x0200u : 0) | 0x8000u | (MMU_PG == 8192u ? 0x4000u : 0);  /* E, P (8 KB pages);
+                                                             * the 060's DCO as D37 */
         on.itt1 = 0;
         dpush = cache_dmode != CACHE_D_OFF;
     } else {
         win[0][0] = 0x00FF8107u;        /* TT0: everything, RWM, every function code */
         win[1][0] = 0x00FF8143u;        /* function codes 4-7: supervisor only */
-        on.tc = 0x80C07760u;            /* E, PS 4 KB, IS 0, TIA 7, TIB 7, TIC 6 */
+        on.tc = MMU_PG == 8192u ? 0x80D07750u : 0x80C07760u;    /* E, PS 4 KB, IS 0, TIA 7, TIB 7, TIC 6 (8 KB:
+                                                                 * PS 13, TIC 5) */
         on.crp_hi = 0x80000002u;        /* lower limit 0 (none), short table descriptors */
     }
 
-    /* the tables (section 5): the root, a pointer table per 32 MB of pools, a page table per 256 KB of pools */
-    const struct zine_range *r;
-    u32 nr = mem_ranges(&r), np = 0, ng = 0;
-    for (u32 i = 0; i < nr; i++) {      /* two ranges sharing a piece count it twice: a table or two too many */
-        ng += ((r[i].hi - 1) >> 18) - (r[i].lo >> 18) + 1;
-        np += ((r[i].hi - 1) >> 25) - (r[i].lo >> 25) + 1;
-    }
-    tbytes = 512 + np * 512 + ng * 256;
-    tblk = mem_alloc(tbytes + 512, 0, 0);
-    if (!tblk)
+    /* the kernel's tree (D60 section 4): a root with nothing valid, for SRP and for URP until a protected process
+     * runs; the trees themselves are made from the table pool once protection is on */
+    void *kblk = mem_alloc(1024, 0, 0);
+    u8 *pb = mem_alloc(3 * MMU_PG, 0, 0), *tb = mem_alloc(512 + 512 + PTSZ, 0, 0);
+    if (!kblk || !pb || !tb) {
+        mem_free(kblk);
+        mem_free(pb);
+        mem_free(tb);
         return (void)off_why("out of memory for the tables");
-    u8 *t = (u8 *)(((u32)tblk + 511) & ~511u);
-    memset(t, 0, tbytes);
-    root = (u32 *)t;
-    u8 *nextp = t + 512, *nextg = t + 512 + np * 512;
-    for (u32 i = 0; i < nr; i++)
-        for (u32 a = r[i].lo & ~0x3FFFFu; a < r[i].hi; a += 0x40000u) {
-            u32 *pt = table(&root[a >> 25], &nextp, 512);
-            u32 *pg = table(&pt[(a >> 18) & 127], &nextg, 256);
-            for (u32 j = 0; j < 64; j++) {
-                u32 pa = a + j * MMU_PG;
-                pg[j] = pa | D_PAGE | (fam == 2 ? (pa < 0x01000000u ? cmlo : cmhi) : 0);
-            }
-        }
+    }
+    krt = (u32 *)(((u32)kblk + 511) & ~511u);
+    memset(krt, 0, 512);
     on.dtt0 = win[0][0];
     on.dtt1 = fam == 2 ? win[0][1] : 0;
     on.itt0 = fam == 2 ? win[0][2] : 0;
-    on.root = (u32)root;
-    tbytes = (u32)(nextg - t);           /* what was used, for the log line */
-    if (dpush)
-        cache_push_range((u32)t, (u32)t + tbytes);
+    on.root = on.srp = (u32)krt;
 
-    /* the probe (section 3): T mapped onto R, R invalid; the windows in protected mode */
-    u8 *pb = mem_alloc(3 * MMU_PG, 0, 0);
-    u32 res = 0;
-    if (pb) {
-        u32 T = ((u32)pb + MMU_PG - 1) & ~(MMU_PG - 1), R = T + MMU_PG;
-        u32 *dt = pte(T), keep = *dt;
-        *dt = R | D_PAGE | (keep & 0x60u) | D_VALID;
-        *(volatile u32 *)T = 0x5A4D5531u;
-        *(volatile u32 *)R = 0x5A4D5532u;
-        if (dpush)
-            cache_push_range((u32)dt, (u32)dt + 4);
-        struct mregs m = on;
-        m.dtt0 = win[1][0];
-        if (fam == 2) {
-            m.dtt1 = win[1][1];
-            m.itt0 = win[1][2];
-        }
-        res = mmu_probe_hw(&m, T, R);
-        *dt = keep;
-        if (dpush)
-            cache_push_range((u32)dt, (u32)dt + 4);
-        mem_free(pb);
+    /* the probe (D41 section 3): in the kernel's tree for the time of it, T mapped onto R, R invalid; the windows in
+     * protected mode */
+    u32 T = ((u32)pb + MMU_PG - 1) & ~(MMU_PG - 1), R = T + MMU_PG;
+    u32 *ptp = (u32 *)(((u32)tb + 511) & ~511u), *pgp = ptp + 128;
+    memset(ptp, 0, 512 + PTSZ);
+    krt[T >> 25] = (u32)ptp | D_TABLE;
+    ptp[(T >> 18) & 127] = (u32)pgp | D_TABLE;
+    pgp[(T >> PG_SH) & (NPTE - 1)] = R | D_PAGE | (fam == 2 ? (T < 0x01000000u ? cmlo : cmhi) : 0) | D_VALID;
+    *(volatile u32 *)T = 0x5A4D5531u;
+    *(volatile u32 *)R = 0x5A4D5532u;
+    if (dpush) {
+        cache_push_range((u32)krt, (u32)krt + 512);
+        cache_push_range((u32)ptp, (u32)ptp + 512 + PTSZ);
     }
-    if (res != 3) {
+    struct mregs m = on;
+    m.dtt0 = win[1][0];
+    if (fam == 2) {
+        m.dtt1 = win[1][1];
+        m.itt0 = win[1][2];
+    }
+    u32 res = mmu_probe_hw(&m, T, R);
+    krt[T >> 25] = 0;
+    if (dpush)
+        cache_push_range((u32)krt, (u32)krt + 512);
+    mem_free(pb);
+    mem_free(tb);
+    trees = res == 3 ? mem_alloc(NPROC * sizeof *trees, 0, 0) : 0;
+    if (!trees) {
         mmu_regs_load(&off);
-        mem_free(tblk);
-        tblk = 0;
+        mem_free(kblk);
+        mem_free(trees);
+        trees = 0;
+        if (res == 3)
+            return (void)off_why("out of memory for the tables");
         kprintf("mmu: memory protection off: no MMU (the probe found none: %u)\n", res);
         return;
     }
+    memset(trees, 0, NPROC * sizeof *trees);
     if (mmu_regs_load(&on)) {
         mmu_regs_load(&off);
-        mem_free(tblk);
-        tblk = 0;
+        mem_free(kblk);
+        mem_free(trees);
+        trees = 0;
         return (void)off_why("no MMU (a register is missing)");
     }
+    loaded = krt;
     mode = 0;
+    tbytes = 1024;
     mmu_arm(fam);                       /* the table to the span's functions, and mmu_on set: together, only here */
-    kprintf("mmu: memory protection on: %s, 4 KB pages, %u KB of tables\n",
-            bi->attn & 0x80 ? "68060" : bi->attn & 0x08 ? "68040" : "68030", (tbytes + 1023) / 1024);
+    kprintf("mmu: memory protection on: %s, %u KB pages, %u KB of tables (a tree per process)\n",
+            bi->attn & 0x80 ? "68060" : bi->attn & 0x08 ? "68040" : "68030", MMU_PG / 1024, tbytes / 1024);
 }
 
 /* ---- a fault (D41 section 10) ---- */
@@ -712,17 +1064,17 @@ KMMU static int mmu_fault_(const u8 *f, u32 pc)
 static void nop_p(struct proc *p) { (void)p; }
 static void nop_v(void) {}
 static void nop_3(u32 a, u32 b, u32 c) { (void)a; (void)b; (void)c; }
-static void nop_2(u32 a, u32 b) { (void)a; (void)b; }
+static int nop_b(u32 a, u32 b, u32 c) { (void)a; (void)b; (void)c; return 0; }
 static void nop_i(int a) { (void)a; }
 static int nop_f(const u8 *f, u32 pc) { (void)f; (void)pc; return 0; }
-static const struct mmu_ops mmu_ops_off = { nop_p, nop_v, nop_p, nop_p, nop_3, nop_v, nop_2, nop_i, nop_v, nop_f };
+static const struct mmu_ops mmu_ops_off = { nop_p, nop_p, nop_p, nop_p, nop_b, nop_v, nop_3, nop_i, nop_v, nop_f };
 const struct mmu_ops *mmu_ops = &mmu_ops_off;
 
 /* the live table: read-only data in the span (.zhwmmu.rodata), the only place that holds span functions' addresses;
  * tools/check-init.py lets only mmu_arm refer to it, as move.l #mmu_ops_on,mmu_ops */
 __attribute__((section(".zhwmmu.rodata"))) static const struct mmu_ops mmu_ops_on = {
-    mmu_switch_, mmu_sysnow_, mmu_forget_, mmu_lend_, mmu_block_, mmu_upd_gone_, mmu_freed_, mmu_hand_,
-    mmu_before_reset_, mmu_fault_ };
+    mmu_switch_, mmu_forget_, mmu_lend_, mmu_redo_, mmu_block_, mmu_upd_gone_, mmu_freed_,
+    mmu_hand_, mmu_before_reset_, mmu_fault_ };
 
 /* the only writer of mmu_on besides mmu_before_reset_ (tools/check-init.py): armed exactly while it is set */
 KMMU __attribute__((noinline)) static void mmu_arm(u8 f)

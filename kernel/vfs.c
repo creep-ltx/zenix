@@ -277,6 +277,8 @@ static __attribute__((noinline)) long fs_call_k(int mi, u32 type, u32 a0, u32 a1
     m.a[0] = a0; m.a[1] = a1; m.a[2] = a2; m.a[3] = a3;
     if (type == FS_CHMOD || type == FS_CHOWN || type == FS_RENAME || type == FS_RMDIR || type == FS_UNLINK)
         perm_epoch++;                   /* before the call: a check that overlaps it is not cached (mount_search) */
+    if (type == FS_CHMOD && mmu_on)
+        seg_unlist(mi, -1);             /* D60: a segment's global pages follow its file's mode (the next spawn loads it) */
     /* FS_CLOSE never starts a stopped server (D11): a new server has no opens to release, and proc_exit's closes
      * must never load a program; FS_SYNC and FS_QUIT skip a server that is not running (it has nothing to write: an
      * ext2 one wrote through, a dead ZenixFS one's uncommitted changes are gone, a starting one wrote nothing yet) */

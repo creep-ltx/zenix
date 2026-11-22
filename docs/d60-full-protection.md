@@ -762,3 +762,111 @@ architecture.md, frozen-interfaces.md, claims.md and the code; their findings an
     the other changes of meaning listed (12); stages 3's dependencies and the extra 15-25 hours (14: now 87-121).
     Open, for stage 3: whether `SYS_memfree` refuses a D55 screen's planes while they are shown (as `CON_GRAB`'s
     regions are).
+
+## 18. As built: stages 0 and 1 (2026-11-22, branch d60)
+
+The main session's answers to section 16 (2026-11-22): the display server keeps the chips in 1.0; system services may
+ask for any range, user-run servers get declared bytes only; old servers get the old lend only when they could debug
+the client, `MMU=STRICT` available, not the default; `CON_GRAB` narrowed to the display service; ZINE a plain take-over
+with checks after; `MMU=D41` yes, for the first hardware runs; the budget as written, the 1260 run when the partner is
+home, emulator figures until then. None of that is built yet: it belongs to stages 3 to 5.
+
+### 18.1 Stage 0: the benches
+
+- `bench mmu [FILE]` (docs/man/bench.txt): the figures of 9.4 that a program can take, each checked: a big file read
+  once (`bigread`, FILE /bin/tcc, through fsd and diskd), the null call, `stat`, a cached 4 KB read (`read4k`), a call to
+  a protected server and back (`msgcall`, a msgpingd it starts), a round trip between two programs through two pipes
+  (`pipetrip`, a byte to `cat` and back), a pipe's throughput (`pipe`, `cat FILE` into a pipe) and `ls -laR /` (`lsr`).
+- `tools/mmubench-test.sh CPU...`: `bench mmu` with the kernel made `MMU=OFF` and as built on the same machine and
+  build, the ratios against 9.4 (reported, never failed on: emulator figures), in either emulator; in `make check`, one
+  job per CPU. `MMUBENCH_DIAG` builds both kernels with a variant (8 KB pages, below).
+- Not in stage 0, left to the stages that rest on them: the desktop's and sound's rows of 9.4 (their tests are made
+  for the 68020 machine, d41 19.3 note 8), the pointer-check check of section 13 (stage 2's split checks need it) and
+  the boot tables copied to fast RAM (6.3: stage 4, when a confined process first holds a DMA engine).
+
+### 18.2 Stage 1: a tree per process
+
+`kernel/mmu.c`, the hooks in `mem.c` (a freed block's owner passed; a block no table could be made for is not
+given), `seg.c` (the segment's readable-by-all mark, `mmu_redo` at `seg_disown`), `vfs.c` (a `chmod` unlists the
+mount's segments while protection is on, so the mark follows the file's mode for later spawns).
+
+- **The trees**: a protected process's tree is made at its first switch to user mode from its view (D41 section 6),
+  from a pool of 256-byte page tables and 512-byte root and pointer tables cut from kernel pages (`MEM_USER`, owner 0,
+  fast RAM first); the pool keeps its pages. A block made for a process is valid in its tree at once; a freed block's
+  whole pages go out of every tree and emptied tables go back to the pool. A process ending, a slot given to a new
+  one, or a process made a system one gives its tree back (a system one keeps the lends of its own calls). `SRP` and,
+  while no protected process ran, `URP` hold the kernel's empty tree. The boot line ends "(a tree per process)", its
+  tables 1 KB at boot (the kernel's tree).
+- **The switch**: idle and an exiting process nothing; a system process the windows to every access, as D41; a
+  protected one its root into `URP` and `PFLUSHAN` (040/060) or `CRP` (030: the load flushes) when it is not the one
+  loaded, then the windows to supervisor only. A call to a system server and back loads nothing.
+- **Global pages**: a shared segment whose file is `o+r` has G on 040/060; a segment freed, a global descriptor
+  changed and `seg_disown` flush everything (`PFLUSHA`).
+- **Flushes** (both reviews' points folded in): every change to the loaded tree that takes a page away or changes a
+  valid one is flushed before the kernel returns (`PFLUSHAN`; `PFLUSHA` on the 030 or when a global entry goes);
+  making an invalid page valid is not, but for a block a process gets for itself on a 040 (whose instruction ATC can
+  hold an invalid entry from a prefetch, MC68040UM 3.2.2.3; the 060 makes none from an invalid descriptor, MC68060UM
+  4.2.2.3; the 040's data ATC holds one only after a data access, which ended the process). Section 4's `PFLUSH` of
+  single pages is the variant `DIAG=-DMMU_PFLUSH_PAGES`: both emulators make `PFLUSH (An)` cost milliseconds (a 240 us
+  call became 68 ms in FS-UAE, 157 ms in Amiberry), so it can be judged on the 1260 only.
+- **Lends, D41's model kept**: a protected server's tree gets its client's whole view at `ipc_recv`. After the reply
+  the lend stays while that client's next request waits at one of the server's ports (it would be lent again at once),
+  and is taken back at the server's next switch to user mode otherwise, or at once when the client gets a block, ends
+  or has its code made again. D41 kept a lend until the next switch to another protected program; the extra exposure
+  is a client that is calling the server already. A server's tree keeps the tables of its clients' memory (freeing
+  and making them at every request doubled the call's cost in FS-UAE), at most a page table per 256 KB of RAM. Stage 2
+  replaces whole views by exact windows, taken down at the reply.
+- **8 KB pages**: `DIAG=-DMMU_PAGE8` (040/060 TCR P, 030 TC 0x80D07750, 32-entry page tables, `MEM_USER` rounded to 8
+  KB).
+- **Machines without an MMU**: unchanged; resident cost 16 bytes of BSS (`struct seg`), the owner argument of
+  `mmu_freed`, the test in `vfs.c` and `mem_alloc`'s, `mmu_sysmark`'s and `mmu_slot_new`'s gates.
+
+### 18.3 The figures (emulator figures: ratios only; neither emulator models the ATC's or the caches' real cost)
+
+`tools/mmubench-test.sh`, protection off -> on, the same build; D41 = the kernel of main at 45bb20d, stage 1 = branch
+d60. FS-UAE 3.2.35 in warp mode, Amiberry 8.5.0 at the machine's speed; the 030 an A1200 with 8 MB Zorro II, the
+040/060 with 64 MB more 32-bit fast RAM (tools/mmu-test.sh's machines).
+
+| Figure (budget) | FS-UAE 030 D41 -> stage 1 | FS-UAE 040 | FS-UAE 060 | Amiberry 030 | Amiberry 040 | Amiberry 060 |
+|---|---|---|---|---|---|---|
+| `msgcall`, a call to a protected server (x1.5 target, x2 limit) | x3.17 -> x1.44 | x4.12 -> x1.56 | x4.11 -> x1.56 | x2.34 -> x1.31 | x4.98 -> x1.68 | x4.98 -> x1.68 |
+| `pipetrip`, a round trip between two programs (x1.5, x2) | x2.03 -> x1.09 | x2.35 -> x1.12 | x2.35 -> x1.12 | x1.63 -> x1.09 | x2.51 -> x1.07 | x2.51 -> x1.07 |
+| `stat` (+10%) | +1% -> +2% | +2% -> +2% | +2% -> +2% | +2% -> +2% | +1% -> +1% | +1% -> +1% |
+| `read4k` (+10%) | +2% -> +3% | +2% -> +3% | +2% -> +3% | +3% -> +3% | +2% -> +2% | +2% -> +2% |
+| `bigread`, `pipe`, `lsr` (+10%, +15%) | within 8% -> within 2% | within 7% -> within 1% | within 7% -> within 1% | within 7% -> within 2% | within 6% -> within 1% | within 6% -> within 1% |
+| the null call (+0) | the same | the same | the same | the same | the same | the same |
+
+The absolute stage-1 times (us, off -> on): FS-UAE 030 `msgcall` 529 -> 763, `pipetrip` 936 -> 1,017; FS-UAE 040/060
+236 -> 368, 448 -> 504; Amiberry 030 179 -> 234, 301 -> 329; Amiberry 040/060 66 -> 111, 142 -> 151.
+
+- **8 KB pages**: in FS-UAE every figure the same as with 4 KB pages to the 0.1 us (the emulator charges nothing for
+  the page size); `free` after one login 20 KB lower (the rounding). Judged on the 1260 only.
+- **Memory** (`free` after boot and one login, FS-UAE): the 040/060 with 72 MB fast 73,094 KB off, 72,999 with D41
+  (d41 19.4), 73,064 with stage 1 (D41's 77 KB tree over all the pools is gone; each process's tree is 1.5-3 KB); the
+  030 with 8 MB, 7,528 with D41 and with stage 1.
+- **Size**: kernel.bin 206,192 -> 208,240 bytes (+2,048): `mmu` 5,722 -> 7,623 bytes of code and data and bss
+  124 -> 153 (the MMU span, given back after the boot when protection is off: 4,848 bytes), `seg` + 44 and bss + 16,
+  `mem` + 18, `vfs` + 14; the mount tests' RAM disk 676 -> 674 KB (82 blocks free). Section 10 estimated about +1 KB
+  for stage 1.
+
+### 18.4 Reviews and tests
+
+Two independent reviews of the code (2026-11-22): **the MMU mechanics** (030/040/060 switch, flushes, encodings):
+one must-fix, `mmu_pflush`'s `movem` loaded its arguments the wrong way round (MOVEM fills D before A whatever the
+list's order): fixed; the 040's instruction ATC and the "valid needs no flush" rule: a block a process gets for itself
+is flushed now, the comment says why; a segment's global mark kept after `chmod o-r`: a `chmod` unlists the mount's
+segments (running instances keep it: limits.md); every encoding, the 8 KB values, the pushes, the probe and the G
+paths checked fine. **The code**: four should-fix, all fixed: a process made a system one while a server served it
+lost its lends (now kept); an ending client's calls were lent again after its tree was gone, and a dead slot's lend
+mark could later take pages out of a live tree (an ending client is never lent; a dead slot's mark is only cleared);
+a lend or a block whose table could not be made stayed half made (taken back; the block is not given); a bundle map
+that failed half way was not taken out (marked when tried). Notes taken: `seg_disown` always flushes everything;
+`mmu_sysmark` does nothing for a process already a system one.
+
+Tests (FS-UAE in fast mode unless said; all with protection where the machine has it):
+- `mmu-test` on every model: FS-UAE 020 030 lc040 040 060 lc060, Amiberry 020 030 ec030 040 lc040 lc040+on ec040
+  ec040+on 060 lc060 lc060+on ec060 ec060+on: pass. The 8 KB build passes every check but the boot line's "4 KB".
+- `mmubench-test` 030 040 060 in both emulators: pass (the figures above).
+- `bootmem-test`, `zdb-test`, `svc-test` (every part), `mounttest`, `cmds-test`: pass (bootmem-test after
+  `tools/check-init-test.py` was pointed at a span function that still exists).
+- `mmu-suite` FS-UAE 030, 040, 060 and Amiberry: below.

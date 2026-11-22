@@ -42,7 +42,7 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
   and page tables of 128/128/64 entries on all three CPUs; U and M preset), sets the kernel's windows for supervisor
   accesses only (040/060: `DTT0` the first 16 MB inhibited, `DTT1` D37's fast block, `ITT0` everything; 030: `TT0`
   for function codes 4-7; `SRP` = `URP`) and turns translation on. A page's cache mode is its window's. The log says
-  `mmu: memory protection on: 68060, 4 KB pages, N KB of tables` or why it is off. On every 68030 boot a translation
+  `mmu: memory protection on: 68060, 4 KB pages, N KB of tables (a tree per process)` or why it is off. On every 68030 boot a translation
   the loader left on (Enforcer, FASTROM) is switched off first. Processes: section 6; memory: section 5.
 - Caches (`kernel/cache.c`, DESIGN D37, docs/d37-data-cache.md): instruction cache on. **The data cache is on only
   on a real 68040/68060 with fast RAM above the first 16 MB**: with the MMU off, `DTT0` makes the first 16 MB (chip
@@ -642,8 +642,9 @@ Nothing can be moved once handed out (no MMU, no paging), so fragmentation is th
 - **With memory protection on** (D41): a process's own blocks (`MEM_USER`: its image block, a ZEX2 program's code
   copy, `SYS_memalloc` regions; not for a process that is a system one from its start, a service's server) are whole
   4 KB pages, their data starting on a page and their header the last 16 bytes of the page below (a free block is cut
-  three ways). Every page wholly inside a freed block is made invalid in the tree (`free_blk`), and a block made for
-  the process flipped in is valid at once. `mem_owner_of` names a fault's owner. The headers are unchanged (ZINE's
+  three ways; 8 KB with the measurement build `DIAG=-DMMU_PAGE8`). Every page wholly inside a freed block is made
+  invalid in every tree (`free_blk`, its owner passed: a shared segment's flushes every global entry), and a block
+  made for a process is valid in its tree at once (no table for it: the allocation answers 0). `mem_owner_of` names a fault's owner. The headers are unchanged (ZINE's
   blob walks them). Off, nothing of this happens.
 - Every walk over the blocks (`alloc_in`, `mem_free`, `mem_free_owner`) checks each header: the magic value, a size of
   at least one header, a multiple of 16 and inside the range. A header that fails means something overwrote the heap:
@@ -801,14 +802,20 @@ pattern (section 6).
   register; the kernel is not built with `-msep-data` and keeps `a5` by the C calling rules; `switch_to` saves it).
 - **Memory protection** (D41, on by default where the MMU is known, section 2; docs/d41-memory-protection.md). A *protected* process (every program a
   user runs) sees in user mode only its view: its block, its regions, its code read only (what `user_ok_wr`/`rd`
-  allow; root's also the update bundle, read only, for zup), and while it holds a client's request (from `ipc_recv`
-  until the next retenant after `ipc_finish`: D41 section 8) that client's view too. A *system* process (a per-slot mask: `svc_born`, a reserved port's creator,
+  allow; root's also the update bundle, read only, for zup), and while it holds a client's request that client's view
+  too (DESIGN D60 stage 1: lent into its tree at `ipc_recv`; after the reply kept while that client's next request
+  waits at one of its ports, taken back at its next switch to user mode otherwise, or at once when the client gets a
+  block, ends or has its code made again). A *system* process (a per-slot mask: `svc_born`, a reserved port's creator,
   any passing `SYS_drv` call, `CON_GRAB`, the owner of a port `SYS_mount` mounts; at once when marked mid-run) runs
-  with the windows matching user accesses too, so it sees everything as before. `schedule()` calls `mmu_switch(next)`
-  before `switch_to`: idle and an exiting process nothing; a system process the windows to "every access"; a protected
-  one the windows to "supervisor only", after flipping the old tenant's and its lent clients' pages out and the new
-  one's in (descriptors pushed on a 040/060 with the data cache on, `PFLUSHA`; the serial port's level 5 let in during
-  the flips) when it is not already the tenant. `proc_exit` forgets an exiting process first. **Faults:** a user-mode
+  with the windows matching user accesses too, so it sees everything as before. **Each protected process
+  has its own translation tree** (DESIGN D60 stage 1, docs/d60-full-protection.md section 4 and "As built"), identity
+  mapped, made at its first switch to user mode from a pool of 256- and 512-byte tables cut from kernel pages; its
+  tables go back to the pool when their last page goes (a lend's stay until the tree ends). `schedule()` calls
+  `mmu_switch(next)` before `switch_to`: idle and an exiting process nothing; a system process the windows to "every
+  access"; a protected one the windows to "supervisor only" and, when its tree is not the one loaded, its root into
+  `URP` and `PFLUSHAN` (040/060: the pages of a shared segment whose file everyone may read are global and stay in the
+  ATC) or into `CRP` (030, which flushes). Descriptors are pushed when written (040/060 with the data cache on); the
+  serial port's level 5 is let in during long flips. `SRP` is an empty tree. `proc_exit` gives the tree back first. **Faults:** a user-mode
   access fault with protection on prints `[kernel] pid N (name): memory protection: a write to ADDR (WHOSE): killed
   (SIGSEGV)` (the 030's format $A/$B, the 040's $7, the 060's $4 frame read for the address and the direction; WHOSE:
   the memory of pid M (name), the kernel's memory, free memory, shared code, its own code (read only), a driver's DMA

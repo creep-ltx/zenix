@@ -185,7 +185,7 @@ if not ok:
 # 13: a resume address of the trap guard (lea label(%pc),%a0 in mmu_probe_hw) retargeted at another span function
 d = bytearray(E.d)
 pr = next(x["value"] for x in E.syms if x["name"] == "mmu_probe_hw")
-other = next(x["value"] for x in E.syms if x["name"] == "retenant")
+other = next(x["value"] for x in E.syms if x["name"] == "tflip")
 for line in dis.splitlines():
     f = line.split()
     if len(f) >= 4 and f[1] == "41fa" and int(f[0].rstrip(":"), 16) >= pr:
@@ -194,7 +194,7 @@ for line in dis.splitlines():
         d[p:p + 2] = struct.pack(">h", other - (a + 2))
         break
 open(f"{tmp}/k13.elf", "wb").write(d)
-run(f"{tmp}/k13.elf", "the trap guard loads retenant's address")
+run(f"{tmp}/k13.elf", "the trap guard loads tflip's address")
 # Review of revision 3's code (C1-C6): each false pass a reviewer built, now refused.
 # C1: a span's start bound plus an offset into its code (boot code storing kmain's address as __zinit_start + n)
 d = bytearray(E.d)

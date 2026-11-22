@@ -126,6 +126,10 @@
 # 2026-11-17 (D41 section 19, protection on by default where the MMU is known): mmu 5,592 -> 5,722 (the FPU's
 # FNOP test, the PCR's identity, the default's third state); budget 5,700 -> 5,800, TOTAL 206,000 -> 206,200
 # (both together, merged into the audit's branch: TOTAL 206,200).
+# 2026-11-22 (DESIGN D60 stages 0 and 1: a translation tree per protected process, the table pool, the switch by root
+# and PFLUSHAN, global pages): mmu 5,722 -> 7,623 and bss 124 -> 153, seg + 44 and bss + 16 (the segment's
+# readable-by-all mark, the hook at seg_disown), vfs + 14 (a chmod unlists the mount's segments), mem + 18 (a block with
+# no table is not given); kernel.bin 206,192 -> 208,240, TOTAL 206,200 -> 208,500; the mount tests' RAM disk 676 -> 674 KB.
 start     4850   8200
 main      5950   1100
 serial    6100   6500
@@ -140,7 +144,7 @@ blk        460     16
 rtc       1550      4
 proc     10650  21500
 syscall  10300      0
-vfs      11750   1600
+vfs      11800   1600
 tty       5900    100
 gfx       9050   2450
 term     14500    256
@@ -148,7 +152,7 @@ confont   3100     32
 kbd       4300    180
 ipc       4150   2150
 svc       5600   1420
-seg       1300    256
+seg       1300    272
 event      700      0
 signal    2150      0
 random    3800    280
@@ -158,7 +162,7 @@ zine      1850     16
 cache     1800     32
 gcon      4250     16
 dbg       4100     20
-mmu       5800    160
+mmu       7800    160
 embed    49900      0
-TOTAL   206200
+TOTAL   208500
 ROOM       800

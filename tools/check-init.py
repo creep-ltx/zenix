@@ -43,7 +43,7 @@ GUARD_TRAP = ("mt_on", "mt_trap")
 # the new digest written here (review of revision 3's code, C5). The allowance holds only for the functions of these
 # names inside that pinned range in the MMU span, never for a namesake elsewhere.
 GUARD_FIRST, GUARD_LAST = "mmu_regs_load", "mmu_flush"
-GUARD_SHA = "8fd515637e6e2c7d"
+GUARD_SHA = "12c83b2a8a76e3ee"  # D60 stage 1: mmu_regs_load writes SRP from its own field (reviewed)
 ARM, DISARM, OPS, ON = "mmu_arm", "mmu_disarm", "mmu_ops", "mmu_ops_on"   # D45 section 13: the table and its writers
 # mmu_on is set only by mmu_arm (with the table: armed exactly while it is set, so the span is kept whenever a copy of a
 # slot could exist) and cleared only by mmu_before_reset_; everyone else only tests or loads it (C3)

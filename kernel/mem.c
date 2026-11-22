@@ -298,8 +298,12 @@ void *mem_alloc(u32 n, u32 flags, u32 owner)
                 continue;                       /* wholly above the limit; one crossing it gives from its low part (A15) */
             void *p = alloc_in(&ranges[i], pg ? (n + MMU_PG - 1) & ~(MMU_PG - 1) : need, owner, limit, pg);
             if (p) {
-                if (__builtin_expect(pg, 0))    /* pg holds mmu_on: the table directly, not the gate (D45 13.5) */
-                    mmu_ops->block((u32)p, n, owner);    /* valid at once for the process flipped in (D41 9) */
+                /* pg holds mmu_on: the table directly, not the gate (D45 13.5); valid at once in its owner's tree, or no
+                 * block when no table could be made for it (D60) */
+                if (__builtin_expect(pg, 0) && mmu_ops->block((u32)p, n, owner)) {
+                    mem_free(p);
+                    return 0;
+                }
                 return p;
             }
         }
@@ -318,7 +322,7 @@ static struct range *range_of(u32 a)
 /* free a block, merge with free neighbours; returns the merged block */
 static struct mblk *free_blk(struct range *r, struct mblk *b)
 {
-    mmu_freed((u32)(b + 1), SZ(b) - HDR);   /* D41: its whole pages invalid for every program */
+    mmu_freed((u32)(b + 1), SZ(b) - HDR, b->owner);     /* D41: its whole pages invalid for every program */
     freeb[r->chip] += SZ(b);
     b->size &= ~1u;
     b->owner = 0;

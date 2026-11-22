@@ -2,7 +2,9 @@
 
 Revision 2, 2026-11-12: revision 1 after its two independent design reviews, every finding folded in or answered
 (section 17); built the same day on branch `mmu` (section 15). **Revision 3, 2026-11-17: on by default** where the CPU
-is known to have an MMU (the partner's order of that day; section 19, branch `mmudef`). Roadmap block 6, "optional
+is known to have an MMU (the partner's order of that day; section 19, branch `mmudef`). Since 2026-11-22 the one
+shared tree and its page flips (sections 4, 5, 8 and 9) are replaced by a tree per process: DESIGN D60 stage 1,
+docs/d60-full-protection.md "As built"; the rest of this model stands until D60's later stages. Roadmap block 6, "optional
 memory protection on CPUs with an MMU", next in the order of work after sound (approved 2026-10-25); the details are
 delegated (docs/decisions.md, 2026-11-12). Sources: the MC68030, MC68040 and MC68060 user's manuals (the knowledge
 base's `manuals/`; pages named where a fact is used), the knowledge base's `amiga/emu68-mmu.md` (Emu68 has no 68k MMU)

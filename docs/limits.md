@@ -25,6 +25,14 @@ display server, a mount's server), which are trusted as before; the kernel itsel
 overflowing into its own BSS, as above); and a protected server's clients while it holds their requests. Programs can
 no longer share memory by passing an address to each other, nor a protected server hand a client's pointer on to
 another protected server. The rounding of every protected block to whole 4 KB pages costs memory (d41 section 15).
+Since DESIGN D60 stage 1 (2026-11-22, d60 "As built") every protected process has its own translation tree, which
+leaves these: a protected server keeps a client's view after the reply while that client's next request waits at its
+port, and until its next switch to user mode otherwise (D41 kept it until the next switch to another program); the
+code of a shared program whose file everyone may read is global in the 040/060's ATC, so another process may read it
+through a kept entry (the file is readable by everyone; a `chmod o-r` stops it for programs started afterwards, not
+for those running); a server's tree keeps the tables of its clients' memory until it ends (at most a page table per
+256 KB of RAM, 0.1% of RAM); when no memory is left for a table, the allocation that needed it fails (0), and a
+process whose tree cannot be made is stopped at its first access with the protection line.
 Never run on a real 68030/040/060 yet; not on the stock A1200 (a 68EC020 has no MMU) nor under Emu68.
 
 What the permissions do cover (audit D): a user cannot kill, stop or take over the terminal of another user's or a

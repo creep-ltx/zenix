@@ -23,7 +23,9 @@ mkb() {     # mkb NAME WORD: $OUT/build-NAME, made with MMUBENCH_DIAG, its kerne
     if [ -n "$2" ] || [ -n "$D" ]; then
         # DIAG is not tracked as a dependency: the kernel's objects go first so the copy is made with it
         [ -n "$D" ] && rm -f "$b"/*.o "$b"/kernel*.bin "$b"/kernel*.elf
-        make -s BUILD="$b" DIAG="$D" all >/dev/null 2>&1 || { echo "FAIL: the build copy $1"; return 1; }
+        # (the kernel named first: missing intermediate files alone make nothing out of date)
+        { make -s BUILD="$b" DIAG="$D" "$b/kernel.bin" && make -s BUILD="$b" DIAG="$D" all; } >"$b.log" 2>&1 ||
+            { echo "FAIL: the build copy $1 (see $b.log)"; return 1; }
     fi
     if [ -n "$2" ]; then
         python3 tools/kopts.py "$b/kernel.bin" "$2" >/dev/null || return 1

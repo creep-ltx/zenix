@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #pragma GCC optimize("Os")              /* table walks at a spawn, an exit, an open for writing: size first */
 #include "kernel.h"
+#include "mmu.h"
 
 /* Shared code segments (DESIGN D13, docs/d13-shared-code.md sections 6-7). A ZEX2 program's code and constants are
  * loaded once and run by every process that starts the same unchanged file. A segment belongs to no process: its block
@@ -75,6 +76,7 @@ struct seg *seg_enter(const struct exec_src *x, u32 code, u32 size, u32 sum, con
         s->ino = (u32)x->ino;
         s->fsize = x->st.size;
         s->mtime = x->st.mtime;
+        s->world = (x->st.mode & 4) != 0;     /* D60 section 4: everyone may read the file: its pages may be global */
         mem_set_owner((void *)code, SEG_OWNER);
         *made = 1;
         return s;
@@ -101,6 +103,7 @@ void seg_disown(struct proc *p)
     s->listed = 0;
     s->refs = 0;
     p->seg = 0;
+    mmu_redo(p);                        /* D60 stage 1: its code no longer global: its tree made again */
 }
 
 void seg_unlist(int m, long ino)
