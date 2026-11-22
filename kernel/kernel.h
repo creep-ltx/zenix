@@ -614,6 +614,11 @@ void prio_recalc(struct proc *p);            /* p finished serving: back to its 
 u8 ipc_best_client(int pid);                 /* ipc.c: the best level among clients waiting for or served by pid */
 int user_ok_wr(const struct proc *p, u32 ptr, u32 len);   /* the process's own memory: it may be written */
 int user_ok_rd(const struct proc *p, u32 ptr, u32 len);   /* ... or its shared code (D13): only read */
+/* D60 5.7: a pointer the kernel follows only during the call (read, write, stat's buffer, a socket's buffers): the
+ * process's own memory as above, or a window of a request it holds (p == current: a window's copy page is then the
+ * client's again until the system call returns) */
+int user_ok_call_wr(struct proc *p, u32 ptr, u32 len);
+int user_ok_call_rd(struct proc *p, u32 ptr, u32 len);
 u32 user_rd_extent(const struct proc *p, u32 ptr);        /* how many bytes from ptr on user_ok_rd allows (0: none) */
 /* Stack guard (proc.c): a pattern at the bottom of every kernel and user stack, checked with the stack pointers at
  * every task switch, at every system call, at the tick when it interrupts user code and when a program faults.
@@ -678,7 +683,12 @@ struct proc *port_owner(int port);             /* the process that owns a port, 
 long ipc_call(int port, struct umsg *m);       /* SYS_call: kflags 0 */
 /* the kernel's own requests (vfs.c, sock.c, drv.c): kflags UMSG_KERNEL | KFL (0, or UMSG_LINKS from vfs.c, DESIGN
  * D26); ns: SVC_NS_*. D23's UMSG_CANCEL is ORed in by call() itself, never passed here (agreed in D26 step 0) */
-long ipc_kcall(int port, struct umsg *m, int ns, u16 kfl);
+long ipc_kcall(int port, struct umsg *m, int ns, u16 kfl, u8 kp);
+/* kp, D60 stage 2 (docs/d60-full-protection.md 5.4): which of the kernel's protocols m is, so that its buffers are
+ * known (copied into the server's slot or lent as windows while protection is on); internal, not frozen */
+#define KP_PROG 0                       /* a program's SYS_call: nothing declared */
+#define KP_FS   1                       /* fs_call_k (vfs.c): FS_* */
+#define KP_NET  2                       /* net_call (sock.c): NET_* with a struct netreq; drv.c's NETDRV_* blocks */
 long ipc_wait(struct umsg *m);                 /* the caller's m is queued: wait for the reply (and take a D11 role) */
 void ipc_enqueue(struct port *p, struct umsg *m, int front);
 void ipc_unqueue(struct port *p, struct umsg *m);
@@ -690,6 +700,9 @@ int ipc_serving(int pid);                      /* is pid serving a request now? 
 #define UMSG_NETREPLY 2                 /* D19: answered by the network server's NETSRV_REPLY (sock.c), internal */
 /* 4 UMSG_CANCEL (D23) and 8 UMSG_LINKS (D26) are in fsproto.h, where the servers see them */
 struct proc *ipc_client(struct umsg *m);       /* the client of m if it is in flight and served by current, else 0 */
+/* D60 stage 2: the kernel's record of the request m names (a server's copy in its inbox while protection is on, else
+ * the message itself), if it is in flight and served by current; else 0 */
+struct umsg *ipc_rec(struct umsg *m);
 struct umsg *ipc_recv(int port, int wait);
 struct umsg *ipc_replyrecv(struct umsg *m, s32 result, int port);
 long ipc_reply(struct umsg *m, s32 result);
