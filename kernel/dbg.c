@@ -194,7 +194,7 @@ static long resume(struct proc *p, struct dbg *d, int step, u32 sig)
     if (!rb)
         return -EIO;
     if (step) {
-        const struct hwinfo *hw = (const struct hwinfo *)HWINFO_ADDR;
+        const struct hwinfo *hw = HWINFO_K;
         if (hw->magic == HWINFO_MAGIC && (hw->flags & HW_DT))
             return -EOPNOTSUPP;         /* Emu68 never traces (section 8) */
     }

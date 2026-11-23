@@ -132,7 +132,7 @@ const u16 gfx_palette2[4] = { 0x000, 0xC22, 0x2BB, 0xBBB };
  * on the owner's A1200, 2026-10-23: "display: not available (no ROM font)"). */
 KINIT static int plausible(u32 a)
 {
-    const struct bootinfo *bi = (const struct bootinfo *)0x1000;
+    const struct bootinfo *bi = BOOTINFO_K;
     if (a >= 0xF00000u && a < 0x1000000u)           /* Kickstart ROM */
         return 1;
     if (a >= 0xE00000u && a < 0xE80000u)            /* extended ROM area */
@@ -730,7 +730,7 @@ static u32 ring_bytes(u32 ls) { return (u32)nring * 8 * ls; }
 static int fast;                        /* the machine has fast RAM (pick_depth) */
 static int pick_depth(void)
 {
-    const struct bootinfo *bi = (const struct bootinfo *)0x1000;
+    const struct bootinfo *bi = BOOTINFO_K;
     int chip2m = 0;
     for (int i = 0; i < bi->nregions && i < 8; i++) {
         if (bi->r[i].attrs & MEMF_CHIP) {

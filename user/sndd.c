@@ -8,7 +8,9 @@
  * No interrupts: Paula sets a channel's request bit in INTREQ when it has read LC/LEN (HRM, "Joining tones"), enabled
  * or not, and sndd reads INTREQR at times worked out from the E-clock, which is exactly Paula's clock / 5. It sleeps in
  * sys_evwait on its port (a request, or POLLPRI: a waiting client was killed) with a timeout of whole 100 Hz ticks.
- * The registers are the chips' (user mode reaches them: no MMU). Every wait on the beam has a limit. */
+ * The registers: without full memory protection the chips' own (user mode reaches them); with it (DESIGN D60 6.2) the
+ * kernel writes them for sndd, a batch at a time (DRV_AUDIO), and checks that every channel's DMA reads only sndd's
+ * own chip RAM: the chips' page is never sndd's. Every wait on the beam has a limit. */
 #include "libz.h"
 #include "sndproto.h"
 #include "../kernel/netproto.h"
@@ -69,7 +71,42 @@ static unsigned lastlc[4], lastlen[4];
 static signed char *silent;                     /* 4 zero bytes in chip RAM */
 static int port, gen;                           /* gen: this sndd's start count, in every stream handle */
 
+static int claim, kpaula;                       /* kpaula: Paula through the kernel (DRV_AUDIO, full protection) */
+static struct udrvaudio q;                      /* the batch being made (kpaula) */
+static unsigned refused;
+
 static unsigned now(void) { return sys_hrtime(); }
+
+/* ---- Paula's registers: written at once, or batched for the kernel (kpaula) ---- */
+
+/* the batch to the kernel, then (wait: INTREQ's bits) its bounded wait -> the audio bits of DMACONR and INTREQR and
+ * VPOSR as the kernel read them (DRV_AUDIO's answer); 0 when refused (said once: a bug here, never the client's) */
+static unsigned kflush(unsigned wait, unsigned limit)
+{
+    q.wait = wait;
+    q.limit = limit;
+    int r = sys_drv(DRV_AUDIO, (unsigned)claim, (unsigned)&q);
+    q.n = 0;
+    if (r < 0) {
+        if (!refused++) dprintf(1, "sndd: the kernel refused a batch of Paula's writes (%d)\n", r);
+        return 0;
+    }
+    return (unsigned)r;
+}
+static void flush(void) { if (kpaula && q.n) kflush(0, 0); }
+static void put(unsigned reg, unsigned v)
+{
+    if (!kpaula) { CUST(reg) = (unsigned short)v; return; }
+    if (q.n >= DRV_AUDIO_MAX) kflush(0, 0);
+    q.w[q.n].reg = (unsigned short)reg;
+    q.w[q.n++].val = (unsigned short)v;
+}
+static unsigned get(unsigned reg)               /* INTREQR, DMACONR or VPOSR */
+{
+    if (!kpaula) return CUST(reg);
+    unsigned r = kflush(0, 0);
+    return reg == VPOSR ? r >> 16 : reg == DMACONR ? r & 15 : r & 0x0780;
+}
 
 /* E-clock ticks from now to t (negative: past) */
 static int until(unsigned t) { return (int)(t - now()); }
@@ -80,20 +117,32 @@ static void say(const char *s) { dprintf(1, "sndd: %s\n", s); }
 
 static void set_lc(int c, const void *p, unsigned bytes)
 {
-    AUDLC(c) = (unsigned)p;
-    AUDLEN(c) = (unsigned short)(bytes / 2);
+    if (!kpaula) {
+        AUDLC(c) = (unsigned)p;
+        AUDLEN(c) = (unsigned short)(bytes / 2);
+    } else {                    /* the pointer and its length in one batch: the kernel checks the pair as it leaves it */
+        if (q.n + 3 > DRV_AUDIO_MAX) kflush(0, 0);
+        put(0x0A0 + 16 * c, (unsigned)p >> 16);
+        put(0x0A2 + 16 * c, (unsigned)p & 0xFFFF);
+        put(0x0A4 + 16 * c, bytes / 2);
+    }
     lastlc[c] = (unsigned)p;
     lastlen[c] = bytes;
 }
-static void set_per(int c, unsigned p) { AUDPER(c) = (unsigned short)p; lastper[c] = (unsigned short)p; }
-static void set_vol(int c, unsigned v) { AUDVOL(c) = (unsigned short)v; lastvol[c] = (unsigned short)v; }
+static void set_per(int c, unsigned p) { put(0x0A6 + 16 * c, p); lastper[c] = (unsigned short)p; }
+static void set_vol(int c, unsigned v) { put(0x0A8 + 16 * c, v); lastvol[c] = (unsigned short)v; }
 
 /* the request bit of channel c was set since it was last cleared: cleared now -> 1 */
 static int took(int c)
 {
-    if (!(CUST(INTREQR) & INTF_AUD(c)))
-        return 0;
-    CUST(INTREQ) = (unsigned short)INTF_AUD(c);
+    if (kpaula) {               /* one call: the kernel looks and clears the bit when it is set */
+        if (!(kflush(INTF_AUD(c), 0) & INTF_AUD(c)))
+            return 0;
+    } else {
+        if (!(CUST(INTREQR) & INTF_AUD(c)))
+            return 0;
+        CUST(INTREQ) = (unsigned short)INTF_AUD(c);
+    }
     irqs[c]++;
     return 1;
 }
@@ -118,20 +167,26 @@ static void off_wait(unsigned per)
 static void wait_bits(unsigned mask, unsigned per)
 {
     unsigned want = mask << 7, t0 = now(), lim = 2 * per / 5 + eclock_hz / 1000u;  /* a period and a millisecond */
-    while ((CUST(INTREQR) & want) != want)
-        if (now() - t0 > lim) {     /* said once (CLAUDE.md: a wait on hardware says what it waited for; audit A6-6) */
-            if (!waits_hit++) dprintf(1, "sndd: Paula did not take the places of channels %x in time\n", mask);
-            break;
-        }
-    CUST(INTREQ) = (unsigned short)want;
+    if (kpaula) {               /* the batch so far, then the kernel's wait (the bits cleared after it) */
+        if ((kflush(want, lim) & want) != want && !waits_hit++)
+            dprintf(1, "sndd: Paula did not take the places of channels %x in time\n", mask);
+    } else {
+        while ((CUST(INTREQR) & want) != want)
+            if (now() - t0 > lim) { /* said once (CLAUDE.md: a wait on hardware says what it waited for; audit A6-6) */
+                if (!waits_hit++) dprintf(1, "sndd: Paula did not take the places of channels %x in time\n", mask);
+                break;
+            }
+        CUST(INTREQ) = (unsigned short)want;
+    }
     for (int c = 0; c < 4; c++) if (mask & (1u << c)) irqs[c]++;
 }
 
 static void chan_off(unsigned mask)
 {
     for (int c = 0; c < 4; c++) if (mask & (1u << c)) set_vol(c, 0);
-    CUST(DMACON) = (unsigned short)mask;
-    CUST(INTREQ) = (unsigned short)(mask << 7);
+    put(DMACON, mask);
+    put(INTREQ, mask << 7);
+    flush();
 }
 
 /* ---- streams ---- */
@@ -252,8 +307,8 @@ static void pcm_start(struct stream *s)
         set_vol(c, (unsigned)s->vol);
         set_lc(c, s->ring[k], s->half);
     }
-    CUST(INTREQ) = (unsigned short)(m << 7);
-    CUST(DMACON) = (unsigned short)(DMAF_SET | 0x0200 | m);     /* the master bit (set already) with the pair's */
+    put(INTREQ, m << 7);
+    put(DMACON, DMAF_SET | (kpaula ? 0 : 0x0200) | m);     /* the master bit (set already: the kernel's) with the pair's */
     wait_bits(m, s->period);                                     /* Paula has read half 0's LC/LEN */
     for (int k = 0; k < 2; k++)
         set_lc(s->ch[k], s->ring[k] + s->half, s->half);         /* half 1 behind it */
@@ -420,7 +475,7 @@ static void apply(struct stream *s, const struct sndframe *f)
     }
     unsigned old = maxper(trig, 0);             /* the periods Paula still counts down on the channels to start */
     if (trig | stop)
-        CUST(DMACON) = (unsigned short)(trig | stop);
+        put(DMACON, trig | stop);
     for (int c = 0; c < 4; c++) {
         const struct sndch *x = &f->ch[c];
         if (x->flags & SNDC_PER) set_per(c, x->period);
@@ -432,9 +487,10 @@ static void apply(struct stream *s, const struct sndframe *f)
         }
     }
     if (trig) {
+        flush();
         off_wait(old);                          /* two of the old periods: the channels have let go */
-        CUST(INTREQ) = (unsigned short)(trig << 7);
-        CUST(DMACON) = (unsigned short)(DMAF_SET | 0x0200 | trig);
+        put(INTREQ, trig << 7);
+        put(DMACON, DMAF_SET | (kpaula ? 0 : 0x0200) | trig);
         wait_bits(trig, maxper(trig, 0));       /* Paula has read the start's LC/LEN */
     }
     for (int c = 0; c < 4; c++) {
@@ -445,6 +501,7 @@ static void apply(struct stream *s, const struct sndframe *f)
             set_lc(c, p, len);
         }
     }
+    flush();
     frames_applied++;
 }
 
@@ -535,7 +592,7 @@ static void request(struct umsg *m)
         if (!peer_ok(m, PEER_WR, m->a[0], n)) { sys_reply(m, -EFAULT); return; }
         struct sndstate x;
         info(&x.info, 0);
-        x.dmacon = CUST(DMACONR);
+        x.dmacon = get(DMACONR);    /* (through the kernel: its audio bits) */
         x.streams = 0;
         for (int i = 1; i <= SND_MAXSTREAM; i++) x.streams += st[i].used ? 1 : 0;
         x.frames = frames_applied;
@@ -657,19 +714,21 @@ int main(void)
     gen = sys_svc_self() & 0x7FFF;
     port = sys_port_create(SND_PORT);           /* first: the kernel knows the service's process by its port */
     if (port < 0) { say("port audio busy"); return 1; }
-    int claim = sys_drv(DRV_CLAIM, DRV_PAULA, 0);
+    claim = sys_drv(DRV_CLAIM, DRV_PAULA, 0);
     if (claim < 0) {
         dprintf(1, "sndd: Paula could not be claimed (%d): not started by the service manager?\n", claim);
         return 1;
     }
     /* after the claim (D60 stage 3: with full memory protection the chips' page is ours only from then on) */
-    ntsc = (CUST(VPOSR) & 0x1000) != 0;         /* the Agnus/Alice NTSC bit, as the kernel reads it */
+    kpaula = prot_full();                       /* D60 6.2: the chips' page is not ours; the kernel writes Paula */
+    ntsc = (get(VPOSR) & 0x1000) != 0;          /* the Agnus/Alice NTSC bit, as the kernel reads it */
     clock_hz = ntsc ? 3579545u : 3546895u;
     eclock_hz = ntsc ? 715909u : 709379u;
     silent = sys_memalloc_chip(4);
     if (!silent) { say("no chip RAM"); return 1; }
     memset(silent, 0, 4);
-    CUST(ADKCON) = 0x00FF;                      /* no channel modulates another (a program before may have left it) */
+    put(ADKCON, 0x00FF);                        /* no channel modulates another (a program before may have left it) */
+    flush();
     unsigned lastreap = now(), idle = now();
     for (;;) {
         unsigned want = 0;
@@ -691,6 +750,7 @@ int main(void)
         if (open) idle = now();
         else if (now() - idle > IDLE_EXIT * eclock_hz) return 0;
         else if (ticks < 0) ticks = IDLE_EXIT * 100 + 10;
+        flush();                /* (kpaula: what the turn wrote, before sndd sleeps) */
         struct pollfd pf = { port, POLLPORT | POLLIN | POLLPRI, 0 };
         if (sys_evwait(&pf, 1, ticks) < 0)
             quit();             /* -EINTR: killed (sndd catches no signal) */

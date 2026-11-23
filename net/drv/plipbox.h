@@ -10,8 +10,8 @@
  * by a pulse on ACK, CIA-A's FLAG (the kernel counts its edges, DRV_PARACK). No CRC on the line (the ENC28J60 checks
  * the Ethernet's own): a damaged byte reaches IP's and TCP's checksums only.
  *
- * Every address here is the 68k's: the core reaches the port through pb_rd/pb_wr/pb_bset/pb_bclr, which the driver
- * maps to the CIAs and the host test to its model (tools/plipbox-model.h). */
+ * Every address here is the 68k's: the line (plipbox-line.c) reaches the port through pb_rd/pb_wr/pb_bset/pb_bclr,
+ * which the kernel maps to the CIAs (DRV_PARXFER) and the host test to its model (tools/plipbox-model.h). */
 #pragma once
 
 #define PB_DATA         0xBFE101u       /* CIA-A port B: the data lines (DRV_PARPORT) */
@@ -58,7 +58,6 @@ struct pb {
     int down;                           /* the box stopped answering: looked for every PB_RETRY ticks */
     unsigned fails;                     /* transfers failed in a row */
     u32 acks;                           /* the ACK count served (DRV_PARACK's value when the last request was taken) */
-    u32 t0, limit;                      /* the transfer's start and its deadline (ticks) */
     u32 last_ok;                        /* the tick of the last transfer that went through */
     int wedged;                         /* a receive was cut between its size bytes (section 5 of D39) */
     const char *stage;                  /* where the last transfer failed */

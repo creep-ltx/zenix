@@ -71,6 +71,13 @@ DIAGNOSTICS
     released".
 
 NOTES
+    With full memory protection (DESIGN D60 stage 4) the driver holds
+    no CIA page: the CIAs also carry the floppy's, the serial port's
+    and the keyboard's lines. The kernel runs each transfer for it
+    (SYS_drv DRV_PARXFER, the same code, net/drv/plipbox-line.c),
+    letting other programs run every 32 polls and every 128 bytes of a
+    handshaked frame. Without protection the driver runs it itself.
+
     No multicast, no promiscuous mode (the box has neither). The line
     has no checksum of its own: a byte damaged on the cable is caught
     by IP's and TCP's checksums only.

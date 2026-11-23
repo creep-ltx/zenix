@@ -50,7 +50,7 @@ __asm__(
     "    move.l  %a0,-(%sp)\n"
     "    movec   %cacr,%d0\n"
     "    move.l  %d0,-(%sp)\n"
-    "    move.w  0x1000,%d1\n"           /* D37 6: the blob is code /bin/zine just wrote; the program runs with */
+    "    move.w  kboot,%d1\n"           /* D37 6: the blob is code /bin/zine just wrote; the program runs with */
     "    and.w   #0x0088,%d1\n"          /* the data cache off (8.1) */
     "    bne.s   3f\n"
     "    or.w    #0x0008,%d0\n"          /* 020/030: CI, the enable bits kept */
@@ -73,7 +73,7 @@ __asm__(
     "    move.l  (%sp)+,%d1\n"
     "    move.l  (%sp)+,%a0\n"
     "    movec   %a0,%vbr\n"             /* Zenix's vectors before anything else (review 2026-10-31) */
-    "    move.w  0x1000,%d0\n"           /* bootinfo's AttnFlags: 68040/68060? */
+    "    move.w  kboot,%d0\n"           /* bootinfo's AttnFlags: 68040/68060? */
     "    and.w   #0x0088,%d0\n"
     "    bne.s   1f\n"
     "    or.w    #0x0808,%d1\n"          /* 020/030: both caches cleared (CI, CD) as CACR is put back */
@@ -157,7 +157,7 @@ static long go(const struct uzine_go *g)
     a.resume = (u32)zine_resume;
     a.vol = g->vol, a.vol_size = g->vol_size, a.blk = g->blk, a.blk_size = g->blk_size;
     a.nranges = mem_ranges(&a.ranges);
-    const struct bootinfo *bi = (const struct bootinfo *)0x1000;
+    const struct bootinfo *bi = BOOTINFO_K;
     a.kernel_pa = bi->kernel_pa;
     a.kernel_mem = *(u32 *)(bi->kernel_pa + 12);
     a.klog_pa = klog_area_base();
@@ -237,10 +237,10 @@ long zine_sys(u32 op, u32 a, u32 b)
             return -EFAULT;
         i.size = n;
         i.layout = ZINE_LAYOUT;
-        i.attn = ((const struct bootinfo *)0x1000)->attn;
+        i.attn = (BOOTINFO_K)->attn;
         mem_totals(&i.chip_total, &i.fast_total);
         mem_stats(&i.chip_free, &i.fast_free);
-        const struct hwinfo *hw = (const struct hwinfo *)HWINFO_ADDR;
+        const struct hwinfo *hw = HWINFO_K;
         i.machine = hw->magic == HWINFO_MAGIC && (hw->flags & HW_DT) ? UZI_EMU68 : 0;
         memcpy((void *)a, &i, n);
         return 0;

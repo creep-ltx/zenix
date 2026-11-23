@@ -350,7 +350,7 @@ KINIT void rnd_init(const struct bootinfo *bi)
         top = 0x200000;
     for (u32 a = 0x4000; a + 4 <= top; a += 4096)      /* one word per 4 KB: 2 KB hashed on a 2 MB machine */
         b2s_update(&pool, (const void *)a, 4);
-    const struct hwinfo *hw = (const struct hwinfo *)HWINFO_ADDR;
+    const struct hwinfo *hw = HWINFO_K;
     if (hw->magic == HWINFO_MAGIC && (hw->flags & HW_DT) && hw->rng200) {
         rng200 = hw->rng200;
         u32 c = rng_rd(0x00);                           /* RNG_CTRL: the generator on (RBGEN 1 in its 13-bit field) */

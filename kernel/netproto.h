@@ -189,6 +189,15 @@ struct uroute {
 #define DRV_PARACK   8          /* a: the claim of DRV_PARPORT -> the falling edges on the parallel port's ACK line
                                  * since boot (CIA-A's FLG, counted by the kernel's level-2 handler), bit 31 clear;
                                  * -EPERM for any other claim (DESIGN D39) */
+#define DRV_AUDIO    9          /* a: the claim of DRV_PAULA, b: struct udrvaudio * -> the audio bits of DMACONR (0-3)
+                                 * and INTREQR (7-10) and VPOSR & 0x7FFF (16-30), read after the writes and the wait:
+                                 * Paula driven by the kernel, checked (DESIGN D60 6.2). Only with full memory
+                                 * protection (SYS_meminfo's fifth word 2): -EOPNOTSUPP without, where the sound
+                                 * server writes Paula itself; -EPERM for anyone but the claim's holder */
+#define DRV_PARXFER 10          /* a: the claim of DRV_PARPORT, b: struct udrvparx * -> the bytes received, 0, or
+                                 * -errno: one plipbox transfer run by the kernel on the claimed lines (DESIGN D60 6.2).
+                                 * Only with full memory protection: -EOPNOTSUPP without, where the driver runs the
+                                 * same line itself (net/drv/plipbox-line.c); -EPERM for anyone but the holder */
 /* DRV_CLAIM's base for the PC Card slot of an A600/A1200 (DESIGN D36): Gayle's attribute memory, I/O space and the
  * card's reset byte, 0xA00000-0xA4FFFF (the window the quiesce steps may write). -ENODEV on a machine without an
  * A600/A1200 Gayle; -EADDRINUSE when memory lies in the slot's addresses 0x600000-0xA4FFFF (an accelerator's or a
@@ -200,7 +209,8 @@ struct uroute {
  * 0xBFE301) and bits 0-2 of CIA-B's port A (BUSY, POUT, SEL, 0xBFD000; its direction 0xBFD200). Its quiesce steps may
  * write only those four bytes, one byte each, and the two of CIA-B only as DRVS_RMW of bits 0-2 (bits 3-7 are the
  * serial port's lines). While it is claimed, CIA-A's FLG interrupt (the ACK line) is on. Every Amiga has the port:
- * no -ENODEV */
+ * no -ENODEV. With full memory protection no CIA page is the holder's (DESIGN D60 6.2): its transfers are
+ * DRV_PARXFER */
 #define DRV_PARPORT     0xBFE101u
 #define DRV_PAR_DDRB    0xBFE301u
 #define DRV_PAR_PRA     0xBFD000u
@@ -209,7 +219,9 @@ struct uroute {
  * 0xDFF0A0-0xDFF0DF. Taken only by the process the service manager runs for port "audio" (sndd), -EPERM for anyone
  * else; no DMA region (sndd's chip RAM is its own) and no quiesce program: the kernel's own stop (the four volumes 0,
  * then the channels' DMA off) runs when the holder ends and before ZINE takes the machine. While it is held the
- * kernel's bell is silent. The only op of SYS_drv the sound server has */
+ * kernel's bell is silent. With full memory protection it maps no register page (DESIGN D60 6.2: the sound server
+ * drives Paula through DRV_AUDIO; one built before D60, its port not PEER_EXACT, still gets the chips' page). Its
+ * ops: this claim and DRV_AUDIO */
 #define DRV_PAULA       0xDFF0A0u
 #define DRVC_CLEAN   1          /* frames the device will read: written back */
 #define DRVC_INVAL   2          /* buffers the device wrote: written back and dropped (never dropped unwritten) */
@@ -229,6 +241,61 @@ struct udrvstep {
 #define DRVS_RMW   2            /* *addr = (*addr & ~mask) | value */
 #define DRVS_WAIT  3            /* DESIGN D46: wait until (*addr & mask) == value, at most 20 ms (not on DRV_PARPORT) */
 struct udrvquiesce { u32 n; struct udrvstep step[DRV_QSTEPS]; };
+
+/* DRV_AUDIO's batch (frozen, fixed: 76 bytes, UDRVAUDIO_FIRST; a growth would be a new op or n's high bits, -EINVAL
+ * today; DESIGN D60 6.2). Up to DRV_AUDIO_MAX register writes, done in order: a channel's AUDxLCH (0xA0 + 16 c) and
+ * AUDxLCL (+2) one right after the other (written as one long, with its AUDxLEN when that comes next, interrupts
+ * masked; an LCL alone or an LCH without its LCL is -EINVAL), AUDxLEN, PER, VOL, DAT; DMACON's audio bits 0-3 (and SET,
+ * bit 15), INTENA's and INTREQ's 7-10 (and SET), ADKCON's 0-7 (and SET); any other register or bit -EINVAL. Checked
+ * whole before anything is written, in its order: every pointer and length a channel is given, as each step leaves
+ * it, must lie in the caller's own chip RAM (LEN 0: 65,536 words), and a channel turned on must have such a pair from
+ * an earlier call or step; else -EFAULT, nothing written. After the writes, when wait has bits (INTREQ's 7-10 only):
+ * until they are all set in INTREQR, at most limit E-clock ticks (no more than 50 ms), then those of them that are set
+ * are cleared; limit 0 only looks. A block freed, or handed to another process, while a channel may read from it (its
+ * pairs since it was turned on) stops that channel first, and the channel needs a new pair to be turned on again. */
+#define DRV_AUDIO_MAX 16
+struct udrvaudio {
+    u32 n;                              /* writes, 0..DRV_AUDIO_MAX */
+    struct { unsigned short reg, val; } w[DRV_AUDIO_MAX];      /* reg: the offset from 0xDFF000 */
+    u32 wait, limit;
+};
+#define UDRVAUDIO_FIRST 76
+
+/* DRV_PARXFER's block (frozen, fixed: 24 bytes, UDRVPARX_FIRST; DESIGN D60 6.2, D39): one transfer of plipbox 0.6's line
+ * protocol, the kernel on the lines (the CIAs are never a driver's). op: PARX_SEND a frame of len bytes from buf
+ * (14..1514; every byte answered, or with PARXF_BURST in burst), PARX_RECV the box's frame into buf (room for len
+ * bytes: -EMSGSIZE when it says more), PARX_UNSTICK free a box held in a burst's end, PARX_ON / PARX_OFF the lines set
+ * up for the box / left as the machine starts them (no buf). deadline: ticks (100 Hz) the transfer may take, at most
+ * 50 (PB_WAIT). In flags only PARXF_BURST (any other bit -EINVAL). buf (len + 3 bytes for a send) must be the caller's
+ * own memory or a region it took (SYS_shm), else -EFAULT; -EBUSY while an earlier driver's transfer is still ending.
+ * The kernel lets a better process run every 32 polls and every 128 bytes of a handshaked frame (never inside a
+ * burst's bytes); a transfer whose process is killed or whose claim ends meanwhile stops, -EINTR. Out: acks, the ACK count once the box took a receive's command; stage, where a failed
+ * transfer stopped (PXS_*); flags, PARXF_WEDGED when a receive was cut between its size bytes. -> the frame's bytes (a
+ * receive; 0: the box had none), 0, -ETIMEDOUT, -EMSGSIZE, -EINTR, -EINVAL */
+struct udrvparx {
+    u32 op, flags, buf, len, deadline;
+    u32 acks;                           /* out */
+};
+#define UDRVPARX_FIRST 24
+#define PARX_SEND    1
+#define PARX_RECV    2
+#define PARX_UNSTICK 3
+#define PARX_ON      4
+#define PARX_OFF     5
+#define PARXF_BURST  1                  /* in: PARX_SEND in a burst (the command 0x33) */
+#define PARXF_WEDGED 2                  /* out */
+#define PARXF_ACKS   4                  /* out: acks holds the count once the box took a receive's command */
+#define PARXF_STAGE(f) ((f) >> 8 & 0xFF)  /* out: PXS_* of a failed transfer */
+#define PXS_BUSY0     1                 /* BUSY before the command */
+#define PXS_CMD       2                 /* the command's answer */
+#define PXS_SIZE      3                 /* the size */
+#define PXS_SIZELO    4                 /* the size's low byte */
+#define PXS_BYTES     5                 /* the frame's bytes */
+#define PXS_GAP       6                 /* the frame's bytes (away as long as the box waits: not trusted) */
+#define PXS_BSTART    7                 /* the burst's start */
+#define PXS_BEND      8                 /* the burst's end */
+#define PXS_LAST      9                 /* the last answer */
+#define PXS_HELD     10                 /* freeing a held box */
 
 /* DRV_ATTACH's block (frozen, first size UDRVATTACH_FIRST; the caller's size in size and b). The driver says who it
  * is; netd lends it its receive buffers (all empty, the driver's to fill) and answers with the interface number */

@@ -415,6 +415,10 @@ static int prev_state;                  /* 0 none, 1 valid (kprev), 2 found but 
 static int prev_damaged;                /* a slot had the magic but failed its header checks */
 static int prev_text;                   /* kprev's ring passes its sum: only then is its text shown */
 static u32 klog_area_pa;
+/* D60 6.3: the rings' sizes and counts as the kernel keeps them, in its own memory: the headers lie in chip RAM, which
+ * a DMA engine in a process's hands (the display server's blitter) can write, so they are written for the next boot
+ * and never read back to index a ring (a size written there would have made kputc write anywhere) */
+static u32 kl_size, kl_total, kp_total;
 
 #define KTEXT(h) ((char *)(h) + KLOG_HDR)
 
@@ -464,7 +468,7 @@ KINIT void klog_init(const struct bootinfo *bi)
         prev_state = 3;
         kl = &klog_small.h;
         memset(kl, 0, sizeof klog_small);
-        kl->size = KLOG_SMALL;
+        kl->size = kl_size = KLOG_SMALL;
     } else {
         struct klog_hdr *s0 = (struct klog_hdr *)lo, *s1 = (struct klog_hdr *)(lo + KLOG_HDR + KLOG_SIZE);
         int v0 = slot_valid(s0), v1 = slot_valid(s1);
@@ -475,10 +479,11 @@ KINIT void klog_init(const struct bootinfo *bi)
             kprev = s1;
         prev_state = kprev ? 1 : prev_damaged ? 2 : 0;
         prev_text = kprev && text_valid(kprev);
+        kp_total = kprev ? kprev->total : 0;    /* (slot_valid: its size is KLOG_SIZE) */
         kl = kprev == s0 ? s1 : s0;
         memset(kl, 0, KLOG_HDR + KLOG_SIZE);
         memset((u8 *)lo + UPDNOTE_OFF, 0, 16);  /* the update note says what this boot did (zenixboot read it) */
-        kl->size = KLOG_SIZE;
+        kl->size = kl_size = KLOG_SIZE;
     }
     kl->magic = KLOG_MAGIC;
     kl->bootno = kprev ? kprev->bootno + 1 : 1;
@@ -532,10 +537,10 @@ static void kputc(char c)
     if (kl) {
         u16 s = irq_save();
         char *t = KTEXT(kl);
-        u32 i = kl->total % kl->size;
+        u32 i = kl_total % kl_size;
         kl->textsum += (u32)(u8)c - (u32)(u8)t[i];
         t[i] = c;
-        kl->total++;
+        kl->total = ++kl_total;
         kl->hdrsum = hdr_sum(kl);
         irq_restore(s);
     }
@@ -556,9 +561,9 @@ static void kputs(const char *s)
 
 /* copy up to n characters of log h starting at position "off" (0 = the first ever); positions that have scrolled
  * out of the ring start at the oldest one still held. Returns the count; 0 = no more yet. */
-static u32 ring_read(const struct klog_hdr *h, u32 off, char *buf, u32 n)
+static u32 ring_read(const struct klog_hdr *h, u32 total, u32 size, u32 off, char *buf, u32 n)
 {
-    u32 total = h->total, size = h->size, got = 0;
+    u32 got = 0;
     const char *t = KTEXT(h);
     u32 oldest = total > size ? total - size : 0;
     if (off < oldest)
@@ -576,22 +581,22 @@ static u32 ring_read(const struct klog_hdr *h, u32 off, char *buf, u32 n)
 u32 klog_read(u32 off, char *buf, u32 n)
 {
     if (off & KLOG_OLDEST) {                /* where the log held starts (audit F10: a reader below it is moved there) */
-        const struct klog_hdr *h = off & KLOG_PREV ? (prev_text ? kprev : 0) : kl;
-        return h && h->total > h->size ? h->total - h->size : 0;
+        u32 t = off & KLOG_PREV ? (prev_text ? kp_total : 0) : kl ? kl_total : 0, z = off & KLOG_PREV ? KLOG_SIZE : kl_size;
+        return t > z ? t - z : 0;
     }
     if (off & KLOG_PREV)
-        return prev_text ? ring_read(kprev, off & ~KLOG_PREV, buf, n) : 0;
-    return kl ? ring_read(kl, off, buf, n) : 0;
+        return prev_text ? ring_read(kprev, kp_total, KLOG_SIZE, off & ~KLOG_PREV, buf, n) : 0;
+    return kl ? ring_read(kl, kl_total, kl_size, off, buf, n) : 0;
 }
 
 /* the display is up: show what was logged so far, and keep showing new messages */
 KINIT void klog_to_screen(void)
 {
     char c;
-    u32 total = kl->total;
-    u32 oldest = total > kl->size ? total - kl->size : 0;
+    u32 total = kl_total;
+    u32 oldest = total > kl_size ? total - kl_size : 0;
     for (u32 i = oldest; i < total; i++) {
-        c = KTEXT(kl)[i % kl->size];
+        c = KTEXT(kl)[i % kl_size];
         if (c == '\n')
             term_log("\r", 1);
         term_log(&c, 1);
@@ -628,7 +633,7 @@ KINIT void klog_show_prev(void)
         return;
     }
     const char *t = KTEXT(kprev);
-    u32 size = kprev->size, end = kprev->total, first = end > size ? end - size : 0, i = end, lines = 0;
+    u32 size = KLOG_SIZE, end = kp_total, first = end > size ? end - size : 0, i = end, lines = 0;
     if (i > first && t[(i - 1) % size] == '\n')
         i--;
     while (i > first) {

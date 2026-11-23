@@ -6,11 +6,21 @@
  *
  * The kernel gives the port (CIA-A's port B, bits 0-2 of CIA-B's port A) to one driver, turns the ACK line's
  * interrupt on and counts its edges (DRV_PARACK). The driver looks at that count on every doorbell, at once again
- * while frames move, after 10 ms, then every 20 ms when idle; a transfer itself is a loop on the CIA's registers. */
+ * while frames move, after 10 ms, then every 20 ms when idle. A transfer itself is the kernel's (DRV_PARXFER, DESIGN
+ * D60 6.2) with full memory protection: the CIAs mix the parallel port's lines with the floppy's, the serial port's and the
+ * keyboard's, so with full memory protection they are never a driver's; without it the driver runs the same loop
+ * itself, plipbox-line.c, which the host test runs against the model. */
 #include "drv.h"
 #include "plipbox.h"
 
-static int claim;
+static int claim, kline;                /* kline: the kernel runs the line (full memory protection) */
+static u32 pb_ticks(void) { return sys_ticks(); }
+static long pb_acks(void) { return sys_drv(DRV_PARACK, (u32)claim, 0); }
+static void pb_sleep(u32 t) { sys_sleep(t); }
+struct pb;
+static void pb_log(struct pb *b, const char *fmt, ...);
+/* without full memory protection (no MMU: the stock A1200) the line runs here, as before D60: the same code, no
+ * system call a transfer, and the kernel keeps none of it (its DRV_PARXFER is in the protection span) */
 static unsigned char pb_rd(u32 a) { return *(volatile unsigned char *)a; }
 static void pb_wr(u32 a, unsigned char v) { *(volatile unsigned char *)a = v; }
 /* one instruction each: an interrupt cannot fall between the read and the write of CIA-B's port A (bits 3-7 are the
@@ -18,11 +28,17 @@ static void pb_wr(u32 a, unsigned char v) { *(volatile unsigned char *)a = v; }
 static void pb_bset(u32 a, int bit) { __asm__ volatile("bset %1,(%0)" :: "a"(a), "d"(bit) : "memory", "cc"); }
 static void pb_bclr(u32 a, int bit) { __asm__ volatile("bclr %1,(%0)" :: "a"(a), "d"(bit) : "memory", "cc"); }
 static void pb_clrbits(u32 a, unsigned m) { __asm__ volatile("and.b %1,(%0)" :: "a"(a), "d"(~m) : "memory", "cc"); }
-static u32 pb_ticks(void) { return sys_ticks(); }
-static long pb_acks(void) { return sys_drv(DRV_PARACK, (u32)claim, 0); }
-static void pb_sleep(u32 t) { sys_sleep(t); }
-struct pb;
-static void pb_log(struct pb *b, const char *fmt, ...);
+static int pb_yield(void) { return 0; }     /* user mode: the scheduler takes the CPU when it must */
+#define PB_FN
+#include "plipbox-line.c"
+static int pb_line(struct pb *b, struct udrvparx *x, unsigned char *buf)
+{
+    (void)b;
+    if (!kline)
+        return pb_xfer(x, buf);
+    x->buf = (u32)buf;
+    return sys_drv(DRV_PARXFER, (u32)claim, (u32)x);
+}
 
 #include "plipbox-core.c"
 
@@ -120,6 +136,7 @@ int main(int argc, char **argv)
         else
             pb_log(&b, "unknown word in the driver line: %s (ignored)", argv[i]);
     }
+    kline = prot_full();                        /* D60 6.2: the CIAs are not ours, the kernel runs the line */
     claim = sys_drv(DRV_CLAIM, DRV_PARPORT, 0);
     if (claim == -EBUSY) { pb_log(&b, "the parallel port is another driver's"); return 1; }
     if (claim < 0) { pb_log(&b, "the claim of the parallel port was refused (%d)", claim); return 1; }

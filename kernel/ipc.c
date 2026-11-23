@@ -76,6 +76,13 @@ KCOLD int port_create(const char *name, int owner)
     return -2;
 }
 
+/* D60 stage 4 (drv.c): pid holds the port called name, marked PEER_EXACT (a server built with D60's libz) */
+int port_exact_of(int pid, const char *name)
+{
+    int i = port_slot(name);
+    return i >= 0 && ports[i].owner == pid && ports[i].exact;
+}
+
 int port_find(const char *name)
 {
     int i = port_slot(name);

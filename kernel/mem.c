@@ -6,8 +6,9 @@
 /* Memory manager. No MMU, so every byte is physical and nothing can be
  * moved once handed out: fragmentation is the enemy. Rules:
  *   - chip and fast RAM are separate pools; fast is preferred
- *   - big blocks are cut from the HIGH end of a free block, small ones
- *     from the low end, so the two kinds do not interleave (a block that
+ *   - big blocks are cut from the HIGH end of a free block (with memory
+ *     protection on, in fast RAM: of the highest one they fit in), small
+ *     ones from the low end, so the two kinds do not interleave (a block that
  *     must end below a limit, MEM_LOW1G or MEM_LOW16M: always the low end)
  *   - every block records its owner (a process id), so a dying or killed
  *     process gets everything back with mem_free_owner()
@@ -33,6 +34,7 @@ static struct range ranges[16];
 static int nranges;
 u32 boot_ram_pa, boot_ram_size;
 static u32 freeb[2];                    /* free block bytes: [0] fast, [1] chip */
+static u8 fast_pool;                    /* there is fast RAM */
 
 #define SZ(b)   ((b)->size & ~1u)
 #define USED(b) ((b)->size & 1u)
@@ -55,6 +57,7 @@ KINIT static void add_range(u32 lo, u32 hi, int chip)
     b->owner = 0;
     b->magic = MAGIC;
     ranges[nranges++] = (struct range){ lo, hi, chip };
+    fast_pool |= !chip;
     freeb[chip] += hi - lo;
 }
 
@@ -204,7 +207,7 @@ KINIT void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem)
 /* A header that is not ours, or a size that does not lead to the next block inside the range, means something
  * wrote over the heap: stop with the address on the serial port instead of walking garbage (a size of 0 would loop
  * forever in the kernel, which nothing can interrupt). */
-static void check_blk(const struct range *r, const struct mblk *b)
+__attribute__((noinline)) static void check_blk(const struct range *r, const struct mblk *b)
 {
     if (b->magic != MAGIC || SZ(b) < HDR || (SZ(b) & 15) || SZ(b) > r->hi - (u32)b) {
         kprintf("mem: corrupt block header at %p (size %x, magic %x)\n", (u32)b, b->size, b->magic);
@@ -247,6 +250,15 @@ __attribute__((noinline)) static void *carve(struct range *r, struct mblk *b, u3
 __attribute__((noinline)) static void *alloc_in(struct range *r, u32 need, u32 owner, u32 limit, int pg)
 {
     int top = need >= BIG && !limit;           /* from the high end (a limit: always the low end) */
+    /* with memory protection on, a big block from the highest free block of fast RAM it fits in (2026-11-23, D60
+     * stage 4): a hole left at the top by a program that ended (netd and its drivers at boot on a 4 MB 68030: 290 KB)
+     * is used before the biggest free block is cut, which is kept whole for the program that needs it (tcc-test's
+     * 101_cleanup: 2.9 MB in one piece; protection's own trees and rounding cost that machine 24 KB) */
+    struct mblk *best = 0;
+    u32 bh = 0, bu = 0;
+    int lastfit = mmu_on && !r->chip;           /* (only there: a machine without protection, and chip RAM, as before:
+                                                 * ZINE's ztake measured 1 s instead of 3 with it on the 68020, not
+                                                 * understood yet) */
     for (struct mblk *b = (struct mblk *)r->lo; b; b = next_of(r, b)) {
         check_blk(r, b);
         u32 lo = (u32)b, e = lo + SZ(b), h = lo, u;
@@ -271,9 +283,13 @@ __attribute__((noinline)) static void *alloc_in(struct range *r, u32 need, u32 o
             break;                              /* past the limit; the blocks only get higher from here */
         if (!pg && h - lo < 2 * HDR)
             h = lo;
-        return carve(r, b, h, u, owner);
+        if (!top || !lastfit)
+            return carve(r, b, h, u, owner);
+        best = b;
+        bh = h;
+        bu = u;
     }
-    return 0;
+    return best ? carve(r, best, bh, bu, owner) : 0;
 }
 
 void *mem_alloc(u32 n, u32 flags, u32 owner)
@@ -288,6 +304,11 @@ void *mem_alloc(u32 n, u32 flags, u32 owner)
         int want_chip = (flags & MEM_CHIP) ? 1 : 0;
         if (pass == 1) {
             if (flags & (MEM_CHIP | MEM_FASTONLY | MEM_LOW1G))
+                break;
+            /* D60 6.3: with memory protection on, the kernel's own memory (its heap, stacks, translation tables, bounce
+             * pages: every block that is not a process's own) is never chip RAM where there is fast RAM: a DMA engine
+             * in a process's hands (the display server's blitter) can write any chip RAM */
+            if (mmu_on && fast_pool && (!(flags & MEM_USER) || !owner))
                 break;
             want_chip = 1;
         }
@@ -322,11 +343,15 @@ static struct range *range_of(u32 a)
 /* free a block, merge with free neighbours; returns the merged block */
 static struct mblk *free_blk(struct range *r, struct mblk *b)
 {
+    if (__builtin_expect(aud_valid, 0))
+        drv_freed((u32)(b + 1), (u32)b + SZ(b));        /* D60 6.2: a channel playing from it stops first */
     mmu_freed((u32)(b + 1), SZ(b) - HDR, b->owner);     /* D41: its whole pages invalid for every program */
     freeb[r->chip] += SZ(b);
     b->size &= ~1u;
     b->owner = 0;
     struct mblk *nx = next_of(r, b);
+    if (nx)
+        check_blk(r, nx);                       /* (D60 6.3: its size, before it is added) */
     if (nx && !USED(nx)) {                      /* merge forward */
         b->size += SZ(nx);
         nx = next_of(r, b);
@@ -335,6 +360,10 @@ static struct mblk *free_blk(struct range *r, struct mblk *b)
     }
     if (b->prev) {                              /* merge backward */
         struct mblk *pv = (struct mblk *)((u32)b - b->prev);
+        /* D60 6.3: only a block of this range that ends here (a chip range's headers can be written by a DMA engine in
+         * a process's hands: a size written there must not make this write outside the range) */
+        if ((u32)pv < r->lo || (u32)pv >= (u32)b || pv->magic != MAGIC || (u32)pv + SZ(pv) != (u32)b)
+            panic("mem: heap corrupt (a block's back link)");
         if (!USED(pv)) {
             pv->size += SZ(b);
             nx = next_of(r, pv);
@@ -366,6 +395,8 @@ void mem_set_owner(void *p, u32 owner)
     struct range *r = range_of((u32)b);
     if (!r || b->magic != MAGIC || !USED(b))
         panic("mem_set_owner: not a block in use");
+    if (__builtin_expect(aud_valid, 0))
+        drv_freed((u32)p, (u32)b + SZ(b));      /* D60 6.2: handed to another: a channel playing from it stops */
     b->owner = owner;
 }
 
@@ -393,16 +424,39 @@ KCOLD u32 mem_owner_of(u32 a, int *used)
     struct range *r = range_of(a);
     if (!r)
         return MEM_NOT_POOL;
-    for (struct mblk *b = (struct mblk *)r->lo; b; b = next_of(r, b))
+    for (struct mblk *b = (struct mblk *)r->lo; b; b = next_of(r, b)) {
+        check_blk(r, b);
         if (a < (u32)b + SZ(b)) {
             *used = USED(b) && a >= (u32)(b + 1);
             return a >= (u32)(b + 1) ? b->owner : 0;
         }
+    }
     return MEM_NOT_POOL;
 }
 
+#ifdef MEM_MAP
+/* DIAG=-DMEM_MAP: every block of every range in the kernel log at each SYS_meminfo (free): where the memory goes */
+KCOLD static void mem_map(void)
+{
+    for (int i = 0; i < nranges; i++) {
+        struct range *r = &ranges[i];
+        u32 big = 0;
+        kprintf("memmap: range %p-%p %s\n", r->lo, r->hi, r->chip ? "chip" : "fast");
+        for (struct mblk *b = (struct mblk *)r->lo; b; b = next_of(r, b)) {
+            if (!USED(b) && SZ(b) > big)
+                big = SZ(b);
+            kprintf("memmap: %p %u %s %x\n", (u32)b, SZ(b), USED(b) ? "used" : "free", b->owner);
+        }
+        kprintf("memmap: largest free %u\n", big);
+    }
+}
+#endif
+
 void mem_stats(u32 *chip_free, u32 *fast_free)
 {
+#ifdef MEM_MAP
+    mem_map();
+#endif
     *chip_free = freeb[1];
     *fast_free = freeb[0];
 }

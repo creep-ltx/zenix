@@ -79,7 +79,7 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   (no wait for a reader that will not come), its `poll` POLLOUT only when a printable byte fits; the hang-up's SIGHUP then SIGCONT, a hung-up slave's read 0 and write -EIO;
   LF written to a slave reaching the master as CR LF; libz's and the C library's `ioctl` numbers (Linux's).
 - **D38 step 2 (a console in graphics mode, branch desk, 2026-11-04):** `SYS_console` ops 8 `CON_GRAB` (root, else
-  -EPERM; the op word's descriptor a console; a2 `struct ucongrab`, first size `UCONGRAB_FIRST` 24: size, the Copper
+  -EPERM; with full memory protection the display service only, the change of meaning of D60 stage 4 below; the op word's descriptor a console; a2 `struct ucongrab`, first size `UCONGRAB_FIRST` 24: size, the Copper
   list and sprite 0 (the caller's chip RAM, even; the list ends 0xFFFF 0xFFFE within 4,096 moves, else -EINVAL;
   outside: -EFAULT), the sprite's height 1..255 and hot spot, back the screen's width and height, the text console's
   depth and `GCHIP_*`; -EBUSY when a console is grabbed, -ENODEV without a display; answers a new descriptor) and 9
@@ -295,6 +295,32 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   and `SYS_atapi` (its `buf`, `len` bytes) are checked as the caller's memory or a window (-EFAULT): they were the disk
   server's trust. `user/usys.h`'s `sys_port_create` marks every port it makes `PEER_EXACT`. Without protection nothing
   else changes.
+- **D60 stage 4 (the drivers and the chips; branch `d60s4`, 2026-11-23; docs/d60-full-protection.md 6 and "As
+  built"), growths, while memory protection is on unless said:** `SYS_drv` op 9 `DRV_AUDIO` (a: the `DRV_PAULA`
+  claim, -EPERM for any other caller; b: `struct udrvaudio`, fixed 76 bytes: n 0-16, 16 `{u16 reg, u16 val}` (reg the
+  offset from 0xDFF000), wait (INTREQ's bits 7-10 only), limit (E-clock ticks, at most 50 ms' worth); the registers
+  AUDxLCH+AUDxLCL as a pair (with the AUDxLEN after them one step), AUDxLEN, PER, VOL, DAT, DMACON bits 0-3 and 15,
+  INTENA's and INTREQ's 7-10 and 15, ADKCON's 0-7 and 15, anything else -EINVAL; every pair as each step leaves it
+  the caller's own chip RAM and a channel turned on only with such a pair, else -EFAULT, nothing written; the answer
+  DMACONR & 15 | INTREQR & 0x0780 | (VPOSR & 0x7FFF) << 16, read after the writes and the wait; the waited bits that
+  are set then cleared) and op 10 `DRV_PARXFER` (a: the `DRV_PARPORT` claim; b: `struct udrvparx`, fixed 24 bytes:
+  op `PARX_SEND` 1, `PARX_RECV` 2, `PARX_UNSTICK` 3, `PARX_ON` 4, `PARX_OFF` 5; flags in `PARXF_BURST` 1 (any other
+  bit -EINVAL), out `PARXF_WEDGED` 2, `PARXF_ACKS` 4 and the stage `PXS_*` 1-10 in bits 8-15; buf (a send: len 14-1514
+  and 3 bytes more, the size word written in front and the pad after; a receive: room for len, at most 1518) the
+  caller's own memory or a region it took; len; deadline at most 50 ticks; acks out; the answer the bytes received,
+  0, -ETIMEDOUT, -EMSGSIZE, -EINTR (killed, or the claim ended, at a yield), -EBUSY (an earlier transfer still ending),
+  -EINVAL, -EFAULT). Both ops answer -EOPNOTSUPP without full memory protection (the sound server and the plipbox
+  driver then drive the registers themselves, as before). With protection on, `DRV_CLAIM` of `DRV_PARPORT` maps no
+  CIA page and `DRV_CLAIM` of `DRV_PAULA` no register page for a server whose port is `PEER_EXACT` (an old one, 5.8,
+  keeps the custom chips' page); the kernel's own blocks never come from chip RAM while there is fast RAM (an
+  allocation the fast RAM cannot give fails, -ENOMEM, internal). An old (pre-stage-4) plipbox driver does not work
+  with full protection (stage 5's update-path list).
+- **One accepted change of meaning (D60 6.3, approved by the partner 2026-11-22, a deliberate security change):**
+  with full memory protection `CON_GRAB` is the display service's alone (the process the service manager started for
+  port `display`): any other process, root included, gets -EPERM (the kernel log says so once). Before, any root
+  process could grab a console and with it the custom chips, whose blitter writes all chip RAM. Accepted once, not
+  repeated: displayd is that service in every release, and the test grabber (`gcontest`) is used only where there is
+  no MMU (tools/gcon-test.sh) or to check the refusal (tools/mmu-test.sh). Without protection nothing changes.
 - **D43 (RTG, branch `rtg`, 2026-11-12):** the hardware table grows at its end: `struct hwfb` (32 bytes) at offset 408
   (`HWFB_OFF`, after `board[]`): magic `HWFB_MAGIC` "ZFB1", base, width, height (u16), bytes a row, Picasso96's
   `RGBFormat` number (u8), bytes a pixel (u8), flags (u16: `HWFB_HVS` 1, `HWFB_TEST` 2), the Pi's register address and

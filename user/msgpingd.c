@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
+#include "../kernel/netproto.h"
 /* test server: port "ping" (or -port NAME); type 1 = add a[0]+a[1] into a[2]; type 2 = copy the client's string a[0]
  * (pointer into the client's memory) to upper case in place; type 3 = answer with its sys_svc_self() (the start count and
  * SVC_MIDREQ: audit A8's test); type 7 = wait a second, then crash (an illegal
@@ -29,7 +30,11 @@
  * what its clients declare (SYS_callv); -old makes the port without the mark (an old server: D41's lend of the whole
  * client when it may debug it, 5.8). Type 11: writes the byte a[1] bytes after a[0] (one past a declared buffer);
  * type 13: SYS_peer PEER_RD of 4 bytes at a[0], the answer in a[2]; type 14: writes a[0] without its client having
- * declared it (a server touching memory it was not given). */
+ * declared it (a server touching memory it was not given).
+ * DESIGN D60 stage 4 (tools/mmu-test.sh): -paula, registered as the service "audio" (svctest reg), claims Paula and
+ * tries DRV_AUDIO with a channel in the kernel's memory, in its own chip RAM, past its end, in its own fast RAM, with
+ * DMAEN, with an AUDxLCH alone; plays from its own chip RAM and frees it (the channel must stop) and turns the channel
+ * on again without a new pointer; says every answer in one line, then writes Paula itself (which must end it). */
 #define FS_OPEN 1
 #define FS_READDIR 6
 #define FS_CLOSE 24
@@ -161,10 +166,43 @@ static int fsdir(struct umsg *m)
     }
     return -38;                                 /* FS_READDIRS too: the fallback is tested with this */
 }
+/* -paula: the hostile checks of DRV_AUDIO (DESIGN D60 6.2) */
+static int aud(int claim, int n, const unsigned short *w)
+{
+    struct udrvaudio q;
+    memset(&q, 0, sizeof q);
+    q.n = (u32)n;
+    for (int i = 0; i < n; i++) { q.w[i].reg = w[2 * i]; q.w[i].val = w[2 * i + 1]; }
+    int r = sys_drv(DRV_AUDIO, (u32)claim, (u32)&q);
+    return n && r > 0 ? 0 : r;                      /* (a batch's answer: its registers; 0 for the line) */
+}
+static void paula(void)
+{
+    int c = sys_drv(DRV_CLAIM, DRV_PAULA, 0);
+    char *chip = sys_memalloc_chip(8192), *fast = sys_memalloc(8192);
+    if (c < 0 || !chip || !fast) { dprintf(1, "msgpingd: paula: claim %d, memory %d\n", c, chip && fast); return; }
+    u32 k = 0x2000, a = (u32)chip, f = (u32)fast;      /* 0x2000: low chip RAM, the kernel's */
+#define LC(x) 0xA0, (unsigned short)((x) >> 16), 0xA2, (unsigned short)(x), 0xA4
+    unsigned short w1[] = { LC(k), 64, 0x96, 0x8001 }, w2[] = { LC(a), 64, 0xA6, 400, 0xA8, 0 },
+                   w3[] = { LC(a + 8150), 64 }, w4[] = { LC(f), 64 }, w5[] = { 0x96, 0x8201 }, w6[] = { 0xA0, 0 },
+                   w7[] = { 0x96, 0x8001 }, w8[] = { 0x96, 0x0001 };
+#define N(w) (int)(sizeof w / 4)
+    int r1 = aud(c, N(w1), w1), r2 = aud(c, N(w2), w2), r3 = aud(c, N(w3), w3), r4 = aud(c, N(w4), w4),
+        r5 = aud(c, N(w5), w5), r6 = aud(c, N(w6), w6), r7 = aud(c, N(w7), w7);
+    int on = aud(c, 0, 0) & 1;                      /* channel 0 plays from our chip RAM */
+    sys_memfree(chip);
+    int off = !(aud(c, 0, 0) & 1), r8 = aud(c, N(w7), w7);     /* stopped by the free; on again: no pointer checked */
+    aud(c, N(w8), w8);
+    dprintf(1, "msgpingd: paula kernel %d own %d past %d fast %d dmaen %d lch %d play %d on %d freed-off %d again %d\n",
+            r1, r2, r3, r4, r5, r6, r7, on, off, r8);
+    *(volatile unsigned short *)0xDFF0A8 = 0;       /* the chips' page is not ours: this ends us */
+    dprintf(1, "msgpingd: paula: wrote Paula myself\n");
+}
+
 int main(int argc, char **argv)
 {
     const char *pname = "ping";
-    int left = -1, fs = 0, uid = -1, old = 0;
+    int left = -1, fs = 0, uid = -1, old = 0, pau = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-port") && i + 1 < argc) pname = argv[++i];
         else if (!strcmp(argv[i], "-fs")) fs = 1;
@@ -175,6 +213,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-fswin")) fs = 6;
         else if (!strcmp(argv[i], "-uid") && i + 1 < argc) uid = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-old")) old = 1;
+        else if (!strcmp(argv[i], "-paula")) pau = 1;
         else if (!strcmp(argv[i], "-call") && i + 1 < argc) {
             struct umsg c;
             memset(&c, 0, sizeof c);
@@ -185,6 +224,8 @@ int main(int argc, char **argv)
     }
     int port = old ? sys3(29, (u32)pname, 0, 0) : sys_port_create(pname);    /* (-old: not marked PEER_EXACT) */
     if (port < 0) { dprintf(1, "msgpingd: port busy\n"); return 1; }
+    if (pau)
+        paula();
     if (uid >= 0 && sys_setuid((u32)uid) < 0) { dprintf(1, "msgpingd: setuid %d failed\n", uid); return 1; }
     struct umsg *m = sys_recv(port, 1);
     for (;;) {

@@ -22,11 +22,14 @@ static int cd_there, flushes, disarms, freed_hooks, disarm_early;
 static u32 *mmu_span_word;                      /* a word inside the MMU span: still unfilled when the disarm comes? */
 static void t_v(void) {}
 static void t_p(struct proc *p) { (void)p; }
-static void t_3(u32 d, u32 l, u32 o) { (void)d; (void)l; (void)o; }
-static void t_freed(u32 d, u32 l) { (void)d; (void)l; freed_hooks++; }
+static int t_b(u32 d, u32 l, u32 o) { (void)d; (void)l; (void)o; return 0; }
+static void t_freed(u32 d, u32 l, u32 o) { (void)d; (void)l; (void)o; freed_hooks++; }
 static void t_i(int b) { (void)b; }
 static int t_f(const u8 *f, u32 pc) { (void)f; (void)pc; return 0; }
-static const struct mmu_ops t_ops = { t_p, t_v, t_p, t_p, t_3, t_v, t_freed, t_i, t_v, t_f };
+static const struct mmu_ops t_ops = { .sw = t_p, .forget = t_p, .redo = t_p, .block = t_b, .upd_gone = t_v,
+                                      .freed = t_freed, .hand = t_i, .before_reset = t_v, .fault = t_f };
+u8 aud_valid;                                   /* D60 6.2 (drv.c): no channel the kernel checked */
+void drv_freed(u32 lo, u32 hi) { (void)lo; (void)hi; }
 const struct mmu_ops *mmu_ops = &t_ops;
 void mmu_disarm(void)                           /* the order: before the span is filled, flushed and freed */
 {
@@ -175,6 +178,50 @@ int main(void)
                     disarms == 1,
                     "the range table full: the spans stay the kernel's, nothing freed, no panic");
         munmap((void *)R, 0x100000);
+    }
+
+    /* 6. (D60 stage 4) with protection on, a big block from the highest free block of fast RAM it fits in: a hole left at the top by a program that
+     * ended takes the next big block, the biggest free block stays whole; with memory protection on the kernel's own
+     * blocks never come from chip RAM while there is fast RAM (a DMA engine in a process's hands writes chip RAM) */
+    {
+        const u32 R = 0x30000000u, C = 0x31000000u;
+        void *m1 = mmap((void *)R, 0x100000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+        void *m2 = mmap((void *)C, 0x40000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+        if (m1 != (void *)R || m2 != (void *)C) { printf("FAIL: cannot map the test's pools\n"); return 1; }
+        struct bootinfo bi;
+        memset(&bi, 0, sizeof bi);
+        bi.nregions = 2;
+        bi.r[0].attrs = MEMF_FAST; bi.r[0].lower = R; bi.r[0].upper = R + 0x100000;
+        bi.r[1].attrs = MEMF_CHIP; bi.r[1].lower = C; bi.r[1].upper = C + 0x40000;
+        nranges = 0; freeb[0] = freeb[1] = 0; fast_pool = 0;
+        mem_init(&bi, 0x100, 0x100);
+        mmu_on = 2;                                 /* (with protection only) */
+        u8 *top = mem_alloc(64 * 1024, 0, 7), *next = mem_alloc(64 * 1024, 0, 8);
+        mem_free(top);                              /* a hole at the top, above next */
+        u8 *c = mem_alloc(40 * 1024, 0, 9);
+        mmu_on = 0;
+        u32 cf, ff, big = 0;
+        for (struct mblk *b = (struct mblk *)ranges[0].lo; b; b = next_of(&ranges[0], b))
+            if (!USED(b) && SZ(b) > big)
+                big = SZ(b);
+        EXPECT_TRUE(top && next && c >= top && c + 40 * 1024 <= top + 64 * 1024 && next < top &&
+                    big >= (u32)(next - (u8 *)R) - 64,
+                    "a big block goes into the hole at the top, the biggest free block stays whole");
+        mem_free(c);
+        mem_free(next);
+        u8 *fill = mem_alloc(0x100000 - 8192, 0, 7);  /* the fast RAM taken, to its last bytes */
+        for (u32 n = 4096; n >= 16; n /= 2)
+            while (mem_alloc(n, MEM_FASTONLY, 7))
+                ;
+        mmu_on = 2;
+        void *k = mem_alloc(256, 0, 0), *ku = mem_alloc(4096, MEM_USER, 0), *u = mem_alloc(4096, MEM_USER, 7);
+        mmu_on = 0;
+        void *k0 = mem_alloc(256, 0, 0);
+        mem_stats(&cf, &ff);
+        EXPECT_TRUE(fill && !k && !ku && u && (u32)u >= C && k0 && (u32)k0 >= C,
+                    "protection on, the fast RAM full: no kernel block from chip RAM, a process's block yes; off: chip RAM");
+        munmap((void *)R, 0x100000);
+        munmap((void *)C, 0x40000);
     }
 
     printf(bad ? "FAILED\n" : "all ok\n");

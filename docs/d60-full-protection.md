@@ -1203,3 +1203,156 @@ Tests (all with protection where the machine has it unless said; FS-UAE in fast 
   the price of confining the servers there.
 - Not done: any real CPU; the desktop's and sound's rows of 9.4 (the 68020 machine's tests); an old displayd, old
   drivers and the update path (stage 5); Amiberry's 030 and 060 suites (FS-UAE's ran).
+
+## 21. As built: stage 4 (2026-11-23, branch d60s4)
+
+The drivers and the chips (section 14's stage 4), with full memory protection: the sound server and the plipbox
+driver hold no register page, `CON_GRAB` is the display service's alone, and the kernel trusts nothing in chip RAM.
+
+### 21.1 What was built
+
+`kernel/drv.c` (`DRV_AUDIO`, `DRV_PARXFER`, the claims' pages), `net/drv/plipbox-line.c` (new: the plipbox's line,
+out of plipbox-core.c), `kernel/gcon.c`, `kernel/main.c` and `kernel/kernel.h` (the boot tables' copies),
+`kernel/serial.c` (the log's indices), `kernel/mem.c` (the heap's checks, the kernel's blocks, big blocks' place),
+`user/sndd.c`, `net/drv/plipbox.c`; the tests `user/msgpingd.c -paula`, tools/mmu-test.sh, tools/mem-test.c.
+
+- **`DRV_AUDIO` (9, 6.2)**: a batch of up to 16 writes to the audio channels' registers and the audio bits of
+  `DMACON`, `INTENA`, `INTREQ`, `ADKCON` (never `DMAEN`, `INTEN` or another device's bit), checked whole before
+  anything is written, in its order: every pointer and length a channel is given, as each step leaves it, must be the
+  caller's own chip RAM (`user_ok_wr` and `chip_ok`; `LEN` 0 is 65,536 words), and a channel is turned on only with
+  such a pair (review 2: checking only the batch's end state let Paula take a stale pointer at a `DMACON` set placed
+  before the pair). A channel's `AUDxLCH`, `AUDxLCL` and the `AUDxLEN` after them are one step, written with
+  interrupts masked. Then a bounded wait for request bits (at most 50 ms) and their clearing, and the answer
+  (`DMACONR`'s and `INTREQR`'s audio bits, `VPOSR`), so sndd's look at a channel and its wait are one call each. While
+  a channel's DMA is on the kernel keeps the span of every pair it had since it was turned on (Paula takes a pair
+  only at a block's end); a block freed, or handed to another process (`mem_set_owner`: `SYS_shm`'s hand-over), that
+  overlaps it stops the channel first and makes its pair unchecked. sndd batches its writes when protection is full
+  (`prot_full`) and writes Paula itself otherwise, as before.
+- **`DRV_PARXFER` (10, 6.2)**: one plipbox transfer (a send, handshaked or in a burst; a receive; freeing a held box;
+  the lines on or off) run by the kernel on the claimed lines, into or out of the driver's own memory or a region it
+  took (netd's frame pool: review 1 found the receive into it refused by an own-memory check). The line's code moved
+  out of plipbox-core.c into `net/drv/plipbox-line.c`, which the kernel includes (in the protection span), the
+  driver includes for a machine without protection, and the host test runs against the model: one code for the
+  three. The kernel is not preempted, so the line yields (`need_resched`, kwork, the claim and `killed` looked at)
+  every 32 polls and every 128 bytes of a handshaked frame, never inside a burst's bytes (the box polls with its
+  interrupts off); the deadline is at most 50 ticks; a second transfer while an earlier driver's is still ending is
+  -EBUSY (review 2).
+- **A deviation (section 11)**: both ops live in the protection span and answer -EOPNOTSUPP without protection;
+  there, sndd writes Paula and the plipbox driver runs the line itself, exactly as before stage 4. Section 11 had the
+  plipbox on `DRV_PARXFER` on every machine (one code path); with one source file for both it is one code anyway,
+  and a machine without an MMU keeps its speed and the 2.3 KB of kernel (the mount tests' floppy is the binding
+  limit, 10).
+- **The register pages (6.2)**: `DRV_CLAIM` of the parallel port grants no CIA page; of Paula, the custom chips' page
+  only to a sound server whose port is not `PEER_EXACT` (an old sndd, 5.8; recorded at the claim, taken out at its
+  end). What still holds the chips' page: the display server, by `CON_GRAB` (the 1.0 limit, until stage 7), and an
+  old sndd until `MMU=STRICT` (stage 5).
+- **`CON_GRAB` (6.3)**: with protection on only the process the service manager started for `display`; root
+  otherwise gets -EPERM (said once in the log). Root still names that service's program (`svctest reg`) and may debug
+  displayd (`zdb`), as root may replace /sbin/displayd: the door is the service manager's, not raw (limits.md).
+  gcon-test is not run as the service (6.3 asked it): it runs on the 68020 machine, without an MMU, where the rule
+  does not apply; mmu-test checks the refusal and the desktop tests the display service's grab under protection.
+- **The kernel trusts no chip RAM (6.3)**, on a machine with fast RAM and the kernel in it: the bootinfo (0x1000) and
+  the hardware table (0x1100) are copied into the kernel's BSS first in `kmain` (`kboot`, `khw`, 576 bytes on every
+  machine) and every later reader uses the copies (C, zine.c's assembler, start.S's `cache_flush_code`; the low
+  `attn` is still written for ZINE's blob); and, found in this stage, three ways the chips reached kernel RAM: the
+  kernel log's ring took its size and count from its header in chip RAM (a size written there made `kputc` write
+  anywhere: the kernel keeps them now), the heap's backward merge followed a chip block's back link unchecked (now
+  checked as a block of the range that ends there, else a panic), and kernel blocks (heap, kernel stacks,
+  translation tables, bounce pages) fell back to chip RAM when fast RAM was full (with protection on, now never while
+  there is fast RAM). A claimed board's window must not overlap RAM the boot listed (review 2).
+- **Not done (stage 4 detail of 6.2)**: `SRP` mapping for a board above 16 MB outside the fast block (protection
+  still stays off on such a machine, as D41 decided; no test machine has one); gcon-test as the display service
+  (above).
+
+### 21.2 Speed
+
+`tools/mmubench-test.sh` in FS-UAE (fast mode), protection off -> on: unchanged from stage 3 (20.2) within the noise,
+as this stage touches no request's path: 030 `read4k` x1.36, `bigread` x1.25, `stat` x1.11, `msgcall` x1.54; 040/060
+`read4k` x1.40, `bigread` x1.24, `stat` x1.14, `msgcall` x1.74; `pipetrip`, `pipe` and `lsr` within 11%. Amiberry:
+030 `read4k` x1.41, `bigread` x1.12, `stat` x1.13, `msgcall` x1.53; 040/060 `read4k` x1.35, `bigread` x1.07, `stat`
+x1.09, `msgcall` x1.54; the rest within 10%: as stage 3. So `read4k` stays at +35-41% against the +10% budget and
+`bigread` at +7-25%: the window per request (below) is the cost, stage 6's.
+- **Looked for, for the fsd/diskd path** (the brief: cheap wins now, the pass in stage 6): the profiled build
+  (`DIAG=-DMMU_PROF`, 040, `bench mmu`) gives per request about 237 us to give it and 222 us to end it in FS-UAE's
+  model, of which a window made 218 us and dropped 234 us (the descriptor writes, about 2.5 pushes a window at some
+  32 us each, the tables' walks), a root switch 39 us; flushes are rare (`PFLUSHAN` 7 times in 400 requests: a page
+  made valid needs none, the switch's root load flushes anyway). Tried and dropped: leaving the flush of a request's
+  windows to the switch or the system call's end (one flush fewer a request): no measurable change in either
+  emulator, so not kept (it would have been a security-sensitive path for nothing). What would pay: keeping a
+  service's window across its client's next request at the same pages (read4k's buffer is the same every time), which
+  bends 5.3's "gone at the reply" and is stage 6's, for the main session to decide; fewer pushes by writing a
+  window's descriptors into one cache line where they fall together. Nothing in this stage made a figure slower.
+
+### 21.3 Memory: the 4 MB 68030
+
+- **Found** (a diagnostic build, `DIAG=-DMEM_MAP`, printing every block at each `free`): on the 4 MB 68030 the biggest
+  free block after boot and a login was 2,948 KB, 45 KB more than 101_cleanup's 2,903 KB (its image 1,879 KB, a 1 MB
+  stack), but `timeout` and the shell are cut from that block's top first. Above them lay a 290 KB hole: netd and
+  its drivers (the A1200's PC Card and parallel port probes) run at boot and end, and big blocks were cut from the
+  high end of the *first* free block that fits, counted from the bottom, so the hole was never used again.
+- **Given back**: with protection on, a big block (16 KB or more) now comes from the highest free block of fast RAM it
+  fits in (mem.c, `alloc_in`): such holes fill first. The biggest free block went from 2,948 to 2,972 KB (+24 KB,
+  which is stage 3's loss) and 101_cleanup loads and runs to its last line there again (tcc-test passes in the 030
+  suite). Only with protection and only in fast RAM: on the 68020 the same change made ZINE's ztake report 1 s
+  instead of 3 (its own CIA TOD count; reproduced at stock speed, not understood: written down for ZINE, the
+  allocator of a machine without protection is as before). The trees, inboxes and the tables windows keep were not
+  given back: they are what confinement costs (20.3); stage 4 adds 576 bytes of BSS (the boot tables' copies) and
+  1.4 KB of the protection span's code on that machine.
+
+### 21.4 Size
+
+kernel.bin 223,576 -> 227,824 bytes (+4,248): `drv` 3,606 -> 6,856 bytes (2.6 KB of it in the protection span,
+given back after the boot when protection is off) and bss + 85, `main` + 104 and bss + 576 (`kboot`, `khw`),
+`mem` + 316, `serial` + 106, `gcon` + 169, `ipc` + 58, `mmu` + 18. Section 10 estimated 1.2 KB for `DRV_AUDIO` and
+`DRV_PARXFER`; the plipbox's line alone is 1.6 KB (it was the driver's, which is that much smaller now). The mount
+tests' RAM disk 658 -> 655 KB (its floppy keeps 1,552 bytes; mounttest passes).
+
+### 21.5 Reviews and tests
+
+Two independent reviews of the code (2026-11-23). **The mechanics**: must-fix: the plipbox's receive into netd's
+frame pool (a region the driver took with `SYS_shm`) was refused by an own-memory check (no frame would have come in
+with protection on; no test has a box): the buffer is checked as the caller's memory or a region it took. Fixed
+too: the line yields in its polls, not only between a frame's words (a box switched off froze every process for
+the deadline), and the deadline is capped at 50 ticks; `DRV_AUDIO` checks the batch in its order (a `DMACON` set
+before the pair started Paula on the old pointer) and counts the channels a batch turns off; the ACK count is taken
+only when it was read; the "every machine" wording. Checked fine: the register masks, the long pointer write, the
+yield's safety (the claim's end seen, kwork, `killed`), the span's rules, the allocator, the log, the boot tables.
+**The interface and security model**: must-fix: the claim was too strong as written: root can still name the
+display service's program or debug displayd, and a sound server whose port is not `PEER_EXACT` gets the chips' page
+(5.8) - written down (limits.md, 21.1) instead; Paula can take a pair between two of a batch's writes, and may still
+read an earlier pair after it was replaced - every step checked, a pointer and its length written as one step with
+interrupts masked, the span of every pair since the channel was turned on kept for the freed-block stop; a second
+driver's transfer could run while an earlier one was yielded (`-EBUSY` now); the frozen header's wording. Fixed
+too: a block handed to another process (`SYS_shm`'s hand-over) stops a channel as a free does; the old-sndd page is
+recorded at the claim; a board's window must not overlap RAM the boot listed; `udrvparx`'s unknown flags are
+-EINVAL and both structs say they are fixed; the refused grab is said once. Written down: what the holder of the
+chips still reaches (disk data through chip buffers, the update note, the kernel on a machine without fast RAM),
+the kernel's waits for Paula and the plipbox, `SRP` and gcon-test not done, an old plipbox driver for stage 5's
+update-path list.
+
+Tests (FS-UAE in fast mode unless said):
+- `mmu-test` FS-UAE 020 030 040 lc040 060 lc060 and Amiberry 030 040 060: pass, with the new checks: `msgpingd
+  -paula` as the service "audio": a channel in the kernel's chip RAM, past its block, in its fast RAM -14, `DMAEN`
+  and an `AUDxLCH` alone -22, a channel played from its own chip RAM stops when the block is freed and is refused
+  when turned on again, and writing Paula itself ends it with the protection line (0xdff0a8); root's `gcontest`
+  refused (-1, the log's line).
+- `mmu-suite` (stock speed: also svc-test's part f and sound-test): FS-UAE 030, 040 and 060 every test passes, tcc-test
+  on the 030 included (101_cleanup loads again, 21.3); Amiberry 030 every test, 040 and 060 every test but
+  svc-test's "fsd is pid 3, at nice -10" (Amiberry's timing, as since 18.4) and on the 060 lua-test's stack probe
+  check, whose figures were there (111,996 bytes deep, within the limit) but whose end marker came out as "==pendl"
+  (a character typed ahead into the shell's echo: the same kind of script race as svc-test's part c, not fixed
+  here).
+- `sound-test` with protection on the 040 (sndd on `DRV_AUDIO`: 37 checks, no wait limit hit) and on the 68020;
+  `eth-test` every part with protection on the 040 (the plipbox driver through `DRV_PARXFER` with nothing on the
+  port: part l; the A2065 and the NE2000 through the frame pool) and on the 68020; `dpy-test` on the 040: the
+  display service's grab under protection ("console 1 handed to pid 18 (displayd)", no protection line; the
+  screenshot checks fail as with stage 2 and 3's kernels, 20.3); `plipbox-test` (host: the moved line against the
+  model, every case) and `mem-test` (host, repaired: its table of mmu_ops was stale since stage 1).
+- Without an MMU (FS-UAE's 68020): cmds-test, svc-test (every part), bootmem-test, zdb-test, readdir-test,
+  sock-test, netd-test, pure-test, prio-test, mounttest, zine-emu-test (after the allocator's change was limited to
+  protection, 21.3), sound-test, eth-test, gcon-test: pass.
+- `mmubench-test` 030 040 060 in both emulators (21.2).
+- **svc-test's part c** failed three checks on main on the 68020 (the main session's run): a race in its script, not
+  the kernel (the next command typed while the shell still waited; fixed in its own commit, 9cf40f8).
+- Not done: any real CPU; a plipbox (no emulator has one: `DRV_PARXFER`'s receive into the frame pool is checked by
+  review only); the old-sndd page and `MMU=STRICT` (stage 5).

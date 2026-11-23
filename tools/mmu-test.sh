@@ -23,6 +23,10 @@
 # next call, which its asking then serves. An old server (msgpingd -old: its port not marked) gets D41's lend by
 # SYS_debug's rule. SYS_shm: an offer taken by a child, the bytes shared both ways, the owner's early free (the child
 # keeps the memory, then owns it), a drop (the child's next read ends it), the refusals, a read-only share written.
+# DESIGN D60 stage 4 (6.2, 6.3): a sound server (msgpingd -paula as the service "audio") whose DRV_AUDIO batches point
+# Paula's DMA into the kernel's chip RAM, past its own block, into its fast RAM, or set DMAEN, is refused; a block it
+# frees while a channel plays from it stops that channel; writing Paula itself ends it. Root's CON_GRAB from a shell
+# (gcontest, not the display service) is refused.
 # usage: tools/mmu-test.sh [MODEL ...]           (default: 020 030 040 lc040 060 lc060)
 #   MODEL: 020 030 ec030 040 lc040 ec040 060 lc060 ec060, each also with +on (lc060+on: forced with MMU=ON)
 #   MMU_TEST_OFF=1: the kernel made MMU=OFF (the figures to compare with); every model then expects "off"
@@ -110,6 +114,10 @@ wait $P 30
 send svctest reg pz 0 /bin/msgpingd -port pz; msgping wild pz; msgping peer pz; msgping peer pz\r
 wait $P 30
 send msgping shm; echo shm-status \$?\r
+wait $P 30
+send svctest reg audio 0 /bin/msgpingd -port audio -paula; msgping call audio; sleep 1; echo paula-done\r
+wait $P 30
+send gcontest ack 1 < /dev/tty1; echo grab-status \$?\r
 wait $P 30
 EOF
 # the confined filesystem server's stray writes: each ends msgpingd -fswin, which is started again for the next
@@ -225,6 +233,13 @@ for cpu in $CPUS; do
         [ "$(grep -caE '\(msgpingd\): memory protection: a (write to|read of)' "$L")" -ge 3 ] &&
             echo "  ok   the three stray servers ended with the protection line" ||
             { echo "  FAIL the three stray servers ended with the protection line"; ok=0; }
+        chk "DRV_AUDIO: Paula's DMA outside the sound server's own chip RAM refused, a freed block stops its channel" \
+            'msgpingd: paula kernel -14 own 0 past -14 fast -14 dmaen -22 lch -22 play 0 on 1 freed-off 1 again -14'
+        chk "... and the sound server writing Paula itself ends (the chips' page is not its)" \
+            'pid [0-9]+ \(msgpingd\): memory protection: a write to 0xdff0a8'
+        if grep -qa 'paula: wrote Paula myself' "$L"; then echo "  FAIL the sound server wrote Paula itself"; ok=0; fi
+        chk "CON_GRAB by root, not the display service: refused" 'display: pid [0-9]+ \(gcontest\) is not the display service'
+        chk "... with -EPERM" 'gcontest: grab refused -1'
         chk "SYS_shm: offered, taken, shared both ways, freed early, kept, dropped" 'msgping: shm ok'
         chk "... exit status" '^shm-status 0'
         chk "confined: reads through the server into the root's server (a window passed on)" \

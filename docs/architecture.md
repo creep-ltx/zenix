@@ -347,7 +347,11 @@ While the claim is held `beep` does nothing; `audio_hold` stops the four channel
 interrupts masked) when the claim is taken, before ZINE (`drv_zine`, which also kills sndd) and when it ends
 (`drv_exit`, before the holder's memory is freed; netd's end releases only its own children's claims). The kernel has no audio interrupt code:
 sndd reads Paula's request bits in INTREQR at times it computes from the E-clock (`sys_hrtime`: Paula's clock / 5)
-and writes the channels' registers itself. Its protocol (`user/sndproto.h`), the double buffer, the frames of a
+and writes the channels' registers itself; with full memory protection (DESIGN D60 stage 4) it holds no register page
+and hands the kernel its writes in batches instead (`SYS_drv` `DRV_AUDIO`, in drv.c, the protection span: the
+registers and bits of the audio channels only, every channel's pointer and length checked in the batch's order as
+sndd's own chip RAM, a block freed or handed on while a channel may read it stops that channel; a bounded wait for
+the request bits in the same call). Its protocol (`user/sndproto.h`), the double buffer, the frames of a
 module and the limits: docs/d40-sound.md.
 
 ### USB (`kernel/drv.c`; the USB server `usb/usbd.c`; diskd's `usb0`; DESIGN D46)
@@ -627,7 +631,11 @@ Nothing can be moved once handed out (no MMU, no paging), so fragmentation is th
   (size + used bit, size of the previous block, **owner pid**, a magic value `ZMEM` that catches overruns and
   double frees).
 - Blocks of 16 KB or more are cut from the **high** end of a free block, small ones from the **low** end, so the
-  two sizes do not interleave and fragment each other. `MEM_LOW1G` (the SD driver's mailbox message, which the Pi's
+  two sizes do not interleave and fragment each other. With memory protection on, a big block in fast RAM comes from
+  the highest free block it fits in (D60 stage 4: a hole a program left at the top is used before the biggest free
+  block is cut; on a 4 MB 68030 it gave the biggest block 24 KB back); elsewhere the first that fits. With memory protection on, a block that is not a process's own (the
+  kernel's heap, stacks, translation tables, bounce pages) never comes from chip RAM while there is fast RAM (D60
+  6.3); a heap header's back link is checked before a merge (a chip range's headers can be written by DMA). `MEM_LOW1G` (the SD driver's mailbox message, which the Pi's
   VideoCore reads only below 1 GB) takes a block that ends below 1 GB, from the low end, also from a fast range that
   crosses 1 GB (audit A15; `tools/mem-test.sh`).
 - Every block records its owner. `mem_free_owner(pid)` hands back everything a process held, which is how a
@@ -806,9 +814,14 @@ pattern (section 6).
   `user_ok_wr`/`rd` allow; root's also the update bundle, read only, for zup), its inbox, the windows of the requests
   it holds, and its **grants** (stage 3, mmu.c, at most 32 in all): the register pages of the device it claimed
   (`SYS_drv` `DRV_CLAIM`: a Zorro board's window, the PC Card slot's 0xA00000-0xA4FFFF, the custom chips' page for
-  Paula, CIA-A's and CIA-B's pages for the parallel port; inhibited, serialized, on the 030 CI), its claim's DMA
-  memory (whole pages), the custom chips' page for the display server (`CON_GRAB`, until the grab ends), and the
-  shared regions it took (`SYS_shm`). An *old server* (one whose port is not marked `PEER_EXACT`: built before D60)
+  an old sound server only (D60 stage 4: a sound server built with D60 drives Paula through `DRV_AUDIO`, the
+  parallel port's driver gets no CIA page and its transfers are `DRV_PARXFER`); inhibited, serialized, on the 030
+  CI), its claim's DMA memory (whole pages), the custom chips' page for the display server (`CON_GRAB`, until the
+  grab ends; with protection on only the `display` service may grab), and the shared regions it took (`SYS_shm`).
+  The kernel trusts nothing in chip RAM (stage 4, d60 6.3): it reads the bootinfo and the hardware table from its own
+  copies (`kboot`, `khw`, made first in `kmain`), keeps the kernel log's indices in its own memory, checks a block's
+  back link before it merges, and with protection on takes its own blocks (heap, stacks, translation tables, bounce
+  pages) from fast RAM only where there is fast RAM. An *old server* (one whose port is not marked `PEER_EXACT`: built before D60)
   also gets, at a program's request, its client's whole view when `SYS_debug`'s rule would let it debug the client
   (lent into its tree at `ipc_recv`; after the reply kept while that client's next request waits at one of its ports,
   taken back at its next switch to user mode otherwise, or at once when the client gets a block, ends or has its code
@@ -1652,7 +1665,8 @@ name); `ls` 5.66 -> 1.05 s, `ls -l` 6.83 -> 2.19 s, the file view 6.6 -> 1.7 s.
   the parallel port (CIA-A's port B and bits 0-2 of CIA-B's port A; its quiesce steps may write only the data port, its
   direction and those three bits of CIA-B's port A and direction, by read-modify-write; CIA-A's FLG interrupt, the ACK
   line, is on while it is held and its edges are counted by the level-2 handler at every read of the ICR, `par_acks`;
-  DESIGN D39): the only owner, a second claim -EBUSY;
+  DESIGN D39; with full memory protection the kernel runs the plipbox's transfers, `DRV_PARXFER`, on those lines,
+  net/drv/plipbox-line.c, yielding every 32 polls and 128 bytes: D60 stage 4): the only owner, a second claim -EBUSY;
   4 claims), `DRV_DMAMEM` (one region a claim, 64-byte aligned, whole lines, at most 4 MB, from fast RAM only under
   Emu68 (`HW_DT`: the Pi's DMA reaches no chip RAM, D46), owned by the claim: neither
   netd's nor the driver's end frees it before the driver is reaped), `DRV_QUIESCE` (at most 8 register writes, read-modify-writes or, D46, bounded waits

@@ -40,12 +40,22 @@ all servers together 32 windows and 64 bounce pages at once; past one the reques
 request to an old server (its port not `PEER_EXACT`) that could not debug its client is answered -EACCES. A slot
 handed to a system call is refused (-EFAULT).
 Since D60 stage 3 (2026-11-23) there are no system processes: the servers, drivers, `init` and the services are
-confined too. What stays: the display server and the sound server hold the custom chips' page, so through the blitter,
-the Copper and Paula's DMA they can read (the display server also write) any chip RAM, never fast RAM (stage 4's
-`DRV_AUDIO`, stage 7's checked blitter close it), and the chips' page also holds `INTENA`, `DMACON`, the Copper and
-the blitter, so either server can stop the machine; the parallel port's driver holds CIA-A's and CIA-B's pages (the
-keyboard, the timers, the ROM overlay bit and the floppy's lines too: it could stop the kernel's clock or hang the
-machine, until stage 4's `DRV_PARXFER`); with 8 KB pages (`DIAG=-DMMU_PAGE8`) a PC Card driver gets none of Gayle's
+confined too. Since stage 4 (2026-11-23) the sound server and the plipbox driver hold no register page (`DRV_AUDIO`,
+`DRV_PARXFER`). What stays: the display server holds the custom chips' page (and so does a sound server built
+before D60, by 5.8's old-server rule, until `MMU=STRICT`), so through the blitter, the Copper and Paula's DMA it can
+read and write any chip RAM, never fast RAM (stage 7's checked blitter closes it), and the chips' page also holds
+`INTENA`, `DMACON` and `DSKLEN`, so it can stop the machine. Being trusted for chip RAM is being trusted for the
+system: the floppy's track buffer and the A3000's SCSI bounce buffer are chip RAM, so the holder of the chips can
+change what is read from a floppy or SCSI disk (the next kernel too), and the update note in the kernel log's area.
+The kernel itself trusts nothing in chip RAM only where it lives in fast RAM: on an MMU machine without fast RAM (or
+with the kernel loaded into chip RAM) its heap, stacks and tables are chip RAM, reachable by the display server.
+`CON_GRAB` is the display service's alone with protection on, but root can name the program of the `display`
+service (`svctest reg`) or debug displayd (`zdb`), as root can replace /sbin/displayd: root's way to the chips is
+through the service manager's door, not raw. Paula takes a channel's pointer and length at a block's end, so in the
+few bus cycles between the kernel's writes of a pair it could take a half-written one (read only, at most 128 KB
+anywhere); the kernel's waits for Paula (`DRV_AUDIO`, up to 50 ms) and for a plipbox (yielding every 32 polls) run
+in the kernel. With the fast RAM full, the kernel's own allocations fail rather than use chip RAM. The plipbox's
+`DRV_PARXFER` has no test against a box in an emulator (FS-UAE has none: the host test runs its line on a model); with 8 KB pages (`DIAG=-DMMU_PAGE8`) a PC Card driver gets none of Gayle's
 card pages (they share 8 KB with the IDE's interrupt latch), so it cannot run; a service may ask for any range of
 its client (it is the system's own code), a server any user runs only for what its client declared; a network driver
 or a disk server built before D60 does not work with full protection (it neither shares the frame pool nor uses the

@@ -1,146 +1,43 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* The plipbox's line protocol (DESIGN D39), shared by the driver (net/drv/plipbox.c) and the host test against the
- * model of the box (tools/plipbox-test.c, tools/plipbox-model.h). Included after the includer has defined:
- *   unsigned char pb_rd(u32 a); void pb_wr(u32 a, unsigned char v);   a CIA register, one access each
- *   void pb_bset(u32 a, int bit); void pb_bclr(u32 a, int bit);        one bit, read-modify-write in one instruction
- *   void pb_clrbits(u32 a, unsigned mask);                            bits cleared in one instruction
- *   u32 pb_ticks(void);                the kernel's 100 Hz tick (its CIA timer: PAL and NTSC alike)
+/* The plipbox's protocol above the line (DESIGN D39), shared by the driver (net/drv/plipbox.c) and the host test
+ * against the model of the box (tools/plipbox-test.c, tools/plipbox-model.h): the start, the magic frames, the
+ * requests, the link's state. The line itself (one transfer on the CIAs) is plipbox-line.c, run by the kernel for the
+ * driver (DRV_PARXFER, D60 6.2: the CIAs are never a driver's) and directly by the host test. Included after the
+ * includer has defined:
+ *   int pb_line(struct pb *b, struct udrvparx *x, unsigned char *buf);   one transfer (DRV_PARXFER's meaning)
+ *   u32 pb_ticks(void);                the kernel's 100 Hz tick
  *   long pb_acks(void);                the ACK line's edges since boot (DRV_PARACK), or -errno
  *   void pb_sleep(u32 ticks);
  *   void pb_log(struct pb *b, const char *fmt, ...);
- *
- * How a transfer goes (pb_proto.c's other side, as plipbox.device does it): the Amiga waits for BUSY low, drives the
- * data lines with the command and raises SEL; the box answers with BUSY high. Then every byte is a toggle of POUT
- * answered by a toggle of BUSY (the size first, high byte first, then the frame, always whole words), except in a
- * burst send, where the Amiga writes the frame's bytes and toggles POUT without waiting (the box polls POUT with its
- * interrupts off; each CIA access takes a whole E-clock cycle, which is what paces the burst on every CPU). At the end
- * the Amiga lets go of the data lines and drops SEL; the box drops BUSY. A wait that passes the transfer's deadline
- * (500 ms) ends it: SEL drops, and the box ends its side when it sees that.
- *
- * Frames from the box: it pulses ACK when it has one (or a magic frame) and keeps that one request until the Amiga
- * takes it with CMD_RECV. The kernel counts the pulses; a request is served by the next CMD_RECV, so the count read
- * once the box has taken that command (it cannot pulse during a transfer) is the count served. A CMD_RECV without a
- * request makes the box read its Ethernet chip's memory where no frame is (bridge.c fill_pkt): never done. */
+ * A request is served by the next CMD_RECV (plipbox-line.c says how), so the count read once the box has taken that
+ * command is the count served. A CMD_RECV without a request makes the box read its Ethernet chip's memory where no
+ * frame is (bridge.c fill_pkt): never done. */
 
-static void pb_begin(struct pb *b, u32 limit)
+/* PXS_* as the log says them */
+static const char *const pb_stages[] = {
+    0, "BUSY before the command", "the command's answer", "the size", "the size's low byte", "the frame's bytes",
+    "the frame's bytes (the driver was away as long as the box waits: not trusted)", "the burst's start",
+    "the burst's end", "the last answer", "freeing a held box",
+};
+
+/* one transfer: the stage of a failure, a receive cut between its size bytes and the count served taken from it */
+static int pb_do(struct pb *b, unsigned op, unsigned flags, unsigned char *buf, unsigned len, u32 deadline)
 {
-    b->t0 = pb_ticks();
-    b->limit = limit;
+    struct udrvparx x = { op, flags, 0, len, deadline, 0 };
+    int r = pb_line(b, &x, buf);
+    unsigned st = PARXF_STAGE(x.flags);
+    if (r < 0 && op != PARX_UNSTICK)
+        b->stage = st && st < sizeof pb_stages / sizeof pb_stages[0] ? pb_stages[st] : r == -EINTR ? "a signal" : 0;
+    if (x.flags & PARXF_WEDGED)
+        b->wedged = 1;
+    if (x.flags & PARXF_ACKS)
+        b->acks = x.acks;
+    return r;
 }
 
-/* BUSY to become want (0 or 1), until the transfer's deadline. Every read is a CIA access (an E-clock cycle on every
- * CPU), the clock is looked at every PB_POLLCHECK reads, and once more after the deadline: the process may not have
- * run while the clock did */
-static int pb_wait(struct pb *b, int want, const char *stage)
-{
-    for (unsigned n = 1;; n++) {
-        if ((pb_rd(PB_CTRL) & 1) == want)
-            return 0;
-        if (!(n % PB_POLLCHECK) && (u32)(pb_ticks() - b->t0) > b->limit) {
-            if ((pb_rd(PB_CTRL) & 1) == want)
-                return 0;
-            b->stage = stage;
-            return -ETIMEDOUT;
-        }
-    }
-}
-
-/* Inside a handshaked frame: was the driver away for about the box's own wait (500 ms) since the last look? Then
- * the box may have given up on this transfer and, SEL still up, taken the lines' level as a new command and answered
- * it: BUSY toggles again, the bytes read are the pull-ups' (found in the model, a frame of the right size with a byte
- * of 0xFF in it, which nothing on the line would catch). Looked at every PB_GAPWORDS words and at the frame's end: a
- * system call per 128 bytes, not per byte */
-static int pb_gap(struct pb *b, u32 *last)
-{
-    u32 t = pb_ticks();
-    if ((u32)(t - *last) >= PB_GAP) {
-        b->stage = "the frame's bytes (the driver was away as long as the box waits: not trusted)";
-        return -ETIMEDOUT;
-    }
-    *last = t;
-    return 0;
-}
-
-/* CIA-B's port A as it is now with SEL up and POUT down: the POUT edges of a handshaked frame (every byte answered,
- * so no edge can be missed) are then one write each instead of a bset's read and write (one CIA access a byte
- * fewer: a receive of 1,514 bytes 11.1 -> 9.0 ms on the model). The serial port's bits 3-7 are
- * written back as read: nothing else in Zenix writes this register while the driver holds the port (D39 4, the
- * rule), and its input bits (DSR, CTS, CD) only take the latch, which nobody drives. BUSY (an input) reads back 0 */
-static unsigned char pb_ctrl_lo(void)
-{
-    return (unsigned char)((pb_rd(PB_CTRL) & ~((1u << PB_POUT) | (1u << PB_BUSY))) | 1u << PB_SEL);
-}
-
-/* every transfer's end: the data lines the box's again, SEL and POUT down in one write (as the quiesce program) */
-static void pb_end(void)
-{
-    pb_wr(PB_DDATA, 0x00);
-    pb_clrbits(PB_CTRL, (1u << PB_SEL) | (1u << PB_POUT));
-}
-
-/* the port set up for the box: SEL and POUT low, then driven; BUSY read; the data lines not driven */
-void pb_lines_on(void)
-{
-    pb_wr(PB_DDATA, 0x00);
-    pb_bclr(PB_CTRL, PB_SEL);
-    pb_bclr(PB_CTRL, PB_POUT);
-    pb_bclr(PB_DCTRL, PB_BUSY);
-    pb_bset(PB_DCTRL, PB_POUT);
-    pb_bset(PB_DCTRL, PB_SEL);
-}
-
-/* the port left as the machine starts it (plipbox.device's end): SEL and POUT low, then not driven, nor the data */
-void pb_lines_off(void)
-{
-    pb_wr(PB_DDATA, 0x00);
-    pb_clrbits(PB_CTRL, (1u << PB_SEL) | (1u << PB_POUT));
-    pb_clrbits(PB_DCTRL, (1u << PB_SEL) | (1u << PB_POUT));
-}
-
-/* the same as the kernel's quiesce program: SEL first (it ends a burst the box is in), then the directions; CIA-B's
- * bits 3-7 (the serial port's) are kept by the read-modify-write */
-void pb_quiesce(struct udrvquiesce *q)
-{
-    memset(q, 0, sizeof *q);
-    q->n = 3;
-    q->step[0].op = DRVS_RMW;
-    q->step[0].size = 1;
-    q->step[0].addr = PB_CTRL;
-    q->step[0].mask = (1u << PB_SEL) | (1u << PB_POUT);
-    q->step[1] = q->step[0];
-    q->step[1].addr = PB_DCTRL;
-    q->step[2].op = DRVS_WRITE;
-    q->step[2].size = 1;
-    q->step[2].addr = PB_DDATA;
-    q->step[2].value = 0;
-}
-
-/* A box held in a burst's end. plipbox 0.6's burst loops end only when SEL drops, and their way out (pb_proto.c,
- * cmd_send_burst's send_burst_exit) loops back to itself for as long as SEL stays low: a burst cut off (a deadline
- * passed, the driver killed: its quiesce drops SEL) leaves the box there, deaf to every command, BUSY high or low
- * (the loop tests POUT before SEL: with POUT high it has dropped BUSY). SEL up, POUT up, then down, each edge
- * answered by BUSY, takes it out: the burst ends as "timeout", the box waits for SEL low and drops BUSY. The data
- * lines carry 0x00 meanwhile: a box that was not held reads that as a command, not one of its four (it answers BUSY
- * high and waits for SEL low), whatever the lines' pull-ups would have given. Done at every start and every look for
- * a lost box (microseconds for a box that was not held), and after a burst that failed. The stage of the failure
- * that led here is kept for the log. */
-static void pb_unstick(struct pb *b)
-{
-    const char *stage = b->stage;
-    pb_begin(b, PB_PROBE);
-    pb_bset(PB_CTRL, PB_POUT);
-    pb_wr(PB_DATA, 0x00);
-    pb_wr(PB_DDATA, 0xFF);
-    pb_bset(PB_CTRL, PB_SEL);
-    if (!pb_wait(b, 0, "freeing a held box")) {
-        pb_bclr(PB_CTRL, PB_POUT);
-        (void)pb_wait(b, 1, "freeing a held box");
-    }
-    pb_end();
-    pb_begin(b, PB_PROBE);
-    (void)pb_wait(b, 0, "freeing a held box");
-    b->stage = stage;
-}
+static void pb_lines_on(struct pb *b) { pb_do(b, PARX_ON, 0, 0, 0, 0); }
+static void pb_lines_off(struct pb *b) { pb_do(b, PARX_OFF, 0, 0, 0, 0); }
+static void pb_unstick(struct pb *b) { pb_do(b, PARX_UNSTICK, 0, 0, 0, PB_PROBE); }
 
 /* a transfer failed (r) or went through (0): the count of failures in a row and the link */
 static void pb_result(struct pb *b, int r, const char *what)
@@ -168,76 +65,33 @@ static void pb_result(struct pb *b, int r, const char *what)
     }
 }
 
-/* the frame of len bytes in b->tx + 2 to the box -> 0, or -errno */
+/* the same as the kernel's quiesce program: SEL first (it ends a burst the box is in), then the directions; CIA-B's
+ * bits 3-7 (the serial port's) are kept by the read-modify-write */
+void pb_quiesce(struct udrvquiesce *q)
+{
+    memset(q, 0, sizeof *q);
+    q->n = 3;
+    q->step[0].op = DRVS_RMW;
+    q->step[0].size = 1;
+    q->step[0].addr = PB_CTRL;
+    q->step[0].mask = (1u << PB_SEL) | (1u << PB_POUT);
+    q->step[1] = q->step[0];
+    q->step[1].addr = PB_DCTRL;
+    q->step[2].op = DRVS_WRITE;
+    q->step[2].size = 1;
+    q->step[2].addr = PB_DDATA;
+    q->step[2].value = 0;
+}
+
+/* the frame of len bytes in b->tx + 2 to the box (the line writes its size word in front) -> 0, or -errno */
 int pb_send(struct pb *b, unsigned len)
 {
-    unsigned char *p = b->tx;
-    int r;
-    if (len < PB_HDR || len > PB_MAXFRAME)
-        return -EINVAL;
-    p[0] = (unsigned char)(len >> 8);
-    p[1] = (unsigned char)len;
-    p[2 + len] = 0;                     /* the box takes whole words: an odd frame's last byte has a partner */
-    unsigned words = (len + 1) / 2;
-    pb_begin(b, b->down ? PB_PROBE : PB_WAIT);
-    if ((r = pb_wait(b, 0, "BUSY before the command")))
-        goto out;
-    pb_wr(PB_DDATA, 0xFF);
-    pb_wr(PB_DATA, b->burst ? PB_CMD_SENDB : PB_CMD_SEND);
-    pb_bset(PB_CTRL, PB_SEL);
-    if (b->burst) {
-        if ((r = pb_wait(b, 1, "the command's answer")))
-            goto out;
-        pb_wr(PB_DATA, p[0]);
-        pb_bset(PB_CTRL, PB_POUT);
-        if ((r = pb_wait(b, 0, "the size")))
-            goto out;
-        pb_wr(PB_DATA, p[1]);
-        pb_bclr(PB_CTRL, PB_POUT);
-        if ((r = pb_wait(b, 1, "the burst's start")))
-            goto out;
-        const unsigned char *q = p + 2;
-        for (unsigned i = 0; i < words; i++) {          /* the box samples the byte at each edge of POUT; bset and
-                                                         * bclr (3 accesses a byte, as plipbox.device): the box's
-                                                         * burst loop was never tried at 2 */
-            pb_wr(PB_DATA, *q++);
-            pb_bset(PB_CTRL, PB_POUT);
-            pb_wr(PB_DATA, *q++);
-            pb_bclr(PB_CTRL, PB_POUT);
-        }
-        pb_bset(PB_CTRL, PB_POUT);
-        if ((r = pb_wait(b, 0, "the burst's end")))
-            goto out;
-        pb_bclr(PB_CTRL, PB_POUT);
-        r = pb_wait(b, 1, "the last answer");
-    } else {
-        const unsigned char *q = p;
-        unsigned char lo = pb_ctrl_lo(), hi = lo | 1u << PB_POUT;
-        u32 last = b->t0;
-        for (unsigned i = 0; i <= words; i++) {         /* the size word, then the frame */
-            if (!(i % PB_GAPWORDS) && (r = pb_gap(b, &last)))
-                goto out;
-            if ((r = pb_wait(b, 1, i ? "the frame's bytes" : "the command's answer")))
-                goto out;
-            pb_wr(PB_DATA, *q++);
-            pb_wr(PB_CTRL, hi);
-            if ((r = pb_wait(b, 0, i ? "the frame's bytes" : "the size")))
-                goto out;
-            pb_wr(PB_DATA, *q++);
-            pb_wr(PB_CTRL, lo);
-        }
-        if (!(r = pb_wait(b, 1, "the last answer")))
-            r = pb_gap(b, &last);
-    }
+    u32 t0 = pb_ticks();
+    int r = pb_do(b, PARX_SEND, b->burst ? PARXF_BURST : 0, b->tx, len, b->down ? PB_PROBE : PB_WAIT);
     if (!r && len > PB_HDR) {
         b->tx_n++;
-        b->tx_ticks += pb_ticks() - b->t0;
+        b->tx_ticks += pb_ticks() - t0;
     }
-out:
-    pb_end();
-    if (r && b->burst && b->stage && (!strcmp(b->stage, "the burst's end") || !strcmp(b->stage, "the last answer") ||
-                                     !strcmp(b->stage, "the burst's start")))
-        pb_unstick(b);                  /* the box may be in the burst still */
     return r;
 }
 
@@ -245,61 +99,14 @@ out:
  * none), or -errno (-EMSGSIZE: it said more than max or a full frame: nothing taken) */
 int pb_recv(struct pb *b, unsigned char *buf, unsigned max, unsigned *len)
 {
-    unsigned n = 0;
-    int r;
-    *len = 0;
-    pb_begin(b, b->down ? PB_PROBE : PB_WAIT);
-    if ((r = pb_wait(b, 0, "BUSY before the command")))
-        goto out;
-    pb_wr(PB_DDATA, 0xFF);
-    pb_wr(PB_DATA, PB_CMD_RECV);
-    pb_bset(PB_CTRL, PB_SEL);
-    if ((r = pb_wait(b, 1, "the command's answer")))
-        goto out;
-    long a = pb_acks();                 /* the box has taken the command: every request it made is this one's */
-    if (a >= 0)
-        b->acks = (u32)a;
-    pb_wr(PB_DDATA, 0x00);
-    pb_bset(PB_CTRL, PB_POUT);
-    if ((r = pb_wait(b, 0, "the size")))
-        goto out;
-    n = (unsigned)pb_rd(PB_DATA) << 8;
-    pb_bclr(PB_CTRL, PB_POUT);
-    if ((r = pb_wait(b, 1, "the size's low byte"))) {
-        b->wedged = 1;                  /* the box may have given up between the two: it keeps the lines (D39 5) */
-        goto out;
-    }
-    n |= pb_rd(PB_DATA);
-    pb_bset(PB_CTRL, PB_POUT);
-    if (n > PB_MAXFRAME || n + (n & 1) > max) {
-        b->stage = "the size";
-        r = -EMSGSIZE;
-        goto out;
-    }
-    unsigned char lo = pb_ctrl_lo(), hi = lo | 1u << PB_POUT;
-    u32 last = b->t0;
-    for (unsigned i = 0; i < (n + 1) / 2; i++) {
-        if (!(i % PB_GAPWORDS) && (r = pb_gap(b, &last)))
-            goto out;
-        if ((r = pb_wait(b, 0, "the frame's bytes")))
-            goto out;
-        *buf++ = pb_rd(PB_DATA);
-        pb_wr(PB_CTRL, lo);
-        if ((r = pb_wait(b, 1, "the frame's bytes")))
-            goto out;
-        *buf++ = pb_rd(PB_DATA);
-        pb_wr(PB_CTRL, hi);
-    }
-    if ((r = pb_gap(b, &last)))
-        goto out;
-    *len = n;
-    if (n > PB_HDR) {
+    u32 t0 = pb_ticks();
+    int r = pb_do(b, PARX_RECV, 0, buf, max, b->down ? PB_PROBE : PB_WAIT);
+    *len = r > 0 ? (unsigned)r : 0;
+    if (r > PB_HDR) {
         b->rx_n++;
-        b->rx_ticks += pb_ticks() - b->t0;
+        b->rx_ticks += pb_ticks() - t0;
     }
-out:
-    pb_end();
-    return r;
+    return r < 0 ? r : 0;
 }
 
 /* a magic frame: no destination (plipbox.device puts its version there; the box reads only the source and type),
@@ -359,17 +166,17 @@ int pb_hello(struct pb *b, int adopt)
 /* the start: -> 0, or -errno (said in the log, the port left as it was found) */
 int pb_start(struct pb *b, int adopt)
 {
-    pb_lines_on();
+    pb_lines_on(b);
     pb_unstick(b);                      /* a box held since a burst was cut off */
     int r = pb_hello(b, adopt);
     if (r) {
-        if (r == -ETIMEDOUT && b->stage && !strcmp(b->stage, "BUSY before the command"))
+        if (r == -ETIMEDOUT && b->stage && b->stage == pb_stages[PXS_BUSY0])
             pb_log(b, "nothing answers on the parallel port: BUSY stays high (no plipbox, or it is off)");
         else if (r == -ETIMEDOUT)
             pb_log(b, "the plipbox does not answer (%s): is it in its bridge mode, firmware 0.6?", b->stage);
         else
             pb_log(b, "the plipbox's start failed at %s (%d)", b->stage ? b->stage : "?", r);
-        pb_lines_off();
+        pb_lines_off(b);
         return r;
     }
     b->fails = 0;
@@ -415,7 +222,7 @@ void pb_stop(struct pb *b)
         b->down = 1;                    /* the short deadline: a box that is gone holds nothing up */
         (void)pb_magic(b, PB_MAGIC_OFFLINE);
     }
-    pb_lines_off();
+    pb_lines_off(b);
 }
 
 /* a frame from the box: 1 for netd, 0 handled here (a magic frame, an empty answer, a bad one) */

@@ -29,6 +29,11 @@ struct pb;
 static char lastlog[64][200];
 static int nlog;
 static void pb_log(struct pb *b, const char *fmt, ...);
+static int pb_yield(void) { return 0; }
+#define PB_FN
+#include "../net/drv/plipbox-line.c"
+static int pb_line(struct pb *b, struct udrvparx *x, unsigned char *buf) { (void)b; return pb_xfer(x, buf); }
+static struct pbl L;                    /* the raw experiments' own line */
 #include "../net/drv/plipbox-core.c"
 static void pb_log(struct pb *b, const char *fmt, ...)
 {
@@ -187,24 +192,24 @@ static unsigned traffic(unsigned ntx, unsigned nrx, unsigned *lost_tx, unsigned 
  * toggle POUT, read the byte, no answer waited for. Here with the model's gaps, as a Zenix process would have them */
 static int burst_recv_as_amigaos(unsigned char *buf, unsigned *len)
 {
-    pb_begin(&b, PB_WAIT);
-    if (pb_wait(&b, 0, "b")) return -1;
+    pb_begin(&L, PB_WAIT);
+    if (pb_wait(&L, 0, 0)) return -1;
     pb_wr(PB_DDATA, 0xFF); pb_wr(PB_DATA, PB_CMD_RECVB); pb_bset(PB_CTRL, PB_SEL);
-    if (pb_wait(&b, 1, "b")) goto out;
+    if (pb_wait(&L, 1, 0)) goto out;
     pb_wr(PB_DDATA, 0); pb_bset(PB_CTRL, PB_POUT);
-    if (pb_wait(&b, 0, "b")) goto out;
+    if (pb_wait(&L, 0, 0)) goto out;
     unsigned n = (unsigned)pb_rd(PB_DATA) << 8; pb_bclr(PB_CTRL, PB_POUT);
-    if (pb_wait(&b, 1, "b")) goto out;
+    if (pb_wait(&L, 1, 0)) goto out;
     n |= pb_rd(PB_DATA); pb_bset(PB_CTRL, PB_POUT);
-    if (pb_wait(&b, 0, "b")) goto out;
+    if (pb_wait(&L, 0, 0)) goto out;
     for (unsigned i = 0; i < (n + 1) / 2; i++) {
         pb_bclr(PB_CTRL, PB_POUT); buf[2 * i] = pb_rd(PB_DATA);
         pb_bset(PB_CTRL, PB_POUT); buf[2 * i + 1] = pb_rd(PB_DATA);
     }
     pb_bclr(PB_CTRL, PB_POUT);
-    if (pb_wait(&b, 1, "b")) goto out;
+    if (pb_wait(&L, 1, 0)) goto out;
     pb_bset(PB_CTRL, PB_POUT);
-    (void)pb_wait(&b, 0, "b");
+    (void)pb_wait(&L, 0, 0);
     *len = n;
     pb_end();
     return 0;
@@ -383,12 +388,12 @@ int main(void)
     /* the send cut short half way: the model's box in its burst, SEL dropped by the quiesce program */
     {
         unsigned char *p = b.tx; p[0] = 1514 >> 8; p[1] = 1514 & 255;
-        pb_begin(&b, PB_WAIT);
-        pb_wait(&b, 0, "x");
+        pb_begin(&L, PB_WAIT);
+        pb_wait(&L, 0, 0);
         pb_wr(PB_DDATA, 0xFF); pb_wr(PB_DATA, PB_CMD_SENDB); pb_bset(PB_CTRL, PB_SEL);
-        pb_wait(&b, 1, "x"); pb_wr(PB_DATA, p[0]); pb_bset(PB_CTRL, PB_POUT);
-        pb_wait(&b, 0, "x"); pb_wr(PB_DATA, p[1]); pb_bclr(PB_CTRL, PB_POUT);
-        pb_wait(&b, 1, "x");
+        pb_wait(&L, 1, 0); pb_wr(PB_DATA, p[0]); pb_bset(PB_CTRL, PB_POUT);
+        pb_wait(&L, 0, 0); pb_wr(PB_DATA, p[1]); pb_bclr(PB_CTRL, PB_POUT);
+        pb_wait(&L, 1, 0);
         for (int i = 0; i < 100; i++) { pb_wr(PB_DATA, p[2 + i]); if (i & 1) pb_bclr(PB_CTRL, PB_POUT); else pb_bset(PB_CTRL, PB_POUT); }
         m_quiesce(&qz);
     }
@@ -407,12 +412,12 @@ int main(void)
             machine(1, 95 + (uint64_t)k, 0);
             start(1);
             unsigned char *p = b.tx; p[0] = 1514 >> 8; p[1] = 1514 & 255;
-            pb_begin(&b, PB_WAIT);
-            pb_wait(&b, 0, "x");
+            pb_begin(&L, PB_WAIT);
+            pb_wait(&L, 0, 0);
             pb_wr(PB_DDATA, 0xFF); pb_wr(PB_DATA, PB_CMD_SENDB); pb_bset(PB_CTRL, PB_SEL);
-            pb_wait(&b, 1, "x"); pb_wr(PB_DATA, p[0]); pb_bset(PB_CTRL, PB_POUT);
-            pb_wait(&b, 0, "x"); pb_wr(PB_DATA, p[1]); pb_bclr(PB_CTRL, PB_POUT);
-            pb_wait(&b, 1, "x");
+            pb_wait(&L, 1, 0); pb_wr(PB_DATA, p[0]); pb_bset(PB_CTRL, PB_POUT);
+            pb_wait(&L, 0, 0); pb_wr(PB_DATA, p[1]); pb_bclr(PB_CTRL, PB_POUT);
+            pb_wait(&L, 1, 0);
             for (int i = 0; i < 41; i++) { pb_wr(PB_DATA, (unsigned char)i); if (i & 1) pb_bclr(PB_CTRL, PB_POUT); else pb_bset(PB_CTRL, PB_POUT); }
             pb_bclr(PB_CTRL, PB_SEL);           /* SEL alone, POUT left high */
             m_idle(1000000);
@@ -435,18 +440,18 @@ int main(void)
         m_net_in(f.d, 300);
         m_idle(1000000);
         M.gap_p = 0;
-        pb_begin(&b, PB_WAIT);
-        pb_wait(&b, 0, "x");
+        pb_begin(&L, PB_WAIT);
+        pb_wait(&L, 0, 0);
         pb_wr(PB_DDATA, 0xFF); pb_wr(PB_DATA, PB_CMD_RECV); pb_bset(PB_CTRL, PB_SEL);
-        pb_wait(&b, 1, "x");
+        pb_wait(&L, 1, 0);
         b.acks = M.acks;
         pb_wr(PB_DDATA, 0); pb_bset(PB_CTRL, PB_POUT);
-        pb_wait(&b, 0, "x"); (void)pb_rd(PB_DATA);
+        pb_wait(&L, 0, 0); (void)pb_rd(PB_DATA);
         m_idle(600000000ull);                   /* the process away for 0.6 s: the box gives up waiting for POUT */
         pb_bclr(PB_CTRL, PB_POUT);
         b.stage = 0;
-        r = pb_wait(&b, 1, "the size's low byte");
-        if (r) b.wedged = 1;
+        r = pb_wait(&L, 1, PXS_SIZELO);
+        if (r) { b.wedged = 1; b.stage = pb_stages[L.stage]; }
         pb_end();
         pb_result(&b, r, "receiving");
         unsigned long c0 = M.contention;

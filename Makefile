@@ -271,8 +271,9 @@ RAMDISK_K := 640
 # 68 bytes of kernel.bin). 674 since DESIGN D60 stage 1 (2026-11-22, a translation tree per process: 2 KB of
 # kernel.bin); 666 since D60 stage 2 (2026-11-22, the records, inboxes and windows: 8.3 KB of kernel.bin); 660 since D60
 # stage 3 (2026-11-23, every server confined: grants, SYS_shm, SYS_callv, the peer lend, 6.6 KB of kernel.bin); 658 for its
-# two reviews' fixes (2026-11-23).
-RAMDISK_MOUNT_K := 658
+# two reviews' fixes (2026-11-23). 655 since D60 stage 4 (2026-11-23, DRV_AUDIO, DRV_PARXFER with the plipbox's line,
+# the boot tables' copies, the chip RAM checks: 4.2 KB of kernel.bin, 2.6 KB of it in the protection span).
+RAMDISK_MOUNT_K := 655
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/check-init.py tools/ksize-check.sh tools/ksize-budget tools/uok-check.py

@@ -135,9 +135,15 @@
 # ipc 4,017 -> 4,381 (the record's gates, ipc_rec), proc + 206 (user_ok_call_*), syscall + 122, sock + 10, vfs + 4, drv
 # + 4; kernel.bin 208,240 -> 216,700, TOTAL 208,500 -> 217,000; the mount tests' RAM disk 674 -> 666 KB (74 blocks free).
 start     4850   8200
-main      5950   1100
-serial    6100   6500
-mem       4250    240
+# 2026-11-23 (D60 stage 4): drv 3,606 -> 6,856 and bss + 85 (DRV_AUDIO and DRV_PARXFER with the plipbox's line,
+# net/drv/plipbox-line.c, 2.6 KB of it in the protection span, given back when protection is off), main + 104 and bss
+# + 576 (the boot tables' copies, kboot and khw), mem + 316 (the heap's back-link and merge checks, the kernel's blocks
+# kept out of chip RAM, big blocks' last fit with protection), serial + 106 (the log's indices kept by the kernel),
+# gcon + 169, ipc + 58; kernel.bin 223,576 -> 227,824, TOTAL 223,600 -> 229,000; the mount tests' RAM disk 658 -> 655
+# KB (Makefile).
+main      5950   1700
+serial    6200   6500
+mem       4600    248
 ide       4800    560
 emmc      4900    640
 floppy    4500    160
@@ -161,12 +167,12 @@ event      700      0
 signal    2150      0
 random    3800    280
 sock      4700   1060
-drv       3700    640
+drv       7000    720
 zine      1850     16
 cache     1800     32
-gcon      4350     16
+gcon      4500     16
 dbg       4100     20
 mmu      19800    240
 embed    51000      0
-TOTAL   223600
+TOTAL   229000
 ROOM       800

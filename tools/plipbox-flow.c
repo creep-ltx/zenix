@@ -37,6 +37,10 @@ static long pb_acks(void) { return (long)(M.acks & 0x7FFFFFFFu); }
 static void pb_sleep(u32 t) { m_idle(t * 10000000ull); }
 struct pb;
 static void pb_log(struct pb *b, const char *fmt, ...);
+static int pb_yield(void) { return 0; }
+#define PB_FN
+#include "../net/drv/plipbox-line.c"
+static int pb_line(struct pb *b, struct udrvparx *x, unsigned char *buf) { (void)b; return pb_xfer(x, buf); }
 #include "../net/drv/plipbox-core.c"
 static void pb_log(struct pb *b, const char *fmt, ...)
 {

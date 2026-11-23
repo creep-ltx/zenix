@@ -478,10 +478,11 @@ cache_push_lines:
  * the instruction cache, the enable bits are kept. 040/060 (and Emu68,
  * which reports an 040): CPUSHA BC, which also makes Emu68's JIT drop
  * its translations of the old bytes. The CPU type comes from bootinfo
- * (0x1000, AttnFlags bits 3 and 7), low chip RAM the kernel keeps. */
+ * (AttnFlags bits 3 and 7), the kernel's copy (D60 6.3: kmain copies it
+ * first; no low chip RAM is read after that). */
     .globl  cache_flush_code
 cache_flush_code:
-    move.w  0x1000,%d0
+    move.w  kboot,%d0
     and.w   #0x0088,%d0
     bne.s   1f
     movec   %cacr,%d0
