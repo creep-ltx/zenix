@@ -45,8 +45,9 @@ NOTES
     none (it is not shown), a byte that is not UTF-8 is one character of
     one column; "col" in the status line is the screen column. A search
     pattern is matched as bytes.
-    It uses all the rows of the terminal: 30 text rows on a PAL screen, 23
-    on NTSC (the other two are the title and the status line).
+    It uses all the rows and columns of the terminal: 30 text rows on a
+    PAL screen, 23 on NTSC (the other two are the title and the status
+    line), and draws itself anew when a terminal window changes size.
     The status line is white on blue where colours are wanted (the rule of
     ls --color=auto: a terminal, TERM set and not "dumb", NO_COLOR not
     set), else inverse; a one-plane display, which shows no colours, shows

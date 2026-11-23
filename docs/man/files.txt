@@ -5,6 +5,7 @@ NAME
 
 SYNOPSIS
     files [-v] [FOLDER]
+    files -K
 
 DESCRIPTION
     A window on Zenix Desktop that lists a folder (the one named, else
@@ -66,7 +67,7 @@ KEYS
     g/  gh  gt             go to /, home, /tmp
     S                      a terminal here
     R, F5                  read the folder again
-    ?, Help                the keys (j k move, any other key closes)
+    ?, F1, Help            the keys (j k move, any other key closes)
     q                      quit (the close gadget too)
 
     A prefix key (g, y, d, p, u, c, o, z) shows on the bottom line what
@@ -79,13 +80,16 @@ KEYS
     characters or names in <>: <Up> <Down> <Left> <Right>, <S-Up> (Shift)
     ..., <C-d> (Ctrl), <Return> <Esc> <Tab> <Space> <Del> <BS> <Help>
     <F1> .. <F10>. Two keys make a prefix; ACTION none takes a key away;
-    ; and # start comments. sort takes name, size, time or ext, then
+    # starts a comment (; too, and a [main] line, from older files).
+    sort takes name, size, time or ext, then
     reverse, or flip; go takes a path, root or home. When the file is
     missing, files writes it with every built-in key (the full list to
     edit). A line it does not understand is said on the bottom line at
     the start; the others still work.
 
 OPTIONS
+    -K  write the built-in keys to standard output, as the keys file
+        holds them, and end
     -v  write to standard output every row drawn ("files: row 3*: ..."
         with * on the cursor's row), the bottom line, what it says and
         starts, the window's place, and each folder's count and time

@@ -654,34 +654,19 @@ static int readline(const char *prompt, int plen, char *buf, int max)
             outs("\033[K^C\r\n"); sys_ttymode(0); buf[0] = 0; return -2;
         case 4:                                                 /* Ctrl-D: end of input, or delete */
             if (len == 0) { outs("\r\n"); sys_ttymode(0); return -1; }
+            c = K_DEL;
             /* fall through */
-        case K_DEL:                                             /* Del: the character under the cursor (D28) */
-            if (pos < len) { int w, k = zu8next(buf + pos, (u32)(len - pos), &w); memmove(buf + pos, buf + pos + k, (u32)(len - pos - k + 1)); len -= k; }
+        case K_DEL: case 127: case 8: case 1: case 2: case 11: case 21: case 23: case 20: {
+            /* libz's line editor (docs/audit-2026-11-23-one-system.md OS-34): Del, BS, Ctrl-A, -B, -K, -U, -W, -T as in
+             * every program's typed line; the suggestion, Tab, history and Ctrl-R stay the shell's own */
+            struct zled e = { buf, len, pos, max - 1 };
+            zled_key(&e, c == K_DEL ? 4 : c);
+            len = e.n; pos = e.pos;
             break;
-        case 127: case 8:                                       /* the character before it */
-            if (pos > 0) { int p = (int)zu8prev(buf, (u32)pos); memmove(buf + p, buf + pos, (u32)(len - pos + 1)); len -= pos - p; pos = p; }
-            break;
-        case 1: pos = 0; break;
+        }
         case 5: if (pos == len) len = take_suggestion(buf, len, max, 0); pos = len; break;
-        case 2: if (pos > 0) pos = (int)zu8prev(buf, (u32)pos); break;
         case 6: if (pos < len) { int w; pos += zu8next(buf + pos, (u32)(len - pos), &w); } else { len = take_suggestion(buf, len, max, 0); pos = len; } break;
-        case 11: len = pos; buf[len] = 0; break;                /* Ctrl-K */
-        case 21: memmove(buf, buf + pos, (u32)(len - pos + 1)); len -= pos; pos = 0; break;   /* Ctrl-U */
-        case 23: { int s = pos; while (s > 0 && is_space(buf[s - 1])) s--; while (s > 0 && !is_space(buf[s - 1])) s--;
-                   memmove(buf + s, buf + pos, (u32)(len - pos + 1)); len -= pos - s; pos = s; break; }   /* Ctrl-W */
         case 12: outs("\033[2J\033[H"); ed_reset(); break;      /* Ctrl-L */
-        case 20:                                                /* Ctrl-T: the two characters around the cursor */
-            if (pos > 0 && len > 1) {
-                int w;
-                if (pos == len) pos = (int)zu8prev(buf, (u32)pos);
-                int a = pos > 0 ? (int)zu8prev(buf, (u32)pos) : -1, b = zu8next(buf + pos, (u32)(len - pos), &w);
-                if (a >= 0) {
-                    char t[4]; int la = pos - a;
-                    memcpy(t, buf + a, (u32)la); memmove(buf + a, buf + pos, (u32)b); memcpy(buf + a + b, t, (u32)la);
-                    pos = a + b + la;
-                }
-            }
-            break;
         case 18:                                                /* Ctrl-R: search the history */
             if (isearch(buf, max, &len, &pos)) { outs("\r\n"); sys_ttymode(0); buf[len] = 0; return len; }
             ed_reset();                                         /* its own line is on the screen */
@@ -3094,8 +3079,10 @@ static void interactive_loop(void)
     save_history();
 }
 
+static const char SH_USAGE[] = "usage: sh [-i] [file [argument...]]\n       sh [-i] -c 'commands' [name [argument...]]\n";
 static int shell_main(int argc, char **argv)
 {
+    zopt(argc, argv, SH_USAGE);         /* --help, --version: the one-system rule (audit 2026-11-23) */
     /* the arena's first chunk (it grows on demand: see aalloc); an interactive command needs a few KB */
     if (!(acur = sys_memalloc(ACHUNK0))) { errm("no memory", 0); return 2; }
     acur->prev = 0; acur->size = ACHUNK0; acur->end = (char *)acur + ACHUNK0;
@@ -3106,7 +3093,11 @@ static int shell_main(int argc, char **argv)
     int ai = 1, force_i = 0; char *cmdstr = 0, *script = 0;
     if (ai < argc && !strcmp(argv[ai], "-i")) { force_i = 1; ai++; }     /* interactive even without a terminal */
     if (ai < argc && !strcmp(argv[ai], "-c")) { if (ai + 1 >= argc) { errm("-c", "needs a command"); return 2; } cmdstr = argv[ai + 1]; ai += 2; if (ai < argc) { arg0 = argv[ai]; ai++; } }
-    else if (ai < argc) { script = argv[ai]; arg0 = argv[ai]; ai++; }
+    else {
+        if (ai < argc && !strcmp(argv[ai], "--")) ai++;
+        else if (ai < argc && argv[ai][0] == '-' && argv[ai][1]) zbadopt(argv[ai], SH_USAGE);
+        if (ai < argc) { script = argv[ai]; arg0 = argv[ai]; ai++; }
+    }
     if (ai < argc) { pos_arg = argv + ai; npos = argc - ai; }      /* the shell's own arguments: they live as long as it */
     if (cmdstr) { int st = run_string(cmdstr); return exit_requested ? last_status : st; }
     if (script) {

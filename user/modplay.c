@@ -39,10 +39,9 @@ static unsigned long long playms;       /* the time heard, in microseconds */
 static unsigned char level[TRK_MAXCH];
 
 /* ---- the screen ---- */
-static int tty, keys, rows = 25, cols = 80, view, page = -1, chofs, sel, msgticks;
+static int tty, keys, view, page = -1, chofs, sel, msgticks;
+/* the screen: libz's one layer (user/zscr.c: the buffered output, the size and SIGWINCH): zscr_rows, zscr_cols */
 static char msg[80];
-static char outb[2048];
-static int outn;
 
 enum { V_PATTERN, V_INSTR, V_LIST, V_HELP, V_N };
 
@@ -67,10 +66,10 @@ static const char defkeys[] =
 static struct kbind kb[64];
 static struct keyset ks = { aname, A_N, kb, 0, 64, "" };
 
+static const char USAGE[] = "usage: modplay [-v VOL] [-l] [-s] [-q] [-z] [-r RATE] FILE|FOLDER...\n       modplay -K\n";
 static void usage(void)
 {
-    dprintf(2, "usage: modplay [-v VOL] [-l] [-s] [-q] [-z] [-r RATE] FILE|FOLDER...\n       modplay -K\n");
-    sys_exit(2);
+    zusage(USAGE);
 }
 
 static void keys_init(void) { keys_load(&ks, defkeys, sizeof defkeys - 1, "modplay"); }
@@ -119,22 +118,13 @@ static int action(int k)
 }
 
 /* ---- output ---- */
-static void flush(void) { if (outn) sys_write(1, outb, (u32)outn); outn = 0; }
-static void put(const char *s, int n)
-{
-    if (n < 0) n = (int)strlen(s);
-    if (outn + n > (int)sizeof outb) flush();
-    if (n > (int)sizeof outb) { sys_write(1, s, (u32)n); return; }
-    memcpy(outb + outn, s, (u32)n);
-    outn += n;
-}
+#define flush oflush
+static void put(const char *s, int n) { oputn(s, n < 0 ? (u32)strlen(s) : (u32)n); }
 static void at(int r, const char *s)       /* a whole line at screen row r (1-based), cut to the width */
 {
-    char b[24];
-    int n = snprintf(b, sizeof b, "\033[%d;1H", r);
-    put(b, n);
+    zscr_at(r, 1);
     int w = 0, k = 0;
-    while (s[k] && w < cols) {
+    while (s[k] && w < zscr_cols) {
         unsigned char c = (unsigned char)s[k];
         int len = c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
         for (int i = 1; i < len; i++) if (!s[k + i]) { len = i; break; }   /* a cut character: up to the end */
@@ -279,7 +269,7 @@ static void draw_head(const struct hist *x)
              msgticks ? msg : "");
     at(2, b);
     /* the meters: two cells a channel (one when more than 39 fit not) */
-    int n = 0, w = t.nch * 2 + 1 <= cols ? 2 : 1;
+    int n = 0, w = t.nch * 2 + 1 <= zscr_cols ? 2 : 1;
     n += snprintf(b + n, sizeof b - (u32)n, " ");
     for (int c = 0; c < t.nch && n < (int)sizeof b - 8; c++) {
         int l = x->lvl[c] * 8 / 64;
@@ -290,7 +280,7 @@ static void draw_head(const struct hist *x)
 
 static int cellw(void)
 {
-    int room = cols - 4, n = t.nch - chofs;
+    int room = zscr_cols - 4, n = t.nch - chofs;
     if (n * 14 <= room) return 13;
     if (n * 7 <= room || room / 14 < 3) return room / 7 >= 3 ? 6 : 3;
     return 13;
@@ -301,7 +291,7 @@ static void draw_row(int r, int pat, int row, int hl)
     char b[512], cell[16];
     int n = snprintf(b, sizeof b, "%s%02X\033[0m", hl ? "\033[7m" : "", row & 0xFF);
     int w = cellw();
-    for (int c = chofs; c < t.nch && n + w + 2 < cols + 12; c++) {
+    for (int c = chofs; c < t.nch && n + w + 2 < zscr_cols + 12; c++) {
         t.ops->cell(&t, pat, row, c, cell);
         cell[w] = 0;
         n += snprintf(b + n, sizeof b - (u32)n, "%s\xE2\x94\x82%s", hl ? "\033[7m" : "", cell);
@@ -311,7 +301,7 @@ static void draw_row(int r, int pat, int row, int hl)
 
 static void draw_pattern(const struct hist *x, int force)
 {
-    int top = 5, hgt = rows - top, prow = t.ops->rows(&t, x->pat);
+    int top = 5, hgt = zscr_rows - top, prow = t.ops->rows(&t, x->pat);
     if (hgt < 1) return;
     int pg = x->row / hgt;
     static int lastrow = -1, lastpat = -1;
@@ -333,8 +323,8 @@ static void draw_pattern(const struct hist *x, int force)
 static void draw_instr(void)
 {
     char b[128], nm[48];
-    int top = 5, hgt = rows - top, half = (t.ninst + 1) / 2;
-    int two = cols >= 80 && half <= hgt;
+    int top = 5, hgt = zscr_rows - top, half = (t.ninst + 1) / 2;
+    int two = zscr_cols >= 80 && half <= hgt;
     for (int i = 0; i < hgt; i++) {
         int n = 0;
         b[0] = 0;
@@ -352,7 +342,7 @@ static void draw_instr(void)
 static void draw_list(void)
 {
     char b[300];
-    int top = 5, hgt = rows - top, first = sel - hgt / 2;
+    int top = 5, hgt = zscr_rows - top, first = sel - hgt / 2;
     if (first > nlist - hgt) first = nlist - hgt;
     if (first < 0) first = 0;
     for (int i = 0; i < hgt; i++) {
@@ -368,7 +358,7 @@ static void draw_list(void)
 static void draw_help(void)
 {
     char b[160];
-    int top = 5, hgt = rows - top, r = 0;
+    int top = 5, hgt = zscr_rows - top, r = 0;
     for (int a = 1; a < A_N && r < hgt; a++) {
         int n = snprintf(b, sizeof b, " %-24s", ahelp[a]), shown = 0;
         for (int i = 0; i < ks.n && shown < 3; i++) {
@@ -468,6 +458,12 @@ static int play_song(void)
     if (tty) { put("\033[2J", -1); draw(1); }
     for (;;) {
         struct pollfd pf = { 0, POLLIN, 0 };
+        if (tty && zscr_resized()) {    /* a terminal window's new size: everything drawn anew */
+            if (zscr_rows < 8) zscr_rows = 8;
+            if (zscr_cols < 40) zscr_cols = 40;
+            put("\033[2J", -1);
+            draw(1);
+        }
         while (keys && poll(&pf, 1, paused ? 200 : 0) > 0 && (pf.revents & POLLIN)) {
             int k = read_key();
             if (k < 0) break;
@@ -668,8 +664,9 @@ static int add_arg(const char *p)
 
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int i = 1;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         if (!strcmp(argv[i], "-v") && i + 1 < argc) { vol = atoi(argv[++i]); if (vol < 0 || vol > 64) usage(); }
         else if (!strcmp(argv[i], "-r") && i + 1 < argc) { optrate = atoi(argv[++i]); if (optrate < 4000 || optrate > 28000) usage(); }
         else if (!strcmp(argv[i], "-l")) repeat = 2;
@@ -678,7 +675,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-z")) shuffle = 1;
         else if (!strcmp(argv[i], "-B") && i + 1 < argc) { bench = atoi(argv[++i]); if (bench < 1 || bench > 600) usage(); }
         else if (!strcmp(argv[i], "-K")) { sys_write(1, defkeys, sizeof defkeys - 1); return 0; }
-        else usage();
+        else zbadopt(argv[i], USAGE);
     }
     if (i >= argc) usage();
     for (; i < argc; i++) if (add_arg(argv[i]) < 0) return 1;
@@ -694,14 +691,12 @@ int main(int argc, char **argv)
     clock = si.clock;
     if (bench) return do_bench(list[0]);
     if (!quiet) {
-        unsigned ti = (unsigned)sys_ttyinfo();
         keys = sys_ttymode(TTY_RAW | TTY_NOSIG) >= 0;
         if (keys && !line) {
             tty = 1;
-            rows = (int)(ti >> 16);
-            cols = (int)(ti & 0xFFFF);
-            if (rows < 8 || rows > 100) rows = 25;
-            if (cols < 40 || cols > 250) cols = 80;
+            zscr_init();                /* the size, and its changes followed (SIGWINCH) */
+            if (zscr_rows < 8) zscr_rows = 8;
+            if (zscr_cols < 40) zscr_cols = 40;
             put("\033[?25l\033[2J", -1);
             flush();
         }

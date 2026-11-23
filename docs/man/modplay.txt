@@ -84,7 +84,8 @@ NOTES
     Each tick sent to Paula is applied within about 5 ms of its time;
     a mixed song's keys and screen are about 0.15 s ahead of the sound
     heard. A module's file is read into memory whole (8 MB at most);
-    Paula's samples are copied to chip RAM (1 MB at most).
+    Paula's samples are copied to chip RAM (1 MB at most). The screen
+    follows a terminal window's size (drawn anew when it changes).
 
 SEE ALSO
     play(1), sndd(8), docs/d56-tracker-player.md, docs/d40-sound.md
