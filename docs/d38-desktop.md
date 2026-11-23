@@ -405,7 +405,8 @@ the A1200 again):
   vertical blank and moves sprite 0 there, before sprite DMA reads it (it waited for the 100 Hz tick before), places
   it to the hires pixel on AGA (SPRxCTL SH1: the hot spot reaches column 639), and accelerates as AmigaOS's Input
   prefs do (`CON_MOUSE`; zdesk's `/etc/zdesk/mouse`: none, low (the default: the counts beyond 4 in a frame doubled),
-  high (beyond 2, tripled)).
+  high (beyond 2, tripled)). (DESIGN D61 replaced this with the screen's own pixels, a speed and a settings window:
+  docs/d61-mouse.md.)
 - **term could not be made narrower.** The console's cell model takes its width in use at run time (`WCOLS`, the
   console's own stays 80): term is 20 to 80 columns, and the program gets SIGWINCH with the new width.
 - **term was slow:** `time ls -laR /` (about 5,000 lines, the owner's AmigaOS partitions mounted) took 12.8 s on the

@@ -219,10 +219,11 @@ static void default_style(void)
     style.drag = sys3(93, 0, (u32)zi, sizeof zi) == 0 && (zi[2] & 0x88) ? 0 : DRAG_OUTLINE;
 }
 static int pf2_pen = -1;                /* a lifted window's stand-in for pen 0 (D38 "Dragging with the chips") */
+static int cop_ptr;                     /* the pointer's colours 17-19 in the Copper lists (D61) */
+static u16 ptrcol[3] = { 0x000, 0xFFF, 0x888 };         /* the pointer's: sprite 0's colours 17-19 (DPY_MOUSE) */
 static void set_palette(void)
 {
     if (rtg) {                          /* D43: the card's pens, all shown again; the chipset's colour 0 */
-        static const u16 ptrcol[3] = { 0x000, 0xFFF, 0x888 };  /* the pointer's: as sprite 0's colours 17-19 */
         copl[0][cop_col + 1] = style.palette[0] & 0xFFF;
         fb_pens(&card, style.palette, 16, ptrcol);
         fb_all();
@@ -396,6 +397,115 @@ static const char *const arrow[16] = {
     "......oo........",
 };
 
+/* ---- D61 (docs/d61-mouse.md 5): the mouse's setting, DPY_MOUSE ---- */
+static struct dpymouse ms;              /* in effect */
+static u16 ptr_pa[16], ptr_pb[16];      /* a card's pointer: its picture's two planes */
+static u8 pend;                         /* a card: the pointer moved and is not on the glass yet */
+static u32 pend_t;                      /* the tick of the record that moved it */
+static u32 nptr, tptr, mptr;            /* DPY_STAT's: card pointer shows, their ticks from the kernel's record, the most */
+static void kernel_events(void);
+#ifndef NO_RTG
+static void band_hook(void);
+#endif
+static void mouse_defaults(void)
+{
+    if (ms.size)
+        return;
+    ms.size = sizeof ms;
+    ms.speed = 100;
+    ms.mult = 200;                      /* "low": beyond 4 counts a frame doubled, as D38's default */
+    ms.thresh = 4;
+    ms.dclick = 50;
+    memcpy(ms.colour, ptrcol, sizeof ms.colour);
+    for (int y = 0; y < 16; y++)
+        for (int x = 0; x < 16; x++) {
+            if (arrow[y][x] == 'o') ms.image[2 * y] |= (u16)(0x8000 >> x);
+            if (arrow[y][x] == 'w') ms.image[2 * y + 1] |= (u16)(0x8000 >> x);
+        }
+}
+/* the picture and colours in ms onto the sprite (the chipset) or the card's pointer */
+static void mouse_image(void)
+{
+    memcpy(ptrcol, ms.colour, sizeof ptrcol);
+    if (rtg) {
+        for (int y = 0; y < 16; y++) {
+            ptr_pa[y] = ms.image[2 * y];
+            ptr_pb[y] = ms.image[2 * y + 1];
+        }
+        fb_pointer_image(ptr_pa, ptr_pb);
+        if (grabbed) {                  /* (at the start the card's set-up draws it) */
+            fb_pointer(ptx - ms.hotx, pty - ms.hoty);
+            set_palette();
+        }
+        return;
+    }
+    memcpy(spr + 2, ms.image, sizeof ms.image);         /* sprite DMA reads it next frame */
+    for (int f = 0; f < 2; f++)
+        for (int i = 0; i < 3; i++)
+            copl[f][cop_ptr + 2 * i + 1] = ptrcol[i];
+}
+/* the kernel's pointer (CON_MOUSE's struct umouse) for the screen shown, at X, Y (negative: where it is) */
+static void mouse_apply(int x, int y)
+{
+    struct umouse u;
+    memset(&u, 0, sizeof u);
+    u.size = sizeof u;
+    u32 W = rtg ? card.w : (u32)base_w, H = rtg ? card.h : (u32)base_h << lace;
+    u32 gx = (u32)ms.speed * 256 / 100, gy = gx * H * (u32)base_w / (2 * W * (u32)base_h);  /* the same distance on
+                                         * the glass down: a hires pixel is about half a line's height */
+    u.gainx = (u16)(gx < 1 ? 1 : gx > 0x1000 ? 0x1000 : gx);
+    u.gainy = (u16)(gy < 1 ? 1 : gy > 0x1000 ? 0x1000 : gy);
+    u.mult = (u16)((u32)ms.mult * 256 / 100);
+    u.thresh = (u8)(base_h <= 200 ? ms.thresh * 5 / 6 : ms.thresh);    /* NTSC: 60 frames a second, not 50 */
+    int sx = 0, sy = 0;                 /* the sprite in the chipset's frame (on a card unseen, kept in range) */
+    while (sx < 3 && (W >> sx) > (u32)base_w)
+        sx++;
+    while (sy < 3 && (H >> sy) > (u32)base_h)
+        sy++;
+    u.shift = (u8)(sx | sy << 2);
+    u.w = (u16)W;
+    u.h = (u16)H;
+    u.x = (short)x;
+    u.y = (short)y;
+    u.hotx = (signed char)(2 * ms.hotx);         /* the sprite's pixels are lores: two hires pixels */
+    u.hoty = ms.hoty;
+    sys_conmouseset(gfd, &u);
+}
+/* DPY_MOUSE's checks: 0, or -EINVAL */
+static int mouse_ok(const struct dpymouse *m)
+{
+    return m->size < DPYMOUSE_FIRST || m->speed < 10 || m->speed > 800 || m->mult < 100 || m->mult > 800 ||
+           m->thresh > 127 || m->dclick < 10 || m->dclick > 300 || (u8)m->hotx > 15 || (u8)m->hoty > 15 ? -EINVAL : 0;
+}
+static u16 swapq(u16 q)                 /* DPYMF_SWAP: the left and right buttons swapped where they come in */
+{
+    if (!(ms.flags & DPYMF_SWAP) || !(q & GQ_LBUTTON) == !(q & GQ_RBUTTON))
+        return q;
+    return q ^ (GQ_LBUTTON | GQ_RBUTTON);
+}
+/* a press of button WHICH at tick T: 2 when it doubles the last press, else 1 (a third counts as a first) */
+static int lastb, lastx, lasty, lastn;
+static u32 lastt;
+static u16 clicks(int which, u32 t)
+{
+    int d = which == lastb && lastn == 1 && t - lastt < ms.dclick && ptx - lastx <= 4 && lastx - ptx <= 4 &&
+            pty - lasty <= 4 && lasty - pty <= 4;
+    lastb = which;
+    lastt = t;
+    lastx = ptx;
+    lasty = pty;
+    lastn = d ? 2 : 1;
+    return (u16)lastn;
+}
+/* a record in the chipset's units (hires pixels, frame lines) for D55's screens, which take those */
+static const struct ugevent *canon(const struct ugevent *e)
+{
+    static struct ugevent c;
+    c = *e;
+    c.y = (short)(c.y >> lace);
+    return &c;
+}
+
 /* ---- screen modes (D38 "Screen modes"): hires or hires interlaced, PAL or NTSC as the console is ---- */
 #define LACE_SPARE (512u << 10)         /* chip RAM left after an interlaced screen: drags, copies, sound, disks */
 /* /etc/zdesk/screen (display/lib/screenfile.c): its mode -> DPYM_LACE or DPYM_HIRES (no file, no line, auto: hires);
@@ -435,12 +545,6 @@ static void hvs_show(int on)            /* the HDMI shows the card's picture (1)
 {
     if (hvs_reg)
         *(volatile u32 *)hvs_reg = __builtin_bswap32(on ? hvs_on : hvs_off);  /* the Pi's registers: little-endian */
-}
-/* the kernel's pointer (the chipset's screen) onto the card's */
-static void fb_scale(int *x, int *y)
-{
-    *x = (int)((u32)*x * card.w / (u32)base_w);
-    *y = (int)((u32)*y * card.h / (u32)base_h);
 }
 /* the record in the boot's hardware table (with full protection the kernel's copy, DRV_HWINFO), checked; 1: the screen
  * is the card's from now on (scr the pens' bitmap in fast RAM) */
@@ -499,7 +603,6 @@ static int card_take(void)
 }
 #else
 static void hvs_show(int on) { (void)on; }
-static void fb_scale(int *x, int *y) { (void)x; (void)y; }
 static int card_take(void) { return 0; }   /* the demo floppy's displayd: the chipset's screen always */
 #endif
 
@@ -519,15 +622,8 @@ static int screen_up(int con)
     copl[0] = mem + 64;                 /* the fixed part: at most 64 moves each */
     copl[1] = copl[0] + 128;
     memset(mem, 0, 1024);
-    for (int y = 0; y < 16; y++) {
-        u16 a = 0, b = 0;
-        for (int x = 0; x < 16; x++) {
-            if (arrow[y][x] == 'o') a |= (u16)(0x8000 >> x);
-            if (arrow[y][x] == 'w') b |= (u16)(0x8000 >> x);
-        }
-        spr[2 + 2 * y] = a;
-        spr[3 + 2 * y] = b;
-    }
+    mouse_defaults();
+    memcpy(spr + 2, ms.image, sizeof ms.image);
     /* a first grab with no screen yet only to learn the machine: the kernel's answer has the chips and the size */
     struct ucongrab g;
     memset(&g, 0, sizeof g);
@@ -552,13 +648,8 @@ static int screen_up(int con)
     base_h = g.height;
     frame_l = base_h > 200 ? 312 : 262;
     if (card_take()) {                  /* D43: the desktop on the card; the chipset shows colour 0, the sprite blank */
-        static u16 pa[16], pb[16];
-        for (int y = 0; y < 16; y++) {
-            pa[y] = spr[2 + 2 * y];
-            pb[y] = spr[3 + 2 * y];
-            spr[2 + 2 * y] = spr[3 + 2 * y] = 0;
-        }
-        fb_pointer_image(pa, pb);
+        memset(spr + 2, 0, sizeof ms.image);
+        mouse_image();
         mode_file();                    /* (its font line: the mode line is the chipset's) */
         chip_used = 0;
         grabbed = 1;
@@ -578,7 +669,11 @@ static int screen_up(int con)
         set_palette();
         ptx = card.w / 2;
         pty = card.h / 2;
-        fb_pointer(ptx, pty);
+        mouse_apply(ptx, pty);          /* D61: the kernel's pointer in the card's own pixels */
+#ifndef NO_RTG
+        fb_band_hook = band_hook;
+#endif
+        fb_pointer(ptx - ms.hotx, pty - ms.hoty);
         return 0;
     }
     lace = mode_file() == DPYM_LACE;
@@ -639,9 +734,10 @@ static int screen_up(int con)
         cop_col = (int)(c - copl[f]);
         for (int i = 0; i < (1 << depth); i++)
             MOVE(0x180 + 2 * i, 0);
-        MOVE(0x1A2, 0x000);             /* the pointer: black outline, white face */
-        MOVE(0x1A4, 0xFFF);
-        MOVE(0x1A6, 0x888);
+        cop_ptr = (int)(c - copl[f]);
+        MOVE(0x1A2, ptrcol[0]);         /* the pointer: black outline, white face (DPY_MOUSE's colours) */
+        MOVE(0x1A4, ptrcol[1]);
+        MOVE(0x1A6, ptrcol[2]);
         if (aga) {                      /* playfield 2's colours (32-47): bank 1 */
             MOVE(0x106, 0x3400);
             cop_col2 = (int)(c - copl[f]);
@@ -665,6 +761,7 @@ static int screen_up(int con)
     set_palette();
     ptx = g.width / 2;
     pty = scr.h / 2;
+    mouse_apply(ptx, pty);              /* D61: the kernel's pointer in the screen's own pixels */
     return 0;
 }
 
@@ -678,6 +775,9 @@ static int mode_switch(int want)
         return want;
     if (dragging || shadowing || !use_blit)
         return -EBUSY;
+    kernel_events();                    /* D61: the records still in the ring are in the old mode's units */
+    if (dragging || shadowing || !use_blit)
+        return -EBUSY;                  /* (one of them began a drag) */
     struct bm nb, old = scr;
     if (mode_alloc(&nb, want, scr.depth) < 0)
         return -ENOMEM;
@@ -686,6 +786,7 @@ static int mode_switch(int want)
     scr = nb;
     lace = want;
     pty = pty >> was << lace;
+    mouse_apply(ptx, pty);              /* the pointer in the new mode's lines, at the same place on the glass */
     struct dpyev e;                     /* told first: their resizes and exposes after it see the new size */
     memset(&e, 0, sizeof e);
     e.type = EV_SCREEN;
@@ -743,7 +844,7 @@ static struct dpykey grabs[DPY_MAXGRAB];
 static int ngrabs;
 static void key(const struct ugevent *e)
 {
-    if (scr_key(e))                     /* D55: Left Amiga+N, and every key while a screen is in front */
+    if (scr_key(canon(e)))              /* D55: Left Amiga+N, and every key while a screen is in front */
         return;
     int up = e->code & 0x80, code = e->code & 0x7F;
     if (wm_cl >= 0)
@@ -773,6 +874,7 @@ static void grab_check(void)
     if (grab_w >= 0 && (wins[grab_w].id != grab_id || !(wins[grab_w].state & WST_SHOWN)))
         grab_w = -1;
 }
+static u16 click_n;                     /* D61: the press's count (clicks()), its EV_BUTTON's arg */
 static void button(int which, int down, u16 qual)
 {
     grab_check();
@@ -829,6 +931,7 @@ static void button(int which, int down, u16 qual)
     v.type = EV_BUTTON;
     v.code = (u8)(which | (down ? 0 : 0x80));
     v.qual = qual;
+    v.arg = down && click_n > 1 ? click_n : 0;
     v.win = w->id;
     v.x = (s16)(ptx - in.x0);
     v.y = (s16)(pty - in.y0);
@@ -862,16 +965,19 @@ static void pgrab_event(u16 old, u16 now, u16 qual, int moved)
 static void pointer(const struct ugevent *e)
 {
     u16 old = btns, now = e->qual & (GQ_LBUTTON | GQ_RBUTTON | GQ_MBUTTON);
-    int x = e->x, y = e->y << lace;     /* the kernel's pointer is in frame lines: two lines a frame line in interlace */
-    if (rtg)
-        fb_scale(&x, &y);
+    int x = e->x, y = e->y;             /* D61: the kernel's pointer is in the screen's own pixels (mouse_apply) */
     int moved = x != ptx || y != pty;
     ptx = x;
     pty = y;
-    if (moved && rtg)
-        fb_pointer(ptx, pty);
+    if (moved && rtg) {
+        fb_pointer(ptx - ms.hotx, pty - ms.hoty);
+        if (!pend) {                    /* on the glass at the pass's next look (ptr_show), not at its end */
+            pend = 1;
+            pend_t = e->time;
+        }
+    }
     btns = now;
-    if (scr_pointer(e, old, now, moved))        /* D55: a screen in front has the mouse */
+    if (scr_pointer(canon(e), old, now, moved))  /* D55: a screen in front has the mouse */
         return;
     if (pgrab_w >= 0 && (wins[pgrab_w].id != pgrab_id || !(wins[pgrab_w].state & WST_SHOWN)))
         pgrab_w = -1;
@@ -900,9 +1006,43 @@ static void pointer(const struct ugevent *e)
         }
     }
     for (int i = 0; i < 3; i++)
-        if ((old ^ now) & bit[i])
+        if ((old ^ now) & bit[i]) {
+            click_n = now & bit[i] ? clicks(i + 1, e->time) : 0;
             button(i + 1, (now & bit[i]) != 0, e->qual);
+        }
 }
+/* a card: the pointer's move onto the glass now: only its old and new place (what else changed waits for the pass's
+ * show); FULL: the pass's whole show with it */
+static void ptr_show(int full)
+{
+    if (!pend)
+        return;
+    if (full)
+        fb_show();
+    else
+        fb_ptr_show();
+    u32 d = sys_ticks() - pend_t;
+    nptr++;
+    tptr += d;
+    if (d > mptr)
+        mptr = d;
+    pend = 0;
+}
+#ifndef NO_RTG
+/* between a big show's bands (fb_band_hook): once a tick, the kernel's records read and a moved pointer shown */
+static void band_hook(void)
+{
+    static u32 kt;
+    static int in;
+    if (in || gfd < 0 || sys_ticks() == kt)
+        return;
+    in = 1;                             /* (a record's reaction may show again: not from inside) */
+    kt = sys_ticks();
+    kernel_events();
+    ptr_show(0);
+    in = 0;
+}
+#endif
 static int has_clients(void);
 static void kernel_events(void)
 {
@@ -915,7 +1055,8 @@ static void kernel_events(void)
         if (n <= 0)
             return;
         for (int i = 0; i < n / (int)sizeof ev[0]; i++) {
-            const struct ugevent *e = &ev[i];
+            struct ugevent *e = &ev[i];
+            e->qual = swapq(e->qual);   /* D61: the buttons as the person set them */
             switch (e->type) {
             case GEV_RELEASE:           /* the blit in progress ends, the blitter is the kernel's: then the answer */
                 shadow_end();           /* (a drag goes on drawing on the screen itself) */
@@ -927,12 +1068,10 @@ static void kernel_events(void)
                 break;
             case GEV_ACQUIRE:           /* every key counts as up; the screen was never touched */
                 use_blit = !rtg;        /* (the blitter reaches no card) */
-                ptx = e->x;
-                pty = e->y << lace;
-                if (rtg) {
-                    fb_scale(&ptx, &pty);
-                    fb_pointer(ptx, pty);
-                }
+                ptx = e->x;             /* (D61: the screen's own pixels) */
+                pty = e->y;
+                if (rtg)
+                    fb_pointer(ptx - ms.hotx, pty - ms.hoty);
                 hvs_show(1);
                 scr_focus(1);
                 break;
@@ -1265,7 +1404,7 @@ static int req(struct umsg *m)
         return 0;
     }
     case DPY_STAT: {
-        int nw = a[1] & 2 ? 12 : 6;
+        int nw = a[1] & 4 ? 15 : a[1] & 2 ? 12 : 6;
         if (peer(m, PEER_WR, a[0], (u32)nw * 4) < 0)
             return -EFAULT;
         u32 *o = (u32 *)a[0];
@@ -1273,15 +1412,39 @@ static int req(struct umsg *m)
         if (nw > 6) {
             o[6] = nmoves; o[7] = tmoves; o[8] = nshows; o[9] = tshows; o[10] = twaits; o[11] = nlate;
         }
+        if (nw > 12) {                  /* D61: a card's pointer: shows, their ticks from the kernel's record, the most */
+            o[12] = nptr; o[13] = tptr; o[14] = mptr;
+        }
         if (a[1] & 1)
             nblits = npix = nglyphs = ndraws = npaints = ncopies = nmoves = tmoves = nshows = tshows = twaits =
-                nlate = 0;
+                nlate = nptr = tptr = mptr = 0;
         return 0;
     }
     case DPY_SCREEN:                    /* D55: a screen of its own (screen.c) */
     case DPY_SCR_SET:
     case DPY_SCR_CLOSE:
         return scr_req(m, cl);
+    case DPY_MOUSE: {                   /* D61: the same clients: the mouse's setting */
+        if (peer(m, a[1] == DPYMO_GET ? PEER_WR : PEER_RD, a[0], DPYMOUSE_FIRST) < 0)
+            return -EFAULT;
+        struct dpymouse *u = (struct dpymouse *)a[0];
+        if (a[1] == DPYMO_GET) {
+            memcpy(u, &ms, DPYMOUSE_FIRST);
+            u->size = DPYMOUSE_FIRST;
+            u->x = (short)ptx;
+            u->y = (short)pty;
+            return 0;
+        }
+        struct dpymouse n;
+        memcpy(&n, u, DPYMOUSE_FIRST);
+        if (a[1] != DPYMO_SET || mouse_ok(&n) < 0)
+            return -EINVAL;
+        n.size = DPYMOUSE_FIRST;
+        ms = n;
+        mouse_image();
+        mouse_apply(ptx, pty);
+        return 0;
+    }
     case DPY_MODE:                      /* any client of the desktop's session (a preferences program) */
         if (rtg)                        /* D43: a card's screen has the mode AmigaOS gave it; nothing changes */
             return a[0] == DPYM_ASK || a[0] <= DPYM_RTG ? DPYM_RTG : -EINVAL;
@@ -1344,8 +1507,14 @@ static int req(struct umsg *m)
     }
     if (cl != wm_cl)
         return m->type >= DPY_WM_HELLO ? -EPERM : -ENOSYS;
-    if (m->type == DPY_WM_MOUSE)
-        return sys_conmouse(gfd, a[0]);
+    if (m->type == DPY_WM_MOUSE) {      /* D38's acceleration (an older zdesk): into D61's setting */
+        if ((a[0] & 0x80) || a[0] - 0x100 > 0x7FF)
+            return -EINVAL;
+        ms.thresh = (u8)a[0];
+        ms.mult = (u16)((a[0] >> 8) * 100);
+        mouse_apply(-1, -1);
+        return 0;
+    }
     if (m->type == DPY_WM_BYE) {
         wm_gone();
         return 0;
@@ -1463,10 +1632,18 @@ int main(int argc, char **argv)
         sys_evwait(p, gfd >= 0 ? 2 : 1, 50);
         if (gfd >= 0)
             kernel_events();
+        if (rtg)
+            ptr_show(0);                /* D61: a card's pointer on the glass before the requests are served */
         struct umsg *m;
+        u32 kt = sys_ticks();
         while ((m = sys_recv(port, 0)) && (int)m != -1) {
             int r = req(m);
             sys_reply(m, r);
+            if (rtg && gfd >= 0 && sys_ticks() != kt) {     /* a long pass: the mouse looked at once a tick */
+                kt = sys_ticks();
+                kernel_events();
+                ptr_show(0);
+            }
         }
         /* a whole drag (D38 6.3): one move a pass, to where the mouse is by then; what changed shown at once, timed
          * to the beam - unless a program still has to draw a part the move uncovered (then the next pass) */
@@ -1503,8 +1680,12 @@ int main(int argc, char **argv)
             if (cls[i].used && cls[i].dead)
                 drop(i);
         }
-        if (rtg && !(shadowing && expose_wait))
-            fb_show();                  /* D43: what changed this pass onto the card */
+        if (rtg && !(shadowing && expose_wait)) {
+            if (pend)
+                ptr_show(1);            /* (the same show, counted for the pointer) */
+            else
+                fb_show();              /* D43: what changed this pass onto the card */
+        }
         if (has_clients())
             had = 1;
         else if (had && !persist)

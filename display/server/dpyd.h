@@ -35,6 +35,7 @@ static inline void fb_show(void) {}
 static inline void fb_all(void) {}
 static inline void fb_pointer(int x, int y) { (void)x; (void)y; }
 static inline void fb_pointer_image(const u16 *a, const u16 *b) { (void)a; (void)b; }
+static inline void fb_ptr_show(void) {}
 #else
 extern int rtg;                 /* the screen is a graphics card's (DESIGN D43, docs/d43-rtg.md) */
 #define CHUNKY_BM(b) ((b)->depth == CHUNKY)     /* a byte a pixel: only on a card (its screen, its kept copies) */
@@ -42,6 +43,8 @@ void fb_show(void);             /* what was drawn on the screen since the last s
 void fb_all(void);              /* the whole screen to be shown again (the pens changed) */
 void fb_pointer(int x, int y);  /* the pointer's place on the card (its picture's top left) */
 void fb_pointer_image(const u16 *a, const u16 *b);     /* its picture: 16 rows of two planes (kept, not copied) */
+void fb_ptr_show(void);         /* D61: only the pointer's old and new place onto the card, now */
+extern void (*fb_band_hook)(void);      /* D61: called between fb_show's bands of 32 lines */
 #endif
 struct fbcard;
 extern struct fbcard card;      /* that card (fb.h) */

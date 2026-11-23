@@ -32,7 +32,7 @@ send secret\r
 sleep 1
 send secret\r
 sleep 3
-send echo acceleration none > /etc/zdesk/mouse; echo login graphical >> /etc/console\r
+send echo acceleration none > /etc/zdesk/mouse; echo speed 200 >> /etc/zdesk/mouse; echo login graphical >> /etc/console\r
 sleep 1
 send echo 'dlt 0 /bin/sh /tests/dlogin.sh' >> /etc/daemons; sync; reboot\r
 EOS

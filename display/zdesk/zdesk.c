@@ -7,6 +7,7 @@
  * and runs the bar and the desktop's icons. Leaving it (the Zenix menu's Log out, or SIGINT or SIGTERM) asks every
  * program on the desktop to end, and the console is text again. */
 #include "zdesk.h"
+#include "../mousefile.h"
 
 struct zw zws[NZW];
 int cur_ws = 1, focus_id, bar_id, desk_id, bar_h = 11, depth = 4, verbose;
@@ -469,6 +470,25 @@ static void apply_saved(void)
     if (conf_screen(path, &mode, font, &size) == 0 && strncmp(path, "/etc/", 5))
         screen_set(path, mode, font, size);
 }
+/* D61 (docs/d61-mouse.md 6): the mouse file (the user's, else the system's) and its pointer applied when the session
+ * starts; what displayd had is put back when it ends, as the screen's mode and font are */
+static struct dpymouse mouse0;
+static int mouse0_ok;
+static void mouse_start(void)
+{
+    char path[ZPATH_MAX], ptr[MF_NAME];
+    struct dpymouse m;
+    mouse0_ok = dpy_call(DPY_MOUSE, (u32)&mouse0, DPYMO_GET, 0, 0) == 0;
+    m = mouse0;
+    conf_file("mouse", path);
+    dpy_mousefile(path, &m, ptr, "zdesk");
+    if (ptr[0])
+        dpy_pointerfile(ptr, &m, "zdesk");
+    int r = dpy_call(DPY_MOUSE, (u32)&m, DPYMO_SET, 0, 0);
+    if (r < 0)
+        dprintf(2, "zdesk: %s: %s\n", path, zstrerror(r) ? zstrerror(r) : "refused");
+}
+
 /* SIGHUP: the theme read again (a preferences program's Test, Use, Save, Cancel of the colours): the session's
  * ~/.config/zdesk/theme.use first (deskprefs' Test and Use; removed when a session starts and ends, as AmigaOS's ENV:
  * beside its ENVARC:), else the saved theme */
@@ -514,6 +534,8 @@ static void end_session(void)
     menu_close();
     if (mode0 >= 0)                     /* the screen as the session found it */
         screen_set("the session's start", mode0, font0, size0);
+    if (mouse0_ok)                      /* and the mouse */
+        dpy_call(DPY_MOUSE, (u32)&mouse0, DPYMO_SET, 0, 0);
     for (int i = 0; i < NZW; i++)       /* every program on the desktop is asked to end */
         if (zws[i].id && !own(zws[i].id) && zws[i].pid > 0 && zws[i].pid != sys_getpid())
             sys_killsig(zws[i].pid, SIGTERM);
@@ -557,7 +579,7 @@ int main(int argc, char **argv)
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
     signal(SIGHUP, on_hup);
-    dpy_call(DPY_WM_MOUSE, mouse_acc, 0, 0, 0);
+    mouse_start();
     apply_saved();
     restyle();
     desk_init();

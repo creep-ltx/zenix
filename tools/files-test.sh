@@ -58,7 +58,7 @@ send cp /bin/hello /tmp/fv/prog; chmod 755 /tmp/fv/prog; : > /tmp/fv/.hid; echo 
 sleep 2
 send mkdir /tmp/big; for i in $(seq 1 500); do : > /tmp/big/f$i; done; echo made-$((40+2))\r
 wait made-42 120
-send echo acceleration none > /etc/zdesk/mouse; zdesk -v > /tmp/z.log 2>&1 &\r
+send echo acceleration none > /etc/zdesk/mouse; echo speed 200 >> /etc/zdesk/mouse; zdesk -v > /tmp/z.log 2>&1 &\r
 sleep 8
 send files -v /tmp/fv > /tmp/f.log 2>&1 &\r
 sleep 6

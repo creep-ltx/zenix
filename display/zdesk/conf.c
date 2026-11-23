@@ -278,26 +278,6 @@ static void item_file(const char *name, struct item *it, int *n, int art)
     free(b);
 }
 
-/* the mouse: "acceleration none|low|high" (low without the file): DPY_WM_MOUSE's THRESHOLD | MULTIPLIER << 8, per
- * frame - low doubles the counts beyond 4 a frame, high triples those beyond 2 */
-unsigned mouse_acc = 0x204;
-static void mouse_file(void)
-{
-    char path[ZPATH_MAX], *b = slurp(conf_file("mouse", path)), *p = b, *l;
-    int ln = 0;
-    while (b && (l = next_line(&p))) {
-        ln++;
-        char *w[3];
-        int n = words(l, w, 3);
-        if (!n || w[0][0] == '#')
-            continue;
-        if (n == 2 && !strcmp(w[0], "acceleration") && !strcmp(w[1], "none")) mouse_acc = 0x100;
-        else if (n == 2 && !strcmp(w[0], "acceleration") && !strcmp(w[1], "low")) mouse_acc = 0x204;
-        else if (n == 2 && !strcmp(w[0], "acceleration") && !strcmp(w[1], "high")) mouse_acc = 0x302;
-        else bad(path, ln, w[0]);
-    }
-    free(b);
-}
 
 static void bar_file(void)
 {
@@ -448,6 +428,5 @@ int conf_load(const char *theme)
     item_file("menu", menu_items, &nmenu_items, 0);
     item_file("icons", icons, &nicons, 1);
     bar_file();
-    mouse_file();
     return 0;
 }

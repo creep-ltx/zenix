@@ -137,6 +137,7 @@ SPLIT[mmubench-test]="030|040|060"                  # D60 9.4: the cost of prote
 SPLIT[mmu-suite]="030|040|060"                      # D41 section 19: the core suites with protection on, one job per CPU
 SPLIT[lace-test]="pal|ntsc"                         # D38 "Screen modes": PAL and NTSC
 SPLIT[prefs-test]="desk|con"                        # D38 "Preferences" and D28 22: the desktop's, the console's
+SPLIT[mouse-test]="k|d|l|p"                       # D61: the kernel, displayd, a card under load, mouseprefs
 SPLIT[drag-test]="hires|lace"                      # D38 "Screen modes": the drags on the interlaced screen too
 SPLIT[fat-test]="16|32"                             # the two rounds, FAT16 and FAT32
 SPLIT[colour-test]="1 4 2|3 s4 s16 s7"    # the 1-plane run first (its edges are the reference); s*: the setting (D18)

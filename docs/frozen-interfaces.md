@@ -125,6 +125,14 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   ticks, shows of the drawn screen and their ticks, ticks waited for the beam, shows late for it), a `WK_BAR` window of a width asked (0: the screen's, as before); `/etc/zdesk/mouse`
   (`acceleration none|low|high`); `struct uzine_info`'s `machine` at offset 28 (`UZINE_INFO_MACHINE` 32 bytes or
   more; `UZI_EMU68` 1: the 68k is Emu68's) and its attn's 68060 bit (0x80) set by the kernel on a CPU with a PCR.
+- **D61 (the mouse, branch mouse, 2026-11-23):** `DPY_MOUSE` 21 (a[0] a `struct dpymouse`, first size 86: size,
+  speed 10-800 percent, mult 100-800 percent, thresh 0-127, flags (`DPYMF_SWAP` 1), dclick 10-300 ticks, hotx, hoty
+  0-15, colour[3], image[32] as sprite 0's words, x, y; a[1] `DPYMO_SET` 0 or `DPYMO_GET` 1; -EINVAL, -EFAULT; any
+  client of the session); `EV_BUTTON`'s `arg` 2 on a double click's second press (0 otherwise, as before);
+  `DPY_STAT`'s a[1] bit 2 (15 counters); `DPY_WM_MOUSE` kept (its multiplier as whole times); the `/etc/zdesk/mouse`
+  format grown (`speed`, `acceleration none|low|medium|high|custom`, `threshold`, `multiplier`, `buttons`,
+  `doubleclick`, `pointer`; the old `acceleration none|low|high` lines keep their meaning) and the pointer file
+  `/etc/zdesk/pointers/NAME.pointer` (`hot X Y`, `colours RGB RGB RGB`, 16 rows of `. o w x`).
 - **D38 revision 3 (dlogin, branch desk, 2026-11-04):** `DPY_SESSION` 13 (root's client and root's caller only, on the
   grabbed console, else -EBUSY; a[0] the uid, at most 65535: clients of other non-root uids are dropped), `DPY_WM_BYE` 46 (the manager leaves the role);
   `/etc/console`'s `login text|graphical`; `/etc/dlogin` (`session LABEL = PROGRAM`, PROGRAM an absolute path or

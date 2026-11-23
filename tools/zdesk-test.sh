@@ -34,7 +34,7 @@ sleep 5
 shot columns
 send q
 sleep 2
-send echo acceleration none > /etc/zdesk/mouse\r
+send echo acceleration none > /etc/zdesk/mouse; echo speed 200 >> /etc/zdesk/mouse\r
 sleep 1
 send echo 'right memory clock ; cmd 0 echo hello-bar' > /etc/zdesk/bar\r
 send : > /tmp/c; zdesk -v > /tmp/z.log 2>&1 &\r
@@ -67,10 +67,10 @@ sleep 1
 send gcontest mouse -90,-80,0 0,0,1 0,0,0\r
 sleep 2
 shot menuclick
-send gcontest mouse 5,62,0 0,0,1 0,0,0\r
+send gcontest mouse 5,72,0 0,0,1 0,0,0\r
 sleep 3
 shot about
-send gcontest mouse 93,40,0 92,39,0 0,0,1 0,0,0\r
+send gcontest mouse 93,40,0 92,29,0 0,0,1 0,0,0\r
 sleep 2
 shot aboutgone
 send gcontest mouse 0,0,2\r

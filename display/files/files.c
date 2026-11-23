@@ -1471,7 +1471,6 @@ static void key(const struct dpyev *e)
 }
 
 /* ================================================================ the mouse and the menus */
-static u32 last_click;
 static int last_row = -1;
 static void click(const struct dpyev *e)
 {
@@ -1490,7 +1489,6 @@ static void click(const struct dpyev *e)
     int i = L.top + r - 1;
     if (i >= L.n)
         return;
-    u32 now = sys_ticks();
     int old = L.cur;
     if (e->qual & (GQ_LSHIFT | GQ_RSHIFT)) {
         L.e[i].fl ^= F_MARK;
@@ -1499,7 +1497,7 @@ static void click(const struct dpyev *e)
         last_row = -1;
         return;
     }
-    if (i == last_row && now - last_click < 50) {   /* a double click: open */
+    if (i == last_row && e->arg == 2) {     /* a double click (D61: displayd's, the mouse setting's time): open */
         last_row = -1;
         L.cur = i;
         if (old != i) moved(old);
@@ -1507,7 +1505,6 @@ static void click(const struct dpyev *e)
         return;
     }
     last_row = i;
-    last_click = now;
     L.cur = i;
     moved(old);
 }

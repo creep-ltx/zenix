@@ -58,7 +58,7 @@ sleep 5
 shot columns
 send q
 sleep 2
-send cp -r /tests/fonts/* /usr/share/fonts/amiga/; mkdir -p /tmp/ttf; mv /usr/share/fonts/truetype/*.ttf /tmp/ttf/; echo acceleration none > /etc/zdesk/mouse; printf 'right cmd 3600 echo .\\n' > /etc/zdesk/bar\r
+send cp -r /tests/fonts/* /usr/share/fonts/amiga/; mkdir -p /tmp/ttf; mv /usr/share/fonts/truetype/*.ttf /tmp/ttf/; echo acceleration none > /etc/zdesk/mouse; echo speed 200 >> /etc/zdesk/mouse; printf 'right cmd 3600 echo .\\n' > /etc/zdesk/bar\r
 sleep 2
 send cp /etc/zdesk/screen /tmp/s0; rm -f /etc/zdesk/theme $HOME/.config/zdesk/theme.use; zdesk -v > /tmp/z.log 2>&1 &\r
 sleep 8

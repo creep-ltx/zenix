@@ -498,6 +498,8 @@ static int show_torn(int b0, u32 us, int y0, int y1)
 int rtg;
 struct fbcard card;
 static int ptr_x = -100, ptr_y;         /* the pointer's picture's top left on the card */
+static int ptr_ox = -100, ptr_oy;       /* (D61) where the card shows it */
+void (*fb_band_hook)(void);
 static const u16 *ptr_a, *ptr_b;
 static void dirty_clip(int x0, int y0, int x1, int y1)
 {
@@ -514,13 +516,44 @@ void fb_pointer(int x, int y)
     dirty_clip(x, y, x + FB_PTRW, y + FB_PTRW);
 }
 void fb_all(void) { dirty_clip(0, 0, scr.w, scr.h); }
+void fb_ptr_show(void)
+{
+    if (!rtg || !ptr_a)
+        return;
+    for (int i = 0; i < 2; i++) {       /* its old place (the pens again) and its new one; both stay damaged for the
+                                         * pass's show, which puts what was drawn under them since */
+        struct rect r = { (s16)(i ? ptr_x : ptr_ox), (s16)(i ? ptr_y : ptr_oy), 0, 0 };
+        r.x1 = (s16)(r.x0 + FB_PTRW);
+        r.y1 = (s16)(r.y0 + FB_PTRW);
+        if (clip_bm(&scr, &r))
+            fb_put(&card, &(struct fbmap){ scr.p, scr.stride }, FBR(r), ptr_x, ptr_y, ptr_a, ptr_b);
+    }
+    ptr_ox = ptr_x;
+    ptr_oy = ptr_y;
+}
 void fb_show(void)
 {
     if (!rtg || !ptr_a)
         return;
-    for (int i = 0; i < ndirty; i++)
-        fb_put(&card, &(struct fbmap){ scr.p, scr.stride }, FBR(dirty[i]), ptr_x, ptr_y, ptr_a, ptr_b);
+    /* D61: in bands of 32 lines, the mouse looked at between them (fb_band_hook: the pointer onto the card at once):
+     * a big change takes a 68020 a second, and the pointer must not wait for it. The list is taken first, so what
+     * the hook draws goes into the next show */
+    struct rect d[NDIRTY];
+    int n = ndirty;
+    memcpy(d, dirty, sizeof d);
     ndirty = 0;
+    ptr_ox = ptr_x;
+    ptr_oy = ptr_y;
+    for (int i = 0; i < n; i++)
+        for (int y = d[i].y0; y < d[i].y1; y += 32) {
+            struct rect b = d[i];
+            b.y0 = (s16)y;
+            if (b.y1 > y + 32)
+                b.y1 = (s16)(y + 32);
+            fb_put(&card, &(struct fbmap){ scr.p, scr.stride }, FBR(b), ptr_x, ptr_y, ptr_a, ptr_b);
+            if (fb_band_hook)
+                fb_band_hook();
+        }
 }
 #endif
 

@@ -7,8 +7,8 @@
 #  - the screen is 640 x 512 (NTSC 640 x 400): dpytest's hello says so, and a window placed in the lower half shows
 #    there, its inside's colour at its lines, the desktop below it to the last line, the bar at the top, the term's
 #    frame where the server says it is;
-#  - the pointer pushed down past the bottom edge: its tip on the screen's last line pair (the kernel's pointer is in
-#    frame lines, displayd doubles it: D38 "Screen modes", the pointer), the pointer's colours there;
+#  - the pointer pushed down past the bottom edge: its tip on the screen's last line (D61: the kernel's pointer is in
+#    the screen's lines; the sprite on the frame line), the pointer's colours there;
 #  - DPY_MODE at run time (dpytest's "mode", as a preferences program's Test and Cancel): hires, 640 x 256 (200
 #    NTSC), every window kept on the screen (the low one moved up), drawn again; then interlaced again;
 # Pixels are read with tools/dpy-test.py on a geometry from the text console (colour-test.py columns), its lines
@@ -32,7 +32,7 @@ sleep 5
 shot columns
 send q
 sleep 2
-send grep -v '^mode' /etc/zdesk/screen > /tmp/scr; echo mode hires-lace >> /tmp/scr; cp /tmp/scr /etc/zdesk/screen; echo acceleration none > /etc/zdesk/mouse\\r
+send grep -v '^mode' /etc/zdesk/screen > /tmp/scr; echo mode hires-lace >> /tmp/scr; cp /tmp/scr /etc/zdesk/screen; echo acceleration none > /etc/zdesk/mouse; echo speed 200 >> /etc/zdesk/mouse\\r
 sleep 1
 send printf 'right cmd 3600 echo .\\\\n' > /etc/zdesk/bar\\r
 sleep 1
@@ -96,8 +96,9 @@ rc=$?; check "hires: A kept on the screen (its frame's bottom at most line $H), 
 rc=$?; check "interlaced again: A drawn ($(cat "$OUT/pl" 2>/dev/null))" $rc
 # the pointer from the middle (320) 40 counts right (2 pixels a count), pushed past the bottom: its tip on the last
 # line pair, H2-2 and H2-1 (one frame line: a sprite line shows in both fields; FS-UAE's view cuts the last lines,
-# so the picture shows the desktop just above it), and a click there reaches zdesk at line H2-2 (EV_WM_CLICK)
+# so the picture shows the desktop just above it), and a click there reaches zdesk at the last line, H2-1
+# (EV_WM_CLICK; D61: the pointer is in the screen's own lines, so it reaches the odd last line too, not only H2-2)
 px bottom geom2 "400,$((H2 - 3)),344" "400,$((H2 - 6)),344" > "$OUT/pb"
-rc=$?; grep -a -q "zdesk: event 38 win 1 code 1 arg 0 at 400,$((H2 - 2))" "$L" || rc=1
-check "the pointer pushed past the bottom: a click there at 400,$((H2 - 2)), the last line pair ($(cat "$OUT/pb"))" $rc
+rc=$?; grep -a -q "zdesk: event 38 win 1 code 1 arg 0 at 400,$((H2 - 1))" "$L" || rc=1
+check "the pointer pushed past the bottom: a click there at 400,$((H2 - 1)), the last line ($(cat "$OUT/pb"))" $rc
 exit $((1 - pass))

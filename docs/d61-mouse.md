@@ -171,9 +171,22 @@ moved to `display/lib/prefswin.c`, so the screen-mode settings program to come u
 No wheel: the kernel reads no wheel (a NewMouse wheel on AmigaOS comes from a driver turning the mouse's extra lines
 into key codes; Zenix has none), so there is no scroll-wheel setting yet.
 
-## 8. Measurements after
+## 8. Measurements after (FS-UAE, the stock A1200's 68020; emulator figures, for the comparison only)
 
-(filled in as built: section 10)
+- **Slow moves:** one count is one pixel across on every screen at 100%, half a line down on a hires screen (the
+  fraction kept: lines 1, 1, 2, 2, ...), one lace line interlaced, one card pixel at 1280 x 960
+  (`mouse-test.sh k`, `d`). Before: two hires pixels, two lace lines, 4 x 3.75 card pixels.
+- **The acceleration** keeps AmigaOS's shape (a threshold, then a multiplier) on the new base: `low` on 10 counts in
+  a frame goes 4 + 6 x 2 = 16 pixels (before: 32).
+- **Lag on the chipset:** unchanged, at most one frame (the vertical blank moves the sprite; section 1.2).
+- **Lag on a card under load** (`mouse-test.sh l`: six windows of 1200 x 900 opened and closed on a 1280 x 960 card
+  while the mouse moves a count every 3 ticks; from the kernel's record to the pointer on the card): **before**, 87
+  shows (moves merged while waiting), 30.7 ticks on average, the most **417 ticks (4.2 s)**: the pointer waited for
+  the pass's whole show of the screen (a full 1280 x 960 conversion takes this 68020 3-4 s); **after**, 100 shows,
+  5.8 ticks on average, the most **107 ticks (1.1 s)**: the pointer is put on the card at once at the pass's start,
+  between requests, and between the show's bands of 32 lines; what remains is a single request that long (closing
+  a 1200 x 900 window draws the uncovered desktop with the CPU, 1.06 s here), which the server does not interrupt.
+  Without load each move is on the card within 2 ticks.
 
 ## 9. Tests
 
@@ -183,10 +196,34 @@ into key codes; Zenix has none), so there is no scroll-wheel setting yet.
 - `tools/mouse-test.sh k`: the kernel in FS-UAE through `gcontest m SET`: a wrong setting refused, a slow sweep in
   single pixels with the half lines kept, the acceleration's moves against an independent computation, interlaced
   and card units with the sprite where the ring says, the edges.
-- `tools/mouse-test.sh d`, `p`: displayd and mouseprefs (section 10).
+- `tools/mouse-test.sh d`: displayd's `DPY_MOUSE` through dpytest (the defaults, a refused value, speed and
+  acceleration, double clicks at two times, swapped buttons, interlace, single pixels on a card with the arrow drawn
+  there); `l`: a card's pointer under load (section 8); `p`: mouseprefs through zdesk (Test with swapped buttons and
+  Cancel clicked with the other button, the keys, the editor, Save's files with their comments kept, Esc, the saved
+  file applied by the next session).
 - The desktop's tests (dpy, zdesk, drag, files, lace, prefs, rtg, gcon) pass with their settings written out
   (`speed 200`, `acceleration none`: two hires pixels a count, as their clicks count).
 
-## 10. As built
+## 10. As built (branch mouse, 2026-11-23)
 
-(section filled in as the branch is built)
+- **Kernel** (section 4): `CON_MOUSE`'s `struct umouse`, `kernel/pointer.h`; `gcon` 4,456 -> 4,956 bytes,
+  `kernel.bin` 227,824 -> 228,328, the mount tests' floppy 1,048 bytes left.
+- **displayd** (section 5): `DPY_MOUSE` (request 21), the units per mode (sent again at a mode change, after the ring
+  is read empty), swapped buttons where the records come in, double clicks (`EV_BUTTON` arg 2), the pointer's picture
+  and colours (sprite 0 and its colours 17-19 in the Copper lists, or the card's pointer), the card's pointer shown at
+  once (`fb_ptr_show`) and the card's show in bands of 32 lines (`fb_band_hook`); `DPY_STAT`'s three pointer counters;
+  `DPY_WM_MOUSE` mapped onto the setting. D55's screens get the records in the chipset's units as before. 82,400 ->
+  85,016 bytes on the disk.
+- **zdesk:** the mouse file and its pointer applied at the session's start through `DPY_MOUSE`, displayd's setting
+  put back at its end; its icons' double click is displayd's (`files` too); 41,144 -> 43,592 bytes (the shared
+  reader, `display/lib/mousefile.c`). **deskprefs** on the shared window code (`display/lib/prefswin.c`, the same
+  layout to the pixel): 22,828 -> 23,400. **mouseprefs** 25,940 bytes. Pointer files `arrow`, `slim`, `cross`,
+  `workbench` in `/etc/zdesk/pointers/`. The DD demo floppy (which has no mouseprefs) 7,168 -> 3,584 bytes free.
+- **Changed for every user:** the speed's default is half the old one (one pixel a count, not two) with the same
+  `low` acceleration; an old `/etc/zdesk/mouse` line `acceleration none` keeps its meaning (no acceleration), on the
+  new speed. The desktop's tests write `speed 200` beside it, so their clicks still count two pixels a count.
+  Interlaced, the pointer now reaches the last line (511), not only the even ones (lace-test checks a click there);
+  the Zenix menu has a Mouse line after Preferences (zdesk-test's About is one item lower).
+- **Not done:** the login screen applies no file (displayd's defaults: 100%, low, normal, 0.5 s, the arrow); no wheel
+  (section 7); a long single request on a card still holds the pointer (section 8); a pointer of more than 16 x 16
+  or 3 colours (sprite 0's size); loading an AmigaOS Pointer.prefs file.

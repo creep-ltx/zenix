@@ -24,7 +24,6 @@ static const struct { const char *name; const char *rows[12]; } arts[] = {
 };
 #define NART (sizeof arts / sizeof arts[0])
 static int art_img[NART];
-static u32 last_click;
 static int last_icon = -1, sel_icon = -1;
 
 /* planar rows of 2 words (24 pixels in 32), plane after plane, then the mask */
@@ -90,7 +89,7 @@ void desk_init(void)
     desk_id = dpy_window(WK_DESKTOP, "", 0, 0, dpy_w, dpy_h, 0);
 }
 
-/* a click on an icon selects it, a second within half a second starts it */
+/* a click on an icon selects it, a double click (D61: displayd's, the mouse setting's time) starts it */
 void desk_event(const struct dpyev *e)
 {
     if (e->type == EV_EXPOSE) {
@@ -103,13 +102,11 @@ void desk_event(const struct dpyev *e)
     for (int i = 0; i < nicons; i++)
         if (e->x >= 8 && e->x < 72 && e->y >= icon_y(i) && e->y < icon_y(i) + 18 + fh)
             hitn = i;
-    u32 now = sys_ticks();
-    if (hitn >= 0 && hitn == last_icon && (u32)(now - last_click) < 50) {
+    if (hitn >= 0 && hitn == last_icon && e->arg == 2) {
         run(icons[hitn].cmd);
         last_icon = -1;
     } else
         last_icon = hitn;
-    last_click = now;
     if (sel_icon != hitn) {             /* the two labels that change, nothing else */
         int old = sel_icon;
         sel_icon = hitn;
