@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "libz.h"
+static const char USAGE[] = "usage: paste [-d list] [-s] file...\n";
 /* paste [-d list] [-s] file...: merge lines of files side by side (or one file per line with -s) */
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *delims = "\t"; int serial = 0, i = 1;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         if (!strcmp(argv[i], "-s")) serial = 1;
         else if (!strncmp(argv[i], "-d", 2)) delims = argv[i][2] ? argv[i] + 2 : (i + 1 < argc ? argv[++i] : "\t");
-        else { dprintf(2, "paste: unknown option %s\n", argv[i]); return 2; }
+        else zbadopt(argv[i], USAGE);
     }
     static struct rd rds[8];                     /* 8 x 2 KB buffers: not on the 16 KB stack */
     int nf = argc - i; int fds[8], done[8];

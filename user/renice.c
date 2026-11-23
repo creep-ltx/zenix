@@ -23,11 +23,14 @@ static int idnum(const char *s, int *out)
     return 1;
 }
 
+static const char USAGE[] = "usage: renice [-n] N [-p] pid... | renice [-n] N -u user...\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int i = 1, n, which = PRIO_PROCESS, rc = 0;
     if (i < argc && !strcmp(argv[i], "-n")) i++;
-    if (i >= argc || !num(argv[i], &n)) { dprintf(2, "usage: renice [-n] N [-p] pid... | renice [-n] N -u user...\n"); return 2; }
+    if (i < argc && argv[i][0] == '-' && !num(argv[i], &n)) zbadopt(argv[i], USAGE);
+    if (i >= argc || !num(argv[i], &n)) zusage(USAGE);
     i++;
     if (i >= argc) { dprintf(2, "renice: no process or user given\n"); return 2; }
     n = n < -20 ? -20 : n > 19 ? 19 : n;

@@ -296,3 +296,84 @@ const char *gai_strerror(int e)
     }
     return "unknown error";
 }
+
+/* the one connection helper (socket.h; docs/audit-2026-11-23-one-system.md OS-38) */
+__attribute__((optimize("Os"))) static const char *zc_text(int e)
+{
+    const char *t = zstrerror(e);
+    return t ? t : "cannot connect";
+}
+__attribute__((optimize("Os"))) int zconnect_begin(const char *host, int port, int flags, const char **why)
+{
+    struct addrinfo h, *r = 0;
+    char ps[8];
+    int e, s, dg = flags & ZC_UDP;
+    static const char *dummy;
+    if (!why) why = &dummy;
+    memset(&h, 0, sizeof h);
+    h.ai_family = AF_INET;
+    h.ai_socktype = dg ? SOCK_DGRAM : SOCK_STREAM;
+    if (port <= 0 || port > 65535) { *why = "not a port number"; return -EINVAL; }
+    snprintf(ps, sizeof ps, "%d", port);
+    if ((e = getaddrinfo(host, ps, &h, &r)) != 0) {
+        *why = e == EAI_NONAME ? "no such host" : gai_strerror(e);
+        return e == EAI_MEMORY ? -ENOMEM : -ENOENT;
+    }
+    s = socket(AF_INET, dg ? SOCK_DGRAM : SOCK_STREAM | SOCK_NONBLOCK, 0);
+    if (s < 0) {
+        e = zerrno;
+        freeaddrinfo(r);
+        *why = zc_text(e);
+        return -e;
+    }
+    e = connect(s, r->ai_addr, r->ai_addrlen) < 0 ? zerrno : 0;
+    freeaddrinfo(r);
+    if (e && e != EINPROGRESS) {
+        sys_close(s);
+        *why = zc_text(e);
+        return -e;
+    }
+    return s;
+}
+__attribute__((optimize("Os"))) int zconnect_end(int fd, int ms, const char **why)
+{
+    struct pollfd q;
+    int e = 0, w;
+    socklen_t el = sizeof e;
+    static const char *dummy;
+    if (!why) why = &dummy;
+    q.fd = fd;
+    q.events = POLLOUT;
+    q.revents = 0;
+    w = poll(&q, 1, ms);
+    if (w == 0)
+        return 0;
+    if (w < 0)
+        e = zerrno;
+    else if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &e, &el) < 0)
+        e = zerrno;
+    if (!e)
+        return 1;
+    sys_close(fd);
+    *why = zc_text(e);
+    return -e;
+}
+__attribute__((optimize("Os"))) int zconnect(const char *host, int port, int flags, const char **why)
+{
+    int s = zconnect_begin(host, port, flags, why), r;
+    if (s < 0 || (flags & ZC_UDP))
+        return s;
+    if ((r = zconnect_end(s, ZCONNECT_MS, why)) <= 0) {
+        if (r == 0) {
+            sys_close(s);
+            if (why) *why = zc_text(ETIMEDOUT);
+            return -ETIMEDOUT;
+        }
+        return r;
+    }
+    if (!(flags & ZC_NONBLOCK)) {
+        int off = 0;
+        sk_ioctl(s, FIONBIO, &off);     /* blocking again (not ioctl(): a program then links no terminal calls) */
+    }
+    return s;
+}

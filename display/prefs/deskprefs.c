@@ -426,11 +426,14 @@ static int key(const struct dpyev *e)
     return 0;
 }
 
+static const char USAGE[] = "usage: deskprefs [-v]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     for (int i = 1; i < argc; i++)
         if (!strcmp(argv[i], "-v")) verbose = 1;
-        else { dprintf(2, "usage: deskprefs [-v]\n"); return 2; }
+        else if (argv[i][0] == '-') zbadopt(argv[i], USAGE);
+        else zusage(USAGE);
     int r = dpy_open("deskprefs");
     if (r < 0) {
         dprintf(2, "deskprefs: the desktop: %s\n", zstrerror(r) ? zstrerror(r) : "not reachable");

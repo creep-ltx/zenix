@@ -8,20 +8,21 @@
 #pragma once
 #include "proto.h"
 
-#define KM_UP 300
-#define KM_DOWN 301
-#define KM_LEFT 302
-#define KM_RIGHT 303
-#define KM_SUP 304
-#define KM_SDOWN 305
-#define KM_SLEFT 306
-#define KM_SRIGHT 307
-#define KM_HELP 308
-#define KM_F1 310
-#define KM_CUP 320
-#define KM_CDOWN 321
-#define KM_CLEFT 322
-#define KM_CRIGHT 323
+/* the keys' codes: libz's (user/libz.h ZK_*), one numbering for the line editor and every keys file */
+#define KM_UP ZK_UP
+#define KM_DOWN ZK_DOWN
+#define KM_LEFT ZK_LEFT
+#define KM_RIGHT ZK_RIGHT
+#define KM_SUP ZK_SUP
+#define KM_SDOWN ZK_SDOWN
+#define KM_SLEFT ZK_SLEFT
+#define KM_SRIGHT ZK_SRIGHT
+#define KM_HELP ZK_HELP
+#define KM_F1 ZK_F1
+#define KM_CUP ZK_CUP
+#define KM_CDOWN ZK_CDOWN
+#define KM_CLEFT ZK_CLEFT
+#define KM_CRIGHT ZK_CRIGHT
 
 struct kbind { unsigned short k1, k2; unsigned char act; char arg[27]; };
 struct keyset {
@@ -39,4 +40,13 @@ int keys_prefix(const struct keyset *ks, int k);               /* k starts a two
 const struct kbind *keys_find(const struct keyset *ks, int k1, int k2);
 int keys_code(const struct dpyev *e);                           /* a key event -> a key code (0: none) */
 void keys_name(int k, char *o);                                 /* a key code -> its name (12 bytes) */
+/* a key name with modifiers, "<S-A-Return>" (docs/audit-2026-11-23-one-system.md OS-30: the desktop's global keys in
+ * the same names): S Shift, C Ctrl, A the left Amiga key, RA the right one, M Alt; the key's own name (Return, Left,
+ * q) into base (16 bytes); s moved past the '>'. The modifiers' bits, or -1 when s is no such name */
+#define KMOD_SHIFT  1
+#define KMOD_CTRL   2
+#define KMOD_AMIGA  4
+#define KMOD_RAMIGA 8
+#define KMOD_ALT    16
+int keys_mods(const char **sp, char *base);
 int keys_tty(int fd);           /* a key read from a terminal (irc, mail): a code, 0x10000 + a byte >= 0x80, -1 the end */

@@ -29,15 +29,11 @@ static int out_put(const void *p, u32 n)
 }
 static int deflate_out(const void *buf, int len, void *user) { (void)user; return out_put(buf, (u32)len) == 0; }
 
-static char *slurp(int fd, u32 *len)
+static char *slurp(int fd, u32 *len)          /* the whole input (zslurpfd, libz; 16 MB at most) */
 {
-    u32 cap = 16384, n = 0; char *b = malloc(cap);
-    if (!b) { dprintf(2, "gzip: out of memory\n"); return 0; }
-    for (;;) {
-        if (n + 8192 > cap) { char *nb = realloc(b, cap * 2); if (!nb) { dprintf(2, "gzip: out of memory\n"); free(b); return 0; } b = nb; cap *= 2; }
-        int r = sys_read(fd, b + n, 8192); if (r <= 0) break; n += (u32)r;
-    }
-    *len = n; return b;
+    char *b = zslurpfd(fd, 16u << 20, len);
+    if (!b) dprintf(2, "gzip: %s\n", zwhy("cannot read the input"));
+    return b;
 }
 
 static int compress_fd(int in, int level, u32 mtime)
@@ -99,14 +95,15 @@ static int decompress_buf(const unsigned char *in, u32 len)
     return out_flush();
 }
 
+static const char USAGE[] = "usage: gzip [-dckf1..9] [file...]\n       gunzip [-ck] [file...]          same as gzip -d\n       zcat [file...]                  same as gzip -dc\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *me = strrchr(argv[0], '/'); me = me ? me + 1 : argv[0];
     int decomp = !strcmp(me, "gunzip") || !strcmp(me, "zcat"), to_stdout = !strcmp(me, "zcat"), keep = 0, level = 6, i = 1, rc = 0;
     crc_init();
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
-        if (!strcmp(argv[i], "--")) { i++; break; }
-        for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'd') decomp = 1; else if (*p == 'c') to_stdout = 1; else if (*p == 'k') keep = 1; else if (*p >= '1' && *p <= '9') level = *p - '0'; else if (*p == 'f' || *p == 'v' || *p == 'q') ; else { dprintf(2, "gzip: unknown option -%c\n", *p); return 2; } }
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
+        for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'd') decomp = 1; else if (*p == 'c') to_stdout = 1; else if (*p == 'k') keep = 1; else if (*p >= '1' && *p <= '9') level = *p - '0'; else if (*p == 'f' || *p == 'v' || *p == 'q') ; else zbadch(*p, USAGE); }
     }
     if (i >= argc) {                                            /* standard input to standard output */
         out_fd = 1;

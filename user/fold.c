@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "libz.h"
+static const char USAGE[] = "usage: fold [-w width] [-s] [file...]\n";
 /* fold [-w width] [-s] [file...]: wrap long lines at width columns (default 80), with -s at the last blank */
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int width = 80, brk = 0, i = 1, rc = 0;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         if (!strcmp(argv[i], "-s")) brk = 1;
         else if (!strncmp(argv[i], "-w", 2)) width = argv[i][2] ? atoi(argv[i] + 2) : (i + 1 < argc ? atoi(argv[++i]) : 80);
         else if (isdigit((unsigned char)argv[i][1])) width = atoi(argv[i] + 1);
-        else { dprintf(2, "fold: unknown option %s\n", argv[i]); return 2; }
+        else zbadopt(argv[i], USAGE);
     }
     if (width < 1) width = 1;
     for (int a = i; a < argc || a == i; a++) {

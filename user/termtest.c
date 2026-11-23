@@ -760,8 +760,10 @@ static int screen(const char *tty, const char *want, int secs, const char *type)
     return !found;
 }
 
+static const char USAGE[] = "usage: termtest [columns|colours|scroll|pcfont [FILE]|rules TTY|conops|rawkeys|text|readline|readraw N|grab FILE|depth N|mode N|winch|screen TTY TEXT SECS [TYPE]]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     if ((argc == 5 || argc == 6) && !strcmp(argv[1], "screen")) return screen(argv[2], argv[3], atoi(argv[4]), argv[5]);
     if (argc == 4 && !strcmp(argv[1], "type")) {          /* a line typed into console N's tty (CON_INPUT, root) */
         char t[CONI_MAX];
@@ -804,7 +806,7 @@ int main(int argc, char **argv)
     if (argc > 1 && !strcmp(argv[1], "columns")) { columns(); return 0; }
     if (argc > 1 && !strcmp(argv[1], "colours")) { colours(); return 0; }
     if (argc > 1 && !strcmp(argv[1], "scroll")) { scroll(); return 0; }
-    if (argc > 1) { dprintf(2, "usage: termtest [columns|colours|scroll|pcfont [FILE]|rules TTY|conops|rawkeys|text|readline|readraw N|grab FILE|depth N|mode N|winch|screen TTY TEXT SECS [TYPE]]\n"); return 2; }
+    if (argc > 1) zusage(USAGE);
     int sz = sys_ttyinfo();
     dprintf(1, ESC "[2J" ESC "[H");
     dprintf(1, ESC "[7m Zenix terminal test " ESC "[0m  size %dx%d\n", sz & 0xFFFF, sz >> 16);

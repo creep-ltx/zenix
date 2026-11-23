@@ -1,6 +1,6 @@
 man-noargs st=2 out=0 err=1
 man-k-noword st=2 out=0 err=1
-sudo-badopt st=2 out=0 err=3
+sudo-badopt st=2 out=0 err=4
 wc-badopt st=2 out=0 err=2
 touch-badopt st=2 out=0 err=2
 tee-badopt st=2 out=0 err=2
@@ -19,4 +19,5 @@ rmdir: T/d: directory not empty
 stat: T/none: no such file or directory
 realpath: T/none: no such file or directory
 status-before-subst=1 
+conventions: --help 184, --version 184, unknown options refused 129
 conv-done

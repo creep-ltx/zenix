@@ -95,41 +95,13 @@ static char uf_name[32];
 
 #define COLD __attribute__((cold, optimize("Os")))   /* load-time code: small (the drawing below is -O2) */
 static void *fast_alloc(unsigned n) { return malloc(n); }
-/* a whole file into memory (at most max bytes) -> the buffer (free it), or 0 with *why */
+/* a whole file into memory (at most max bytes; zslurp, libz) -> the buffer (free it), or 0 with *why */
 COLD static u8 *slurp(const char *path, u32 max, u32 *n, const char **why)
 {
-    int fd = sys_open(path, O_RDONLY);
-    if (fd < 0) {
-        *why = "not there";
-        return 0;
-    }
-    struct ustat st;
-    u8 *b = 0;
-    int r = sys_fstat(fd, &st);
-    if (r < 0 || st.size > max) {
-        *why = r < 0 ? "cannot be read" : "too large";
-        sys_close(fd);
-        return 0;
-    }
-    if (!(b = malloc(st.size ? st.size : 1))) {
-        *why = "no memory to read it";
-        sys_close(fd);
-        return 0;
-    }
-    u32 got = 0;
-    while (got < st.size) {
-        int r = sys_read(fd, b + got, st.size - got);
-        if (r <= 0)
-            break;
-        got += (u32)r;
-    }
-    sys_close(fd);
-    if (got != st.size) {
-        free(b);
-        *why = "cannot be read";
-        return 0;
-    }
-    *n = got;
+    u8 *b = (u8 *)zslurp(path, max, n);
+    if (!b)
+        *why = zerrno == ENOENT ? "not there" : zerrno == EFBIG ? "too large" : zerrno == ENOMEM ? "no memory to read it"
+             : "cannot be read";
     return b;
 }
 

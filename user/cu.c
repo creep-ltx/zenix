@@ -34,17 +34,16 @@ static int copy_in(void)
     }
 }
 
+static const char USAGE[] = "usage: cu [-l device]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *dev = "/dev/ttyS0";
     if (argc == 2 && !strcmp(argv[1], "-r"))
         return copy_in();
     if (argc == 3 && !strcmp(argv[1], "-l"))
         dev = argv[2];
-    else if (argc != 1) {
-        dprintf(2, "usage: cu [-l device]\n");
-        return 2;
-    }
+    else if (argc != 1) { if (argv[1][0] == '-') zbadopt(argv[1], USAGE); zusage(USAGE); }
     int port = sys_open(dev, O_RDWR);
     if (port < 0) {
         dprintf(2, "cu: %s: %s\n", dev, zstrerror(port) ? zstrerror(port) : "cannot open");

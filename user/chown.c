@@ -31,9 +31,13 @@ int main(int argc, char **argv)
 {
     const char *me = strrchr(argv[0], '/'); me = me ? me + 1 : argv[0];
     only_group = !strcmp(me, "chgrp");
+    const char *USAGE = only_group ? "usage: chgrp [-R] group file...\n" : "usage: chown [-R] owner[:group] file...\n";
+    zopt(argc, argv, USAGE);
     int i = 1;
     if (i < argc && !strcmp(argv[i], "-R")) { recursive = 1; i++; }
-    if (i + 1 >= argc) { dprintf(2, "usage: %s [-R] %s file...\n", me, only_group ? "group" : "owner[:group]"); return 2; }
+    if (i < argc && !strcmp(argv[i], "--")) i++;
+    else if (i < argc && argv[i][0] == '-') zbadopt(argv[i], USAGE);
+    if (i + 1 >= argc) zusage(USAGE);
     char spec[64]; strncpy(spec, argv[i++], 63); spec[63] = 0;
     char *colon = strchr(spec, ':');
     if (only_group) { if (id_of(spec, 1, &new_gid)) { dprintf(2, "chgrp: %s: no such group\n", spec); return 1; } }

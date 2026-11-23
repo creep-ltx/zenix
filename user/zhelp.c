@@ -292,3 +292,182 @@ char *zs_bre_to_ere(const char *s)
     }
     *o = 0; return out;
 }
+
+/* ---- the one-system helpers (docs/audit-2026-11-23-one-system.md section 3; OS-20, OS-35, OS-36) ---- */
+#include "../kernel/version.h"
+
+/* the command line: every program calls zopt first in main. --help (as the first argument) writes the usage to the
+ * output and ends with 0; --version writes "NAME VERSION" (the system's version) and ends with 0. zusage writes the
+ * usage to the error stream and ends with 2; zbadopt writes "NAME: unknown option OPT" before it. Cold code, -Os and
+ * no formatter: about 0.5 KB in a program that takes all of them. */
+#define ZCOLD __attribute__((optimize("Os"), noinline))
+#ifdef ZENIX_LIBC
+#define zo_exit exit                    /* the C library's: its streams flushed */
+#else
+#define zo_exit _zexit                  /* libz's: the buffered output flushed */
+#endif
+static char **zo_argv;
+static ZCOLD void zo_put(int fd, const char *s) { sys_write(fd, s, strlen(s)); }
+ZCOLD const char *zprogname(void)
+{
+    const char *n = zo_argv && zo_argv[0] ? zo_argv[0] : "", *p = n;
+    for (; *p; p++)
+        if (*p == '/') n = p + 1;
+    return n;
+}
+ZCOLD void zopt(int argc, char **argv, const char *usage)
+{
+    zo_argv = argv;
+    if (argc < 2) return;
+    if (!strcmp(argv[1], "--help")) { zo_put(1, usage); zo_exit(0); }
+    if (!strcmp(argv[1], "--version")) { zo_put(1, zprogname()); zo_put(1, " " ZENIX_VSTR "\n"); zo_exit(0); }
+}
+ZCOLD void zusage(const char *usage)
+{
+    zo_put(2, usage);
+    zo_exit(2);
+}
+ZCOLD void zbadopt(const char *opt, const char *usage)
+{
+    zo_put(2, zprogname());
+    zo_put(2, ": unknown option ");
+    zo_put(2, opt);
+    zo_put(2, "\n");
+    zusage(usage);
+}
+ZCOLD void zbadch(int c, const char *usage)
+{
+    char o[3] = { '-', (char)c, 0 };
+    zbadopt(o, usage);
+}
+
+/* a program that takes no arguments at all: zopt, then any argument refused (an option: unknown; a word: the usage) */
+ZCOLD void znoargs(int argc, char **argv, const char *usage)
+{
+    zopt(argc, argv, usage);
+    if (argc > 1) {
+        if (argv[1][0] == '-' && argv[1][1]) zbadopt(argv[1], usage);
+        zusage(usage);
+    }
+}
+
+/* a program without options: zopt, then an option refused and "--" skipped; *argv and *argc moved so that (*argv)[1]
+ * is the first operand */
+ZCOLD void zoperands(int *argc, char ***argv, const char *usage)
+{
+    zopt(*argc, *argv, usage);
+    int i = 1;
+    while (zisopt(*argc, *argv, &i, usage)) zbadopt((*argv)[i], usage);
+    *argc -= i - 1;
+    *argv += i - 1;
+}
+
+/* a hand-written option loop's test, "for (; zisopt(argc, argv, &i, USAGE); i++)": 1 when argv[*i] is an option word;
+ * 0 at the first operand, or after "--" (skipped). With a usage, a long option ("--word") is refused through zbadopt;
+ * with none it is the caller's (--color) */
+ZCOLD int zisopt(int argc, char **argv, int *i, const char *usage)
+{
+    if (*i >= argc) return 0;
+    const char *a = argv[*i];
+    if (a[0] != '-' || !a[1]) return 0;
+    if (a[1] == '-') {
+        if (!a[2]) { (*i)++; return 0; }
+        if (usage) zbadopt(a, usage);
+    }
+    return 1;
+}
+
+/* the options' letters, one at a time, as POSIX's getopt (opts: the letters, a ':' after one that takes a value):
+ * the letter, or -1 at the first operand (zoptnext) or after "--". An unknown letter or long option ends the program
+ * through zbadopt, a missing value through "NAME: option -x needs a value" and the usage: the caller never sees them. */
+int zoptnext = 1;
+char *zoptval;
+static int zo_pos;
+ZCOLD int zoptget(int argc, char **argv, const char *opts, const char *usage)
+{
+    zoptval = 0;
+    if (!zo_pos) {
+        if (!zisopt(argc, argv, &zoptnext, usage)) return -1;
+        zo_pos = 1;
+    }
+    char *a = argv[zoptnext];
+    int c = (unsigned char)a[zo_pos++];
+    const char *o = c == ':' ? 0 : strchr(opts, c);
+    if (!o) zbadch(c, usage);
+    if (o[1] == ':') {
+        if (a[zo_pos]) zoptval = a + zo_pos;
+        else if (zoptnext + 1 < argc) zoptval = argv[++zoptnext];
+        else {
+            char m[3] = { '-', (char)c, 0 };
+            zo_put(2, zprogname());
+            zo_put(2, ": option ");
+            zo_put(2, m);
+            zo_put(2, " needs a value\n");
+            zusage(usage);
+        }
+        zoptnext++;
+        zo_pos = 0;
+    } else if (!a[zo_pos]) {
+        zoptnext++;
+        zo_pos = 0;
+    }
+    return c;
+}
+
+/* dates: one source with the PC tests (user/zdate.h) */
+#include "zdate.h"
+
+/* a whole file into memory, NUL-terminated (the length without it in *len): malloc'd, or 0 and zerrno (the open's
+ * error, EISDIR, EFBIG when it holds more than max bytes: refused, never cut, ENOMEM). A file of unknown size (a
+ * pipe, a device) is read to its end. zslurpfd reads an open descriptor (left open: a caller that checks its owner
+ * with fstat reads the same file it checked) */
+ZCOLD char *zslurpfd(int fd, u32 max, u32 *len)
+{
+    struct ustat st;
+    u32 n = 0, cap = 0;
+    int r;
+    if (sys_fstat(fd, &st) == 0) {
+        if ((st.mode & S_IFMT) == S_IFDIR) { zerrno = EISDIR; return 0; }
+        if ((st.mode & S_IFMT) == S_IFREG) cap = st.size + 1;
+    }
+    if (cap > max + 1) { zerrno = EFBIG; return 0; }
+    if (!cap) cap = 1024;
+    char *b = malloc(cap);
+    if (!b) zerrno = ENOMEM;
+    while (b) {
+        if (n + 1 >= cap) {                 /* full: is there more? (a file of the size fstat gave is read once) */
+            char c;
+            if ((r = sys_read(fd, &c, 1)) <= 0) {
+                if (r < 0) { int e = zerrno; free(b); b = 0; zerrno = e; }
+                break;
+            }
+            if (n >= max) { free(b); b = 0; zerrno = EFBIG; break; }
+            u32 nc = cap * 2 > max + 1 ? max + 1 : cap * 2;
+            char *nb = malloc(nc);      /* (not realloc: a program reading only regular files links none of it) */
+            if (!nb) { free(b); b = 0; zerrno = ENOMEM; break; }
+            memcpy(nb, b, n);
+            free(b);
+            b = nb; cap = nc;
+            b[n++] = c;
+            continue;
+        }
+        r = sys_read(fd, b + n, cap - 1 - n);
+        if (r < 0) { int e = zerrno; free(b); b = 0; zerrno = e; break; }
+        if (r == 0) break;
+        n += (u32)r;
+    }
+    if (!b) return 0;
+    b[n] = 0;
+    if (len) *len = n;
+    return b;
+}
+ZCOLD char *zslurp(const char *path, u32 max, u32 *len)
+{
+    int fd = sys_open(path, O_RDONLY);
+    if (fd < 0) return 0;
+    char *b = zslurpfd(fd, max, len);
+    int e = zerrno;
+    sys_close(fd);
+    zerrno = e;
+    return b;
+}

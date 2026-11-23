@@ -24,14 +24,15 @@ static void rmtree(const char *path, int top)
     }
     (void)top;
 }
+static const char USAGE[] = "usage: rm [-frv] file...\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int i = 1;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
-        if (!strcmp(argv[i], "--")) { i++; break; }
-        for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'f') o_f = 1; else if (*p == 'r' || *p == 'R') o_r = 1; else if (*p == 'v') o_v = 1; else { dprintf(2, "rm: unknown option -%c\n", *p); return 2; } }
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
+        for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'f') o_f = 1; else if (*p == 'r' || *p == 'R') o_r = 1; else if (*p == 'v') o_v = 1; else zbadch(*p, USAGE); }
     }
-    if (i >= argc) { if (!o_f) { dprintf(2, "usage: rm [-frv] file...\n"); return 2; } return 0; }
+    if (i >= argc) { if (!o_f) zusage(USAGE); return 0; }
     for (; i < argc; i++) rmtree(argv[i], 1);
     return rc;
 }

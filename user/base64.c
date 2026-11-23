@@ -2,13 +2,15 @@
 #include "libz.h"
 /* base64 [-d] [-w columns] [file]: encode to base64 (lines of 76 characters), or decode with -d */
 static const char tab[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static const char USAGE[] = "usage: base64 [-d] [-w columns] [file]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int dec = 0, wrap = 76, i = 1;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--decode")) dec = 1;
         else if (!strncmp(argv[i], "-w", 2)) wrap = argv[i][2] ? atoi(argv[i] + 2) : (i + 1 < argc ? atoi(argv[++i]) : 76);
-        else { dprintf(2, "base64: unknown option %s\n", argv[i]); return 2; }
+        else zbadopt(argv[i], USAGE);
     }
     int fd = 0;
     if (i < argc && strcmp(argv[i], "-")) { fd = sys_open(argv[i], O_RDONLY); if (fd < 0) { dprintf(2, "base64: %s: %s\n", argv[i], zwhy("cannot open")); return 1; } }

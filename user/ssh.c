@@ -125,29 +125,12 @@ static int seed(void *u, unsigned char *b, size_t n)
     return r == (int)n ? 0 : r < 0 ? r : -EIO;
 }
 
-/* a whole small file into memory (NUL after it); 0 if it cannot be read */
+/* a whole small file into memory (NUL after it; zslurp, libz); 0 if it cannot be read */
 static char *readfile(const char *path, long *n, u32 max)
 {
-    *n = 0;
-    int fd = sys_open(path, O_RDONLY);
-    if (fd < 0)
-        return 0;
-    struct ustat st;
-    if (sys_fstat(fd, &st) < 0 || st.size > max) {
-        sys_close(fd);
-        return 0;
-    }
-    char *b = malloc(st.size + 1);
-    if (!b) { sys_close(fd); return 0; }
-    long got = 0;
-    while (got < (long)st.size) {
-        int r = sys_read(fd, b + got, st.size - (u32)got);
-        if (r <= 0) break;
-        got += r;
-    }
-    sys_close(fd);
-    b[got] = 0;
-    *n = got;
+    u32 l = 0;
+    char *b = zslurp(path, max, &l);
+    *n = (long)l;
     return b;
 }
 
@@ -347,18 +330,19 @@ static void keys_in(const unsigned char *k, long n)
     }
 }
 
+static const char USAGE[] = "usage: ssh [-p PORT] [-l USER] [-i KEY] [-e CHAR|none] [-t|-T] [-v] [user@]host [command...]\n";
 static int usage(void)
 {
-    dprintf(2, "usage: ssh [-p PORT] [-l USER] [-i KEY] [-e CHAR|none] [-t|-T] [-v] [user@]host [command...]\n");
-    return 255;
+    zusage(USAGE);
 }
 
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *user = getenv("USER"), *keyfile = 0;
     int tflag = 0, i = 1;
     static char cmd[1024], userbuf[64];
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         const char *o = argv[i];
         if (!strcmp(o, "-p") && i + 1 < argc) port = atoi(argv[++i]);
         else if (!strcmp(o, "-l") && i + 1 < argc) user = argv[++i];
@@ -372,7 +356,7 @@ int main(int argc, char **argv)
         } else if (!strcmp(o, "-t")) tflag = 1;
         else if (!strcmp(o, "-T")) tflag = -1;
         else if (!strcmp(o, "-v")) verbose = 1;
-        else return usage();
+        else zbadopt(o, USAGE);
     }
     if (i >= argc || port <= 0 || port > 65535)
         return usage();
@@ -414,18 +398,9 @@ int main(int argc, char **argv)
     if (e < 0)
         die("no random numbers: %s", zstrerror(e) ? zstrerror(e) : "failed");
 
-    struct addrinfo h, *r = 0;
-    char ps[8];
-    snprintf(ps, sizeof ps, "%d", port);
-    memset(&h, 0, sizeof h);
-    h.ai_family = AF_INET;
-    h.ai_socktype = SOCK_STREAM;
-    if ((e = getaddrinfo(host, ps, &h, &r)) != 0)
-        die("%s: %s", host, e == EAI_NONAME ? "no such host" : gai_strerror(e));
-    sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0 || connect(sock, r->ai_addr, r->ai_addrlen) < 0)
-        die("connect to %s port %d: %s", host, port, zstrerror(zerrno) ? zstrerror(zerrno) : "failed");
-    freeaddrinfo(r);
+    const char *why;
+    if ((sock = zconnect(host, port, 0, &why)) < 0)
+        die("%s port %d: %s", host, port, why);
     int pr = getpriority(PRIO_PROCESS, 0);      /* one level lower: netd keeps up, other consoles stay snappy */
     if (pr < 19)
         setpriority(PRIO_PROCESS, 0, pr + 1);

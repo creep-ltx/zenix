@@ -1651,8 +1651,15 @@ static int undo(const char *path)
     return 0;
 }
 
+static const char USAGE[] = "usage: zinstall [--zenix-size MB] [--layout recommended|one|custom] [--root-size MB] [--home-size MB]\n"
+    "       [--root-fs ext2|zenixfs] [--home-fs ext2|zenixfs] [--reinstall [--erase-home] [--keep-users|--new-users]]\n"
+    "       [--remove-zenix] [--elsewhere] [--delete NAME]... [--hostname NAME] [--root-password-file FILE] [--user NAME [--user-name TEXT]\n"
+    "       [--user-password-file FILE] | --no-user] [--server URL|none]\n"
+    "       [--startup keep:NAME|format:NAME|none --root keep:NAME|format:NAME --home keep:NAME|format:NAME|none]\n"
+    "       zinstall --list     zinstall --undo [FILE]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     static struct tdisk d;
     static struct t_plan pl;
     static struct t_opt opts[T_MAXOPT];
@@ -1671,6 +1678,12 @@ int main(int argc, char **argv)
         if (!strcmp(a, "--new-users")) { opt_keepusers = 0; continue; }
         if (!strcmp(a, "--remove-zenix")) { opt_remove = 1; continue; }
         if (!strcmp(a, "--elsewhere")) { opt_elsewhere = 1; continue; }
+        static const char *const withv[] = { "--hostname", "--zenix-size", "--layout", "--delete", "--root-size",
+            "--home-size", "--root-fs", "--home-fs", "--root-password-file", "--user", "--user-password-file",
+            "--user-name", "--startup", "--root", "--home", "--server", 0 };
+        int known = 0;
+        for (int k = 0; withv[k]; k++) known |= !strcmp(a, withv[k]);
+        if (!known && a[0] == '-') zbadopt(a, USAGE);
         if (!v) goto usage;
         if (!strcmp(a, "--hostname")) opt_host = v;
         else if (!strcmp(a, "--zenix-size")) opt_zsize = v;
@@ -1688,18 +1701,13 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--root")) opt_rootpart = v;
         else if (!strcmp(a, "--home")) opt_homepart = v;
         else if (!strcmp(a, "--server")) opt_server = v;
+        else if (a[0] == '-') zbadopt(a, USAGE);
         else goto usage;
         i++;
     }
     if (0) {
 usage:
-        say("usage: zinstall [--zenix-size MB] [--layout recommended|one|custom] [--root-size MB] [--home-size MB]\n"
-            "       [--root-fs ext2|zenixfs] [--home-fs ext2|zenixfs] [--reinstall [--erase-home] [--keep-users|--new-users]]\n"
-            "       [--remove-zenix] [--elsewhere] [--delete NAME]... [--hostname NAME] [--root-password-file FILE] [--user NAME [--user-name TEXT]\n"
-            "       [--user-password-file FILE] | --no-user] [--server URL|none]\n"
-            "       [--startup keep:NAME|format:NAME|none --root keep:NAME|format:NAME --home keep:NAME|format:NAME|none]\n"
-            "       zinstall --list     zinstall --undo [FILE]\n");
-        return 2;
+        zusage(USAGE);
     }
     {   /* one at a time: two would plan on the same blocks */
         struct uproc pr;

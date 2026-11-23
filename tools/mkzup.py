@@ -239,7 +239,7 @@ FAMILIES = [
     ("telnet", "a terminal to another computer over the network", "telnet"),
     ("irc", "an IRC client: channels, private messages, TLS", "irc"),
     ("mail", "an e-mail client: IMAP, POP3 and SMTP, MIME, TLS", "mail"),
-    ("tls", "TLS for irc and mail: the helper /lib/tls/tlspipe", ""),
+    ("tls", "TLS for irc, mail and wget: the helper /lib/tls/tlspipe", ""),
     ("ssh", "the secure shell and its keys", "ssh ssh-keygen"),
     ("wget", "fetch files over HTTP and HTTPS", "wget"),
     ("sntp", "set the clock from the network", "sntp"),
@@ -304,7 +304,7 @@ FAMILY_EXTRA = {"tls": [("f", 0o755, "build:tlspipe.zx", "/lib/tls/tlspipe")],
                           ("d", 0o1777, None, "/var/games"),
                           ("c", 0o666, None, "/var/games/robots_roll"),
                           ("c", 0o666, None, "/var/games/tetris.scores")]}
-FAMILY_DEPS = {"games": ["lua"], "irc": ["tls"], "mail": ["tls"]}
+FAMILY_DEPS = {"games": ["lua"], "irc": ["tls"], "mail": ["tls"], "wget": ["tls"]}
 
 
 def extra_src(build, src):

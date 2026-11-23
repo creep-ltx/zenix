@@ -49,18 +49,18 @@ static void setbit(u8 *b, u32 i) { b[i / 8] |= (u8)(1u << (i % 8)); }
 
 static u32 cdiv(u32 a, u32 b) { return (a + b - 1) / b; }
 
+static const char USAGE[] = "usage: mkfs.ext2 [-b 1024|2048|4096] [-i bytes-per-inode] device\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *dev = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-b") && i + 1 < argc) bsize = (u32)atoi(argv[++i]);
         else if (!strcmp(argv[i], "-i") && i + 1 < argc) bpi = (u32)atoi(argv[++i]);
+        else if (argv[i][0] == '-') zbadopt(argv[i], USAGE);
         else dev = argv[i];
     }
-    if (!dev || (bsize != 1024 && bsize != 2048 && bsize != 4096) || bpi < 1024) {
-        dprintf(2, "usage: mkfs.ext2 [-b 1024|2048|4096] [-i bytes-per-inode] device\n");
-        return 2;
-    }
+    if (!dev || (bsize != 1024 && bsize != 2048 && bsize != 4096) || bpi < 1024) zusage(USAGE);
     port = sys_port_find("disk");
     if (port < 0) { dprintf(1, "mkfs.ext2: no disk server\n"); return 1; }
     struct umsg m;

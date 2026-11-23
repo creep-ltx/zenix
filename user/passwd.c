@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "pw.h"
+static const char USAGE[] = "usage: passwd [user]\n";
 /* passwd [user]: change a password (set-user-id root). Users change their own after giving the old one; root
  * changes anyone's. An empty new password removes the password. */
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
+    if (argc > 1 && argv[1][0] == '-') zbadopt(argv[1], USAGE);
     u32 me = (u32)sys_getuid();
     struct pw p;
     const char *who = argc > 1 ? argv[1] : 0;

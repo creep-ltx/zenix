@@ -29,7 +29,6 @@ typedef unsigned char u8;
 #define CACHE    "/var/cache/zpkg/pkg"
 #define CONF     "/etc/zpkg.conf"
 #define ZUP      "/sbin/zup"
-#define CONNECT_MS 15000
 #define IDLE_MS    60000
 #define MAXSERVER  8
 #define MAXHOLD    32
@@ -56,20 +55,6 @@ void zf_say(const char *fmt, ...)       /* user/zpkgfmt.c's reasons */
 }
 
 /* ---- files ---- */
-static char *slurp(const char *path, u32 *len, u32 max)     /* the whole file, NUL-terminated, or 0 */
-{
-    struct ustat st;
-    if (sys_stat(path, &st) < 0 || (st.mode & S_IFMT) != S_IFREG || st.size > max) return 0;
-    char *b = malloc(st.size + 1);
-    int fd = sys_open(path, O_RDONLY);
-    if (!b || fd < 0) { free(b); if (fd >= 0) sys_close(fd); return 0; }
-    int n = sys_read(fd, b, st.size);
-    sys_close(fd);
-    if (n != (int)st.size) { free(b); return 0; }
-    b[n] = 0;
-    if (len) *len = (u32)n;
-    return b;
-}
 static int write_all(int fd, const void *p, u32 n)
 {
     while (n) {
@@ -131,7 +116,7 @@ static struct {
 static int read_conf(void)
 {
     u32 n;
-    char *t = slurp(CONF, &n, 16384);
+    char *t = zslurp(CONF, 16384, &n);
     strcpy(cf.channel, ZPKG_KEYCLASS == ZP_KEY_TEST ? "test" : "testing");
     cf.cache_kb = 4096;
     if (!t) return 0;
@@ -175,7 +160,7 @@ static int load_db(void)
         char path[64];
         if (l < 10 || strcmp(names[i] + l - 9, ".manifest") || l > 40) continue;
         snprintf(path, sizeof path, DB "/%s", names[i]);
-        char *t = slurp(path, &len, 1u << 20);
+        char *t = zslurp(path, 1u << 20, &len);
         struct zf_pkg *k = malloc(sizeof *k);
         if (!t || !k || zf_manifest_parse(k, t, len, path)) {
             say("%s: the package database is damaged: nothing done", path);
@@ -186,7 +171,7 @@ static int load_db(void)
     }
     dir_free(names, n);
     u32 dl;
-    depsbuf = slurp(DEPS, &dl, 65536);
+    depsbuf = zslurp(DEPS, 65536, &dl);
     winst = calloc((u32)ninst + 1, sizeof *winst);
     if (!winst) return -ENOMEM;
     for (int i = 0; i < ninst; i++) {
@@ -273,7 +258,7 @@ static int lock_take(void)
         if (r == 0) { lock_mine = 1; return 0; }
         if (r != -EEXIST) { say("cannot make %s (%s)", LOCK, zstrerror(r)); return r; }
         u32 len;
-        char *t = slurp(LOCK, &len, 64);
+        char *t = zslurp(LOCK, 64, &len);
         int holder = t ? (int)strtoul(t, 0, 10) : 0;
         free(t);
         struct uproc p;
@@ -322,32 +307,15 @@ static int wait_fd(int fd, int ev, int ms)
 static int conn_open(const struct http_url *u, const char **why)
 {
     static char msg[96];
-    struct addrinfo h, *r = 0;
-    char ps[8];
-    int e, s;
+    const char *w;
+    int s;
     if (cn.fd >= 0 && !strcmp(cn.host, u->host) && cn.port == u->port) return 0;
     conn_close();
     if (u->tls) { *why = "https is not taken yet (D22 step 9): use an http:// server"; return -EPROTONOSUPPORT; }
-    memset(&h, 0, sizeof h);
-    h.ai_family = AF_INET;
-    h.ai_socktype = SOCK_STREAM;
-    snprintf(ps, sizeof ps, "%u", u->port);
-    if ((e = getaddrinfo(u->host, ps, &h, &r)) != 0) { *why = e == EAI_NONAME ? "no such host" : gai_strerror(e); return -ENOENT; }
-    s = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
-    if (s < 0) { freeaddrinfo(r); *why = "no socket (is the network up?)"; return -ENETDOWN; }
-    e = connect(s, r->ai_addr, r->ai_addrlen) < 0 ? zerrno : 0;
-    freeaddrinfo(r);
-    if (e == EINPROGRESS) {
-        int w = wait_fd(s, POLLOUT, CONNECT_MS);
-        socklen_t el = sizeof e;
-        if (w != 1) e = w == 0 ? ETIMEDOUT : -w;
-        else if (getsockopt(s, SOL_SOCKET, SO_ERROR, &e, &el) < 0) e = zerrno;
-    }
-    if (e) {
-        sys_close(s);
-        snprintf(msg, sizeof msg, "connect to %s: %s", u->host, zstrerror(e) ? zstrerror(e) : "failed");
+    if ((s = zconnect(u->host, (int)u->port, ZC_NONBLOCK, &w)) < 0) {
+        snprintf(msg, sizeof msg, "%s port %u: %s", u->host, u->port, w);
         *why = msg;
-        return -e;
+        return s;
     }
     cn.fd = s;
     strcpy(cn.host, u->host);
@@ -505,11 +473,9 @@ static struct zp_trust tr;
 static const char *snapshot;
 static u32 ymd(u32 t)                                       /* seconds since 1970 -> YYYYMMDD */
 {
-    long z = (long)(t / 86400u) + 719468, era = z / 146097, doe = z - era * 146097;
-    long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365, doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    long mp = (5 * doy + 2) / 153, d = doy - (153 * mp + 2) / 5 + 1, m = mp < 10 ? mp + 3 : mp - 9;
-    long y = yoe + era * 400 + (m <= 2);
-    return (u32)(y * 10000 + m * 100 + d);
+    struct zdt z;
+    zdate(t, &z);
+    return (u32)(z.year * 10000 + z.mon * 100 + z.day);
 }
 static void set_trust(void)
 {
@@ -559,7 +525,7 @@ static int load_stored(void)
     u32 n;
     char path[64];
     snprintf(path, sizeof path, SYNC "/%s", syncname);
-    char *t = slurp(path, &n, ZP_INDEX_MAX);
+    char *t = zslurp(path, ZP_INDEX_MAX, &n);
     const char *why;
     if (!t) return 0;
     if (zp_index_parse(&ix, t, n, &why)) { say("the stored package list is damaged (%s): fetched again", why); free(t); return 0; }
@@ -597,7 +563,7 @@ static int sync_list(void)
         u32 n;
         snprintf(url, sizeof url, "%s/%s/latest", base, dir);
         if (fetch(url, "latest.tmp", ZP_LATEST_MAX, 0, digest, &size, &why) < 0) { say("%s: %s", base, why); continue; }
-        char *lb = slurp("latest.tmp", &n, ZP_LATEST_MAX);
+        char *lb = zslurp("latest.tmp", ZP_LATEST_MAX, &n);
         sys_unlink("latest.tmp");
         if (!lb || zp_latest_parse(lb, n, &serial)) { say("%s: a bad latest", base); free(lb); continue; }
         free(lb);
@@ -612,7 +578,7 @@ static int sync_list(void)
             sys_unlink("sig.tmp");
             continue;
         }
-        char *sig = slurp("sig.tmp", &n, ZC_SIG_SIZE);
+        char *sig = zslurp("sig.tmp", ZC_SIG_SIZE, &n);
         sys_unlink("sig.tmp");
         snprintf(url, sizeof url, "%s/%s/index-%u", base, dir, serial);
         if (!sig || fetch(url, "index.tmp", ZP_INDEX_MAX, 0, digest, &size, &why) < 0) {
@@ -621,7 +587,7 @@ static int sync_list(void)
         /* the signature over the bytes fetched, before a line is parsed (5.1) */
         int which = -1, rc = zc_sig_verify((const u8 *)sig, ZC_SIG_SIZE, ZC_SIG_LABEL_INDEX, digest, zpkg_keys, ZPKG_NKEYS, &which);
         if (rc != ZC_SIG_OK) { say("%s: the list's signature does not verify: refused", base); free(sig); sys_unlink("index.tmp"); continue; }
-        char *list = slurp("index.tmp", &n, ZP_INDEX_MAX), *copy = list ? malloc(n + 1) : 0;
+        char *list = zslurp("index.tmp", ZP_INDEX_MAX, &n), *copy = list ? malloc(n + 1) : 0;
         sys_unlink("index.tmp");
         struct zp_index nx;
         unsigned warn = 0;
@@ -762,7 +728,7 @@ static void say_running(const char *name)
     char path[64];
     u32 len;
     snprintf(path, sizeof path, DB "/%s.manifest", name);
-    char *t = slurp(path, &len, 1u << 20);
+    char *t = zslurp(path, 1u << 20, &len);
     if (!t) return;
     k = malloc(sizeof *k);
     if (!k || zf_manifest_parse(k, t, len, path)) { free(k); free(t); return; }
@@ -815,7 +781,7 @@ static void zpkg_new_hint(void)
     u32 len;
     const struct zf_pkg *me = inst_find("zpkg");
     if (!boot_refused || !strcmp(myname, "zpkg-new") || sys_stat("/bin/zpkg-new", &st) < 0) return;
-    char *t = slurp(DB "/zpkg-new.manifest", &len, 1u << 20);
+    char *t = zslurp(DB "/zpkg-new.manifest", 1u << 20, &len);
     if (!t || zf_manifest_parse(&k, t, len, DB "/zpkg-new.manifest")) return;
     if (k.vnum > (me ? me->vnum : 0))
         say("/bin/zpkg-new (%u) is newer than this zpkg (%u) and may place the system where this one cannot: "
@@ -1232,7 +1198,7 @@ static int verify_file(const char *file, struct zf_bundle *b, char pname[25], in
     u32 n;
     if (strlen(file) + 5 > sizeof sigf - 1) { say("%s: the name is too long", file); return -ENAMETOOLONG; }
     snprintf(sigf, sizeof sigf, "%s.sig", file);
-    char *sig = slurp(sigf, &n, ZC_SIG_SIZE);
+    char *sig = zslurp(sigf, ZC_SIG_SIZE, &n);
     if (!sig || n != ZC_SIG_SIZE) { free(sig); say("%s: no signature (%s, 80 bytes): refused", file, sigf); return -EPERM; }
     int r = read_head(file, b, pname, sys);
     if (r) { free(sig); say("%s: not a bundle zpkg takes%s", file, r == -EPERM ? " (a system bundle with packages outside the base group)" : ""); return -EINVAL; }
@@ -1542,18 +1508,19 @@ static int cmd_query(char **names, int n, char what)
     return rc;
 }
 
-static int usage(void)
-{
-    dprintf(2, "usage: zpkg -Sy | -Syu | -Syuu | -S NAME... | -Sw NAME... | -Ss WORD... | -Si NAME... | -Sl[n] | -Sc\n"
+static const char USAGE[] = "usage: zpkg -Sy | -Syu | -Syuu | -S NAME... | -Sw NAME... | -Ss WORD... | -Si NAME... | -Sl[n] | -Sc\n"
            "       zpkg -Q [NAME...] | -Qi NAME... | -Ql NAME... | -Qo PATH... | -Qu\n"
            "       zpkg -R[s][n] NAME... | -U FILE... | --back NAME\n"
            "       zpkg --fetch DIR [--zfs]\n"
-           "  options: --snapshot NAME  --ignore-expiry  --reset-serial CHANNEL  --ram  --yes  --all   (man zpkg)\n");
-    return 2;
+           "  options: --snapshot NAME  --ignore-expiry  --reset-serial CHANNEL  --ram  --yes  --all   (man zpkg)\n";
+static int usage(void)
+{
+    zusage(USAGE);
 }
 
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     char *args[64];
     int na = 0, ignore = 0, ram = 0, yes = 0;
     const char *op = 0, *back = 0, *reset = 0, *fetchdir = 0;
@@ -1575,7 +1542,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--all")) show_all = 1;
         else if (!strcmp(argv[i], "-q")) quiet = 1;
         else if (argv[i][0] == '-' && argv[i][1] && argv[i][1] != '-' && !op) op = argv[i] + 1;
-        else if (argv[i][0] == '-') return usage();
+        else if (argv[i][0] == '-') zbadopt(argv[i], USAGE);
         else if (na < 64) args[na++] = argv[i];
         else { say("more than 64 names"); return 2; }
     }

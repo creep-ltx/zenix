@@ -33,6 +33,22 @@ static int sys_fstat(int fd, struct ustat *u) { struct stat s; return fromst(fst
 static int sys_lstat(const char *p, struct ustat *u) { struct stat s; return fromst(lstat(p, &s), &s, u); }
 static int sys_utimes(const char *p, u32 t) { struct timeval v[2] = { { t, 0 }, { t, 0 } }; return utimes(p, v); }
 #define _zexit exit
+/* libz's date conversion (its own source) and command line, as the PC test needs them */
+struct zdt { int year, mon, day, hour, min, sec, wday, yday; };
+static long zdays(int y, int m, int d);
+#define ZDATE_LINK static __attribute__((unused))
+#include "zdate.h"
+static const char *zprog = "unlha";
+static __attribute__((noreturn)) void zusage(const char *u) { fputs(u, stderr); exit(2); }
+static __attribute__((noreturn)) void zbadopt(const char *o, const char *u)
+{ fprintf(stderr, "%s: unknown option %s\n", zprog, o); zusage(u); }
+static void zopt(int argc, char **argv, const char *u)
+{
+    const char *sl = strrchr(argv[0], '/');
+    zprog = sl ? sl + 1 : argv[0];
+    if (argc > 1 && !strcmp(argv[1], "--help")) { fputs(u, stdout); exit(0); }
+    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("%s 0.2\n", zprog); exit(0); }
+}
 #else
 #include "libz.h"
 #endif
@@ -113,14 +129,11 @@ static const char *mname(const struct arcent *e, char *b)
 
 static void civil(long days, int *y, int *m, int *d)     /* days since 1978-01-01 */
 {
-    long z = days + 2922 + 719468, era = z / 146097;
-    unsigned doe = (unsigned)(z - era * 146097);
-    unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    unsigned mp = (5 * doy + 2) / 153;
-    *d = (int)(doy - (153 * mp + 2) / 5 + 1);
-    *m = (int)(mp < 10 ? mp + 3 : mp - 9);
-    *y = (int)((long)yoe + era * 400 + (*m <= 2));
+    struct zdt z;
+    zdate((u32)(days + 2922) * 86400u, &z);
+    *y = z.year;
+    *m = z.mon;
+    *d = z.day;
 }
 
 static void list_line(const struct arcent *e)
@@ -305,11 +318,8 @@ static int count(void *ctx, const struct arcent *e)
     return 1;
 }
 
-static void usage(void)
-{
-    dprintf(2, "usage: %s l|t|x [-f] [-q] [-d folder] [-L megabytes] archive [name...]\n", me);
-    _zexit(2);
-}
+static const char *USAGE;
+static void usage(void) { zusage(USAGE); }
 
 int main(int argc, char **argv)
 {
@@ -322,10 +332,14 @@ int main(int argc, char **argv)
     me = me ? me + 1 : argv[0];
     lzx = !strcmp(me, "unlzx");
     if (!lzx) me = "unlha";
+    USAGE = lzx ? "usage: unlzx l|t|x [-f] [-q] [-d folder] [-L megabytes] archive [name...]\n"
+                : "usage: unlha l|t|x [-f] [-q] [-d folder] [-L megabytes] archive [name...]\n";
+    zopt(argc, argv, USAGE);
     if (argc < 2) usage();
     {
         const char *c = argv[i++];
         if (*c == '-') c++;
+        if (*c == '-') zbadopt(argv[1], USAGE);
         if ((c[0] != 'l' && c[0] != 't' && c[0] != 'x') || c[1]) usage();
         command = c[0];
     }
@@ -340,7 +354,7 @@ int main(int argc, char **argv)
             long mb = atoi(argv[++i]);
             if (mb <= 0 || mb > 4000) usage();
             limit = (unsigned long)mb * 1024 * 1024;
-        } else usage();
+        } else zbadopt(a, USAGE);
     }
     if (i >= argc) usage();
     arcname = argv[i++];

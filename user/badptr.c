@@ -113,8 +113,10 @@ static void size_checks(void)
     check("disk info: DISK_LIST writes the first 80 bytes, DISK_LISTSZ at most the size given, below 80 -EINVAL", ok);
 }
 
+static const char USAGE[] = "usage: badptr\n       badptr ipc\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     if (argc > 1 && !strcmp(argv[1], "ipc")) return ipc_checks();
     int a = sys_write(1, (const void *)0x1000, 16);
     int b = sys_write(1, (const void *)0xFFFFFFF0, 64);

@@ -6,7 +6,7 @@
  * / pattern search, ? backward search, n/N next/previous match, h help, q quit.
  * Short files are just printed. Text from a pipe works: the keys come from /dev/tty. Colour codes (SGR, ESC [ ... m)
  * pass through, as GNU less -R does, and take no room on the line; other control characters are shown as ^X. */
-static int ROWS = 25;                   /* the terminal's rows (main asks the kernel: 32 PAL, 25 NTSC) */
+#define ROWS zscr_rows                   /* the terminal's rows (libz's screen layer: the size, SIGWINCH) */
 static char *text; static u32 tlen, tcap;
 struct row { u32 off; unsigned short len; };
 static struct row *rows; static u32 nrows, rcap;
@@ -31,7 +31,7 @@ static u32 sgr_len(u32 i, u32 end)
     while (k < end && ((text[k] >= '0' && text[k] <= '9') || text[k] == ';' || text[k] == ':')) k++;
     return k < end && text[k] == 'm' ? k + 1 - i : 0;
 }
-/* split the text into screen rows: lines of up to 80 columns, tabs to the next multiple of 8; DESIGN D28: by
+/* split the text into screen rows: lines of up to the terminal's width (zscr_cols), tabs to the next multiple of 8; DESIGN D28: by
  * characters and the console's widths (a UTF-8 letter one column, a wide one two), never inside a character */
 static void layout(void)
 {
@@ -44,7 +44,7 @@ static void layout(void)
             if (sl) { i += sl; continue; }                  /* a colour code: no width */
             u32 w = text[i] == '\t' ? 8 - (col % 8) : ((unsigned char)text[i] < 32 ? 2u : 1u), k = 1;
             if ((unsigned char)text[i] >= 0x80) { int cw; k = (u32)zu8next(text + i, tlen - i, &cw); w = (u32)cw; }
-            if (col + w > 80 && col > 0) { add_row(start, i - start); start = i; col = 0; }
+            if (col + w > (u32)zscr_cols && col > 0) { add_row(start, i - start); start = i; col = 0; }
             col += w; i += k;
         }
         add_row(start, i - start);
@@ -96,42 +96,71 @@ static void draw(const char *extra)
     status(extra);
     oflush();
 }
-static int read_key(void)
+#define K_RESIZE 0x7FFF
+static int getb(int ms)                 /* a byte from the terminal within ms (-1: none) */
 {
     unsigned char c;
-    if (sys_read(tty_fd, &c, 1) != 1) return 'q';
+    struct pollfd p = { tty_fd, POLLIN, 0 };
+    if (ms >= 0 && poll(&p, 1, ms) <= 0) return -1;
+    return sys_read(tty_fd, &c, 1) == 1 ? c : -1;
+}
+/* a key from the terminal: a byte, or libz's code (ZK_*) for the arrows, Home, End, the pages, F1 and Help (the
+ * console's xterm sequences); a new window size (SIGWINCH, libz's screen layer) as K_RESIZE */
+static int read_key(void)
+{
+    for (;;) {
+        struct pollfd p = { tty_fd, POLLIN, 0 };
+        if (zscr_resized()) return K_RESIZE;
+        if (poll(&p, 1, 500) > 0) break;
+    }
+    int c = getb(-1);
+    if (c < 0) return -1;                /* the end of the terminal's input */
     if (c != 27) return c;
-    unsigned char s1, s2 = 0;
-    if (sys_read(tty_fd, &s1, 1) != 1) return 'q';
-    if (s1 != '[' && s1 != 'O') return 0;
-    int num = 0;
-    while (sys_read(tty_fd, &s2, 1) == 1 && s2 >= '0' && s2 <= '9') num = num * 10 + (s2 - '0');
-    if (s2 == 'A') return 'k';
-    if (s2 == 'B') return 'j';
-    if (s2 == 'H') return 'g';
-    if (s2 == 'F') return 'G';
-    if (s2 == '~') return num == 5 ? 'b' : num == 6 ? 'f' : num == 1 ? 'g' : num == 4 ? 'G' : 0;
+    int s1 = getb(30), s2 = 0, num = 0;
+    if (s1 < 0) return 27;
+    if (s1 == 'O') { s2 = getb(30); return s2 == 'P' ? ZK_F1 : s2 == 'H' ? 1 : s2 == 'F' ? 5 : 0; }
+    if (s1 != '[') return 0;
+    while ((s2 = getb(30)) >= '0' && s2 <= '9') num = num * 10 + (s2 - '0');
+    if (s2 == ';') while ((s2 = getb(30)) >= '0' && s2 <= '9') ;      /* a modifier: the key is the same */
+    switch (s2) {
+    case 'A': return ZK_UP;
+    case 'B': return ZK_DOWN;
+    case 'C': return ZK_RIGHT;
+    case 'D': return ZK_LEFT;
+    case 'H': return 1;
+    case 'F': return 5;
+    case 'P': return ZK_F1;
+    case '~': return num == 1 || num == 7 ? 1 : num == 4 || num == 8 ? 5 : num == 3 ? 4 : num == 5 ? ZK_SUP :
+                     num == 6 ? ZK_SDOWN : num == 2 ? ZK_HELP : num == 11 ? ZK_F1 : 0;
+    }
     return 0;
 }
-static void prompt_line(const char *label, char *out, int max)
+/* the keys as less's letters */
+static int less_key(int k)
 {
-    int n = 0;
-    oputs("\033[H"); for (int r = 0; r < ROWS - 1; r++) oputs("\033[B");
-    oputs("\r\033[K"); oputs(label); oflush();
-    for (;;) {
-        unsigned char c;
-        if (sys_read(tty_fd, &c, 1) != 1) break;
-        if (c == '\r' || c == '\n') break;
-        if (c == 27 || c == 3) { n = 0; break; }
-        if ((c == 127 || c == 8) && n) {               /* D28: one character, its columns */
-            int p = (int)zu8prev(out, (u32)n), w = zu8cols(out + p, (u32)(n - p));
-            n = p;
-            while (w-- > 0) oputs("\b \b");
-        }
-        else if (c >= 32 && n < max - 1) { out[n++] = (char)c; oputc(c); }
-        oflush();
+    switch (k) {
+    case ZK_UP: return 'k';
+    case ZK_DOWN: return 'j';
+    case 1: return 'g';                 /* Home */
+    case 5: return 'G';                 /* End */
+    case ZK_SUP: return 'b';            /* Page Up */
+    case ZK_SDOWN: return 'f';          /* Page Down */
+    case ZK_F1: case ZK_HELP: return 'h';
     }
-    out[n] = 0;
+    if (k < 0) return 'q';
+    return k == K_RESIZE || (k > 0 && k < 0x80) ? k : 0;
+}
+static void prompt_line(const char *label, char *out, int max)     /* libz's line editor on the bottom row */
+{
+    struct zled e;
+    zled_init(&e, out, max, "");
+    for (;;) {
+        zled_show(&e, ROWS, 1, zscr_cols - 1, label);
+        oflush();
+        int k = read_key(), r = k < 0 ? ZLED_CANCEL : k == K_RESIZE ? ZLED_MORE : zled_key(&e, k);
+        if (r == ZLED_DONE) break;
+        if (r == ZLED_CANCEL || r == ZLED_EOF) { out[0] = 0; break; }
+    }
 }
 static void search(int dir, int again)
 {
@@ -189,14 +218,17 @@ static void on_cont(int sig)
     oputs("\033[2J");
     draw(0);
 }
+static const char USAGE[] = "usage: less file...   (or: command | less)\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int i = 1, bad = 0;                                            /* a file that could not be read: status 1 */
-    { int ti = sys_ttyinfo(); ROWS = ti > 0 ? ti >> 16 : 25; if (ROWS < 3) ROWS = 3; }    /* 32 on PAL, 25 on NTSC */
-    while (i < argc && argv[i][0] == '-' && argv[i][1]) i++;         /* options are accepted and ignored */
+    zscr_size();                                                   /* the terminal's size: the rows' width too */
+    if (ROWS < 3) ROWS = 3;
+    while (zisopt(argc, argv, &i, 0)) i++;   /* options are accepted and ignored (long ones too) */
     int tty_out = sys_isatty(1);
     if (i >= argc) {
-        if (sys_isatty(0)) { dprintf(2, "usage: less file...   (or: command | less)\n"); return 2; }
+        if (sys_isatty(0)) zusage(USAGE);
         char b[1024]; int n; while ((n = sys_read(0, b, sizeof b)) > 0) append(b, (u32)n);
     } else {
         for (; i < argc; i++) {
@@ -216,6 +248,7 @@ int main(int argc, char **argv)
         return bad;
     }
     tty_fd = sys_open("/dev/tty", O_RDONLY);
+    zscr_init();
     if (tty_fd < 0) { dprintf(2, "less: no terminal\n"); return 1; }
     sys_ttymode(TTY_RAW | TTY_NOSIG);
     signal(SIGINT, on_end); signal(SIGTERM, on_end); signal(SIGHUP, on_end);
@@ -223,7 +256,7 @@ int main(int argc, char **argv)
     oputs("\033[2J");
     draw(0);
     for (;;) {
-        int k = read_key();
+        int k = less_key(read_key());
         int page = ROWS - 1, maxtop = (int)nrows - 1;
         int old = top;
         switch (k) {
@@ -242,6 +275,14 @@ int main(int argc, char **argv)
         case 'N': search(-1, 1); continue;
         case 'h': case 'H': oputs("\033[2J"); help(); oputs("\033[2J"); draw(0); continue;
         case 26: kill(0, SIGTSTP); continue;                       /* Ctrl+Z: the whole job stops (man too) */
+        case K_RESIZE: {                                           /* a new size: the rows laid out again */
+            u32 at = (u32)top < nrows ? rows[top].off : 0;
+            if (ROWS < 3) ROWS = 3;
+            layout();
+            for (top = 0; (u32)top + 1 < nrows && rows[top + 1].off <= at; top++) ;
+            oputs("\033[2J");
+            break;
+        }
         default: continue;
         }
         (void)maxtop; (void)old;

@@ -34,4 +34,27 @@ int color_rule(int fd, const char *term, const char *no_color);
 int color_arg(const char *arg, int bare);   /* --color[=WHEN]: 0 never, 1 always, 2 auto, -1 not it, -2 bad WHEN */
 const char *zsig_name(int sig);         /* 15 -> "TERM"; 0 if none */
 int zsig_num(const char *name);         /* "TERM", "SIGTERM" or "15" -> 15; -1 if unknown */
+/* the one-system helpers (docs/audit-2026-11-23-one-system.md section 3, user/zhelp.c) */
+void zopt(int argc, char **argv, const char *usage);   /* --help, --version: answered, the program ends with 0 */
+void zusage(const char *usage) __attribute__((noreturn));
+void zbadopt(const char *opt, const char *usage) __attribute__((noreturn));
+void zbadch(int c, const char *usage) __attribute__((noreturn));
+void znoargs(int argc, char **argv, const char *usage);
+int zoptget(int argc, char **argv, const char *opts, const char *usage);
+extern int zoptnext;
+extern char *zoptval;
+int zisopt(int argc, char **argv, int *i, const char *usage);
+void zoperands(int *argc, char ***argv, const char *usage);
+char *zslurpfd(int fd, unsigned int max, unsigned int *len);
+extern int zscr_rows, zscr_cols;        /* the screen (user/zscr.c): the terminal's size, SIGWINCH, the cursor */
+void zscr_init(void);
+int zscr_size(void);
+int zscr_resized(void);
+void zscr_at(int row, int col);
+int zscr_move(char *b, int row, int col);  /* the escape into b (24 bytes), for a program with its own buffer */
+const char *zprogname(void);
+struct zdt { int year, mon, day, hour, min, sec, wday, yday; };
+void zdate(unsigned int t, struct zdt *d);
+long zdays(int y, int m, int d);
+char *zslurp(const char *path, unsigned int max, unsigned int *len);
 #endif

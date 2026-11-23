@@ -8,8 +8,10 @@ static void one(int fd)
     char *line = 0; u32 cap = 0; int n;
     while ((n = rd_getline(&r, &line, &cap)) >= 0) { for (int i = n - 1; i >= 0; i--) oputc((unsigned char)line[i]); oputc('\n'); }
 }
+static const char USAGE[] = "usage: rev [file...]\n";
 int main(int argc, char **argv)
 {
+    zoperands(&argc, &argv, USAGE);
     if (argc < 2) { one(0); return 0; }
     for (int i = 1; i < argc; i++) {
         int fd = strcmp(argv[i], "-") ? sys_open(argv[i], O_RDONLY) : 0;

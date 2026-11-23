@@ -85,6 +85,14 @@ STACK_boot := 4096
 # in FS-UAE: the deepest byte written after a boot, logins on two consoles, ls -l, df, mount); init's frames are its
 # 512-byte /etc/console buffer and printf, diskd has no recursion: 4 KB and 8 KB (16 before)
 STACK_init := 4096
+# cold commands (CLAUDE.md's golden path: "small everywhere else: cold code at -Os"): run once, a few system calls, no
+# loop over data a user waits for; the throughput commands (cat, cp, grep, sort, sed, wc, ls, tar, gzip, less ...) stay
+# -O2. About a quarter of their code (audit 2026-11-23: the room the one-system command line takes on the demo floppy)
+COLDAPPS := mkdir rmdir ln echo pwd ps free uname uptime date clear kill dmesg sleep true false env hostname id whoami \
+            touch umount reboot ifconfig route ping host netstat df chmod stat which printf basename dirname readlink \
+            expr pgrep tree cal time seq du find man mount login su passwd sync useradd userdel gpasswd conmirror lsusb \
+            fdisk mkfs_zenixfs zinstall zup ssh-keygen conprefs input beep zdb
+$(COLDAPPS:%=$(BUILD)/%.uo) $(COLDAPPS:%=$(BUILD)/%.po): UCFLAGS += -Os
 # init is cold code (it waits for its children all its life): -Os, which also pays for /etc/daemons (DESIGN D24 7)
 $(BUILD)/init.uo: UCFLAGS += -Os
 STACK_diskd := 8192
@@ -325,9 +333,10 @@ RAMAPPS := init login sh ls cat echo pwd ps free wc hello crash uname df fdisk m
            touch head tail sleep true false chmod id whoami su passwd chown ln stat cmp date env printenv dmesg
 # the mount tests (tools/mounttest.sh) boot their own small floppy: the standard RAM image is full (passwd, whoami,
 # uname and touch left out 2026-10-30, no mount test runs them: the allocator's code, about 1 KB more in each program,
-# had taken the room the tests write into; 25 KB stay free, as before)
-MOUNTAPPS := init login sh ls ln cmp seq cat echo pwd mkdir rm rmdir cp mv df sync fdisk mkfs_ext2 fsck_ext2 mount umount \
-             mkfs_zenixfs fsck_zenixfs su id chmod wc head tail ps stat sleep true false env \
+# had taken the room the tests write into; 25 KB stay free, as before; rmdir, id, head and env left out 2026-11-23,
+# no mount test runs them: --help, --version and the refusal of unknown options, about 0.5 KB more in each program)
+MOUNTAPPS := init login sh ls ln cmp seq cat echo pwd mkdir rm cp mv df sync fdisk mkfs_ext2 fsck_ext2 mount umount \
+             mkfs_zenixfs fsck_zenixfs su chmod wc tail ps stat sleep true false \
              kill pgrep grep dmesg svctest zfsd readlink
 
 # development/test image: the same, plus a small root filesystem that the bootblock loads into RAM.
@@ -596,7 +605,7 @@ $(BUILD)/dpytest.uo: display/test/dpytest.c display/display.h display/proto.h us
 $(BUILD)/dpytest.uelf: $(BUILD)/dpytest.uo $(BUILD)/libdisplay.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/dpytest.uo $(BUILD)/libdisplay.no $(BUILD)/libz.uo $(LIBGCC) -o $@
 # zdesk (DESIGN D38 step 5): the floating window manager, its bar, desktop and settings (display/zdesk/), cold: -Os
-ZDESKOBJS := $(patsubst %,$(BUILD)/zd-%.no,zdesk conf bar desk)
+ZDESKOBJS := $(patsubst %,$(BUILD)/zd-%.no,zdesk conf bar desk) $(BUILD)/keys.no
 $(BUILD)/zd-%.no: display/zdesk/%.c display/zdesk/zdesk.h display/display.h display/proto.h user/libz.h user/usys.h user/socket.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
 $(BUILD)/zdesk.uelf: $(ZDESKOBJS) $(BUILD)/libdisplay.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
@@ -777,10 +786,10 @@ BUILD_DATE := $(or $(SOURCE_DATE_EPOCH),$(shell git log -1 --format=%ct 2>/dev/n
 $(BUILD)/builddate.h: FORCE | $(BUILD)
 	@printf '#define ZENIX_BUILD_DATE %su\n' '$(BUILD_DATE)' > $@.new; cmp -s $@.new $@ || mv $@.new $@; rm -f $@.new
 FORCE:
-# wget (DESIGN D21 8, docs/man/wget.txt) over its core (user/wget/), net/http/ (shared with zpkg) and the library's
-# TLS glue (crypto/zc/zc_tls.c), a plain program (not pure: D21 3.5); sntp (D21 8.3, docs/man/sntp.txt) over
+# wget (DESIGN D21 8, docs/man/wget.txt) over its core (user/wget/) and net/http/ (shared with zpkg); its TLS through
+# the helper /lib/tls/tlspipe, the system's one TLS path (audit 2026-11-23 OS-12: the package tls); sntp (D21 8.3, docs/man/sntp.txt) over
 # net/sntp/ and the clock file's code (crypto/zc/zc_clock.c). The cores are system-call free (tools/host/tls-test.sh)
-WGETOBJS := $(BUILD)/cr/user/wget/plan.o $(BUILD)/cr/net/http/http.o $(BUILD)/tlstrust.uo
+WGETOBJS := $(BUILD)/cr/user/wget/plan.o $(BUILD)/cr/net/http/http.o
 SNTPOBJS := $(BUILD)/cr/net/sntp/sntp.o $(BUILD)/clockfile.uo
 # /var/lib/clock's reading and writing, one copy for sntp and reboot (reboot raises the floor from a trusted clock)
 CLOCKOBJS := $(BUILD)/clockfile.uo $(BUILD)/cr/crypto/zc/zc_clock.o
@@ -797,12 +806,12 @@ $(BUILD)/cr/net/http/http.o: net/http/http.h
 $(BUILD)/cr/net/sntp/sntp.o: net/sntp/sntp.h
 $(BUILD)/wget.uo $(BUILD)/sntp.uo: $(BUILD)/%.uo: user/%.c $(BUILD)/builddate.h crypto/zc/zc_clock.h user/socket.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -I$(BUILD) -Inet/port/shim $(CRYPTO_DEF) -c $< -o $@
-$(BUILD)/wget.uo: user/wget/wget.h net/http/http.h crypto/zc/zc_tls.h crypto/zc/zc_x509.h user/tlstrust.h
+$(BUILD)/wget.uo: user/wget/wget.h net/http/http.h
 $(BUILD)/tlspipe.uo: user/tlspipe.c user/tlstrust.h $(BUILD)/builddate.h crypto/zc/zc_tls.h user/socket.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -I$(BUILD) -Inet/port/shim $(CRYPTO_DEF) -c $< -o $@
 $(BUILD)/tlspipe.uelf: $(BUILD)/tlspipe.uo $(BUILD)/tlstrust.uo $(BUILD)/libcrypto.a $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/tlspipe.uo $(BUILD)/tlstrust.uo $(BUILD)/libcrypto.a $(BUILD)/libz.uo $(LIBGCC) -o $@
-# the clock's rules, the seed and the trust anchors, one copy for wget and the TLS helper of irc and mail (user/tlstrust.h)
+# the clock's rules, the seed and the trust anchors of the TLS helper (user/tlstrust.h)
 $(BUILD)/tlstrust.uo: user/tlstrust.c user/tlstrust.h crypto/zc/zc_tls.h crypto/zc/zc_x509.h crypto/zc/zc_clock.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -Inet/port/shim $(CRYPTO_DEF) -c $< -o $@
 $(BUILD)/sntp.uo: net/sntp/sntp.h
@@ -826,8 +835,8 @@ $(BUILD)/zpkg.uo: user/zpkg.c $(BUILD)/zpkgkeys.h $(BUILD)/builddate.h user/zpkg
 	$(CC) $(UCFLAGS) -Os -I$(BUILD) -Inet/port/shim $(CRYPTO_DEF) -c $< -o $@
 $(BUILD)/zpkg.uelf: $(BUILD)/zpkg.uo $(ZPKGOBJS) $(BUILD)/libcrypto.a $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/zpkg.uo $(ZPKGOBJS) $(BUILD)/libcrypto.a $(BUILD)/libz.uo $(LIBGCC) -o $@
-$(BUILD)/wget.uelf: $(BUILD)/wget.uo $(WGETOBJS) $(BUILD)/libcrypto.a $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/wget.uo $(WGETOBJS) $(BUILD)/libcrypto.a $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(BUILD)/wget.uelf: $(BUILD)/wget.uo $(WGETOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/wget.uo $(WGETOBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/sntp.uelf: $(BUILD)/sntp.uo $(SNTPOBJS) $(BUILD)/libcrypto.a $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/sntp.uo $(SNTPOBJS) $(BUILD)/libcrypto.a $(BUILD)/libz.uo $(LIBGCC) -o $@
 # rz and sz (DESIGN D20 5, docs/man/rz.txt; sz is a link to rz): the Zmodem engine (user/xfer/, CTerm's, MIT) at -O2
@@ -872,7 +881,7 @@ include libc/picolibc/sources.mk
 # libz's files the C library builds too (user/zshare.h; libz.uo below): the allocator, the environment, the buffered
 # output, the error texts, the signals, poll and select, the sockets, the helpers (paths, colours), the passwd parser
 # and the pseudo-terminals (DESIGN D20 7.2)
-LIBZ_SHARED := zmalloc zenv zout zerrtab zsig zpoll zsock zhelp zpw zpty
+LIBZ_SHARED := zmalloc zenv zout zerrtab zsig zpoll zsock zhelp zpw zpty zscr
 # the port: the system layer, the start and the end, the streams, strerror, dprintf, directories, the 64-bit division
 # (section 7: libgcc's is not pure), the terminal, processes, users, glob, regcomp (over user/regex.c, the one engine)
 LIBC_PORT = libc/zenix/sys.c libc/zenix/pathtime.c libc/zenix/start.c libc/zenix/stdio.c libc/zenix/strerror.c libc/zenix/dprintf.c libc/zenix/dirent.c \
@@ -966,6 +975,23 @@ $(LIBCAPPS:%=$(BUILD)/%.pzx): $(BUILD)/%.pzx: $(BUILD)/%.cpuelf tools/mkzexe.py 
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ $(or $(STACK_$*),$(STACK_DEFAULT))
 
+# the ported programs' --help and --version (ports/common/zmain.c, docs/audit-2026-11-23-one-system.md section 3): a
+# constructor built per program and linked with it: ZMAIN_LD for the ZEX2 programs (pure), ZMAINZ_LD for the ZEXE ones
+# -K (the built-in keys, docs/audit-2026-11-23-one-system.md section 3) for the programs with a keys file: upstream's
+# own table (static "defaults", ctop's "defkeys") made global as zport_keys by objcopy, upstream's source unchanged
+ZMAIN_KEYS := sumi maki markdown ahiru
+$(BUILD)/%/keys-k.o: $(BUILD)/%/keys.o
+	$(TOOLPREFIX)objcopy --redefine-sym defaults=zport_keys --globalize-symbol=zport_keys $< $@
+$(BUILD)/ctop/ctop-k.o: $(BUILD)/ctop/ctop.o
+	$(TOOLPREFIX)objcopy --redefine-sym defkeys=zport_keys --globalize-symbol=zport_keys $< $@
+ZMAIN_LD = $(BUILD)/zmain/$(1).o
+ZMAINZ_LD = $(BUILD)/zmainz/$(1).o
+$(BUILD)/zmain/%.o: ports/common/zmain.c $(LIBC_HDRS) tools/purecc.sh
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(LIBC_PFLAGS) -DZPORT_NAME=$* $(if $(filter $*,$(ZMAIN_KEYS)),-DZPORT_KEYS) -c $< -o $@
+$(BUILD)/zmainz/%.o: ports/common/zmain.c $(LIBC_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(LIBC_PFLAGS) -DZPORT_NAME=$* -c $< -o $@
 # ---- the text-UI library (roadmap block 3; DESIGN D27 sections 8-9: linked into each program, no shared library):
 # the owner's tui.library, its upstream source pinned in ports/tui/upstream (tools/tui-vendor.sh, unchanged) and
 # compiled through Zenix's layer in ports/tui/zenix (ports/tui/README). TUI_UTF8=1 (the default since the console's
@@ -1020,9 +1046,9 @@ $(BUILD)/libtui-pure.a: $(BUILD)/tuip/core.o $(BUILD)/tuip/glue.o $(BUILD)/tuip/
 # user/PROG.c: these rules build them). TT_NAMES_PROG: the names after ENVARC: (and ENV:) the program's own literals
 # use, mapped to $HOME/.config/NAME; the first is the program's, also for T:NAME- (/tmp/NAME-). ----
 TEXTTOOLS := sumi maki markdown
-TT_SRCS_sumi := main buf file syntax clip keys
-TT_SRCS_maki := main src keys drawer filecol
-TT_SRCS_markdown := main buf file syntax clip keys md mdedit view
+TT_SRCS_sumi := main buf file syntax clip keys-k
+TT_SRCS_maki := main src keys-k drawer filecol
+TT_SRCS_markdown := main buf file syntax clip keys-k md mdedit view
 TT_NAMES_sumi := "Sumi"
 TT_NAMES_maki := "Maki","FileColours"
 TT_NAMES_markdown := "Markdown"
@@ -1037,8 +1063,8 @@ $$(BUILD)/$(1)/zenix-dos.o: ports/common/dos.c $$(TT_HDRS) tools/purecc.sh Makef
 	@mkdir -p $$(dir $$@)
 	tools/purecc.sh $$(CC) $$(TT_CFLAGS) '-DZENIX_TT_NAMES=$$(TT_NAMES_$(1))' -c $$< -o $$@
 $$(BUILD)/$(1).cpuelf: $$(TT_SRCS_$(1):%=$$(BUILD)/$(1)/%.o) $$(BUILD)/$(1)/zenix-dos.o $$(BUILD)/crt0-pure.o \
-                       $$(BUILD)/libtui-pure.a $$(BUILD)/libc-pure.a link/pure.ld
-	$$(CC) $$(LIBC_PFLAGS) $$(PULDFLAGS) $$(LIBC_LDFLAGS) $$(BUILD)/crt0-pure.o $$(TT_SRCS_$(1):%=$$(BUILD)/$(1)/%.o) \
+                       $$(BUILD)/libtui-pure.a $$(BUILD)/libc-pure.a link/pure.ld $$(BUILD)/zmain/$(1).o
+	$$(CC) $$(LIBC_PFLAGS) $$(PULDFLAGS) $$(LIBC_LDFLAGS) $$(BUILD)/zmain/$(1).o $$(BUILD)/crt0-pure.o $$(TT_SRCS_$(1):%=$$(BUILD)/$(1)/%.o) \
 	    $$(BUILD)/$(1)/zenix-dos.o $$(BUILD)/libtui-pure.a $$(BUILD)/libc-pure.a $$(LIBGCC) -o $$@
 $$(BUILD)/$(1).pzx: $$(BUILD)/$(1).cpuelf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$$(TOOLPREFIX) tools/check-68020-60.sh $$<
@@ -1087,8 +1113,8 @@ $(BUILD)/luaz/sndlib.o: $(BUILD)/luaz/sndlib.c $(LUAZ_HDRS)
 $(BUILD)/luaz/modrep.o: user/modrep.c user/modrep.h $(LIBC_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(LUAZ_CFLAGS) -c $< -o $@
-$(BUILD)/lua.celf: $(LUA_SRCS:%=$(BUILD)/lua/%.o) $(LUAZ_OBJS) $(BUILD)/crt0.o $(BUILD)/libc.a link/user.ld
-	$(CC) $(LIBC_PFLAGS) $(ULDFLAGS) $(LIBC_FLOATLD) -Wl,--wrap=luaL_openlibs $(BUILD)/crt0.o \
+$(BUILD)/lua.celf: $(LUA_SRCS:%=$(BUILD)/lua/%.o) $(LUAZ_OBJS) $(BUILD)/crt0.o $(BUILD)/libc.a link/user.ld $(BUILD)/zmainz/lua.o
+	$(CC) $(LIBC_PFLAGS) $(ULDFLAGS) $(LIBC_FLOATLD) -Wl,--wrap=luaL_openlibs $(call ZMAINZ_LD,lua) $(BUILD)/crt0.o \
 	    $(LUA_SRCS:%=$(BUILD)/lua/%.o) $(LUAZ_OBJS) $(BUILD)/libc.a $(LIBGCC) -o $@
 $(BUILD)/lua.zx: $(BUILD)/lua.celf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
@@ -1119,8 +1145,8 @@ MAKE_CFLAGS := $(LIBC_PFLAGS) -Wno-sign-compare -Wno-unused-parameter -Wno-impli
 $(BUILD)/make/%.o: ports/pdpmake/upstream/%.c $(LIBC_HDRS) $(wildcard ports/pdpmake/upstream/*.h) tools/purecc.sh Makefile
 	@mkdir -p $(dir $@)
 	tools/purecc.sh $(CC) $(MAKE_CFLAGS) -c $< -o $@
-$(BUILD)/make.cpuelf: $(MAKE_SRCS:%=$(BUILD)/make/%.o) $(BUILD)/crt0-pure.o $(BUILD)/libc-pure.a link/pure.ld
-	$(CC) $(LIBC_PFLAGS) $(PULDFLAGS) $(LIBC_LDFLAGS) $(BUILD)/crt0-pure.o $(MAKE_SRCS:%=$(BUILD)/make/%.o) \
+$(BUILD)/make.cpuelf: $(MAKE_SRCS:%=$(BUILD)/make/%.o) $(BUILD)/crt0-pure.o $(BUILD)/libc-pure.a link/pure.ld $(BUILD)/zmain/make.o
+	$(CC) $(LIBC_PFLAGS) $(PULDFLAGS) $(LIBC_LDFLAGS) $(call ZMAIN_LD,make) $(BUILD)/crt0-pure.o $(MAKE_SRCS:%=$(BUILD)/make/%.o) \
 	    $(BUILD)/libc-pure.a $(LIBGCC) -o $@
 $(BUILD)/make.pzx: $(BUILD)/make.cpuelf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
@@ -1144,9 +1170,9 @@ $(BUILD)/make-probe.zx: $(BUILD)/make-probe.cpuelf tools/mkzexe.py tools/check-6
 # ---- zld, the linker (roadmap block 7, DESIGN D52 section 5, docs/d52-self-hosting.md): ELF objects and archives
 # straight to a ZEXE or ZEX2 program, the same bytes as ld + tools/mkzexe.py (tools/zld-host-test.sh). Ours, written in
 # standard C, so the same file builds for the PC (the host test); on Zenix a C library program with shared code.
-$(BUILD)/zld/zld.o: user/zld.c $(LIBC_HDRS) tools/purecc.sh
+$(BUILD)/zld/zld.o: user/zld.c kernel/version.h $(LIBC_HDRS) tools/purecc.sh
 	@mkdir -p $(dir $@)
-	tools/purecc.sh $(CC) $(LIBC_PFLAGS) -c $< -o $@
+	tools/purecc.sh $(CC) $(LIBC_PFLAGS) -include kernel/version.h -c $< -o $@
 $(BUILD)/zld.cpuelf: $(BUILD)/zld/zld.o $(BUILD)/crt0-pure.o $(BUILD)/libc-pure.a link/pure.ld
 	$(CC) $(LIBC_PFLAGS) $(PULDFLAGS) $(LIBC_LDFLAGS) $(BUILD)/crt0-pure.o $(BUILD)/zld/zld.o $(BUILD)/libc-pure.a \
 	    $(LIBGCC) -o $@
@@ -1199,8 +1225,8 @@ TCC_CFLAGS := $(LIBC_PFLAGS) -DTCC_TARGET_M68K -DONE_SOURCE=1 -DTCC_STACK_LIMIT=
               -I$(TCC_SRC) -w
 $(BUILD)/tcc/tcc.o: $(TCC_DEPS) $(LIBC_HDRS)
 	$(CC) $(TCC_CFLAGS) -c $(TCC_SRC)/tcc.c -o $@
-$(BUILD)/tcc.celf: $(BUILD)/tcc/tcc.o $(BUILD)/crt0.o $(BUILD)/libc.a link/user.ld
-	$(CC) $(LIBC_PFLAGS) $(ULDFLAGS) $(LIBC_FLOATLD) $(BUILD)/crt0.o $(BUILD)/tcc/tcc.o $(BUILD)/libc.a $(LIBGCC) -o $@
+$(BUILD)/tcc.celf: $(BUILD)/tcc/tcc.o $(BUILD)/crt0.o $(BUILD)/libc.a link/user.ld $(BUILD)/zmainz/tcc.o
+	$(CC) $(LIBC_PFLAGS) $(ULDFLAGS) $(LIBC_FLOATLD) $(call ZMAINZ_LD,tcc) $(BUILD)/crt0.o $(BUILD)/tcc/tcc.o $(BUILD)/libc.a $(LIBGCC) -o $@
 $(BUILD)/tcc.zx: $(BUILD)/tcc.celf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ $(STACK_tcc)
@@ -1224,8 +1250,8 @@ FROTZ_HDRS := $(wildcard ports/frotz/upstream/src/*/*.h ports/frotz/zenix/*.h)
 $(BUILD)/frotz/%.o: ports/frotz/upstream/src/%.c $(FROTZ_HDRS) $(LIBC_HDRS) Makefile
 	@mkdir -p $(dir $@)
 	$(CC) $(FROTZ_CFLAGS) -c $< -o $@
-$(BUILD)/frotz.celf: $(FROTZ_SRCS:%=$(BUILD)/frotz/%.o) $(BUILD)/crt0.o $(BUILD)/libc.a link/user.ld
-	$(CC) $(LIBC_PFLAGS) $(ULDFLAGS) $(LIBC_FLOATLD) $(BUILD)/crt0.o $(FROTZ_SRCS:%=$(BUILD)/frotz/%.o) \
+$(BUILD)/frotz.celf: $(FROTZ_SRCS:%=$(BUILD)/frotz/%.o) $(BUILD)/crt0.o $(BUILD)/libc.a link/user.ld $(BUILD)/zmainz/frotz.o
+	$(CC) $(LIBC_PFLAGS) $(ULDFLAGS) $(LIBC_FLOATLD) $(call ZMAINZ_LD,frotz) $(BUILD)/crt0.o $(FROTZ_SRCS:%=$(BUILD)/frotz/%.o) \
 	    $(BUILD)/libc.a $(LIBGCC) -o $@
 $(BUILD)/frotz.zx: $(BUILD)/frotz.celf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
@@ -1291,7 +1317,7 @@ GAMESDATA := $(BUILD)/bg/fortunes.dat games/gridrun.lua games/words ports/frotz/
              ports/frotz/stories/README ports/bsdgames/LICENSE
 define BSDGAME_RULES
 $$(BUILD)/$(1).celf: $$(patsubst %,$$(BUILD)/bg/%.o,$$(or $$(BG_SRCS_$(1)),$(1)/$(1))) $$(BG_OBJS_$(1)) \
-                     $$(BUILD)/libzgames.a $$(BUILD)/crt0.o $$(BUILD)/libc.a link/user.ld
+                     $$(BUILD)/libzgames.a $$(BUILD)/crt0.o $$(BUILD)/libc.a link/user.ld $$(BUILD)/zmainz/$(1).o
 	$$(CC) $$(LIBC_PFLAGS) $$(ULDFLAGS) $$(if $$(filter $(1),$$(BG_FLOAT)),$$(LIBC_FLOATLD),$$(LIBC_LDFLAGS)) \
 	    $$(BUILD)/crt0.o $$(filter-out $$(BUILD)/crt0.o,$$(filter %.o,$$^)) $$(BUILD)/libzgames.a $$(BUILD)/libc.a $$(LIBGCC) -o $$@
 $$(BUILD)/$(1).zx: $$(BUILD)/$(1).celf tools/mkzexe.py tools/check-68020-60.sh
@@ -1308,7 +1334,7 @@ $(foreach g,$(BSDGAMES),$(eval $(call BSDGAME_RULES,$(g))))
 # upstream's compiled with one function each of Zenix's), linked with the text-UI library and the C library as a
 # program with shared code (ZEX2). /bin/ahiru (UAPPS). Each directory's objects in a folder of their own (fs/ops.c and
 # ahiru/src/ops.c, core/sums.c and fs/sums.c share names). ----
-AHIRU_UP := main ui preview ops fe keys more more2 filecol
+AHIRU_UP := main ui preview ops fe keys-k more more2 filecol
 AHIRU_CORE := core util arc zip adf adfw iso dms version rename sums
 AHIRU_ARC := arcread arclha arclzx       # Zenix's clean readers (DESIGN D33), the commands' own files
 AHIRU_FS := find place icon kind arcfs arcw keymap sync renames usercmd sums
@@ -1341,8 +1367,8 @@ $(BUILD)/ahiru/zenix-dos.o: ports/common/dos.c $(TT_HDRS) tools/purecc.sh Makefi
 $(BUILD)/ahiru/zenix-gui.o: ports/common/gui.c $(TT_HDRS) tools/purecc.sh
 	@mkdir -p $(dir $@)
 	tools/purecc.sh $(CC) $(TT_CFLAGS) -c $< -o $@
-$(BUILD)/ahiru.cpuelf: $(AHIRU_OBJS) $(BUILD)/crt0-pure.o $(BUILD)/libtui-pure.a $(BUILD)/libc-pure.a link/pure.ld
-	$(CC) $(LIBC_PFLAGS) $(PULDFLAGS) $(LIBC_LDFLAGS) $(BUILD)/crt0-pure.o $(AHIRU_OBJS) $(BUILD)/libtui-pure.a \
+$(BUILD)/ahiru.cpuelf: $(AHIRU_OBJS) $(BUILD)/crt0-pure.o $(BUILD)/libtui-pure.a $(BUILD)/libc-pure.a link/pure.ld $(BUILD)/zmain/ahiru.o
+	$(CC) $(LIBC_PFLAGS) $(PULDFLAGS) $(LIBC_LDFLAGS) $(call ZMAIN_LD,ahiru) $(BUILD)/crt0-pure.o $(AHIRU_OBJS) $(BUILD)/libtui-pure.a \
 	    $(BUILD)/libc-pure.a $(LIBGCC) -o $@
 $(BUILD)/ahiru.pzx: $(BUILD)/ahiru.cpuelf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
@@ -1355,7 +1381,7 @@ $(BUILD)/ahiru.zx: $(BUILD)/ahiru.pzx
 # (ports/common: dos.c with ctop's settings name) and ctop's own Zenix files (ports/ctop/zenix: the part of CUtils'
 # library it calls, cu.h and cu.c, and bsdsocket.library's base, sockbase.S), linked with the text-UI library and the
 # C library as a program with shared code (ZEX2). /bin/ctop (UAPPS). ----
-CTOP_OBJS := $(BUILD)/ctop/ctop.o $(BUILD)/ctop/cu.o $(BUILD)/ctop/sockbase.o $(BUILD)/ctop/zenix-dos.o
+CTOP_OBJS := $(BUILD)/ctop/ctop-k.o $(BUILD)/ctop/cu.o $(BUILD)/ctop/sockbase.o $(BUILD)/ctop/zenix-dos.o
 CTOP_HDRS := $(TT_HDRS) ports/ctop/zenix/cu.h
 # upstream calls bsdsocket.library itself (inline asm: the base in a6, registers named without %): the assembler is
 # told so, and nothing is inlined, so that no function holding those calls keeps its frame in a6 (this GCC's frame
@@ -1364,7 +1390,7 @@ CTOP_FIX := -Wa,--register-prefix-optional -fno-inline
 $(BUILD)/ctop/ctop.o: ports/ctop/upstream/src/ctop.c $(CTOP_HDRS) tools/purecc.sh Makefile
 	@mkdir -p $(dir $@)
 	tools/purecc.sh $(CC) $(TT_CFLAGS) -Iports/ctop/zenix -Wno-sign-compare -Wno-unused-parameter $(CTOP_FIX) -c $< -o $@
-$(BUILD)/ctop/cu.o: ports/ctop/zenix/cu.c $(CTOP_HDRS) user/usys.h kernel/netproto.h tools/purecc.sh
+$(BUILD)/ctop/cu.o: ports/ctop/zenix/cu.c ports/common/zmain.c $(CTOP_HDRS) user/usys.h kernel/netproto.h tools/purecc.sh
 	@mkdir -p $(dir $@)
 	tools/purecc.sh $(CC) $(TT_CFLAGS) -Iports/ctop/zenix -c $< -o $@
 $(BUILD)/ctop/sockbase.o: ports/ctop/zenix/sockbase.S | $(BUILD)
@@ -1389,7 +1415,7 @@ $(BUILD)/crt0.o: user/crt0.S | $(BUILD)
 # joined into one object (ld -r keeps every function's section, so --gc-sections still takes only what is called)
 $(BUILD)/libz-main.uo: user/libz.c user/libz.h user/zshare.h user/usys.h kernel/cwidth.h $(BUILD)/conwidth.h | $(BUILD)
 	$(CC) $(UCFLAGS) -I$(BUILD) -c $< -o $@
-$(LIBZ_SHARED:%=$(BUILD)/%.uo) $(LIBZ_SHARED:%=$(BUILD)/%.po): user/zshare.h user/zpw.h
+$(LIBZ_SHARED:%=$(BUILD)/%.uo) $(LIBZ_SHARED:%=$(BUILD)/%.po): user/zshare.h user/zpw.h user/zdate.h
 $(BUILD)/zsock.uo $(BUILD)/zsock.po: user/socket.h kernel/netproto.h
 $(BUILD)/libz.uo: $(BUILD)/libz-main.uo $(LIBZ_SHARED:%=$(BUILD)/%.uo)
 	$(CC) -m68020-60 -nostdlib -r $^ -o $@

@@ -4,6 +4,7 @@
  * ~/.config/zdesk/NAME wins over /etc/zdesk/NAME. A bad line is said on standard error with its file and number and
  * skipped; a missing file leaves the theme's or the built-in default. */
 #include "zdesk.h"
+#include "../keys.h"
 
 struct theme th;
 struct key keys[NKEY];
@@ -35,22 +36,12 @@ const char *conf_file(const char *name, char *buf)
     return buf;
 }
 
-/* the whole file into memory (at most 16 KB), or 0 */
+/* the whole file into memory (zslurp, libz: at most 16 KB; a longer one is refused, never cut), or 0 */
 static char *slurp(const char *path)
 {
-    int fd = sys_open(path, O_RDONLY);
-    if (fd < 0)
-        return 0;
-    char *b = malloc(16384);
-    int n = 0, r;
-    if (b)
-        while (n < 16383 && (r = sys_read(fd, b + n, (u32)(16383 - n))) > 0)
-            n += r;
-    sys_close(fd);
-    if (b)
-        b[n] = 0;
-    if (b && n == 16383)
-        dprintf(2, "zdesk: %s: longer than 16 KB: the rest is not read\n", path);
+    char *b = zslurp(path, 16384, 0);
+    if (!b && zerrno == EFBIG)
+        dprintf(2, "zdesk: %s: longer than 16 KB: not read\n", path);
     return b;
 }
 static char *next_line(char **p)
@@ -194,7 +185,23 @@ static int key_line(char **w, int n)
         return -1;
     u16 mask = GQ_LSHIFT | GQ_RSHIFT | GQ_CTRL | GQ_LALT | GQ_RALT | GQ_LAMIGA | GQ_RAMIGA, qual = 0;
     int shift = 0, code = -1;
-    for (char *s = w[0]; *s;) {
+    if (w[0][0] == '<') {               /* the one keys format's names (display/keys.h keys_mods): <A-Return>, <S-A-Left> */
+        char base[16];
+        const char *p = w[0];
+        int m = keys_mods(&p, base);
+        if (m < 0 || *p)
+            return -1;
+        qual = (m & KMOD_AMIGA ? GQ_LAMIGA : 0) | (m & KMOD_RAMIGA ? GQ_RAMIGA : 0) | (m & KMOD_CTRL ? GQ_CTRL : 0) |
+               (m & KMOD_ALT ? GQ_LALT : 0);
+        shift = (m & KMOD_SHIFT) != 0;
+        for (char *c = base; *c; c++)
+            *c = (char)tolower((unsigned char)*c);
+        if (!strcmp(base, "bs")) strcpy(base, "backspace");
+        for (u32 i = 0; i < sizeof keynames / sizeof keynames[0]; i++)
+            if (!strcmp(base, keynames[i].n)) code = keynames[i].c;
+        if (code < 0) return -1;
+    }
+    for (char *s = w[0]; *s && w[0][0] != '<';) {
         char *e = strchr(s, '+');
         if (e) *e = 0;
         if (!strcmp(s, "lamiga") || !strcmp(s, "amiga")) qual |= GQ_LAMIGA;

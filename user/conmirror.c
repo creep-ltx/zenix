@@ -5,12 +5,14 @@
  * copy off the screen never waits for the 115200-baud port; the kernel's own log still goes to the port. */
 static void say(const char *s) { sys_write(2, s, strlen(s)); }
 
+static const char USAGE[] = "usage: conmirror off|on\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int on = argc == 2 && !strcmp(argv[1], "on"), off = argc == 2 && !strcmp(argv[1], "off");
     if (!on && !off) {
-        say("usage: conmirror off|on\n");
-        return 2;
+        if (argc > 1 && argv[1][0] == '-') zbadopt(argv[1], USAGE);
+        zusage(USAGE);
     }
     int r = sys_ttymirror(on);
     if (r < 0) {

@@ -69,8 +69,10 @@ static void visit(const char *path, const char *name, int depth, const struct us
         if (do_delete && depth >= mindepth) sys_rmdir(path);
     }
 }
+static const char USAGE[] = "usage: find [path...] [expression]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int i = 1, np = 0; char **paths = argv + 1;
     for (; i < argc && argv[i][0] != '-' && argv[i][0] != '!'; i++) np++;
     static char *dot[] = { ".", 0 };

@@ -10,8 +10,8 @@
 # title (the path and the name under the cursor), the sizes, the status line (AmigaOS's protection letters, the free
 # space, the place in the list), the colours of directories, the highlight and links, the yank and cut tags, the
 # question, Sumi's screen, the archive's card and its member; and on the disk: the copy byte for byte with its mode kept, the move, the delete, the link
-# left as it was, the member unpacked with its date; the settings folder ($HOME/.config/Ahiru: the keys, the theme, the config, the places, mode 700) and
-# $HOME/.config/FileColours. A third start: a zip's member folder named ".." pasted is refused, nothing written
+# left as it was, the member unpacked with its date; the settings folder ($HOME/.config/ahiru: the keys, the theme, the config, the places, mode 700) and
+# $HOME/.config/filecolours. A third start: a zip's member folder named ".." pasted is refused, nothing written
 # outside the target (FA-11). The memory with Ahiru open is printed (free and ps). Every wait is for an event (the
 # grid, the shell's lines), none for a time.
 cd "$(dirname "$0")/.." || exit 1
@@ -89,11 +89,11 @@ check(re.search(r"^-rw-r----- 1 root root 12 .* one\.txt$", f, re.M) is not None
       "sub: the copy with its mode kept (640), the moved file, keep.txt and the link untouched", f[:600])
 check(re.search(r"^hello ahiru\nsecond file\nkept\n", f, re.M) is not None and re.search(r"^one\.txt$", f, re.M),
       "the copied and moved files byte for byte, the link's target", f[:700])
-check(re.search(r"^drwx------ .*\.config/Ahiru$", f, re.M) is not None and
-      all(re.search(r"^-rw-r--r-- .* Ahiru\.%s$" % n, f, re.M) for n in ("config", "keys", "places", "theme")) and
-      re.search(r"^-rw-r--r-- .* \S*\.config/FileColours$", f, re.M) is not None,
-      "the settings: $HOME/.config/Ahiru (this user's only) with the config, the keys, the places and the theme; "
-      "$HOME/.config/FileColours", f[:1200])
+check(re.search(r"^drwx------ .*\.config/ahiru$", f, re.M) is not None and
+      all(re.search(r"^-rw-r--r-- .* %s$" % n, f, re.M) for n in ("config", "keys", "places", "theme")) and
+      re.search(r"^-rw-r--r-- .* \S*\.config/filecolours$", f, re.M) is not None,
+      "the settings: $HOME/.config/ahiru (this user's only) with the config, the keys, the places and the theme; "
+      "$HOME/.config/filecolours", f[:1200])
 # FA-11 (B3-6): a zip whose member is "../esc.txt" (a folder named ".." at its top): picked and pasted into /tmp/y/t,
 # it would land in /tmp/y; the paste is refused with a message and nothing is written
 y = [rows(part("y%d" % i, "y%d" % (i + 1))) for i in range(2)] + [rows(part("y2", "yfile"))]

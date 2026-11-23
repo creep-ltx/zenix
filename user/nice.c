@@ -12,14 +12,16 @@ static int num(const char *s, int *out)
     return 1;
 }
 
+static const char USAGE[] = "usage: nice [-n N] [command [argument...]]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int i = 1, inc = 10;
     if (i < argc && !strcmp(argv[i], "-n")) {
         if (i + 1 >= argc || !num(argv[i + 1], &inc)) { dprintf(2, "nice: -n needs a number\n"); return 125; }
         i += 2;
     } else if (i < argc && argv[i][0] == '-' && argv[i][1] && strcmp(argv[i], "--")) {
-        if (!num(argv[i] + 1, &inc)) { dprintf(2, "usage: nice [-n N] [command [argument...]]\n"); return 125; }
+        if (!num(argv[i] + 1, &inc)) zbadopt(argv[i], USAGE);
         i++;
     }
     if (i < argc && !strcmp(argv[i], "--")) i++;

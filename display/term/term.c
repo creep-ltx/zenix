@@ -263,8 +263,10 @@ static void menu(const struct dpyev *e)
         quit_menu_new = 2;              /* Window: Close */
 }
 
+static const char USAGE[] = "usage: term [-H] [-r ROWS] [-c COLUMNS] [-p X,Y] [-e COMMAND [ARGUMENTS]]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     char **cmd = 0;
     int px = -1, py = -1, hold = 0;
     for (int i = 1; i < argc; i++) {
@@ -277,8 +279,8 @@ int main(int argc, char **argv)
             if (px < 0 || py < 0) px = py = -1;
             continue;
         }
-        dprintf(2, "usage: term [-H] [-r ROWS] [-c COLUMNS] [-p X,Y] [-e COMMAND [ARGUMENTS]]\n");
-        return 2;
+        if (argv[i][0] == '-') zbadopt(argv[i], USAGE);
+        zusage(USAGE);
     }
     if (cols < 20) cols = 20;
     if (cols > 80) cols = 80;

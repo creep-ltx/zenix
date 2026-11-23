@@ -11,7 +11,8 @@
  * a timestamp in /var/run/sudo (root's, mode 700) per user and parent shell, holding the wall clock and the
  * seconds since boot; both must agree, so a restart or a moved clock ends it. sudo -k forgets it. */
 
-static int usage(void) { dprintf(2, "usage: sudo [-k] [-u user] command [arg...]\n       sudo [-u user] -s | -i\n       sudo -k\n"); return 2; }
+static const char USAGE[] = "usage: sudo [-k] [-u user] command [arg...]\n       sudo [-u user] -s | -i\n       sudo -k\n";
+static int usage(void) { zusage(USAGE); }
 
 #define STAMP_DIR "/var/run/sudo"
 #define STAMP_SECS 300
@@ -95,6 +96,7 @@ static int in_wheel(void) { return in_group_named("wheel"); }
 
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *target = "root";
     int shell = 0, home = 0, i = 1;
     for (; i < argc && argv[i][0] == '-'; i++) {
@@ -103,7 +105,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-i")) shell = home = 1;
         else if (!strcmp(argv[i], "-k")) { stamp_forget(sys_getuid()); if (i + 1 >= argc) return 0; }
         else if (!strcmp(argv[i], "--")) { i++; break; }
-        else return usage();
+        else zbadopt(argv[i], USAGE);
     }
     if (shell ? i < argc : i >= argc) return usage();
     u32 ruid = sys_getuid();

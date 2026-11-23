@@ -8,15 +8,12 @@ static int weekday(int y, int m, int d)               /* 0 = Sunday */
     if (m < 3) y--;
     return (y + y / 4 - y / 100 + y / 400 + t[m - 1] + d) % 7;
 }
-static void civil(u32 secs, int *y, int *m, int *d)
-{
-    u32 z = secs / 86400 + 719468, era = z / 146097, doe = z - era * 146097;
-    u32 yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365, doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
-    *d = (int)(doy - (153 * mp + 2) / 5 + 1); *m = (int)(mp < 10 ? mp + 3 : mp - 9); *y = (int)(yoe + era * 400 + (*m <= 2));
-}
+static const char USAGE[] = "usage: cal [[month] year]\n";
 int main(int argc, char **argv)
 {
-    int ty, tm, td; civil(sys_time(), &ty, &tm, &td);
+    zopt(argc, argv, USAGE);
+    if (argc > 1 && argv[1][0] == '-') zbadopt(argv[1], USAGE);
+    struct zdt z; zdate(sys_time(), &z); int ty = z.year, tm = z.mon, td = z.day;
     int y = ty, m = tm, hl = sys_isatty(1);
     if (argc == 2) y = atoi(argv[1]), m = 0;
     else if (argc >= 3) { m = atoi(argv[1]); y = atoi(argv[2]); }

@@ -107,10 +107,7 @@ static u32 iso_time(const u8 *t)
 {
     int y = 1900 + t[0], mo = t[1], d = t[2];
     if (y < 1970 || y > 2105 || mo < 1 || mo > 12 || d < 1 || d > 31 || t[3] > 23 || t[4] > 59 || t[5] > 60) return 0;
-    y -= mo <= 2;
-    int yoe = y % 400, era = y / 400;
-    int doy = (153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1;
-    int days = era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
+    int days = (int)zdays(y, mo, d);
     u32 v = (u32)days * 86400u + t[3] * 3600u + t[4] * 60u + t[5], z = (u32)((signed char)t[6] * 900);
     return (signed char)t[6] > 0 && v < z ? 0 : v - z;
 }

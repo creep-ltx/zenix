@@ -1,9 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 
+static const char USAGE[] = "usage: input\n       input -w SECONDS\n";
 /* input: show the mouse (port 1) and joystick (port 2) state; -w SECONDS watches and prints each change */
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
+    if (argc > 1 && strcmp(argv[1], "-w")) { if (argv[1][0] == '-') zbadopt(argv[1], USAGE); zusage(USAGE); }
     int secs = (argc > 2 && !strcmp(argv[1], "-w")) ? atoi(argv[2]) : 0;
     int last[4] = { 0, 0, -1, -1 };
     u32 end = sys_ticks() + (u32)secs * 100;

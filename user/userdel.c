@@ -35,15 +35,18 @@ static int rewrite(const char *file, const char *name, int group, int *found)
     return pw_replace("userdel", file, nf, o, 0644);
 }
 
+static const char USAGE[] = "usage: userdel [-r] name\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int rmhome = 0; const char *name = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-r")) rmhome = 1;
-        else if (argv[i][0] == '-' || name) { dprintf(2, "usage: userdel [-r] name\n"); return 2; }
+        else if (argv[i][0] == '-') zbadopt(argv[i], USAGE);
+        else if (name) zusage(USAGE);
         else name = argv[i];
     }
-    if (!name) { dprintf(2, "usage: userdel [-r] name\n"); return 2; }
+    if (!name) zusage(USAGE);
     if (sys_getuid() != 0) { dprintf(2, "userdel: only root may remove users\n"); return 1; }
     struct pw p;
     if (pw_byname(name, &p)) { dprintf(2, "userdel: %s: no such user\n", name); return 1; }

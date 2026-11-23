@@ -26,10 +26,12 @@ static u32 walk(const char *path, int top)
     } else if (o_a && !o_s) show(kb, path);
     return kb;
 }
+static const char USAGE[] = "usage: du [-sahk] [path...]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int i = 1;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) for (const char *p = argv[i] + 1; *p; p++) { if (*p == 's') o_s = 1; else if (*p == 'a') o_a = 1; else if (*p == 'h') o_h = 1; else if (*p != 'k') { dprintf(2, "du: unknown option -%c\n", *p); return 2; } }
+    for (; zisopt(argc, argv, &i, USAGE); i++) for (const char *p = argv[i] + 1; *p; p++) { if (*p == 's') o_s = 1; else if (*p == 'a') o_a = 1; else if (*p == 'h') o_h = 1; else if (*p != 'k') { zbadch(*p, USAGE); } }
     if (i >= argc) walk(".", 1); else for (; i < argc; i++) walk(argv[i], 1);
     return rc;
 }

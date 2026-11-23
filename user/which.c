@@ -1,8 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
+static const char USAGE[] = "usage: which name...\n";
 /* which name...: where a program is found in $PATH */
 int main(int argc, char **argv)
 {
+    zoperands(&argc, &argv, USAGE);
     int rc = 0; const char *path = getenv("PATH"); if (!path) path = "/bin";
     for (int i = 1; i < argc; i++) {
         int found = 0; const char *p = path; char buf[ZPATH_MAX]; struct ustat st;

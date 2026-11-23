@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
+static const char USAGE[] = "usage: yes [string]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     char line[256]; u32 n = 0;
     const char *s = argc > 1 ? argv[1] : "y";
     while (*s && n < 250) line[n++] = *s++;

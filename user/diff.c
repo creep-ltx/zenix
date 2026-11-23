@@ -191,15 +191,16 @@ static int diff_dirs(const char *d1, const char *d2)
     return rc;
 }
 
+static const char USAGE[] = "usage: diff [-uqiwr] [-U N] file1 file2\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int i = 1;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
-        if (!strcmp(argv[i], "--")) { i++; break; }
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         if (argv[i][1] == 'U') { o_u = 1; o_ctx = atoi(argv[i][2] ? argv[i] + 2 : (i + 1 < argc ? argv[++i] : "3")); continue; }
-        for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'u') o_u = 1; else if (*p == 'q') o_q = 1; else if (*p == 'i') o_i = 1; else if (*p == 'w') o_w = 1; else if (*p == 'r') o_r = 1; else { dprintf(2, "diff: unknown option -%c\n", *p); return 2; } }
+        for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'u') o_u = 1; else if (*p == 'q') o_q = 1; else if (*p == 'i') o_i = 1; else if (*p == 'w') o_w = 1; else if (*p == 'r') o_r = 1; else zbadch(*p, USAGE); }
     }
-    if (argc - i != 2) { dprintf(2, "usage: diff [-uqiwr] [-U N] file1 file2\n"); return 2; }
+    if (argc - i != 2) zusage(USAGE);
     struct ustat s1, s2;
     int e1 = sys_stat(argv[i], &s1), e2 = sys_stat(argv[i + 1], &s2);
     if (e1 == 0 && e2 == 0 && (s1.mode & S_IFMT) == S_IFDIR && (s2.mode & S_IFMT) == S_IFDIR) { int rc = diff_dirs(argv[i], argv[i + 1]); oflush(); return rc; }

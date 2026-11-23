@@ -796,7 +796,7 @@ Section 9's rule 1 for the first time on a whole program; the files, the choices
   (`libtui-pure.a`, new here, as the library's "as built" planned). 93,752 bytes: 83,392 shared, 5,488 data,
   31,564 bytes of data and BSS per process (the 16 KB stack apart); the library's part of the code 11.4 KB.
   Stack: `STACK_DEFAULT`, measured (`ports/sumi/README`).
-- **Settings:** upstream's `ENVARC:Sumi` is `$HOME/.config/Sumi` (the keys, the settings, where each file was left);
+- **Settings:** upstream's `ENVARC:Sumi` is `$HOME/.config/sumi` (`keys`, `prefs`, `places`; lowercase, one folder a program since the audit 2026-11-23 OS-29, the old names moved once);
   `ENV:` has no copy on Zenix. Decided here with the others the README lists (no shared clipboard, `run` through
   `sh`, the mode and root's owner kept on save), for the main session to confirm.
 - **Memory (FS-UAE, the stock A1200, 80 x 32, one file open):** Sumi owns 194 KB and shares 81 KB of code (`ps`):
@@ -809,7 +809,7 @@ Section 9's rule 1 for the first time on a whole program; the files, the choices
 
 ## Main session, 2026-10-29: Sumi merged
 
-- The port's choices are accepted as built (settings in `$HOME/.config/Sumi`, `ENV:Sumi` no file, `T:` as `/tmp`, the
+- The port's choices are accepted as built (settings in `$HOME/.config/sumi`, `ENV:Sumi` no file, `T:` as `/tmp`, the
   Unix mode kept on save, no clipboard between programs, `run` through sh).
 - **Shift+Tab** sends `ESC [ Z` in raw mode, as xterm and Linux's console do: a small keyboard change, next job.
 - **Memory:** 194 KB per Sumi on the stock A1200 is too much; the causes are upstream's (the text-UI library's 16-byte

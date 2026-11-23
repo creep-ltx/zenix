@@ -15,12 +15,15 @@ static void addr(char *b, u32 a, unsigned port, int star)
     else snprintf(b, 24, "%s:%u", inet_ntoa(in), port);
 }
 
+static const char USAGE[] = "usage: netstat [-tuwlan]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int t = 0, u = 0, w = 0, l = 0, a = 0;
     for (int i = 1; i < argc; i++) {
         const char *p = argv[i];
-        if (*p != '-' || !p[1]) goto usage;
+        if (*p != '-' || !p[1]) zusage(USAGE);
+        if (p[1] == '-') zbadopt(p, USAGE);
         while (*++p)
             switch (*p) {
             case 't': t = 1; break;
@@ -29,7 +32,7 @@ int main(int argc, char **argv)
             case 'l': l = 1; break;
             case 'a': a = 1; break;
             case 'n': break;
-            default: goto usage;
+            default: zbadch(*p, USAGE);
             }
     }
     if (!t && !u && !w) t = u = w = 1;
@@ -68,7 +71,4 @@ int main(int argc, char **argv)
     }
     if (n == MAXROWS) oprintf("netstat: only the first %d shown\n", MAXROWS);
     return 0;
-usage:
-    dprintf(2, "usage: netstat [-tuwlan]\n");
-    return 2;
 }

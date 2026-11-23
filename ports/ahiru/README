@@ -45,8 +45,9 @@ zenix/     Zenix's own files (GPL-2.0-only):
            compiled and only the Zenix wrapper is called, as ports/tui/zenix/core.c does)
 
 The AmigaOS layer is ports/common (shared with Sumi, Maki and Markdown, no copy): dos.c compiled with the names Ahiru
-maps ("Ahiru": PROGDIR:Ahiru.keys, .theme, .config, .places, .marks as $HOME/.config/Ahiru/Ahiru.*, the folder made
-mode 700; "FileColours": ENVARC:FileColours as $HOME/.config/FileColours, Maki's), and gui.c, the screen calls,
+maps ("Ahiru": PROGDIR:Ahiru.keys, .theme, .config, .places, .marks as $HOME/.config/ahiru/keys, theme, config,
+places, marks, the folder made mode 700; "FileColours": ENVARC:FileColours as $HOME/.config/filecolours, Maki's; the
+old places, $HOME/.config/Ahiru/Ahiru.* and FileColours, moved once), and gui.c, the screen calls,
 which never open. What each call does is in ports/common/README; the ones Ahiru is the first to need: more places
 (SYS: as /, T: and RAM: as /tmp/T-UID, NIL: as /dev/null), locks with absolute paths and NameFromLock resolving soft
 links, ParentDir, CurrentDir, Info, DateStamp from 1978 (AmigaOS's, which the core counts in) and SetFileDate,

@@ -382,12 +382,15 @@ static void music(void)
     }
 }
 
+static const char USAGE[] = "usage: zintro [-v] [-q]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-v")) verbose = 1;
         else if (!strcmp(argv[i], "-q")) nosound = 1;
-        else { dprintf(2, "usage: zintro [-v] [-q]\n"); return 2; }
+        else if (argv[i][0] == '-') zbadopt(argv[i], USAGE);
+        else zusage(USAGE);
     }
     int r = dpy_open("zintro");
     if (r < 0) {

@@ -321,8 +321,10 @@ static void shell(void)
            "the master's close: the shell ended by SIGHUP (%d), its job %d ended too", st, job);
 }
 
+static const char USAGE[] = "usage: ptytest\n       ptytest size\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     strncpy(self, argv[0], sizeof self - 1);
     if (argc > 1 && argv[1][0] == '_') {
         if (!strcmp(argv[1], "_talk")) return child_talk();

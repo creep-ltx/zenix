@@ -33,7 +33,7 @@ Found in upstream (for the owner's repository, not changed here):
   0.5b1): since 0.2b7 the places table and the prompts' history hold each entry at its length, and since tui.library
   0.5b3 a cell is 6 bytes (two grids 31 KB, were 80 KB).
 - Messages and help keep AmigaOS words: "Protect it +wd first", "an AmigaDOS command", "ENVARC:Sumi/Sumi.keys" in
-  "does nothing"; on Zenix they mean chmod, a shell command and $HOME/.config/Sumi. A word from the OS layer
+  "does nothing"; on Zenix they mean chmod, a shell command and $HOME/.config/sumi/keys. A word from the OS layer
   (upstream's own small header) would make them right on both.
 - Shift+Tab (unindent) needs the terminal to send ESC [ Z; Zenix's console sent a plain Tab for it (a console matter,
   not upstream's): fixed in the keyboard (kernel/kbd.c, 2026-10-29), checked by tools/sumi-test.sh.

@@ -1,35 +1,37 @@
 # zdesk's keys (DESIGN D38 step 5; docs/man/zdesk.txt "KEYS"). A user's ~/.config/zdesk/keys replaces this file.
-# KEYS ACTION [ARGUMENTS]: KEYS are modifiers (lamiga, ramiga, shift, ctrl, alt) and one key joined by "+".
+# KEYS ACTION [ARGUMENTS]: KEYS in the one keys format's names (display/keys.h): <A-x> the left Amiga key with x,
+# <RA-x> the right one, <S-x> Shift, <C-x> Ctrl, <M-x> Alt, joined as <S-A-Left>. The older "lamiga+shift+left" is
+# still read.
 # Amiga+F1..F10 stay the console switches and cannot be used here.
-lamiga+return       terminal
-lamiga+q            close
-lamiga+m            minimise
-lamiga+z            zoom
-lamiga+tab          next
-lamiga+space        menu
-lamiga+left         move -8 0
-lamiga+right        move 8 0
-lamiga+up           move 0 -8
-lamiga+down         move 0 8
-lamiga+shift+left   resize -8 0
-lamiga+shift+right  resize 8 0
-lamiga+shift+up     resize 0 -8
-lamiga+shift+down   resize 0 8
-lamiga+1            workspace 1
-lamiga+2            workspace 2
-lamiga+3            workspace 3
-lamiga+4            workspace 4
-lamiga+5            workspace 5
-lamiga+6            workspace 6
-lamiga+7            workspace 7
-lamiga+8            workspace 8
-lamiga+9            workspace 9
-lamiga+shift+1      sendto 1
-lamiga+shift+2      sendto 2
-lamiga+shift+3      sendto 3
-lamiga+shift+4      sendto 4
-lamiga+shift+5      sendto 5
-lamiga+shift+6      sendto 6
-lamiga+shift+7      sendto 7
-lamiga+shift+8      sendto 8
-lamiga+shift+9      sendto 9
+<A-Return>          terminal
+<A-q>               close
+<A-m>               minimise
+<A-z>               zoom
+<A-Tab>             next
+<A-Space>           menu
+<A-Left>            move -8 0
+<A-Right>           move 8 0
+<A-Up>              move 0 -8
+<A-Down>            move 0 8
+<S-A-Left>          resize -8 0
+<S-A-Right>         resize 8 0
+<S-A-Up>            resize 0 -8
+<S-A-Down>          resize 0 8
+<A-1>               workspace 1
+<A-2>               workspace 2
+<A-3>               workspace 3
+<A-4>               workspace 4
+<A-5>               workspace 5
+<A-6>               workspace 6
+<A-7>               workspace 7
+<A-8>               workspace 8
+<A-9>               workspace 9
+<S-A-1>             sendto 1
+<S-A-2>             sendto 2
+<S-A-3>             sendto 3
+<S-A-4>             sendto 4
+<S-A-5>             sendto 5
+<S-A-6>             sendto 6
+<S-A-7>             sendto 7
+<S-A-8>             sendto 8
+<S-A-9>             sendto 9

@@ -633,16 +633,19 @@ static int mark_clean(void)
     return 0;
 }
 
+static const char USAGE[] = "usage: fsck.ext2 [-y] [-n] device\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *dev = 0;
     int want_fix = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-y")) want_fix = 1;
         else if (!strcmp(argv[i], "-n")) want_fix = 0;
+        else if (argv[i][0] == '-') zbadopt(argv[i], USAGE);
         else dev = argv[i];
     }
-    if (!dev) { dprintf(2, "usage: fsck.ext2 [-y] [-n] device\n"); return 2; }
+    if (!dev) zusage(USAGE);
     port = sys_port_find("disk");
     if (port < 0) { dprintf(1, "fsck.ext2: no disk server\n"); return 8; }
     struct umsg m;

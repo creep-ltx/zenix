@@ -37,8 +37,8 @@ zenix/     Zenix's own files (GPL-2.0-only):
 The AmigaOS layer (ports/common) gained what ctop is the first to need (amigados.h's last part, ports/common/README):
 AvailMem(MEMF_TOTAL) from the kernel's boot log ("mem: N KB chip, M KB fast free"), SysBase->AttnFlags from its CPU
 line, timer.device and ReadEClock (the 100 Hz tick, rate 100), a Unix path with a colon after it as that path ("/:" is
-/: ctop names a volume so), BADDR of an address (not a handle) as that address, ENVARC:NAME making $HOME/.config
-first, the exec and utility names (struct TagItem, struct DosList, AFF_*, SIGBREAKF_CTRL_D-F, stricmp, FilePart ...).
+/: ctop names a volume so), BADDR of an address (not a handle) as that address, ENVARC:ctop.keys as $HOME/.config/ctop/keys (its folder made
+first; the old $HOME/.config/ctop.keys moved there once), the exec and utility names (struct TagItem, struct DosList, AFF_*, SIGBREAKF_CTRL_D-F, stricmp, FilePart ...).
 
 Decided here (conservatively; for the main session to confirm):
 - What Zenix cannot tell stays "not known" in ctop's own way, nothing invented: how busy the processor is and each

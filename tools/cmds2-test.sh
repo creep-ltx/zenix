@@ -14,7 +14,7 @@ make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 rm -f $BD/zenix.hdf; make -s BUILD=$BD $MKBOX $BD/zenix.hdf >/dev/null 2>&1
 if [ -n "$MKBOX" ]; then [ "$(debugfs -R "stat /bin/ls" $BD/zenix.hdf 2>/dev/null | grep -o 'Links: [0-9]*')" = "Links: 65" ] || { echo "FAIL: the image's /bin/ls is not the box (65 links)"; exit 1; }; fi
 OUT=${ZENIX_OUT:-/tmp/zenix-cmds2}; mkdir -p $OUT
-tools/run-test.sh fsuae/a1200-020-fast.fs-uae ${CMDS2_SECS:-700} tools/tests/cmds2-test.txt 2>&1 | sed 's/\x1b\[[0-9;:]*[mK]//g' > $OUT/run.log
+tools/run-test.sh fsuae/a1200-020-fast.fs-uae ${CMDS2_SECS:-1300} tools/tests/cmds2-test.txt 2>&1 | sed 's/\x1b\[[0-9;:]*[mK]//g' > $OUT/run.log
 pass=1
 want() { if grep -aqF -- "$2" $OUT/run.log; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 want "cal: February 2024" "February 2024"

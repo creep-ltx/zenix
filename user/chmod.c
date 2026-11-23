@@ -25,9 +25,11 @@ static int apply(const char *spec, unsigned cur, unsigned *out, int isdir)
     }
     *out = mode; return 1;
 }
+static const char USAGE[] = "usage: chmod MODE file...\n";
 int main(int argc, char **argv)
 {
-    if (argc < 3) { dprintf(2, "usage: chmod MODE file...\n"); return 2; }
+    zopt(argc, argv, USAGE);
+    if (argc < 3) zusage(USAGE);
     int rc = 0;
     for (int i = 2; i < argc; i++) {
         struct ustat st;

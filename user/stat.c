@@ -1,8 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
+static const char USAGE[] = "usage: stat file...\n";
 /* stat file...: inode, mode, links, size, time */
 int main(int argc, char **argv)
 {
+    zoperands(&argc, &argv, USAGE);
     int rc = 0;
     for (int i = 1; i < argc; i++) {
         struct ustat st;

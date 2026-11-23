@@ -311,30 +311,18 @@ static void sizestr(u32 s, char *o)
     else
         snprintf(o, 8, "%u%c", v, u[k - 1]);
 }
-static int leap(int y) { return (y % 4 == 0 && y % 100) || y % 400 == 0; }
 /* as ls -l: "Nov 13 02:47", or "Nov 13  2025" more than half a year from now */
 static void datestr(u32 t, char *o)
 {
     static const char mon[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
-    static const u8 ml[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-    u32 now = sys_time(), days = t / 86400, rem = t % 86400;
-    int y = 1970, m = 0;
-    for (;;) {
-        u32 yl = leap(y) ? 366 : 365;
-        if (days < yl) break;
-        days -= yl;
-        y++;
-    }
-    for (; m < 11; m++) {
-        u32 l = ml[m] + (m == 1 && leap(y));
-        if (days < l) break;
-        days -= l;
-    }
+    u32 now = sys_time();
+    struct zdt z;
+    zdate(t, &z);
     int old = t + 183u * 86400 < now || t > now + 86400;
     if (old)
-        snprintf(o, 16, "%.3s %2u  %d", mon + m * 3, days + 1, y);
+        snprintf(o, 16, "%.3s %2d  %d", mon + (z.mon - 1) * 3, z.day, z.year);
     else
-        snprintf(o, 16, "%.3s %2u %02u:%02u", mon + m * 3, days + 1, rem / 3600, rem / 60 % 60);
+        snprintf(o, 16, "%.3s %2d %02d:%02d", mon + (z.mon - 1) * 3, z.day, z.hour, z.min);
 }
 
 /* ================================================================ the layout */
@@ -428,7 +416,9 @@ static void draw_head(void)
 enum { M_LIST, M_ASK, M_LINE, M_HELP };
 static int mode, askwhat;               /* askwhat: what a yes is for ('p' paste, 'd' delete, 'r' run) */
 static char ed[ZPATH_MAX], edp[48];     /* the line typed and its prompt */
-static int edlen, edpos;
+static struct zled FE = { ed, 0, 0, sizeof ed };   /* the typed line: libz's line editor */
+#define edlen FE.n
+#define edpos FE.pos
 static void draw_status(void)
 {
     int bl = 0, y = rows - 1, curc = -1;
@@ -1165,36 +1155,23 @@ static void line_done(void)
     else
         list_free(&keep);
 }
-static void line_key(const struct dpyev *e)
+static void line_key(const struct dpyev *e)        /* libz's line editor: the keys every typed line has */
 {
-    int c = e->code;
+    int c = e->code, sh = (e->qual & (GQ_LSHIFT | GQ_RSHIFT)) != 0, k = 0;
     if (c == 0x44 || c == 0x43) { line_done(); return; }
     if (c == 0x45) { mode = M_LIST; msg[0] = 0; }
-    else if (c == 0x4F) {               /* Left (Shift: the start) */
-        if (e->qual & (GQ_LSHIFT | GQ_RSHIFT)) edpos = 0;
-        else while (edpos > 0 && (((u8)ed[--edpos]) & 0xC0) == 0x80);
-    } else if (c == 0x4E) {
-        if (e->qual & (GQ_LSHIFT | GQ_RSHIFT)) edpos = edlen;
-        else if (edpos < edlen) for (edpos++; edpos < edlen && (((u8)ed[edpos]) & 0xC0) == 0x80; edpos++);
-    } else if (c == 0x41) {             /* Backspace */
-        int s = edpos;
-        while (s > 0 && (((u8)ed[--s]) & 0xC0) == 0x80);
-        memmove(ed + s, ed + edpos, (u32)(edlen - edpos));
-        edlen -= edpos - s;
-        edpos = s;
-    } else if (c == 0x46) {             /* Del */
-        int t = edpos;
-        if (t < edlen) for (t++; t < edlen && (((u8)ed[t]) & 0xC0) == 0x80; t++);
-        memmove(ed + edpos, ed + t, (u32)(edlen - t));
-        edlen -= t - edpos;
-    } else if ((u8)e->ch[0] >= 32 && e->ch[0] != 127) {
-        int n = 1;
-        while (n < 4 && e->ch[n] && ((u8)e->ch[n] & 0xC0) == 0x80) n++;
-        if (edlen + n < (int)sizeof ed - 1) {
-            memmove(ed + edpos + n, ed + edpos, (u32)(edlen - edpos));
-            memcpy(ed + edpos, e->ch, (u32)n);
-            edlen += n;
-            edpos += n;
+    else {
+        if (c == 0x4F) k = sh ? 1 : ZK_LEFT;           /* Left (Shift: the start) */
+        else if (c == 0x4E) k = sh ? 5 : ZK_RIGHT;     /* Right (Shift: the end) */
+        else if (c == 0x41) k = 127;                    /* Backspace */
+        else if (c == 0x46) k = 4;                      /* Del */
+        else if (e->ch[0] && (u8)e->ch[0] < 32) k = (u8)e->ch[0];   /* Ctrl-A, -E, -K, -U, -W, -T */
+        if (k && (k != 4 || edlen))
+            zled_key(&FE, k);
+        else if ((u8)e->ch[0] >= 32 && e->ch[0] != 127) {
+            int n = 1;
+            while (n < 4 && e->ch[n] && ((u8)e->ch[n] & 0xC0) == 0x80) n++;
+            zled_insert(&FE, (const char *)e->ch, n);
         }
     }
     draw_status();
@@ -1241,17 +1218,16 @@ static const char *const actdesc[NACT] = {
     "rename, at the end", "rename, at the start", "make a folder", "search names", "next match", "previous match",
     "sort by", "show/hide hidden names", "go to", "a shell here (a terminal)", "read again", "these keys", "quit" };
 static const char defaults[] =
-    "; files - the file view of Zenix Desktop: the keys (man files). Edit freely; files reads this at start.\n"
-    ";\n"
-    "; One key a line: KEYS ACTION [ARGUMENT]. KEYS are typed characters, or\n"
-    "; names in <>: <Up> <Down> <Left> <Right>, <S-Up> (Shift) ..., <C-d> (Ctrl),\n"
-    "; <Return> <Esc> <Tab> <Space> <Del> <BS> <Help> <F1> .. <F10>.\n"
-    "; Two keys in a row make a prefix: the first shows what can follow.\n"
-    "; ACTION none takes a key away. The format is Ahiru.keys's.\n"
-    ";\n"
-    "; sort takes name, size, time or ext, and \"reverse\" after it, or flip;\n"
-    "; go takes a path, or root or home.\n"
-    "\n[main]\n"
+    "# files - the file view of Zenix Desktop: the keys (man files). Edit freely; files reads this at start.\n"
+    "#\n"
+    "# One key a line: KEYS ACTION [ARGUMENT]. KEYS are typed characters, or\n"
+    "# names in <>: <Up> <Down> <Left> <Right>, <S-Up> (Shift) ..., <C-d> (Ctrl),\n"
+    "# <Return> <Esc> <Tab> <Space> <Del> <BS> <Help> <F1> .. <F10>.\n"
+    "# Two keys in a row make a prefix: the first shows what can follow.\n"
+    "# ACTION none takes a key away. The format is Ahiru.keys's.\n"
+    "#\n"
+    "# sort takes name, size, time or ext, and \"reverse\" after it, or flip;\n"
+    "# go takes a path, or root or home.\n"
     "j down\n<Down> down\nk up\n<Up> up\n"
     "J halfdown\n<C-d> halfdown\nK halfup\n<C-u> halfup\n"
     "<S-Down> pagedown\n<C-f> pagedown\n<S-Up> pageup\n<C-b> pageup\n"
@@ -1269,7 +1245,7 @@ static const char defaults[] =
     "zh togglehidden\n"
     "g/ go root\ngh go home\ngt go /tmp\n"
     "S newshell\nR reload\n<F5> reload\n"
-    "? help\n<Help> help\nq quit\n";
+    "? help\n<F1> help\n<Help> help\nq quit\n";
 
 #define MAXB 160
 static struct kbind kb[MAXB];
@@ -1562,13 +1538,17 @@ static int handle(struct dpyev *e)
     return quit;
 }
 
+static const char USAGE[] = "usage: files [-v] [FOLDER]\n       files -K\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *start = 0;
     for (int i = 1; i < argc; i++)
         if (!strcmp(argv[i], "-v")) verbose = 1;
+        else if (!strcmp(argv[i], "-K")) { sys_write(1, defaults, sizeof defaults - 1); return 0; }   /* the built-in keys */
         else if (argv[i][0] != '-' && !start) start = argv[i];
-        else { dprintf(2, "usage: files [-v] [FOLDER]\n"); return 2; }
+        else if (argv[i][0] == '-') zbadopt(argv[i], USAGE);
+        else zusage(USAGE);
     char dir[ZPATH_MAX];
     if (zrealpath(start ? start : ".", dir, sizeof dir) < 0) {
         dprintf(2, "files: %s: %s\n", start ? start : ".", zwhy("cannot resolve"));

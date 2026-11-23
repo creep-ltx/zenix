@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "pw.h"
+static const char USAGE[] = "usage: id [user]\n";
 /* id [user]: uid, gid and groups. Without a user: the process's own ids and the supplementary groups the kernel
  * holds (SYS_groups); with one: what /etc/passwd and /etc/group give that user (what login would set) */
 int main(int argc, char **argv)
 {
+    zoperands(&argc, &argv, USAGE);
     u32 uid = (u32)sys_getuid(), gid = (u32)sys_getgid();
     unsigned short g[NGROUPS + 1];
     int n;

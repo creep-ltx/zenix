@@ -21,7 +21,7 @@ static int fail(const char *what, const char *why)
     return 1;
 }
 
-/* the whole file, at most max bytes -> its bytes (free them) and *n, *st; or 0 and *why */
+/* the whole file, at most max bytes (zslurpfd, libz) -> its bytes (free them) and *n, *st; or 0 and *why */
 static unsigned char *slurp(const char *path, u32 max, u32 *n, struct ustat *st, const char **why)
 {
     int fd = sys_open(path, O_RDONLY);
@@ -29,27 +29,10 @@ static unsigned char *slurp(const char *path, u32 max, u32 *n, struct ustat *st,
         *why = fd == -ENOENT ? "not there" : "cannot be opened";
         return 0;
     }
-    int r = sys_fstat(fd, st);
-    if (r < 0 || st->size > max) {
-        *why = r < 0 ? "cannot be read" : "too large";
-        sys_close(fd);
-        return 0;
-    }
-    unsigned char *b = malloc(st->size ? st->size : 1);
-    u32 got = 0;
-    while (b && got < st->size) {
-        int r = sys_read(fd, b + got, st->size - got);
-        if (r <= 0)
-            break;
-        got += (u32)r;
-    }
+    unsigned char *b = sys_fstat(fd, st) < 0 ? 0 : (unsigned char *)zslurpfd(fd, max, n);
+    if (!b)
+        *why = zerrno == EFBIG ? "too large" : zerrno == ENOMEM ? "no memory to read it" : "cannot be read";
     sys_close(fd);
-    if (!b || got != st->size) {
-        *why = b ? "cannot be read" : "no memory to read it";
-        free(b);
-        return 0;
-    }
-    *n = got;
     return b;
 }
 
@@ -92,18 +75,15 @@ static void mkdirs(char *path)
     sys_mkdir(path);
 }
 
-static int usage(void)
-{
-    dprintf(2, "usage: ttf2font [-q] [-o DIR] [-n NAME] FONT.ttf SIZE...\n"
-               "       ttf2font [-q] -c FONT.ttf [OUT.zcf]\n");
-    return 2;
-}
-
+static const char USAGE[] = "usage: ttf2font [-q] [-o DIR] [-n NAME] FONT.ttf SIZE...\n"
+                            "       ttf2font [-q] -c FONT.ttf [OUT.zcf]\n";
+static int usage(void) { zusage(USAGE); }
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *dir = "/var/cache/fonts", *name = 0;
     int console = 0, i = 1;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         if (!strcmp(argv[i], "-q"))
             quiet = 1;
         else if (!strcmp(argv[i], "-c"))
@@ -113,7 +93,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-n") && i + 1 < argc)
             name = argv[++i];
         else
-            return usage();
+            zbadopt(argv[i], USAGE);
     }
     if (i >= argc || (!console && i + 1 >= argc) || (console && i + 2 < argc))
         return usage();

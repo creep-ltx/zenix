@@ -210,11 +210,12 @@ static int run_stream(int fd, int outfd)
     return 0;
 }
 
+static const char USAGE[] = "usage: sed [-nEri] [-e script] [-f file] [script] [file...]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int i = 1, have_script = 0; char *script = xmalloc(1); script[0] = 0;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
-        if (!strcmp(argv[i], "--")) { i++; break; }
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         if (!strcmp(argv[i], "-e") && i + 1 < argc) { char *n = realloc(script, strlen(script) + strlen(argv[i + 1]) + 2); if (!n) die("out of memory", 0); strcat(n, argv[++i]); strcat(n, "\n"); script = n; have_script = 1; continue; }
         if (!strcmp(argv[i], "-f") && i + 1 < argc) {
             int fd = sys_open(argv[++i], O_RDONLY); if (fd < 0) die("cannot read the script", argv[i]);
@@ -223,9 +224,9 @@ int main(int argc, char **argv)
             free(ln);
             sys_close(fd); have_script = 1; continue;
         }
-        for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'n') o_n = 1; else if (*p == 'E' || *p == 'r') o_E = 1; else if (*p == 'i') o_i = 1; else if (*p == 's') ; else die("unknown option", argv[i]); }
+        for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'n') o_n = 1; else if (*p == 'E' || *p == 'r') o_E = 1; else if (*p == 'i') o_i = 1; else if (*p == 's') ; else zbadch(*p, USAGE); }
     }
-    if (!have_script) { if (i >= argc) { dprintf(2, "usage: sed [-nEri] [-e script] [-f file] [script] [file...]\n"); return 2; } script = argv[i++]; }
+    if (!have_script) { if (i >= argc) zusage(USAGE); script = argv[i++]; }
     parse_script(script);
     if (i >= argc) { run_stream(0, 1); oflush(); return 0; }
     int rc = 0;

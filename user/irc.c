@@ -15,33 +15,14 @@
 #define HISTN 32
 #define PING_IDLE 120                   /* seconds of silence before our PING */
 #define DEAD_IDLE 300                   /* ... and before the connection is taken for lost */
-#define CONNECT_SECS 60                 /* a TCP connection (TLS: also the handshake, up to a minute on a 68020) */
+#define TLS_SECS 150                    /* the TLS handshake after the connection (up to a minute on a 68020) */
 
 static struct irc S;
-static int rows = 25, cols = 80, tty, quit, winch;
-
-/* ---- output: one buffer, written when the loop waits ---- */
-static char outb[4096];
-static int outn;
-static void flush(void) { if (outn) sys_write(1, outb, (u32)outn); outn = 0; }
-static void putn(const char *s, int n)
-{
-    if (outn + n > (int)sizeof outb) flush();
-    if (n > (int)sizeof outb) { sys_write(1, s, (u32)n); return; }
-    memcpy(outb + outn, s, (u32)n);
-    outn += n;
-}
-static void puts_(const char *s) { putn(s, (int)strlen(s)); }
-static void putf(const char *fmt, ...)
-{
-    char b[160];
-    va_list ap;
-    va_start(ap, fmt);
-    int n = vsnprintf(b, sizeof b, fmt, ap);
-    va_end(ap);
-    putn(b, n < (int)sizeof b ? n : (int)sizeof b - 1);
-}
-static void at(int r) { putf("\033[%d;1H", r); }
+static int tty, quit;
+/* the screen: libz's one layer (user/zscr.c: the buffered output, the size, SIGWINCH, the reverse lines) */
+#define rows zscr_rows
+#define cols zscr_cols
+#define at(r) zscr_at(r, 1)
 
 /* ---- the connection ---- */
 enum { N_OFF, N_WAIT, N_CONNECTING, N_TLS, N_ON };
@@ -128,27 +109,12 @@ static void schedule_retry(void)
 
 static void net_open(void)
 {
-    struct addrinfo h, *r = 0;
-    char ps[8];
-    int e;
+    const char *w;
     why[0] = 0;
-    memset(&h, 0, sizeof h);
-    h.ai_family = AF_INET;
-    h.ai_socktype = SOCK_STREAM;
-    snprintf(ps, sizeof ps, "%d", port);
     irc_print(&S, 0, IRC_K_INFO, "-!- connecting to %s port %d%s", host, port, use_tls ? " (TLS)" : "");
     S.now = sys_time();
-    if ((e = getaddrinfo(host, ps, &h, &r)) != 0) {
-        irc_print(&S, 0, IRC_K_ERR, "-!- %s: %s", host, e == EAI_NONAME ? "no such host" : gai_strerror(e));
-        schedule_retry();
-        return;
-    }
-    sockfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
-    e = sockfd < 0 ? zerrno : connect(sockfd, r->ai_addr, r->ai_addrlen) < 0 ? zerrno : 0;
-    freeaddrinfo(r);
-    if (e && e != EINPROGRESS) {
-        irc_print(&S, 0, IRC_K_ERR, "-!- %s port %d: %s", host, port, zstrerror(e) ? zstrerror(e) : "cannot connect");
-        if (sockfd >= 0) sys_close(sockfd);
+    if ((sockfd = zconnect_begin(host, port, 0, &w)) < 0) {     /* the one connection helper (socket.h) */
+        irc_print(&S, 0, IRC_K_ERR, "-!- %s port %d: %s", host, port, w);
         sockfd = -1;
         schedule_retry();
         return;
@@ -293,7 +259,9 @@ static void net_write(void)
 #define IND 6                           /* "HH:MM " */
 static int dirty_all, dirty_status, dirty_input;
 static char ed[EDMAX + 1];
-static int en, ep;                      /* the input's bytes and the cursor (bytes) */
+static struct zled E = { ed, 0, 0, EDMAX + 1 };    /* the input row: libz's line editor */
+#define en E.n                          /* the input's bytes and the cursor (bytes) */
+#define ep E.pos
 
 static const char *kind_sgr(int k)
 {
@@ -342,22 +310,22 @@ static void draw_row(const struct irc_line *l, int r)
         if (i < r) off += k;
     }
     if (r == 0)
-        putf("%02u:%02u ", l->t / 3600 % 24, l->t / 60 % 60);
+        oprintf("%02u:%02u ", l->t / 3600 % 24, l->t / 60 % 60);
     else
-        puts_("      ");
-    puts_(kind_sgr(l->kind));
+        oputs("      ");
+    oputs(kind_sgr(l->kind));
     if (r == 0 && l->nick && l->nick <= k) {          /* the nick in a colour of its own */
         u32 h = 0;
         for (u32 i = 1; i + 1 < l->nick; i++) h = h * 31 + (unsigned char)t[i];
-        if (l->kind == IRC_K_OWN) puts_("\033[1m");
-        else if (l->kind == IRC_K_MSG) putf("\033[%um", 31 + h % 6);
-        putn(t, l->nick);
-        puts_("\033[m");
-        puts_(kind_sgr(l->kind));
-        putn(t + l->nick, (int)(k - l->nick));
+        if (l->kind == IRC_K_OWN) oputs("\033[1m");
+        else if (l->kind == IRC_K_MSG) oprintf("\033[%um", 31 + h % 6);
+        oputn(t, l->nick);
+        oputs("\033[m");
+        oputs(kind_sgr(l->kind));
+        oputn(t + l->nick, (u32)(k - l->nick));
     } else
-        putn(t + off, (int)k);
-    puts_("\033[m\033[K");
+        oputn(t + off, (u32)k);
+    oputs("\033[m\033[K");
 }
 
 static const struct irc_line *line_at(const struct irc_win *w, int i)   /* i: 0 the newest */
@@ -371,12 +339,7 @@ static void draw_title(void)
     char b[300];
     snprintf(b, sizeof b, " %s%s%s", S.cur ? w->name : "irc " IRC_VERSION, w->topic ? ": " : "",
              w->topic ? w->topic : S.cur ? "" : "  /help: the commands");
-    at(1);
-    puts_("\033[7m");
-    u32 k = zu8fit(b, (u32)strlen(b), cols - 1);
-    putn(b, (int)k);
-    for (int c = zu8cols(b, k); c < cols - 1; c++) puts_(" ");
-    puts_("\033[m");
+    zscr_bar(1, b);
 }
 
 static void draw_text(void)
@@ -386,7 +349,7 @@ static void draw_text(void)
     while (row >= TOP) {
         const struct irc_line *l = line_at(w, i++);
         if (!l) {
-            for (; row >= TOP; row--) { at(row); puts_("\033[K"); }
+            for (; row >= TOP; row--) { at(row); oputs("\033[K"); }
             break;
         }
         for (int r = nrows(l) - 1; r >= 0 && row >= TOP; r--, row--) {
@@ -423,41 +386,21 @@ static void draw_status(void)
                           S.w[i]->act == IRC_ACT_HI ? "!" : S.w[i]->act == IRC_ACT_MSG ? "+" : "");
             first = 0;
         }
-    at(rows - 1);
-    puts_("\033[7m");
-    u32 k = zu8fit(b, (u32)strlen(b), cols - 1);
-    putn(b, (int)k);
-    for (int c = zu8cols(b, k); c < cols - 1; c++) puts_(" ");
-    puts_("\033[m");
+    zscr_bar(rows - 1, b);              /* the status line, above the input row */
 }
 
 static void draw_input(void)
 {
     char p[IRC_NAMEMAX + 4];
     snprintf(p, sizeof p, "[%s] ", S.cur ? S.w[S.cur]->name : "status");
-    int pc = zu8cols(p, (u32)strlen(p)), room = cols - 1 - pc;
-    if (room < 10) { p[0] = 0; pc = 0; room = cols - 1; }
-    /* the part shown: from a character start so that the cursor is inside, at most room columns */
-    u32 from = 0;
-    while (zu8cols(ed + from, (u32)ep - from) > room - 1 && from < (u32)ep) {
-        int c;
-        from += (u32)zu8next(ed + from, (u32)en - from, &c);
-    }
-    at(rows);
-    putn(p, (int)strlen(p));
-    u32 k = zu8fit(ed + from, (u32)en - from, room);
-    putn(ed + from, (int)k);
-    puts_("\033[K");
-    putf("\033[%d;%dH", rows, pc + zu8cols(ed + from, (u32)ep - from) + 1);
+    zled_show(&E, rows, 1, cols - 1, p);    /* libz's line editor's row: the part around the cursor */
 }
 
 static void redraw(void)
 {
-    int sz = sys_ttyinfo();
-    if (sz & 0xFFFF) cols = sz & 0xFFFF;
-    if (sz >> 16) rows = sz >> 16;
+    zscr_size();
     if (rows < 6) rows = 6;
-    putf("\033[%d;%dr", TOP, BOT);
+    oprintf("\033[%d;%dr", TOP, BOT);
     draw_title();
     draw_text();
     dirty_status = dirty_input = 1;
@@ -473,13 +416,13 @@ static void shown(void *u, int w, const struct irc_line *l)
         return;
     }
     if (l->kind == IRC_K_HI && S.c.bell && tty)
-        puts_("\007");
+        oputs("\007");
     dirty_status = 1;
     if (w != S.cur || S.w[w]->scroll || dirty_all || !tty)
         return;
     for (int r = 0, n = nrows(l); r < n; r++) {
         at(BOT);
-        puts_("\n\r");
+        oputs("\n\r");
         draw_row(l, r);
     }
     dirty_input = 1;
@@ -521,38 +464,14 @@ static int nh, hpos = -1;
 static char comp_pre[IRC_NAMEMAX];
 static int comp_n = -1, comp_start, comp_len;
 
-static void ed_set(const char *t)
-{
-    en = (int)strlen(t);
-    if (en > EDMAX) en = EDMAX;
-    memcpy(ed, t, (u32)en);
-    ed[en] = 0;
-    ep = en;
-}
-
+#define ed_set(t) zled_set(&E, t)
 static void ed_insert(const char *t, int n)
 {
-    if (en + n > EDMAX) {
-        puts_("\007");
-        return;
-    }
-    memmove(ed + ep + n, ed + ep, (u32)(en - ep));
-    memcpy(ed + ep, t, (u32)n);
-    en += n;
-    ep += n;
-    ed[en] = 0;
+    if (zled_insert(&E, t, n) < 0)
+        oputs("\007");
 }
+#define ed_cut(from, to) zled_cut(&E, from, to)
 
-static void ed_cut(int from, int to)
-{
-    memmove(ed + from, ed + to, (u32)(en - to));
-    en -= to - from;
-    ep = from;
-    ed[en] = 0;
-}
-
-static int prevc(int p) { return p > 0 ? (int)zu8prev(ed, (u32)p) : 0; }
-static int nextc(int p) { int c; return p < en ? p + zu8next(ed + p, (u32)(en - p), &c) : en; }
 
 static void complete(void)
 {
@@ -572,7 +491,7 @@ static void complete(void)
         comp_n = 0;                     /* round again */
         m = irc_nick_match(&S, S.cur, comp_pre, (int)strlen(comp_pre), 0);
     }
-    if (!m) { comp_n = -1; puts_("\007"); return; }
+    if (!m) { comp_n = -1; oputs("\007"); return; }
     char t[IRC_NAMEMAX + 3];
     snprintf(t, sizeof t, "%s%s", m, comp_start == 0 ? ": " : " ");
     ed_cut(comp_start, comp_start + comp_len);
@@ -619,16 +538,15 @@ static void act(int a, const char *arg)
     if (a != A_COMPLETE) comp_n = -1;
     switch (a) {
     case A_SEND: submit(); break;
-    case A_BS: if (ep > 0) ed_cut(prevc(ep), ep); break;
-    case A_DEL: if (ep < en) { int e = nextc(ep); int p = ep; ed_cut(p, e); } break;
-    case A_LEFT: ep = prevc(ep); break;
-    case A_RIGHT: ep = nextc(ep); break;
-    case A_HOME: ep = 0; break;
-    case A_END: ep = en; break;
-    case A_KSTART: ed_cut(0, ep); break;
-    case A_KEND: en = ep; ed[en] = 0; break;
-    case A_KWORD: { int s = ep; while (s > 0 && ed[s - 1] == ' ') s--; while (s > 0 && ed[s - 1] != ' ') s--;
-                    ed_cut(s, ep); break; }
+    case A_BS: zled_key(&E, 127); break;
+    case A_DEL: if (en) zled_key(&E, 4); break;
+    case A_LEFT: zled_key(&E, ZK_LEFT); break;
+    case A_RIGHT: zled_key(&E, ZK_RIGHT); break;
+    case A_HOME: zled_key(&E, 1); break;
+    case A_END: zled_key(&E, 5); break;
+    case A_KSTART: zled_key(&E, 21); break;
+    case A_KEND: zled_key(&E, 11); break;
+    case A_KWORD: zled_key(&E, 23); break;
     case A_HUP: case A_HDOWN: {
         int lo = nh > HISTN ? nh - HISTN : 0;
         if (a == A_HUP) hpos = hpos < 0 ? nh - 1 : hpos > lo ? hpos - 1 : hpos;
@@ -706,13 +624,11 @@ static char *conf_read(const char *path, int must, char *msg, int mn)
         if (must) { snprintf(msg, (u32)mn, "%s: %s", path, zstrerror(fd) ? zstrerror(fd) : "cannot open"); return 0; }
         return strdup("");
     }
-    if (sys_fstat(fd, &st) < 0 || st.size > CONFMAX || !(t = malloc(st.size + 1))) {
-        snprintf(msg, (u32)mn, "%s: too big (%d bytes at most)", path, CONFMAX);
+    if (sys_fstat(fd, &st) < 0 || !(t = zslurpfd(fd, CONFMAX, 0))) {   /* the file checked below is the one read */
+        snprintf(msg, (u32)mn, "%s: %s", path, zwhy("cannot read"));
         sys_close(fd);
         return 0;
     }
-    int n = sys_read(fd, t, st.size);
-    t[n > 0 ? n : 0] = 0;
     if ((st.mode & 077) && (!strncmp(t, "password", 8) || !strncmp(t, "sasl", 4) || strstr(t, "\npassword") ||
                             strstr(t, "\nsasl")))
         dprintf(2, "irc: %s holds a password and others may read it: chmod 600 %s\n", path, path);
@@ -720,16 +636,16 @@ static char *conf_read(const char *path, int must, char *msg, int mn)
     return t;
 }
 
+static const char USAGE[] = "usage: irc [-c FILE] [-n NICK] [-p PORT] [-t] [SERVER [#CHANNEL...]]\n       irc -K\n";
 static void usage(void)
 {
-    dprintf(2, "usage: irc [-c FILE] [-n NICK] [-p PORT] [-t] [SERVER [#CHANNEL...]]\n       irc -K\n");
-    sys_exit(2);
+    zusage(USAGE);
 }
 
-static void on_winch(int sig) { (void)sig; winch = 1; }
 
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *cfile = 0, *onick = 0, *oserver = 0;
     int oport = 0, otls = 0, i;
     char msg[160], path[ZPATH_MAX];
@@ -740,7 +656,8 @@ int main(int argc, char **argv)
         else if (!strcmp(o, "-c") && i + 1 < argc) cfile = argv[++i];
         else if (!strcmp(o, "-n") && i + 1 < argc) onick = argv[++i];
         else if (!strcmp(o, "-p") && i + 1 < argc) { oport = atoi(argv[++i]); if (oport <= 0 || oport > 65535) usage(); }
-        else usage();
+        else if (!strcmp(o, "--")) { i++; break; }
+        else zbadopt(o, USAGE);
     }
     if (i < argc) oserver = argv[i++];
     const char *home = getenv("HOME");
@@ -789,9 +706,9 @@ int main(int argc, char **argv)
     tty = sys_isatty(0) && sys_isatty(1);
     if (!tty) { dprintf(2, "irc: the keys and the screen must be a terminal\n"); return 2; }
     signal(SIGPIPE, SIG_IGN);
-    signal(SIGWINCH, on_winch);
+    zscr_init();
     sys_ttymode(TTY_RAW | TTY_NOSIG);
-    puts_("\033[2J");
+    oputs("\033[2J");
     redraw();
     if (ks.bad[0]) irc_print(&S, 0, IRC_K_ERR, "-!- %s", ks.bad);
     irc_print(&S, 0, IRC_K_INFO, "-!- irc " IRC_VERSION ": /help for the commands; F1-F10 or Ctrl-N/Ctrl-P for the windows");
@@ -827,7 +744,7 @@ int main(int argc, char **argv)
         S.want = 0;
         if (nstate == N_WAIT && (int)(up - retry_at) >= 0)
             net_open();
-        if ((nstate == N_CONNECTING || nstate == N_TLS) && (int)(up - since) > CONNECT_SECS + (nstate == N_TLS ? 120 : 0)) {
+        if ((nstate == N_CONNECTING || nstate == N_TLS) && (int)(up - since) > ZCONNECT_MS / 1000 + (nstate == N_TLS ? TLS_SECS : 0)) {
             snprintf(why, sizeof why, "no answer in time");
             net_close("no answer in time");
             schedule_retry();
@@ -837,12 +754,12 @@ int main(int argc, char **argv)
             schedule_retry();
         } else if (nstate == N_ON && (int)(up - last_rx) > PING_IDLE && !S.ping_sent)
             irc_keepalive(&S);
-        if (winch) { winch = 0; puts_("\033[2J"); dirty_all = 1; }
+        if (zscr_resized()) { oputs("\033[2J"); dirty_all = 1; }
         if (up != last_sec) { last_sec = up; if (S.now % 60 == 0 || nstate == N_WAIT) dirty_status = 1; }
         if (dirty_all) redraw();
         if (dirty_status) { draw_title(); draw_status(); dirty_status = 0; dirty_input = 1; }
         if (dirty_input) { draw_input(); dirty_input = 0; }
-        flush();
+        oflush();
         struct pollfd p[4];
         int n = 0, ik = -1, ir = -1, iw = -1, iw2 = -1;
         ik = n; p[n].fd = 0; p[n].events = POLLIN; p[n++].revents = 0;
@@ -855,17 +772,17 @@ int main(int argc, char **argv)
         int wait = nstate == N_ON && qn > qsent && tokens <= 0 ? 200 : 1000;
         if (poll(p, (u32)n, wait) < 0) continue;
         if (iw >= 0 && p[iw].revents) {
-            int e = 0;
-            socklen_t el = sizeof e;
-            if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &e, &el) < 0) e = zerrno;
-            if (e) {
-                snprintf(why, sizeof why, "%s port %d: %s", host, port, zstrerror(e) ? zstrerror(e) : "cannot connect");
+            const char *w;
+            int e = zconnect_end(sockfd, 0, &w);
+            if (e < 0) {
+                sockfd = -1;                /* closed by zconnect_end */
+                snprintf(why, sizeof why, "%s port %d: %s", host, port, w);
                 irc_print(&S, 0, IRC_K_ERR, "-!- %s", why);
                 why[0] = 0;
                 nstate = N_OFF;
                 net_close(0);
                 schedule_retry();
-            } else
+            } else if (e > 0)
                 net_up();
         }
         if (ir >= 0 && (p[ir].revents & (POLLIN | POLLHUP | POLLERR)) && rfd >= 0) net_read();
@@ -874,8 +791,8 @@ int main(int argc, char **argv)
     }
     S.now = sys_time();
     if (nstate != N_OFF) net_close(0);
-    puts_("\033[r\033[2J\033[H");
-    flush();
+    oputs("\033[r\033[2J\033[H");
+    oflush();
     sys_ttymode(0);
     if (quit == 2) dprintf(1, "irc: %s\n", S.quit);
     irc_free(&S);

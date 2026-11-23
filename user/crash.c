@@ -41,8 +41,10 @@ static int protected_on(void)          /* the boot's "mmu: memory protection on:
     return 0;
 }
 
+static const char USAGE[] = "usage: crash\n       crash stack\n       crash kstack | idle\n       crash sleep N | poke | damage | literal\n       crash victim N [FILE] | read ADDR | write ADDR\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     if (argc > 2 && !strcmp(argv[1], "victim")) {
         unsigned n = 8192, bad = 0;
         volatile unsigned *r = sys_memalloc(n);

@@ -294,25 +294,25 @@ static int mount_all(void)
     return bad;
 }
 
+static const char USAGE[] = "usage: mount [-t ext2|zenixfs|fat|exfat|ffs|pfs3|iso9660] [-o OPTIONS] DEVICE DIR     mount -t nfs [-o OPTIONS] HOST:/EXPORT DIR\n"
+                            "       mount -a     mount every line of /etc/fstab;   mount   list the mounts\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *type = 0, *dev = 0, *dir = 0, *opts = 0;
     int all = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-a")) all = 1;
         else if (!strcmp(argv[i], "-t") && i + 1 < argc) type = argv[++i];
         else if (!strcmp(argv[i], "-o") && i + 1 < argc) opts = argv[++i];
+        else if (argv[i][0] == '-' && argv[i][1]) zbadopt(argv[i], USAGE);
         else if (!dev) dev = argv[i];
         else if (!dir) dir = argv[i];
         else dev = 0;
     }
     if (all) return mount_all();
     if (argc == 1) { list(); return 0; }
-    if (!dev || !dir) {
-        dprintf(2, "usage: mount [-t ext2|zenixfs|fat|exfat|ffs|pfs3|iso9660] [-o OPTIONS] DEVICE DIR     mount -t nfs [-o OPTIONS] HOST:/EXPORT DIR\n"
-               "       mount -a     mount every line of /etc/fstab;   mount   list the mounts\n");
-        return 2;
-    }
+    if (!dev || !dir) zusage(USAGE);
     if ((type && !strcmp(type, "nfs")) || (!type && strstr(dev, ":/"))) return mount_nfs(dev, dir, opts, 0);
     return mount_one(dev, dir, type, opts, 0);
 }

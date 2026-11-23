@@ -6,17 +6,14 @@
 static int o_a, o_A, o_l, o_d, o_R, o_F, o_h, o_t, o_r, o_S, o_1, multi, tty, printed_any, color, color_lead;
 struct ent { const char *name; struct ustat st; char link[64]; int islink; };
 static const char *const mon[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-static int leap(int y) { return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0; }
 
 static void when(u32 t, char *out)
 {
-    u32 days = t / 86400, rem = t % 86400; int y = 1970;
-    for (;;) { u32 yl = leap(y) ? 366 : 365; if (days < yl) break; days -= yl; y++; }
-    static const int ml[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-    int m = 0; for (; m < 11; m++) { int l = ml[m] + (m == 1 && leap(y)); if ((int)days < l) break; days -= (u32)l; }
+    struct zdt z;
+    zdate(t, &z);
     u32 now = sys_time(); int old = now > t ? now - t > 15552000u : t - now > 3600;
-    if (old) snprintf(out, 20, "%s %2d  %d", mon[m], (int)days + 1, y);
-    else snprintf(out, 20, "%s %2d %02d:%02d", mon[m], (int)days + 1, (int)(rem / 3600), (int)(rem / 60 % 60));
+    if (old) snprintf(out, 20, "%s %2d  %d", mon[z.mon - 1], z.day, z.year);
+    else snprintf(out, 20, "%s %2d %02d:%02d", mon[z.mon - 1], z.day, z.hour, z.min);
 }
 static void modestr(u32 m, char *s)
 {
@@ -175,20 +172,22 @@ static int list(const char *path, int top)
 }
 int main(int argc, char **argv)
 {
+    static const char USAGE[] = "usage: ls [-aAldRFhtrSs1] [--color[=when]] [file...]\n";
     int i = 1, rc = 0, cmode = 2;
+    zopt(argc, argv, USAGE);
     for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
         if (!strcmp(argv[i], "--")) { i++; break; }
         if (argv[i][1] == '-') {
             int m = color_arg(argv[i], 1);
             if (m == -2) { dprintf(2, "ls: invalid argument for --color: %s (always, never or auto)\n", argv[i]); return 2; }
-            if (m < 0) { dprintf(2, "ls: unknown option %s\n", argv[i]); return 2; }
+            if (m < 0) zbadopt(argv[i], USAGE);
             cmode = m;
             continue;
         }
         for (const char *p = argv[i] + 1; *p; p++) {
             switch (*p) { case 'a': o_a = 1; break; case 'A': o_A = 1; break; case 'l': o_l = 1; break; case 'd': o_d = 1; break; case 'R': o_R = 1; break;
                 case 'F': o_F = 1; break; case 'h': o_h = 1; break; case 't': o_t = 1; break; case 'r': o_r = 1; break; case 'S': o_S = 1; break; case '1': o_1 = 1; break; case 's': break;
-                default: dprintf(2, "ls: unknown option -%c\n", *p); return 2; }
+                default: zbadch(*p, USAGE); }
         }
     }
     tty = sys_isatty(1);

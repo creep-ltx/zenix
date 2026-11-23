@@ -65,7 +65,7 @@ got=$(od -An -tu4 --endian=big -j4 -N4 "$T/fortunes.dat" | tr -d ' ')
 check $? "the index: version 1, $got strings big-endian (the file has $n)"
 
 # ---- the curses
-cc -std=gnu99 -O1 -g $SAN -Wall -Wno-unused $H -Iports/bsdgames/zenix/include -o "$T/cursestest" \
+cc -std=gnu99 -O1 -g $SAN -Wall -Wno-unused $H -Iports/bsdgames/zenix/include -Itools/tests/games -o "$T/cursestest" \
     tools/tests/games/cursestest.c ports/bsdgames/zenix/curses.c 2>"$T/cc.log"
 check $? "the PC build of the curses and its test" "$(head -3 "$T/cc.log")"
 for size in 24x80 32x80 25x40; do

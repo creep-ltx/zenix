@@ -29,22 +29,21 @@ enum { A_NONE, A_NEXT, A_PREV, A_FIRST, A_LAST, A_ZOOM, A_DITHER, A_LEFT, A_RIGH
 static const char *const actname[NACT] = { "none", "next", "prev", "first", "last", "zoom", "dither", "left",
                                            "right", "up", "down", "help", "quit", "screen" };
 static const char defaults[] =
-    "; show - the picture viewer of Zenix Desktop: the keys (man show). Edit freely; show reads this at start.\n"
-    ";\n"
-    "; One key a line: KEYS ACTION [ARGUMENT]. KEYS are typed characters, or\n"
-    "; names in <>: <Up> <Down> <Left> <Right>, <S-Up> (Shift) ..., <C-d> (Ctrl),\n"
-    "; <Return> <Esc> <Tab> <Space> <Del> <BS> <Help> <F1> .. <F10>.\n"
-    "; Two keys in a row make a prefix. ACTION none takes a key away.\n"
-    "; The format is files' and Ahiru.keys's.\n"
-    ";\n"
-    "; left and right move a picture wider than the window; when its width\n"
-    "; fits they go to the previous and next picture. screen shows the\n"
-    "; picture on a screen of its own, in its own mode and colours (DESIGN D55).\n"
-    "\n[main]\n"
+    "# show - the picture viewer of Zenix Desktop: the keys (man show). Edit freely; show reads this at start.\n"
+    "#\n"
+    "# One key a line: KEYS ACTION [ARGUMENT]. KEYS are typed characters, or\n"
+    "# names in <>: <Up> <Down> <Left> <Right>, <S-Up> (Shift) ..., <C-d> (Ctrl),\n"
+    "# <Return> <Esc> <Tab> <Space> <Del> <BS> <Help> <F1> .. <F10>.\n"
+    "# Two keys in a row make a prefix. ACTION none takes a key away.\n"
+    "# The format is files' and Ahiru.keys's.\n"
+    "#\n"
+    "# left and right move a picture wider than the window; when its width\n"
+    "# fits they go to the previous and next picture. screen shows the\n"
+    "# picture on a screen of its own, in its own mode and colours (DESIGN D55).\n"
     "n next\n<Space> next\np prev\n<BS> prev\ngg first\nG last\n"
     "z zoom\nd dither\ns screen\n"
     "h left\n<Left> left\nl right\n<Right> right\nk up\n<Up> up\nj down\n<Down> down\n"
-    "? help\n<Help> help\nq quit\n<Esc> quit\n";
+    "? help\n<F1> help\n<Help> help\nq quit\n<Esc> quit\n<C-c> quit\n";
 #define MAXB 64
 static struct kbind kb[MAXB];
 static struct keyset K = { actname, NACT, kb, 0, MAXB, "" };
@@ -628,19 +627,23 @@ static void handle(const struct dpyev *e)
     }
 }
 
+static const char USAGE[] = "usage: show [-v] [-s | -w] [-n | -f] PICTURE\n       show -K\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *file = 0;
     int own = 1;                        /* a screen of its own is the default (partner 2026-11-17); -w: the window */
     for (int i = 1; i < argc; i++)
         if (!strcmp(argv[i], "-v")) verbose = 1;
+        else if (!strcmp(argv[i], "-K")) { sys_write(1, defaults, sizeof defaults - 1); return 0; }   /* the built-in keys */
         else if (!strcmp(argv[i], "-s")) own = 1;
         else if (!strcmp(argv[i], "-w")) own = 0;
         else if (!strcmp(argv[i], "-n")) dither = PIC_NEAREST;
         else if (!strcmp(argv[i], "-f")) dither = PIC_FS;
         else if (argv[i][0] != '-' && !file) file = argv[i];
-        else { dprintf(2, "usage: show [-v] [-s | -w] [-n | -f] PICTURE\n"); return 2; }
-    if (!file) { dprintf(2, "usage: show [-v] [-s | -w] [-n | -f] PICTURE\n"); return 2; }
+        else if (argv[i][0] == '-') zbadopt(argv[i], USAGE);
+        else zusage(USAGE);
+    if (!file) zusage(USAGE);
     char full[ZPATH_MAX];
     if (zrealpath(file, full, sizeof full) < 0) {
         dprintf(2, "show: %s: %s\n", file, zwhy("cannot resolve"));

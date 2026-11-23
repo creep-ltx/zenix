@@ -6,7 +6,7 @@
 # types e (the text to edit, Sumi's editor), a second read once the Markdown source is on the grid, then Ctrl+W
 # quits. Checked: the rendering (the headings with their colour, the emphasis marks gone and the words coloured,
 # bullets, the numbers, the code block in its box, the quote's bar), the status and key lines, the source in the
-# editor, the settings folder ($HOME/.config/Markdown: the keys, where the file was left). The memory with Markdown
+# editor, the settings folder ($HOME/.config/markdown: the keys, where the file was left). The memory with Markdown
 # open is printed (free and ps). Every wait is for an event (the grid, the shell's lines), none for a time.
 cd "$(dirname "$0")/.." || exit 1
 OUT=${ZENIX_OUT:-/tmp/zenix-markdown}; mkdir -p $OUT
@@ -49,9 +49,9 @@ check(r1.get(1) == "  1 # Big Title" and r1.get(3) == "  3 Some **bold** and *it
       r1.get(14) == " 14 ```c" and r1.get(30, "").endswith("line 1/20  col 1   Latin-1   Markdown") and
       r1.get(31, "").startswith("^S Save  ^E View"), "e: the source to edit (Sumi's editor, the Markdown colours)",
       (r1.get(1), r1.get(3), r1.get(30)))
-check(re.search(r"^drwx------ .*Markdown$", f, re.M) is not None and
-      re.search(r"^-rw-r--r-- .* Markdown\.keys$", f, re.M) is not None and re.search(r"^0 0 /tmp/t\.md$", f, re.M),
-      "the settings: $HOME/.config/Markdown (this user's only), the keys, where the file was left", f[:600])
+check(re.search(r"^drwx------ .*markdown$", f, re.M) is not None and
+      re.search(r"^-rw-r--r-- .* keys$", f, re.M) is not None and re.search(r"^0 0 /tmp/t\.md$", f, re.M),
+      "the settings: $HOME/.config/markdown (this user's only), the keys, where the file was left", f[:600])
 L.memory(f, "markdown", "Markdown")
 L.waits()
 L.done()

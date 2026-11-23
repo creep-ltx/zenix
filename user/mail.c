@@ -11,48 +11,22 @@
 #include "../display/keys.h"
 
 #define TLSPIPE "/lib/tls/tlspipe"
-#define CONNECT_SECS 60                 /* a TCP connection */
 #define TLS_SECS 240                    /* the helper's first line (a handshake on a 68020 takes up to a minute) */
 #define READ_SECS 120                   /* a server's answer */
 
 static struct mail_cfg cf;
-static int rows = 25, cols = 80, winch, batch;
+static int batch;
+/* the screen: libz's one layer (user/zscr.c: the buffered output, the size, SIGWINCH, the reverse lines) */
+#define rows zscr_rows
+#define cols zscr_cols
+#define at(r) zscr_at(r, 1)
+#define putw zscr_putw
 
 static const char *mchr(const char *p, int c, u32 n)
 {
     for (; n; n--, p++)
         if (*p == c) return p;
     return 0;
-}
-
-/* ---- output: one buffer ---- */
-static char outb[4096];
-static int outn;
-static void flush(void) { if (outn) sys_write(1, outb, (u32)outn); outn = 0; }
-static void putn(const char *s, int n)
-{
-    if (outn + n > (int)sizeof outb) flush();
-    if (n > (int)sizeof outb) { sys_write(1, s, (u32)n); return; }
-    memcpy(outb + outn, s, (u32)n);
-    outn += n;
-}
-static void puts_(const char *s) { putn(s, (int)strlen(s)); }
-static void putf(const char *fmt, ...)
-{
-    char b[200];
-    va_list ap;
-    va_start(ap, fmt);
-    int n = vsnprintf(b, sizeof b, fmt, ap);
-    va_end(ap);
-    putn(b, n < (int)sizeof b ? n : (int)sizeof b - 1);
-}
-static void at(int r) { putf("\033[%d;1H", r); }
-/* text in exactly w columns (cut on whole characters, then spaces) */
-static void putw(const char *s, int w)
-{
-    u32 n = (u32)strlen(s), k = zu8fit(s, n, w);
-    putn(s, (int)k);
-    for (int c = zu8cols(s, k); c < w; c++) putn(" ", 1);
 }
 
 /* the message row */
@@ -66,7 +40,7 @@ static void say(const char *fmt, ...)
     if (batch) return;                  /* mail -s: said at the end, on standard error */
     at(rows);
     putw(msg, cols - 1);
-    flush();
+    oflush();
 }
 
 /* ---- a connection: a socket, or the TLS helper's two pipes ---- */
@@ -173,9 +147,7 @@ static int c_tls(void *u, char *err, int errn)
 
 static int c_open(struct conn *c, struct mconn *m, const char *host, int port, int tls, char *err, int errn)
 {
-    struct addrinfo h, *r = 0;
-    char ps[8];
-    int e;
+    const char *w;
     memset(m, 0, sizeof *m);
     m->u = c;
     m->rd = c_rd;
@@ -183,26 +155,10 @@ static int c_open(struct conn *c, struct mconn *m, const char *host, int port, i
     m->starttls = c_tls;
     c->host = host;
     c->port = port;
-    memset(&h, 0, sizeof h);
-    h.ai_family = AF_INET;
-    h.ai_socktype = SOCK_STREAM;
-    snprintf(ps, sizeof ps, "%d", port);
     say("connecting to %s port %d", host, port);
-    if ((e = getaddrinfo(host, ps, &h, &r)) != 0) {
-        snprintf(err, (u32)errn, "%s: %s", host, e == EAI_NONAME ? "no such host" : gai_strerror(e));
-        return -1;
-    }
-    c->sock = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
-    e = c->sock < 0 ? zerrno : connect(c->sock, r->ai_addr, r->ai_addrlen) < 0 ? zerrno : 0;
-    freeaddrinfo(r);
-    if (e == EINPROGRESS) {
-        struct pollfd p = { c->sock, POLLOUT, 0 };
-        socklen_t el = sizeof e;
-        if (poll(&p, 1, CONNECT_SECS * 1000) <= 0) e = ETIMEDOUT;
-        else if (getsockopt(c->sock, SOL_SOCKET, SO_ERROR, &e, &el) < 0) e = zerrno;
-    }
-    if (e) {
-        snprintf(err, (u32)errn, "%s port %d: %s", host, port, zstrerror(e) ? zstrerror(e) : "cannot connect");
+    if ((c->sock = zconnect(host, port, ZC_NONBLOCK, &w)) < 0) {   /* the one connection helper (socket.h) */
+        snprintf(err, (u32)errn, "%s port %d: %s", host, port, w);
+        c->sock = -1;
         c_close(c);
         return -1;
     }
@@ -364,10 +320,9 @@ static const char *shown(const char *raw)
 
 static void draw_title(const char *t)
 {
-    at(1);
-    puts_("\033[7m ");
-    putw(t, cols - 2);
-    puts_("\033[m");
+    char b[300];
+    snprintf(b, sizeof b, " %s", t);
+    zscr_bar(1, b);
 }
 
 static int unread(void)
@@ -383,7 +338,7 @@ static const char *mon3[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "
 static void index_row(int r, int i)
 {
     at(r);
-    if (i >= S.nm) { puts_("\033[K"); return; }
+    if (i >= S.nm) { oputs("\033[K"); return; }
     struct mitem *it = &S.m[i];
     char d[12] = "      ";
     if (it->date) {
@@ -394,22 +349,22 @@ static void index_row(int r, int i)
         else if (y == y2) snprintf(d, sizeof d, "%s %2d", mon3[mo - 1], dd);
         else snprintf(d, sizeof d, "  %4d", y);
     }
-    if (i == icur) puts_("\033[7m");
-    else if (!(it->flags & MF_SEEN)) puts_("\033[1m");
+    if (i == icur) oputs("\033[7m");
+    else if (!(it->flags & MF_SEEN)) oputs("\033[1m");
     char f[4];
     f[0] = it->flags & MF_DELETED ? 'D' : !(it->flags & MF_SEEN) ? 'N' : it->flags & MF_ANSWERED ? 'r' : ' ';
     f[1] = it->flags & MF_ATTACH ? '+' : ' ';
     f[2] = ' ';
     f[3] = 0;
-    puts_(f);
-    puts_(d);
-    puts_("  ");
+    oputs(f);
+    oputs(d);
+    oputs("  ");
     int fw = cols >= 80 ? 20 : cols / 4;
     putw(it->from, fw);
-    puts_("  ");
+    oputs("  ");
     int rest = cols - 1 - 3 - 6 - 2 - fw - 2;
     putw(it->subj[0] ? it->subj : "(no subject)", rest > 0 ? rest : 0);
-    puts_("\033[m");
+    oputs("\033[m");
 }
 
 static void draw_index(void)
@@ -425,7 +380,7 @@ static void draw_index(void)
              unread(), S.exists > S.nm ? "  (the newest shown: limit)" : "");
     draw_title(t);
     for (int r = 0; r < H; r++) index_row(TOP + r, itop + r);
-    if (!S.nm) { at(TOP); puts_("  (no messages)"); }
+    if (!S.nm) { at(TOP); oputs("  (no messages)"); }
 }
 
 static void draw_folders(void)
@@ -440,11 +395,11 @@ static void draw_folders(void)
     for (int r = 0; r < H; r++) {
         int i = ftop + r;
         at(TOP + r);
-        if (i >= S.nbox) { puts_("\033[K"); continue; }
-        if (i == fcur) puts_("\033[7m");
-        puts_(!strcmp(S.box[i].name, S.cur) ? " * " : "   ");
+        if (i >= S.nbox) { oputs("\033[K"); continue; }
+        if (i == fcur) oputs("\033[7m");
+        oputs(!strcmp(S.box[i].name, S.cur) ? " * " : "   ");
         putw(S.box[i].shown, cols - 4);
-        puts_("\033[m");
+        oputs("\033[m");
     }
 }
 
@@ -540,35 +495,33 @@ static void draw_pager(void)
     for (int r = 0; r < H; r++) {
         int i = prow + r;
         at(TOP + r);
-        if (i >= nrows_) { puts_("\033[K"); continue; }
+        if (i >= nrows_) { oputs("\033[K"); continue; }
         const char *s = x + roff[i];
         int n = rlen[i];
         int bol = roff[i] == 0 || x[roff[i] - 1] == '\n';
         if (view == V_PAGER && i < phdr && bol) {
             const char *c = mchr(s, ':', (u32)n);
             if (c) {
-                puts_("\033[1m");
-                putn(s, (int)(c - s) + 1);
-                puts_("\033[m");
-                putn(c + 1, n - (int)(c - s) - 1);
-                puts_("\033[K");
+                oputs("\033[1m");
+                oputn(s, (u32)(c - s) + 1);
+                oputs("\033[m");
+                oputn(c + 1, n - (int)(c - s) - 1);
+                oputs("\033[K");
                 continue;
             }
         }
         int q = view == V_PAGER && i > phdr && s[0] == '>';
         for (int j = i; !q && view == V_PAGER && j > phdr && j > i - 20; j--)    /* a quote's wrapped rows too */
             if (roff[j] == 0 || x[roff[j] - 1] == '\n') { q = x[roff[j]] == '>'; break; }
-        if (q) puts_("\033[36m");
-        putn(s, n);
-        puts_(q ? "\033[m\033[K" : "\033[K");
+        if (q) oputs("\033[36m");
+        oputn(s, n);
+        oputs(q ? "\033[m\033[K" : "\033[K");
     }
 }
 
 static void draw(void)
 {
-    int sz = sys_ttyinfo();
-    if (sz & 0xFFFF) cols = sz & 0xFFFF;
-    if (sz >> 16) rows = sz >> 16;
+    zscr_size();
     if (rows < 6) rows = 6;
     if (cols < 30) cols = 30;
     if (view == V_INDEX) draw_index();
@@ -577,7 +530,7 @@ static void draw(void)
     keyhints();
     at(rows);
     putw(msg, cols - 1);
-    flush();
+    oflush();
 }
 
 /* ---- the keys ---- */
@@ -627,80 +580,54 @@ static void keyhints(void)
             }
     }
     b[o] = 0;
-    at(rows - 1);
-    puts_("\033[7m ");
-    putw(b, cols - 2);
-    puts_("\033[m");
+    char l[310];
+    snprintf(l, sizeof l, " %s", b);
+    zscr_bar(rows - 1, l);              /* the status line (the keys), above the message row */
 }
 
 /* a line typed on the message row: its length, -1 when given up (Esc, Ctrl-G, Ctrl-C); complete: Tab cycles the
  * folders' names */
 static int prompt(const char *q, char *out, int cap, int echo, const char *init, int complete)
 {
-    int n = (int)strlen(init), tab = 0;
-    if (n > cap - 1) n = cap - 1;
-    memcpy(out, init, (u32)n);
-    out[n] = 0;
+    struct zled e;                      /* libz's line editor: the keys every typed line has */
+    int tab = 0;
     char pre[256] = "";
+    zled_init(&e, out, cap, init);
     for (;;) {
-        at(rows);
-        puts_(q);
-        int qc = zu8cols(q, (u32)strlen(q)), room = cols - 1 - qc;
-        if (echo) {
-            u32 from = 0;
-            while (zu8cols(out + from, (u32)n - from) > room - 1 && from < (u32)n) { int c; from += (u32)zu8next(out + from, (u32)n - from, &c); }
-            putn(out + from, (int)zu8fit(out + from, (u32)n - from, room));
+        if (echo)
+            zled_show(&e, rows, 1, cols - 1, q);
+        else {
+            at(rows);
+            oputs(q);
+            oputs("\033[K");
         }
-        puts_("\033[K");
-        flush();
-        int k = keys_tty(0);
-        if (k < 0 || k == 27 || k == 7 || k == 3) { msg[0] = 0; return -1; }
-        if (k == 13) { msg[0] = 0; return n; }
-        if (k == 127 || k == 8) {
-            if (n) n = (int)zu8prev(out, (u32)n);
-            out[n] = 0;
-            tab = 0;
-            continue;
-        }
-        if (k == 21) { n = 0; out[0] = 0; tab = 0; continue; }          /* Ctrl-U */
-        if (k == 9 && complete && S.nbox) {   /* the folders that start with what was typed, in turn */
+        oflush();
+        int k = keys_tty(0), r = k < 0 ? ZLED_CANCEL : zled_key(&e, k);
+        if (r == ZLED_CANCEL || r == ZLED_EOF) { msg[0] = 0; return -1; }
+        if (r == ZLED_DONE) { msg[0] = 0; return e.n; }
+        if (r == ZLED_OTHER && k == 9 && complete && S.nbox) {    /* the folders that start with what was typed, in turn */
             if (!tab) snprintf(pre, sizeof pre, "%s", out);
             int pl = (int)strlen(pre), nm = 0, seen = 0;
             for (int i = 0; i < S.nbox; i++)
                 if (!strncmp(S.box[i].shown, pre, (u32)pl)) nm++;
             for (int i = 0; nm && i < S.nbox; i++)
                 if (!strncmp(S.box[i].shown, pre, (u32)pl) && seen++ == tab % nm) {
-                    snprintf(out, (u32)cap, "%s", S.box[i].shown);
-                    n = (int)strlen(out);
+                    zled_set(&e, S.box[i].shown);
                     break;
                 }
             tab++;
             continue;
         }
         tab = 0;
-        if (k & 0x10000) {              /* a UTF-8 character */
-            char t[4];
-            int c0 = k & 0xFF, need = (c0 & 0xE0) == 0xC0 ? 2 : (c0 & 0xF0) == 0xE0 ? 3 : (c0 & 0xF8) == 0xF0 ? 4 : 1, m = 1;
-            t[0] = (char)c0;
-            while (m < need) {
-                unsigned char ch;
-                struct pollfd p = { 0, POLLIN, 0 };
-                if (poll(&p, 1, 30) <= 0 || sys_read(0, &ch, 1) != 1 || (ch & 0xC0) != 0x80) break;
-                t[m++] = (char)ch;
-            }
-            if (m == need && need > 1 && n + m < cap) { memcpy(out + n, t, (u32)m); n += m; out[n] = 0; }
-            continue;
-        }
-        if (k >= 32 && k < 127 && n + 1 < cap) { out[n++] = (char)k; out[n] = 0; }
     }
 }
 
 static int yesno(const char *q, const char *keys)  /* the key typed of keys, or 0 */
 {
     at(rows);
-    puts_(q);
-    puts_("\033[K");
-    flush();
+    oputs(q);
+    oputs("\033[K");
+    oflush();
     int k = keys_tty(0);
     msg[0] = 0;
     return k > 0 && k < 127 && strchr(keys, k) ? k : 0;
@@ -811,19 +738,6 @@ static int select_box(const char *name)
 /* ---- writing ---- */
 static char draft_path[ZPATH_MAX];
 
-static char *read_file(const char *path, u32 max)
-{
-    int fd = sys_open(path, O_RDONLY);
-    struct ustat st;
-    if (fd < 0) return 0;
-    if (sys_fstat(fd, &st) < 0 || st.size > max) { sys_close(fd); return 0; }
-    char *t = malloc(st.size + 1);
-    if (!t) { sys_close(fd); return 0; }
-    int n = sys_read(fd, t, st.size);
-    sys_close(fd);
-    t[n > 0 ? n : 0] = 0;
-    return t;
-}
 
 static int write_file(const char *path, const char *t, u32 n, int mode)
 {
@@ -852,13 +766,13 @@ static int editor(const char *path)
     av[n] = 0;
     if (strchr(av[0], '/')) snprintf(prog, sizeof prog, "%s", av[0]);
     else if (!path_find(av[0], prog, sizeof prog)) { say("no editor %s", av[0]); return -1; }
-    puts_("\033[r\033[2J\033[H");
-    flush();
+    oputs("\033[r\033[2J\033[H");
+    oflush();
     sys_ttymode(0);
     int pid = sys_spawn(prog, av, 0);
     int st = pid < 0 ? pid : sys_wait(pid);
     sys_ttymode(TTY_RAW | TTY_NOSIG);
-    puts_("\033[2J");
+    oputs("\033[2J");
     if (pid < 0) { say("cannot start %s: %s", prog, zstrerror(pid) ? zstrerror(pid) : "failed"); return -1; }
     return st;
 }
@@ -920,7 +834,7 @@ static void compose(int kind)
     u32 srcuid = src >= 0 ? S.m[src].uid : 0;
     for (;;) {
         editor(draft_path);
-        char *t = read_file(draft_path, MAIL_TEXTMAX + 131072);
+        char *t = zslurp(draft_path, MAIL_TEXTMAX + 131072, 0);
         if (!t) { say("the draft cannot be read: not sent (%s)", draft_path); break; }
         if (!strcmp(t, d)) {
             free(t);
@@ -1102,7 +1016,7 @@ static void act(int a)
         break;
     }
     case A_HELP: help_open(); break;
-    case A_REDRAW: puts_("\033[2J"); break;
+    case A_REDRAW: oputs("\033[2J"); break;
     }
 }
 
@@ -1128,15 +1042,12 @@ static int load_config(const char *cfile, int must)
         if (must) { dprintf(2, "mail: %s: %s\n", cfile, zstrerror(fd) ? zstrerror(fd) : "cannot open"); return -1; }
         return mail_config(&cf, strdup(""), e, sizeof e);
     }
-    char *t;
-    if (sys_fstat(fd, &st) < 0 || st.size > MAIL_CONFMAX || !(t = malloc(st.size + 1))) {
-        dprintf(2, "mail: %s: too big (%d bytes at most)\n", cfile, MAIL_CONFMAX);
-        sys_close(fd);
+    char *t = sys_fstat(fd, &st) < 0 ? 0 : zslurpfd(fd, MAIL_CONFMAX, 0);   /* the file checked below is the one read */
+    sys_close(fd);
+    if (!t) {
+        dprintf(2, "mail: %s: %s\n", cfile, zwhy("cannot read"));
         return -1;
     }
-    int n = sys_read(fd, t, st.size);
-    sys_close(fd);
-    t[n > 0 ? n : 0] = 0;
     if (mail_config(&cf, t, e, sizeof e) < 0) {
         dprintf(2, "mail: %s: %s\n", cfile, e);
         return -1;
@@ -1153,10 +1064,10 @@ static int load_config(const char *cfile, int must)
     return 0;
 }
 
+static const char USAGE[] = "usage: mail [-c FILE] [-f FOLDER]\n       mail [-c FILE] -s SUBJECT ADDRESS... < TEXT\n       mail -K\n";
 static void usage(void)
 {
-    dprintf(2, "usage: mail [-c FILE] [-f FOLDER]\n       mail [-c FILE] -s SUBJECT ADDRESS... < TEXT\n       mail -K\n");
-    sys_exit(2);
+    zusage(USAGE);
 }
 
 /* mail -s: the text from standard input to the addresses, through the settings' SMTP server */
@@ -1194,10 +1105,10 @@ static int send_batch(const char *subj, char **to, int nto)
     return 0;
 }
 
-static void on_winch(int sig) { (void)sig; winch = 1; }
 
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *cfile = 0, *folder = 0, *subj = 0;
     int i;
     char path[ZPATH_MAX];
@@ -1207,7 +1118,8 @@ int main(int argc, char **argv)
         else if (!strcmp(o, "-c") && i + 1 < argc) cfile = argv[++i];
         else if (!strcmp(o, "-f") && i + 1 < argc) folder = argv[++i];
         else if (!strcmp(o, "-s") && i + 1 < argc) subj = argv[++i];
-        else usage();
+        else if (!strcmp(o, "--")) { i++; break; }
+        else zbadopt(o, USAGE);
     }
     if ((subj && i >= argc) || (!subj && i < argc)) usage();
     const char *home = getenv("HOME");
@@ -1237,9 +1149,9 @@ int main(int argc, char **argv)
         return 2;
     }
     keys_load(&ks, defkeys, sizeof defkeys - 1, "mail");
-    signal(SIGWINCH, on_winch);
+    zscr_init();
     sys_ttymode(TTY_RAW | TTY_NOSIG);
-    puts_("\033[2J");
+    oputs("\033[2J");
     if (ks.bad[0]) snprintf(msg, sizeof msg, "%s", ks.bad);
     draw();
     if (session() == 0) {
@@ -1249,7 +1161,7 @@ int main(int argc, char **argv)
         if (!S.cur[0]) snprintf(S.cur, sizeof S.cur, "%s", folder ? folder : cf.folder);
     }
     while (!quit) {
-        if (winch) { winch = 0; puts_("\033[2J"); if (view == V_PAGER) pager_build(); else if (view == V_HELP) wrap(); }
+        if (zscr_resized()) { oputs("\033[2J"); if (view == V_PAGER) pager_build(); else if (view == V_HELP) wrap(); }
         draw();
         int k = keys_tty(0);
         if (k < 0) break;
@@ -1273,8 +1185,8 @@ int main(int argc, char **argv)
     }
     ms_logout(&S);
     c_close(&IN);
-    puts_("\033[r\033[2J\033[H");
-    flush();
+    oputs("\033[r\033[2J\033[H");
+    oflush();
     sys_ttymode(0);
     pager_close();
     ms_free(&S);

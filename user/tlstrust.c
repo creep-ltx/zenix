@@ -35,24 +35,11 @@ u32 tt_clock_floor(u32 build_date)
 
 void tt_civil(u32 t, int *y, int *m, int *d)
 {
-    static const unsigned char ml[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-    u32 days = t / 86400;
-    *y = 1970;
-    for (;;) {
-        u32 yl = (*y % 4 == 0 && (*y % 100 != 0 || *y % 400 == 0)) ? 366 : 365;
-        if (days < yl)
-            break;
-        days -= yl;
-        ++*y;
-    }
-    for (*m = 0; *m < 11; ++*m) {
-        u32 l = ml[*m] + (*m == 1 && *y % 4 == 0 && (*y % 100 != 0 || *y % 400 == 0));
-        if (days < l)
-            break;
-        days -= l;
-    }
-    ++*m;
-    *d = (int)days + 1;
+    struct zdt z;
+    zdate(t, &z);
+    *y = z.year;
+    *m = z.mon;
+    *d = z.day;
 }
 
 /* ---- the random seed: 32 bytes from /dev/random for each handshake (D21 5); said when the pool is not ready ---- */

@@ -5,6 +5,7 @@ NAME
 
 SYNOPSIS
     ctop [-d SECONDS]
+    ctop -K
 
 DESCRIPTION
     ctop is the owner's monitor for the Amiga, in the way of btop; Zenix
@@ -28,7 +29,7 @@ DESCRIPTION
            2.5; + and - change it while it runs).
 
 KEYS
-    Every key is in $HOME/.config/ctop.keys (written at the first start
+    Every key is in $HOME/.config/ctop/keys (written at the first start
     with the built-in ones; h lists what is bound). The usual ones:
     q Esc Ctrl-C     quit
     h ?              the keys
@@ -68,7 +69,9 @@ NOTES
     nice value).
     Some words stay AmigaOS's: "no bsdsocket.library: no network" when
     netd is not running, "Shells", "the Pi", ENVARC:ctop.keys in the
-    help (on Zenix that file is $HOME/.config/ctop.keys).
+    help (on Zenix that file is $HOME/.config/ctop/keys; one kept as
+    $HOME/.config/ctop.keys before 2026-11-23 is moved there once, with a
+    line saying so). ctop -K prints the built-in keys.
     Memory on the stock A1200 (80 x 32): about 102 KB of its own and
     57 KB of code shared by every ctop running (measured in FS-UAE,
     tools/ctop-test.sh).

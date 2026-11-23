@@ -95,6 +95,30 @@ int sys_port_find(const char *n);
 int sys_call(int port, struct umsg *m);
 int sys_update(u32 op, u32 a, u32 b);
 extern int zerrno;
+/* libz's whole-file read and command line (user/zhelp.c) with their rules, over the calls above */
+static inline char *zslurp(const char *path, u32 max, u32 *len)
+{
+    struct ustat st;
+    int fd = sys_open(path, 0);
+    char *b = 0;
+    if (fd < 0) return 0;
+    if (sys_fstat(fd, &st) == 0 && st.size > max) zerrno = 27;          /* EFBIG: refused, never cut */
+    else if (sys_fstat(fd, &st) == 0 && (b = malloc(st.size + 1))) {
+        int n = sys_read(fd, b, st.size);
+        if (n != (int)st.size) { free(b); b = 0; }
+        else { b[n] = 0; if (len) *len = (u32)n; }
+    }
+    sys_close(fd);
+    return b;
+}
+static inline __attribute__((noreturn)) void zusage(const char *usage) { fputs(usage, stderr); exit(2); }
+static inline __attribute__((noreturn)) void zbadopt(const char *opt, const char *usage)
+{ fprintf(stderr, "zup: unknown option %s\n", opt); zusage(usage); }
+static inline void zopt(int argc, char **argv, const char *usage)
+{
+    if (argc > 1 && !strcmp(argv[1], "--help")) { fputs(usage, stdout); exit(0); }
+    if (argc > 1 && !strcmp(argv[1], "--version")) { puts("zup 0.2"); exit(0); }
+}
 int dir_list(const char *path, char ***names);
 void dir_free(char **names, int n);
 #include "../../user/sha256.h"

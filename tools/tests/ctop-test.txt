@@ -7,6 +7,6 @@ send netstat > /dev/null; (termtest screen /dev/tty1 'To''tal ' 60 'q' > /tmp/c4
 waitecho st2=0 120
 send ctop -d x; echo st3=$?; ctop extra; echo st4=$?; ctop '?'; echo st5=$?\r
 waitecho st5=0 30
-send for i in 0 1 2 3 4; do echo ==c$i; cat /tmp/c$i.txt; done; echo ==file; ls -l $HOME/.config/ctop.keys; head -2 $HOME/.config/ctop.keys; cat /tmp/f0.txt /tmp/f1.txt /tmp/ps1.txt; echo ==c""done\r
+send for i in 0 1 2 3 4; do echo ==c$i; cat /tmp/c$i.txt; done; echo ==file; ls -l $HOME/.config/ctop/keys; head -2 $HOME/.config/ctop/keys; cat /tmp/f0.txt /tmp/f1.txt /tmp/ps1.txt; echo ==c""done\r
 wait ==cdone 60
 stop

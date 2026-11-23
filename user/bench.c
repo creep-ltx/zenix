@@ -464,8 +464,10 @@ static int bench_mmu(const char *big)
     return mb_bad;
 }
 
+static const char USAGE[] = "usage: bench\n       bench dir [-q] DIRECTORY\n       bench mmu [FILE]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     if (argc >= 2 && !strcmp(argv[1], "mmu"))
         return bench_mmu(argc >= 3 ? argv[2] : "/bin/tcc");
     if (argc >= 3 && !strcmp(argv[1], "dir")) {

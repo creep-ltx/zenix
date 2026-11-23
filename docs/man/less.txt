@@ -36,11 +36,12 @@ NOTES
     An access the user is not allowed is reported as "permission denied".
     Running out of memory is reported ("out of memory") and ends the command
     with a non-zero status; nothing is cut short silently.
-    The text is UTF-8: rows are 80 columns by the console's widths (a
-    wide character two) and never break a character; a byte that is not
-    UTF-8 is one column, as the console shows it; a search pattern is
-    matched as bytes.
-    It pages as many rows as the terminal has (32 on PAL, 25 on NTSC). In
+    The text is UTF-8: rows are the terminal's width by the console's
+    widths (a wide character two) and never break a character; a byte
+    that is not UTF-8 is one column, as the console shows it; a search
+    pattern is matched as bytes.
+    It pages as many rows as the terminal has (32 on PAL, 25 on NTSC) and
+    lays the rows out again when a terminal window changes size. In
     a pipe (ls | less) the keys come from the console less runs on, its
     controlling tty, not from console 1.
 

@@ -23,8 +23,10 @@ static int sum(int fd, const char *name)
     dprintf(1, "%s  %s\n", s, name);
     return 0;
 }
+static const char USAGE[] = "usage: sha256sum [file...]\n";
 int main(int argc, char **argv)
 {
+    zoperands(&argc, &argv, USAGE);
     if (argc < 2) return sum(0, "-") != 0;
     int rc = 0;
     for (int i = 1; i < argc; i++) {

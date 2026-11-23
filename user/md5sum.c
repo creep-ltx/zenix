@@ -43,8 +43,10 @@ static void sum(int fd, const char *name)
     for (int i = 0; i < 4; i++) for (int j = 0; j < 4; j++) { unsigned char byte = (unsigned char)(v[i] >> (8 * j)); s[8*i + 2*j] = hex[byte >> 4]; s[8*i + 2*j + 1] = hex[byte & 15]; }
     s[32] = 0; dprintf(1, "%s  %s\n", s, name);
 }
+static const char USAGE[] = "usage: md5sum [file...]\n";
 int main(int argc, char **argv)
 {
+    zoperands(&argc, &argv, USAGE);
     if (argc < 2) { sum(0, "-"); return 0; }
     int rc = 0;
     for (int i = 1; i < argc; i++) {

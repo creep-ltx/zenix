@@ -1,12 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* /lib/tls/tlspipe HOST PORT: TLS for a program that does not carry the crypto library itself (DESIGN D58 section 5,
- * D59 section 4; irc and mail start it for a TLS server, mail also after STARTTLS, so they stay small and the library
- * is loaded only when TLS is used; the package tls). The socket,
+/* /lib/tls/tlspipe HOST PORT [ALPN]: TLS for a program that does not carry the crypto library itself (DESIGN D58
+ * section 5, D59 section 4; irc and mail start it for a TLS server, mail also after STARTTLS, wget for an https: URL
+ * with ALPN "http/1.1": the system's one TLS path, docs/audit-2026-11-23-one-system.md OS-12; the package tls). The
+ * socket,
  * already connected to HOST, is descriptor 2; the plain text comes in on 0 and goes out on 1. The handshake is the
  * crypto library's (crypto/zc/zc_tls.h, as wget's: TLS 1.2, the chain checked against /etc/ssl/anchors and the
  * owner's roots in /etc/ssl/local/, the name HOST, the dates by zc_clock's rules: user/tlstrust.h). The first line on
  * 1 says how it went: "ok\n", "ok clock YYYY-MM-DD\n" (the clock is not trusted: dates checked only against that
- * floor) or "error TEXT\n" (then the end, status 3), after "info TEXT\n" lines while it waits (the random pool); after "ok" the stream both ways until either side ends it: an
+ * floor) or "error KIND: TEXT\n" (KIND certificate: the server's chain or name refused; network: the connection
+ * failed or went silent; TLS: any other failure; then the end, status 3), after "info TEXT\n" lines while it waits (the random pool); after "ok" the stream both ways until either side ends it: an
  * end of 0 sends close_notify (status 0); the server's end: status 0 with its close_notify, 1 without or on a
  * network error, 3 on a TLS error. Not a command: no page; docs/man/irc.txt and mail.txt name it. */
 #include "socket.h"
@@ -123,8 +125,8 @@ int main(int argc, char **argv)
     unsigned char seed[32];
     char line[160];
     int r, port;
-    if (argc != 3 || (port = atoi(argv[2])) <= 0 || port > 65535) {
-        put("error usage: tlspipe HOST PORT (the socket on descriptor 2)\n");
+    if (argc < 3 || argc > 4 || (port = atoi(argv[2])) <= 0 || port > 65535) {
+        put("error usage: tlspipe HOST PORT [ALPN] (the socket on descriptor 2)\n");
         return 2;
     }
     signal(SIGPIPE, SIG_IGN);
@@ -147,13 +149,16 @@ int main(int argc, char **argv)
         setpriority(PRIO_PROCESS, 0, pr + 1);
     struct zc_tls_io io = { 0, sock_send, sock_recv };
     zc_tls_init(&T->t, T->iobuf, T->chain, T->store, sizeof T->store, tt_find, 0, 0);
-    r = zc_tls_connect(&T->t, &io, argv[1], (unsigned)port, &clk, seed, 0);
+    r = zc_tls_connect(&T->t, &io, argv[1], (unsigned)port, &clk, seed, argc > 3 ? argv[3] : 0);
     zc_wipe(seed, sizeof seed);
     if (pr < 19)
         setpriority(PRIO_PROCESS, 0, pr);
     if (r < 0) {
         int e = r == ZC_TLS_EENGINE ? zc_tls_error(&T->t) : r;
-        snprintf(line, sizeof line, "error TLS: %s\n", r == ZC_TLS_EENGINE || r == ZC_TLS_ETRUNC ? zc_tls_strerror(e)
+        int x509 = r == ZC_TLS_EENGINE && ((e >= BR_ERR_X509_OK && e < BR_ERR_RECV_FATAL_ALERT) ||
+                                           e == ZC_X509_ERR_EKU || e == ZC_X509_ERR_CHAIN);
+        snprintf(line, sizeof line, "error %s: %s\n", x509 ? "certificate" : r == ZC_TLS_EENGINE || r == ZC_TLS_ETRUNC ?
+                 "TLS" : "network", r == ZC_TLS_EENGINE || r == ZC_TLS_ETRUNC ? zc_tls_strerror(e)
                  : r == -ETIMEDOUT ? "the server stopped answering" : zstrerror(r) ? zstrerror(r) : "failed");
         put(line);
         return 3;

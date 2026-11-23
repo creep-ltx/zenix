@@ -259,27 +259,22 @@ static int x_rseek(void *u, void *f, unsigned long pos)
 
 static void x_rclose(void *u, void *f) { (void)u; sys_close((int)(long)f - 1); }
 
-static int usage(int send)
-{
-    dprintf(2, send ? "usage: sz [-e] [-q] [-T] FILE...\n" : "usage: rz [-e] [-q] [-T] [-d DIR]\n");
-    return 2;
-}
-
 int main(int argc, char **argv)
 {
     const char *me = strrchr(argv[0], '/') ? strrchr(argv[0], '/') + 1 : argv[0];
     int send = !strcmp(me, "sz"), escctl = 0, i = 1;
+    const char *USAGE = send ? "usage: sz [-e] [-q] [-T] FILE...\n" : "usage: rz [-e] [-q] [-T] [-d DIR]\n";
+    zopt(argc, argv, USAGE);
     const char *dir = 0;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         if (!strcmp(argv[i], "-e")) escctl = 1;
         else if (!strcmp(argv[i], "-q")) quiet = 1;
         else if (!strcmp(argv[i], "-T")) tform = 1;
         else if (!send && !strcmp(argv[i], "-d") && i + 1 < argc) dir = argv[++i];
-        else if (!strcmp(argv[i], "--")) { i++; break; }
-        else return usage(send);
+        else zbadopt(argv[i], USAGE);
     }
     if (send ? i >= argc : i != argc)
-        return usage(send);
+        zusage(USAGE);
     if (dir && sys_chdir(dir) < 0) {
         dprintf(2, "%s: %s: %s\n", me, dir, zwhy("cannot go there"));
         return 1;

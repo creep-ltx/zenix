@@ -5,6 +5,7 @@ NAME
 
 SYNOPSIS
     markdown [-e] [+LINE] [FILE ...]
+    markdown -K
 
 DESCRIPTION
     Markdown is the owner's Markdown viewer and editor for the Amiga, a
@@ -55,16 +56,18 @@ SETTINGS
     set pictures on|off and all of Sumi's settings.
 
 FILES
-    $HOME/.config/Markdown/Markdown.keys    the keys, an [edit] and a
-                                            [view] part, written with
-                                            the defaults at the first
-                                            start
-    $HOME/.config/Markdown/Markdown.prefs   the settings set changes
-    $HOME/.config/Markdown/Markdown.places  where each file was left
+    $HOME/.config/markdown/keys     the keys, an [edit] and a [view]
+                                    part, written with the defaults at
+                                    the first start (markdown -K)
+    $HOME/.config/markdown/prefs    the settings set changes
+    $HOME/.config/markdown/places   where each file was left
     The folder is made at the first start, readable by this user only
     (AmigaOS's ENVARC:Markdown; there is no second copy as ENV: has).
-    Without HOME nothing is kept. When the terminal goes away with changes
-    not saved, each changed file is kept as NAME.save, an unnamed one as
+    Without HOME nothing is kept. Settings kept under the AmigaOS names
+    before 2026-11-23 ($HOME/.config/Markdown/Markdown.keys, .prefs,
+    .places) are moved here the first time they are read, with a line
+    saying so. When the terminal goes away with changes not saved, each
+    changed file is kept as NAME.save, an unnamed one as
     /tmp/T-UID/Markdown-N.save (UID: the user's number; a folder of the
     user's own, mode 700).
 

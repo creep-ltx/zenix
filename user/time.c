@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "libz.h"
+static const char USAGE[] = "usage: time command [argument...]\n";
 /* time command [argument...]: run a command and print how long it took (wall-clock time, to standard error) */
 int main(int argc, char **argv)
 {
-    if (argc < 2) { dprintf(2, "usage: time command [argument...]\n"); return 2; }
+    zopt(argc, argv, USAGE);
+    if (argc > 1 && !strcmp(argv[1], "--")) argv++, argc--;
+    else if (argc > 1 && argv[1][0] == '-') zbadopt(argv[1], USAGE);
+    if (argc < 2) zusage(USAGE);
     char b[ZPATH_MAX], *path = argv[1];                     /* with a slash as it is: the kernel judges its length */
     if (!strchr(argv[1], '/')) {
         if (strlen(argv[1]) + 6 > sizeof b) { dprintf(2, "time: %s: file name too long\n", argv[1]); return 127; }

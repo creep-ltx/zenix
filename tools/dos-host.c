@@ -137,6 +137,34 @@ int main(int argc, char **argv)
     check("T: refused when /tmp/T-UID is a soft link someone planted", !fh);
     if (fh) Close(fh);
 
+    /* OS-29 (docs/audit-2026-11-23-one-system.md): the settings in $HOME/.config/sumi/, lowercase, named for what they
+     * hold; a file at its old place (Sumi/Sumi.keys) moved once */
+    snprintf(p, sizeof p, "%s/home", top);
+    mkdir(p, 0755);
+    setenv("HOME", p, 1);
+    snprintf(q, sizeof q, "%s/home/.config/Sumi", top);
+    mkdir(p, 0755);
+    snprintf(p, sizeof p, "%s/home/.config", top);
+    mkdir(p, 0755);
+    mkdir(q, 0700);
+    snprintf(p, sizeof p, "%s/home/.config/Sumi/Sumi.keys", top);
+    FILE *f = fopen(p, "w");
+    if (f) { fputs("old keys\n", f); fclose(f); }
+    fh = Open((STRPTR)"ENVARC:Sumi/Sumi.keys", MODE_OLDFILE);
+    char kb[16] = { 0 };
+    if (fh) { Read(fh, kb, 8); Close(fh); }
+    snprintf(p, sizeof p, "%s/home/.config/sumi/keys", top);
+    check("ENVARC:Sumi/Sumi.keys is $HOME/.config/sumi/keys; the old file moved there, its old folder gone",
+          !strcmp(kb, "old keys") && has(p, "old keys\n") && access(q, F_OK) < 0);
+    fh = Open((STRPTR)"ENVARC:Sumi/Sumi.prefs", MODE_NEWFILE);
+    if (fh) Close(fh);
+    snprintf(p, sizeof p, "%s/home/.config/sumi/prefs", top);
+    check("ENVARC:Sumi/Sumi.prefs is $HOME/.config/sumi/prefs", fh && access(p, F_OK) == 0);
+    fh = Open((STRPTR)"PROGDIR:Sumi.places", MODE_NEWFILE);
+    if (fh) Close(fh);
+    snprintf(p, sizeof p, "%s/home/.config/sumi/places", top);
+    check("PROGDIR:Sumi.places is $HOME/.config/sumi/places", fh && access(p, F_OK) == 0);
+
     printf(fails ? "dos-host-test: FAILED\n" : "dos-host-test: all passed\n");
     return fails;
 }

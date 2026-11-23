@@ -144,16 +144,19 @@ static const char *through_link(const char *name)
     return 0;
 }
 
+static const char USAGE[] = "usage: tar c|x|t [v] [f archive] [-C dir] [file...]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     char mode = 0; const char *file = 0, *dir = 0; int i = 1;
     for (; i < argc; i++) {
         const char *a = argv[i]; if (a[0] != '-' && i > 1) break;
+        if (a[0] == '-' && a[1] == '-') zbadopt(a, USAGE);
         if (a[0] == '-') a++;
         if (!strcmp(argv[i], "-C")) { dir = argv[++i]; continue; }
-        for (; *a; a++) { if (*a == 'c' || *a == 'x' || *a == 't') mode = *a; else if (*a == 'v') verbose = 1; else if (*a == 'f') file = argv[++i]; else if (*a == 'C') dir = argv[++i]; else { dprintf(2, "tar: unknown option %c\n", *a); return 2; } }
+        for (; *a; a++) { if (*a == 'c' || *a == 'x' || *a == 't') mode = *a; else if (*a == 'v') verbose = 1; else if (*a == 'f') file = argv[++i]; else if (*a == 'C') dir = argv[++i]; else zbadch(*a, USAGE); }
     }
-    if (!mode) { dprintf(2, "usage: tar c|x|t [v] [f archive] [-C dir] [file...]\n"); return 2; }
+    if (!mode) zusage(USAGE);
     if (mode == 'c') {
         if (file && strcmp(file, "-")) { int fd = sys_open(file, O_WRONLY | O_CREAT | O_TRUNC); if (fd < 0) { dprintf(2, "tar: %s: %s\n", file, zwhy("cannot write")); return 1; } sys_dup2(fd, 1); sys_close(fd); }
         if (dir && sys_chdir(dir) < 0) { dprintf(2, "tar: %s: cannot enter\n", dir); return 1; }

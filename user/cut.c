@@ -13,19 +13,20 @@ static void parse_list(const char *s)
     }
 }
 static int wanted(int k) { for (int i = 0; i < nr; i++) if (k >= rng[i].lo && k <= rng[i].hi) return 1; return 0; }
+static const char USAGE[] = "usage: cut -f LIST [-d C] [-s] | -c LIST | -b LIST [file...]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int mode = 0, delim = '\t', only = 0, i = 1;                  /* mode 1 fields, 2 chars */
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
-        if (!strcmp(argv[i], "--")) { i++; break; }
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         char o = argv[i][1]; const char *val = argv[i][2] ? argv[i] + 2 : (i + 1 < argc ? argv[++i] : "");
         if (o == 'f') { mode = 1; parse_list(val); }
         else if (o == 'c' || o == 'b') { mode = 2; parse_list(val); }
         else if (o == 'd') delim = (unsigned char)val[0];
         else if (o == 's') only = 1;
-        else { dprintf(2, "cut: unknown option -%c\n", o); return 2; }
+        else zbadch(o, USAGE);
     }
-    if (!mode) { dprintf(2, "usage: cut -f LIST [-d C] [-s] | -c LIST | -b LIST [file...]\n"); return 2; }
+    if (!mode) zusage(USAGE);
     int rc = 0, nfiles = argc - i;
     for (int f = 0; f < (nfiles ? nfiles : 1); f++) {
         int fd = 0;

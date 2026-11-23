@@ -10,9 +10,9 @@
  * line, Ctrl+Left/Right line start/end, Ctrl+Up/Down file start/end, Alt+Up/Down page, Alt+Left/Right word,
  * Tab / Shift+Tab indent / unindent, F4 line numbers, F1 help. */
 
-#define TEXT_ROWS_MAX 30                /* text rows on a PAL screen (32 rows, 2 for the bars) */
-static int text_rows = 23;              /* this terminal: its rows - 2 (main sets it: 30 PAL, 23 NTSC) */
-#define SCR_COLS 80
+static int text_rows = 23;              /* this terminal: its rows - 2 (libz's screen layer: the size, SIGWINCH) */
+static int scr_cols = 80;               /* its columns (at most 255): the rows' cells, set with them (screen_alloc) */
+#define SCR_COLS scr_cols
 
 /* ------------------------------------------------------------ the buffer: an array of lines */
 struct line { char *s; int len, cap; };
@@ -327,14 +327,39 @@ static int save_file(const char *path)
 /* ------------------------------------------------------------ the screen: only changed rows are sent */
 /* a cell: its character's bytes packed into a long, the first in the top byte (D28: a UTF-8 character is up to 4); 0
  * the right half of a wide character (nothing is sent for it) */
-struct cell_row { u32 c[SCR_COLS]; unsigned char inv[SCR_COLS]; };
-static struct cell_row shadow[TEXT_ROWS_MAX + 2], cur_row;
+struct cell_row { u32 *c; unsigned char *inv; };
+static struct cell_row *shadow, cur_row;     /* the rows as the terminal shows them, and the one being made */
 static int use_color;                   /* the status line in colour (inv 2) */
 static int shadow_valid;
 
+/* the rows for the terminal's size now (at the start and after a resize): text_rows + 2 and one to make, each
+ * SCR_COLS cells, in one block; 0, or -1 when there is no memory */
+static int screen_alloc(void)
+{
+    static void *blk;
+    text_rows = zscr_rows - 2;
+    if (text_rows < 3) text_rows = 3;
+    scr_cols = zscr_cols;
+    int n = text_rows + 3;
+    u32 one = (u32)SCR_COLS * 5;
+    void *b = malloc(n * sizeof *shadow + n * one);
+    if (!b) return -1;
+    free(blk);
+    blk = b;
+    shadow = b;
+    unsigned char *p = (unsigned char *)(shadow + n);
+    for (int i = 0; i < n; i++, p += one) {
+        shadow[i].c = (u32 *)p;
+        shadow[i].inv = p + (u32)SCR_COLS * 4;
+    }
+    cur_row = shadow[n - 1];
+    shadow_valid = 0;
+    return 0;
+}
 static void flush_row(int r, const struct cell_row *want)
 {
-    if (shadow_valid && !memcmp(&shadow[r], want, sizeof *want)) return;
+    if (shadow_valid && !memcmp(shadow[r].c, want->c, (u32)SCR_COLS * 4) && !memcmp(shadow[r].inv, want->inv, (u32)SCR_COLS))
+        return;
     char pos[16]; snprintf(pos, sizeof pos, "\033[%d;1H", r + 1); oputs(pos);
     int cur = 0;
     for (int i = 0; i < SCR_COLS; i++) {
@@ -343,7 +368,8 @@ static void flush_row(int r, const struct cell_row *want)
         for (u32 v = want->c[i]; v; v <<= 8) oputc((unsigned char)(v >> 24));
     }
     if (cur) oputs("\033[0m");
-    shadow[r] = *want;
+    memcpy(shadow[r].c, want->c, (u32)SCR_COLS * 4);
+    memcpy(shadow[r].inv, want->inv, (u32)SCR_COLS);
 }
 static u32 pack(const char *s, int n)                  /* a character's n bytes as a cell */
 {
@@ -412,7 +438,7 @@ static void render(void)
      * inverse of blue on white, so a one-plane display, which shows no colours, still shows it inverse */
     int sl = use_color ? 2 : 1;
     blank_row(&cur_row, sl);
-    char st[SCR_COLS + 1];
+    char st[256];
     int n = snprintf(st, sizeof st, " %s%s", filename[0] ? filename : "(no name)", modified ? " [modified]" : "");
     put_str(&cur_row, 0, st, n, sl);
     n = snprintf(st, sizeof st, "line %d/%d  col %d  Ctrl+S save  Ctrl+Q quit  F1 help ", cy + 1, nL, cc + 1);
@@ -436,16 +462,28 @@ static unsigned char pq[4]; static int pqn;     /* bytes read ahead that were no
 #define M_SHIFT 0x1000
 #define M_ALT   0x2000
 #define M_CTRL  0x4000
+static int resized;                     /* a new terminal size came while a key was awaited (SIGWINCH) */
+static int midkey;                      /* within a key's bytes: a resize waits for its end */
 static int getb(void)
 {
     unsigned char c;
     if (pqn) { c = pq[0]; memmove(pq, pq + 1, (u32)--pqn); return c; }
+    for (;;) {                          /* the wait notices a resize (libz's screen layer) */
+        struct pollfd p = { 0, POLLIN, 0 };
+        if (zscr_resized()) resized = 1;
+        if (resized && !pqn && !midkey) return -2;
+        if (poll(&p, 1, 500) > 0) break;
+    }
     return sys_read(0, &c, 1) == 1 ? c : -1;
 }
+#define K_RESIZE 0x0FFF
 static int read_key(void)
 {
+    midkey = 0;
     int c = getb();
+    if (c == -2) { resized = 0; return K_RESIZE; }
     if (c < 0) return -1;
+    midkey = 1;
     if (c >= 0xC2 && c <= 0xF4) {                       /* D28: a lead: its continuations come with it */
         int need = c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4, w;
         int other = -1;
@@ -485,21 +523,25 @@ static int read_key(void)
     return key ? key | mods : K_NONE;
 }
 
-/* a one-line prompt on the message row; returns 1 with text in out, 0 when cancelled */
+/* a one-line prompt on the message row (libz's line editor: the keys every typed line has); returns 1 with text in
+ * out, 0 when cancelled */
 static int prompt(const char *label, char *out, int max, const char *initial)
 {
-    int n = 0;
-    if (initial) { n = (int)strlen(initial); if (n >= max) n = max - 1; memcpy(out, initial, (u32)n); }
+    struct zled e;
+    zled_init(&e, out, max, initial ? initial : "");
     for (;;) {
-        char line[4 * SCR_COLS + 1]; snprintf(line, sizeof line, "%s%.*s", label, n, out);
-        char pos[24]; snprintf(pos, sizeof pos, "\033[%d;1H", text_rows + 2); oputs(pos); oputs("\033[K"); oputs(line); oflush();
+        zled_show(&e, text_rows + 2, 1, SCR_COLS - 1, label);
+        oflush();
         shadow_valid = 0;
-        int c = read_key();
-        if (c == '\r' || c == '\n') { out[n] = 0; return 1; }
-        if (c == 27 || c == 3 || c < 0 || c == K_NONE) { if (c == K_NONE) continue; return 0; }
-        if ((c == 127 || c == 8) && n) n = (int)zu8prev(out, (u32)n);         /* one character (D28) */
-        else if (c == K_TEXT && n + kn < max) { memcpy(out + n, kbuf, (u32)kn); n += kn; }
-        else if (c >= 32 && c < 256 && n < max - 1) out[n++] = (char)c;
+        int c = read_key(), k = c & 0xFFF, r;
+        if (c < 0) return 0;
+        if (k == K_TEXT) { zled_insert(&e, kbuf, kn); continue; }
+        k = k == K_LEFT ? ZK_LEFT : k == K_RIGHT ? ZK_RIGHT : k == K_HOME ? 1 : k == K_END ? 5 : k == K_DEL ? 4 : k;
+        if ((c & M_CTRL) && (k == ZK_LEFT || k == ZK_RIGHT)) k = k == ZK_LEFT ? ZK_CLEFT : ZK_CRIGHT;
+        if (k == K_NONE || k == K_RESIZE || (k >= 256 && k < ZK_UP)) continue;
+        r = zled_key(&e, k);
+        if (r == ZLED_DONE) return 1;
+        if (r == ZLED_CANCEL) return 0;
     }
 }
 static int ask(const char *q, const char *keys)         /* one key from keys, or 0 */
@@ -635,13 +677,16 @@ static void on_cont(int sig)
     shadow_valid = 0;
     render();
 }
+static const char USAGE[] = "usage: edit [+LINE] [file]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int goto_line = 0, i = 1;
-    { int ti = sys_ttyinfo(), rows = ti > 0 ? ti >> 16 : 25;      /* the screen's rows: 32 on PAL, 25 on NTSC */
-      text_rows = rows - 2; if (text_rows > TEXT_ROWS_MAX) text_rows = TEXT_ROWS_MAX; if (text_rows < 3) text_rows = 3; }
+    zscr_init();                                                /* the terminal's size, and its changes */
+    if (screen_alloc() < 0) { dprintf(2, "edit: out of memory\n"); return 1; }
     for (; i < argc; i++) {
         if (argv[i][0] == '+' && isdigit((unsigned char)argv[i][1])) goto_line = atoi(argv[i] + 1);
+        else if (argv[i][0] == '-' && argv[i][1]) zbadopt(argv[i], USAGE);
         else if (!filename[0]) { if (strlen(argv[i]) >= sizeof filename) { dprintf(2, "edit: %s: file name too long\n", argv[i]); return 1; } strcpy(filename, argv[i]); }
     }
     use_color = color_auto(1);
@@ -659,9 +704,14 @@ int main(int argc, char **argv)
     oputs("\033[2J\033[H"); shadow_valid = 0;
     int want = -1;                                              /* the visual column to return to when moving up and down */
     for (;;) {
+        if (scr_cols != zscr_cols || text_rows != (zscr_rows - 2 < 3 ? 3 : zscr_rows - 2)) {
+            if (screen_alloc() < 0) break;                      /* a new size: the rows made again, all drawn anew */
+            invalidate();
+        }
         render();
         int k = read_key();
         if (k < 0) break;
+        if (k == K_RESIZE) continue;
         int plain = k & 0xFFF, mods = k & 0x7000, extend = (mods & M_SHIFT) != 0;
         message[0] = 0;
         int vertical = 0;

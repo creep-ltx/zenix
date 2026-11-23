@@ -544,20 +544,15 @@ static u32 fat_to_unix(u32 d, u32 t)
 {
     u32 y = 1980 + (d >> 9), m = (d >> 5) & 15, day = d & 31;
     if (m < 1 || m > 12 || !day) return 0;
-    u32 yy = m <= 2 ? y - 1 : y, era = yy / 400, yoe = yy - era * 400;
-    u32 doy = (153 * (m + (m > 2 ? (u32)-3 : 9)) + 2) / 5 + day - 1;
-    u32 doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    u32 days = era * 146097 + doe - 719468;
+    u32 days = (u32)zdays((int)y, (int)m, (int)day);
     return days * 86400 + (t >> 11) * 3600 + ((t >> 5) & 63) * 60 + (t & 31) * 2;
 }
 static void unix_to_fat(u32 now, u32 *d, u32 *t)
 {
     if (now < 315532800u) { *d = 0x21; *t = 0; return; }   /* before 1980: the format's first day */
-    u32 z = now / 86400 + 719468, era = z / 146097, doe = z - era * 146097;
-    u32 yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365, y = yoe + era * 400;
-    u32 doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
-    u32 day = doy - (153 * mp + 2) / 5 + 1, m = mp < 10 ? mp + 3 : mp - 9;
-    if (m <= 2) y++;
+    struct zdt z;
+    zdate(now, &z);
+    u32 y = (u32)z.year, m = (u32)z.mon, day = (u32)z.day;
     if (y > 2107) { *d = 0xFF9F; *t = 0xBF7D; return; }
     *d = (y - 1980) << 9 | m << 5 | day;
     u32 s = now % 86400;

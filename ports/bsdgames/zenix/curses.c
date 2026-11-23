@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* A small curses for the BSD games (include/curses.h has what it is). The screen is the terminal on standard output,
  * driven by the xterm-style escapes Zenix's console, term and telnet clients understand: CSI row;col H, CSI K, CSI m
- * (0, 1, 4, 7), CSI ?25 l/h. curscr holds what the terminal shows; wrefresh writes the cells of a window that differ
+ * (0, 1, 4, 7), CSI ?25 l/h, through the system's one screen layer (user/zscr.c: the buffered output, the size,
+ * the cursor placed; docs/audit-2026-11-23-one-system.md OS-33). curscr holds what the terminal shows; wrefresh writes the cells of a window that differ
  * from it (all of them after touchwin or clearok), in runs, moving the cursor only where a run starts. Input is read
  * from standard input a byte at a time (poll for the timeouts); keypad() turns the arrows' escape sequences into
  * KEY_UP and the rest. The terminal's modes are termios's (cbreak and noecho take the console out of its line mode;
@@ -16,6 +17,7 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+#include <zenix.h>
 
 WINDOW *stdscr, *curscr;
 int LINES, COLS;
@@ -26,10 +28,11 @@ static int py = -1, px = -1;            /* the terminal's cursor (-1: not known)
 static chtype pattr;                    /* the attributes the terminal draws with */
 static int pushed = -1;                 /* ungetch */
 
-/* ---- output: one buffer, written when full and at the end of a refresh */
+/* ---- output: one buffer, written when full and at the end of a refresh (its own, not zenix.h's oputn: that one
+ * links the error texts, 1.3 KB more in every game) */
 static char obuf[1024];
 static int on;
-static void oflush(void)
+static void cflush(void)
 {
     int k = 0;
     while (k < on) {
@@ -44,7 +47,7 @@ static void oput(const char *s, int n)
 {
     while (n > 0) {
         if (on == (int)sizeof obuf)
-            oflush();
+            cflush();
         int k = (int)sizeof obuf - on < n ? (int)sizeof obuf - on : n;
         memcpy(obuf + on, s, (size_t)k);
         on += k;
@@ -53,22 +56,12 @@ static void oput(const char *s, int n)
     }
 }
 static void ostr(const char *s) { oput(s, (int)strlen(s)); }
-static void onum(int v)
-{
-    char d[12];
-    int k = 0;
-    do { d[k++] = (char)('0' + v % 10); v /= 10; } while (v);
-    while (k) oput(&d[--k], 1);
-}
 static void omove(int y, int x)
 {
     if (y == py && x == px)
         return;
-    ostr("\033[");
-    onum(y + 1);
-    oput(";", 1);
-    onum(x + 1);
-    oput("H", 1);
+    char b[24];
+    oput(b, zscr_move(b, y + 1, x + 1));       /* the screen layer's escape */
     py = y;
     px = x;
 }
@@ -136,11 +129,11 @@ int delwin(WINDOW *w)
 
 static void getsize(void)
 {
-    struct winsize ws;
     LINES = COLS = 0;
-    if (ioctl(1, TIOCGWINSZ, &ws) == 0 || ioctl(0, TIOCGWINSZ, &ws) == 0) {
-        LINES = ws.ws_row;
-        COLS = ws.ws_col;
+    if (isatty(1) || isatty(0)) {       /* the terminal's size: the screen layer's (zscr_size) */
+        zscr_size();
+        LINES = zscr_rows;
+        COLS = zscr_cols;
     }
     const char *e;
     if (LINES <= 0 && (e = getenv("LINES"))) LINES = atoi(e);
@@ -176,7 +169,7 @@ int endwin(void)
     if (!cursor_vis)
         ostr("\033[?25h");
     ostr("\r\n");
-    oflush();
+    cflush();
     py = px = -1;
     if (have_saved)
         tcsetattr(0, TCSANOW, &saved);
@@ -393,7 +386,7 @@ int wnoutrefresh(WINDOW *w)
 int doupdate(void)
 {
     oattr(0);
-    oflush();
+    cflush();
     return OK;
 }
 int wrefresh(WINDOW *w)                 /* SIGALRM held off meanwhile: worm and robots -r refresh from its handler */
@@ -414,10 +407,10 @@ int curs_set(int v)
     int old = cursor_vis;
     cursor_vis = v != 0;
     ostr(cursor_vis ? "\033[?25h" : "\033[?25l");
-    oflush();
+    cflush();
     return old;
 }
-int beep(void) { oput("\a", 1); oflush(); return OK; }
+int beep(void) { oput("\a", 1); cflush(); return OK; }
 int flash(void) { return beep(); }
 int baudrate(void) { return 38400; }
 int has_colors(void) { return 0; }
@@ -442,7 +435,7 @@ int mvcur(int oy, int ox, int ny, int nx)
         return ERR;
     py = px = -1;
     omove(ny, nx);
-    oflush();
+    cflush();
     return OK;
 }
 int napms(int ms)

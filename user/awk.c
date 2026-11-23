@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "libz.h"
+#include "../kernel/version.h"
 #include "regex.h"
 
 /* awk [-F fs] [-v name=value]... [-f progfile | 'program'] [name=value | file]...
@@ -1673,8 +1674,10 @@ static void assign_cmdline(const char *spec)           /* name=value from -v or 
     sym_set(s, vstrnum(tstr(val))); free(val);
 }
 
+static const char USAGE[] = "usage: awk [-F fs] [-v var=value] [-f progfile | 'program'] [file ...]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     { char *sp; __asm__ volatile("move.l %%sp,%0" : "=r"(sp)); stk_top = sp; }
     sNF = special("NF", SP_NF); sNR = special("NR", SP_NR); sFNR = special("FNR", SP_FNR); sFS = special("FS", SP_FS); sOFS = special("OFS", SP_OFS);
     sORS = special("ORS", SP_ORS); sRS = special("RS", SP_RS); sSUBSEP = special("SUBSEP", SP_SUBSEP); sRSTART = special("RSTART", SP_RSTART);
@@ -1688,7 +1691,7 @@ int main(int argc, char **argv)
 
     char *progtext = 0; int i = 1;
     char *vspecs[32]; int nv = 0; const char *fsopt = 0;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         const char *o = argv[i];
         if (!strcmp(o, "--")) { i++; break; }
         if (o[1] == 'F') { fsopt = o[2] ? o + 2 : (i + 1 < argc ? argv[++i] : ""); }
@@ -1698,10 +1701,10 @@ int main(int argc, char **argv)
             char *t = read_file_text(f);
             if (progtext) { char *c = xmalloc(strlen(progtext) + strlen(t) + 2); strcpy(c, progtext); strcat(c, "\n"); strcat(c, t); progtext = c; } else progtext = t;
         }
-        else if (!strcmp(o, "--version") || !strcmp(o, "-version")) { dprintf(1, "awk (Zenix) 1\n"); return 0; }
-        else fatal("unknown option %s", o);
+        else if (!strcmp(o, "-version")) { dprintf(1, "awk " ZENIX_VSTR "\n"); return 0; }
+        else zbadopt(o, USAGE);
     }
-    if (!progtext) { if (i >= argc) { dprintf(2, "usage: awk [-F fs] [-v var=value] [-f progfile | 'program'] [file ...]\n"); return 2; } progtext = argv[i++]; }
+    if (!progtext) { if (i >= argc) zusage(USAGE); progtext = argv[i++]; }
     if (fsopt) { char *u = unescape(fsopt); if (!strcmp(u, "t")) { free(u); u = xstrdup("\t"); } set_strvar(sFS, u); free(u); }
     for (int k = 0; k < nv; k++) assign_cmdline(vspecs[k]);
 
