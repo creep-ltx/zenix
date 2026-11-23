@@ -292,3 +292,126 @@ char *zs_bre_to_ere(const char *s)
     }
     *o = 0; return out;
 }
+
+/* ---- the one-system helpers (docs/audit-2026-11-23-one-system.md section 3; OS-20, OS-35, OS-36) ---- */
+#include "../kernel/version.h"
+
+/* the command line: every program calls zopt first in main. --help (alone, as the first argument) writes the usage to
+ * the output and ends with 0; --version writes "NAME VERSION" (the system's version) and ends with 0. zusage writes
+ * the usage to the error stream and ends with 2; zbadopt writes "NAME: unknown option OPT" before it. Written without
+ * the formatter, so a program that formats nothing links none. */
+static const char *zo_name = "";
+static void zo_put(int fd, const char *s) { sys_write(fd, s, strlen(s)); }
+const char *zprogname(void) { return zo_name; }
+void zopt(int argc, char **argv, const char *usage)
+{
+    const char *n = argc > 0 && argv[0] ? argv[0] : "", *sl = strrchr(n, '/');
+    zo_name = sl ? sl + 1 : n;
+    if (argc < 2 || argv[1][0] != '-' || argv[1][1] != '-')
+        return;
+    if (!strcmp(argv[1], "--help")) {
+        if (zout_at_exit) zout_at_exit();   /* nothing buffered may follow it */
+        zo_put(1, usage);
+        sys_exit(0);
+    }
+    if (!strcmp(argv[1], "--version")) {
+        zo_put(1, zo_name);
+        zo_put(1, " " ZENIX_VSTR "\n");
+        sys_exit(0);
+    }
+}
+void zusage(const char *usage)
+{
+    if (zout_at_exit) zout_at_exit();
+    zo_put(2, usage);
+    sys_exit(2);
+    for (;;);
+}
+void zbadopt(const char *opt, const char *usage)
+{
+    if (zout_at_exit) zout_at_exit();
+    zo_put(2, zo_name);
+    zo_put(2, ": unknown option ");
+    zo_put(2, opt);
+    zo_put(2, "\n");
+    zusage(usage);
+}
+
+void zbadch(int c, const char *usage)
+{
+    char o[3] = { '-', (char)c, 0 };
+    zbadopt(o, usage);
+}
+
+/* dates: seconds since 1970 (UTC, to 2106) as a calendar date, and back (the civil-from-days formula, one for all) */
+void zdate(u32 t, struct zdt *d)
+{
+    u32 days = t / 86400, rem = t % 86400;
+    long z = (long)days + 719468, era = z / 146097;
+    u32 doe = (u32)(z - era * 146097);
+    u32 yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    u32 doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    u32 mp = (5 * doy + 2) / 153;
+    int m = (int)(mp < 10 ? mp + 3 : mp - 9), y = (int)(yoe + era * 400) + (m <= 2);
+    d->year = y;
+    d->mon = m;
+    d->day = (int)(doy - (153 * mp + 2) / 5 + 1);
+    d->hour = (int)(rem / 3600);
+    d->min = (int)(rem / 60 % 60);
+    d->sec = (int)(rem % 60);
+    d->wday = (int)((days + 4) % 7);
+    d->yday = (int)(days - (u32)zdays(y, 1, 1));
+}
+long zdays(int y, int m, int d)
+{
+    y -= m <= 2;
+    long era = (y >= 0 ? y : y - 399) / 400;
+    u32 yoe = (u32)(y - era * 400);
+    u32 doy = (u32)((153 * (m > 2 ? m - 3 : m + 9) + 2) / 5 + d - 1);
+    u32 doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + (long)doe - 719468;
+}
+
+/* a whole file into memory, NUL-terminated (the length without it in *len): malloc'd, or 0 and zerrno (the open's
+ * error, EISDIR, EFBIG when it holds more than max bytes: refused, never cut, ENOMEM). A file of unknown size (a
+ * pipe, a device) is read to its end. */
+char *zslurp(const char *path, u32 max, u32 *len)
+{
+    struct ustat st;
+    int fd = sys_open(path, O_RDONLY), r;
+    if (fd < 0) return 0;
+    u32 n = 0, cap = 0;
+    if (sys_fstat(fd, &st) == 0) {
+        if ((st.mode & S_IFMT) == S_IFDIR) { sys_close(fd); zerrno = EISDIR; return 0; }
+        if ((st.mode & S_IFMT) == S_IFREG) cap = st.size + 1;
+    }
+    if (cap > max + 1) { sys_close(fd); zerrno = EFBIG; return 0; }
+    if (!cap) cap = 1024;
+    char *b = malloc(cap);
+    if (!b) zerrno = ENOMEM;
+    while (b) {
+        if (n + 1 >= cap) {                 /* full: is there more? (a file of the size fstat gave is read once) */
+            char c;
+            if ((r = sys_read(fd, &c, 1)) <= 0) {
+                if (r < 0) { int e = zerrno; free(b); b = 0; zerrno = e; }
+                break;
+            }
+            if (n >= max) { free(b); b = 0; zerrno = EFBIG; break; }
+            u32 nc = cap * 2 > max + 1 ? max + 1 : cap * 2;
+            char *nb = realloc(b, nc);
+            if (!nb) { free(b); b = 0; zerrno = ENOMEM; break; }
+            b = nb; cap = nc;
+            b[n++] = c;
+            continue;
+        }
+        r = sys_read(fd, b + n, cap - 1 - n);
+        if (r < 0) { int e = zerrno; free(b); b = 0; zerrno = e; break; }
+        if (r == 0) break;
+        n += (u32)r;
+    }
+    sys_close(fd);
+    if (!b) return 0;
+    b[n] = 0;
+    if (len) *len = n;
+    return b;
+}

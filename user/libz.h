@@ -53,6 +53,19 @@ int zrealpath(const char *in, char *out, size_t cap);
  * -EINVAL: a bad line (*name its first word, for the message). One parser for boot and init */
 int svc_line(char *l, char **name, int *nice, char **prog);
 
+/* the one-system helpers (docs/audit-2026-11-23-one-system.md section 3; user/zhelp.c, the C library's too) */
+void zopt(int argc, char **argv, const char *usage);   /* first in main: --help (the usage to the output, status 0),
+                                                       * --version ("NAME VERSION", status 0); sets zprogname */
+void zusage(const char *usage) __attribute__((noreturn));   /* the usage to the error stream, status 2 */
+void zbadopt(const char *opt, const char *usage) __attribute__((noreturn));  /* "NAME: unknown option OPT", the usage, 2 */
+void zbadch(int c, const char *usage) __attribute__((noreturn));      /* the same for the letter c: "unknown option -c" */
+const char *zprogname(void);                          /* argv[0]'s last part, as zopt saw it */
+struct zdt { int year, mon, day, hour, min, sec, wday, yday; };  /* mon 1-12, day 1-31, wday 0 = Sunday, yday 0-365 */
+void zdate(u32 t, struct zdt *d);                     /* seconds since 1970 (UTC, to 2106) as a date */
+long zdays(int y, int m, int d);                      /* the days from 1970-01-01 to a date (m 1-12) */
+char *zslurp(const char *path, u32 max, u32 *len);    /* the whole file, malloc'd and NUL-terminated; 0 and zerrno
+                                                       * (EFBIG: more than max bytes, refused, never cut) */
+
 /* more of the C library */
 char *strdup(const char *s);
 char *strcat(char *d, const char *s);

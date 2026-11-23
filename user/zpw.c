@@ -3,34 +3,17 @@
  * callers) and the C library's getpwnam, getpwuid, getgrnam, getgrgid and getpass (user/zshare.h) */
 #include "zshare.h"
 
-/* read a whole file into a malloc'd buffer (64 KB at most: more is refused, never cut) */
+/* read a whole file into a malloc'd buffer (64 KB at most: more is refused, never cut; zslurp, zhelp.c) */
 char *pw_slurp(const char *path, int *len)
 {
-    int fd = sys_open(path, O_RDONLY), n = 0, r;
-    u32 cap = 4096;
-    if (fd < 0) return 0;
-    char *buf = malloc(cap);
-    while (buf) {
-        if ((u32)n + 1 >= cap) {
-            if (cap >= 65536) {             /* said without the formatter (the C library's getpw* link none) */
-                static const char msg[] = " is larger than 64 KB: not read\n";
-                sys_write(2, path, strlen(path));
-                sys_write(2, msg, sizeof msg - 1);
-                free(buf); buf = 0; break;
-            }
-            char *nb = realloc(buf, cap * 2);
-            if (!nb) { free(buf); buf = 0; break; }
-            buf = nb; cap *= 2;
-        }
-        r = sys_read(fd, buf + n, cap - 1 - (u32)n);
-        if (r < 0) { free(buf); buf = 0; break; }
-        if (r == 0) break;
-        n += r;
+    u32 n;
+    char *buf = zslurp(path, 65536, &n);
+    if (!buf && zerrno == EFBIG) {          /* said without the formatter (the C library's getpw* link none) */
+        static const char msg[] = " is larger than 64 KB: not read\n";
+        sys_write(2, path, strlen(path));
+        sys_write(2, msg, sizeof msg - 1);
     }
-    sys_close(fd);
-    if (!buf) return 0;
-    buf[n] = 0;
-    if (len) *len = n;
+    if (buf && len) *len = (int)n;
     return buf;
 }
 static char *slurp(const char *path)          /* the last file read stays until the next call */

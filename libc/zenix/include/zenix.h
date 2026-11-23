@@ -34,4 +34,14 @@ int color_rule(int fd, const char *term, const char *no_color);
 int color_arg(const char *arg, int bare);   /* --color[=WHEN]: 0 never, 1 always, 2 auto, -1 not it, -2 bad WHEN */
 const char *zsig_name(int sig);         /* 15 -> "TERM"; 0 if none */
 int zsig_num(const char *name);         /* "TERM", "SIGTERM" or "15" -> 15; -1 if unknown */
+/* the one-system helpers (docs/audit-2026-11-23-one-system.md section 3, user/zhelp.c) */
+void zopt(int argc, char **argv, const char *usage);   /* --help, --version: answered, the program ends with 0 */
+void zusage(const char *usage) __attribute__((noreturn));
+void zbadopt(const char *opt, const char *usage) __attribute__((noreturn));
+void zbadch(int c, const char *usage) __attribute__((noreturn));
+const char *zprogname(void);
+struct zdt { int year, mon, day, hour, min, sec, wday, yday; };
+void zdate(unsigned int t, struct zdt *d);
+long zdays(int y, int m, int d);
+char *zslurp(const char *path, unsigned int max, unsigned int *len);
 #endif

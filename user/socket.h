@@ -142,6 +142,17 @@ struct addrinfo {
 int getaddrinfo(const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **res);
 void freeaddrinfo(struct addrinfo *res);
 const char *gai_strerror(int e);
+/* the one connection helper (docs/audit-2026-11-23-one-system.md OS-38): the name looked up, a socket, the connection
+ * made within ZCONNECT_MS (one limit for every network program). zconnect: the socket (blocking unless ZC_NONBLOCK;
+ * ZC_UDP: a datagram socket, connected at once), or a negative error number and *why (a fixed text: "no such host",
+ * "connection refused", "connection timed out" ...). zconnect_begin starts it and gives the socket at once (a program
+ * that keeps its own loop: it waits for POLLOUT and calls zconnect_end with 0 ms, or with the time left) */
+#define ZCONNECT_MS 30000
+#define ZC_UDP      1
+#define ZC_NONBLOCK 2
+int zconnect(const char *host, int port, int flags, const char **why);
+int zconnect_begin(const char *host, int port, int flags, const char **why);
+int zconnect_end(int fd, int ms, const char **why);   /* 1 made, 0 not yet, < 0 failed (the socket closed) */
 #ifdef _ZENIX_SOCKET_LIBC
 _END_STD_C
 #endif
