@@ -96,8 +96,9 @@ cmp_ "... no shared copy of it" "$(S $L private)" -eq "$(S $L base)"
 rx   $L "the filesystem server restarted" "svc: fs: started @fsd \(pid [0-9]+, for pid [0-9]+ [a-z]+\)"
 cmp_ "... a start after it is a new generation: a new copy" "$(S $L gen2)" -gt "$(S $L gen1)"
 if grep -aq '^mmu: memory protection on' "$OUT/$L.log"; then      # D41/D60: the write is stopped
-count $L "with memory protection: both writes into the shared code end the writer (read only)" 2 \
-     "\[kernel\] pid [0-9]+ \(crashpure\): memory protection: a write to 0x[0-9a-f]+ \(its own code \(read only\)\): killed \(SIGSEGV\).*"
+np=$(grep -aoE '\[kernel\] pid [0-9]+ \(crashpure\): memory protection: a write to 0x[0-9a-f]+ \(its own code \(read only\)\): killed' "$OUT/$L.log" | sort -u | wc -l)
+[ "$np" = 2 ] && ok "with memory protection: both writes into the shared code end the writer (read only)" ||
+    bad "with memory protection: both writes into the shared code end the writer ($np processes, not 2)"   # (the lines again in dmesg)
 count $L "... the code was never changed (no checksum line)" 0 ".*(damaged|DAMAGED) \(checksum\).*"
 cmp_ "... the copy stays in use after the first" "$(S $L poked)" -eq "$(S $L one)"
 cmp_ "... and after the second" "$(S $L damaged)" -eq "$(S $L one)"
@@ -152,7 +153,9 @@ imax=-1; for m in $IDLE; do [ "$m" -gt "$imax" ] && imax=$m; done
 [ "$(echo $IDLE | wc -w)" = 3 ] && cmp_ "the three idle shells (consoles 2-4) hold little memory (ps MEM, KB, the largest)" "$imax" -le 112 ||
     bad "three idle shells in ps between ==s4 and ==s4b (found: $IDLE)"
 line s "a command that needs a big arena ran (30000 words from a 168894-byte command substitution)" "big-ok"
-BIG=$(awk '$0 == "==s4c" { f = 1; next } $0 == "==s4d" { f = 0 } f && $5 == "wait" && $NF == "sh" { print $6 }' "$OUT/s.log" | head -n 1)
+# console 1's shell: the parent of that ps (its state wait, or ready on Amiberry's timing: not the state, the PPID)
+BIG=$(awk '$0 == "==s4c" { f = 1; next } $0 == "==s4d" { f = 0 } f && $NF == "ps" { pp = $2 } f && $NF == "sh" { mem[$1] = $6 }
+     END { print mem[pp] }' "$OUT/s.log" | head -n 1)
 cmp_ "... and the shell gave the memory back afterwards (ps MEM of console 1's shell, KB)" "${BIG:--1}" -le 112
 cmp_ "two more shells (sh -c) share it too" "$(V s s4b)" -gt "$(V s s4)"
 cmp_ "... still one copy" "$(S s s4b)" -eq "$(S s s1)"
