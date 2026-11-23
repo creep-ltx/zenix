@@ -56,21 +56,63 @@ int svc_line(char *l, char **name, int *nice, char **prog);
 /* the one-system helpers (docs/audit-2026-11-23-one-system.md section 3; user/zhelp.c, the C library's too) */
 void zopt(int argc, char **argv, const char *usage);   /* first in main: --help (the usage to the output, status 0),
                                                        * --version ("NAME VERSION", status 0); sets zprogname */
-void zusage(const char *usage) __attribute__((noreturn));   /* the usage to the error stream, status 2 */
-void zbadopt(const char *opt, const char *usage) __attribute__((noreturn));  /* "NAME: unknown option OPT", the usage, 2 */
-void zbadch(int c, const char *usage) __attribute__((noreturn));      /* the same for the letter c: "unknown option -c" */
+void zusage(const char *usage) __attribute__((noreturn, cold));   /* the usage to the error stream, status 2 */
+void zbadopt(const char *opt, const char *usage) __attribute__((noreturn, cold));  /* "NAME: unknown option OPT", the usage, 2 */
+void zbadch(int c, const char *usage) __attribute__((noreturn, cold));      /* the same for the letter c: "unknown option -c" */
 void znoargs(int argc, char **argv, const char *usage);   /* zopt, then any argument refused (status 2) */
-/* POSIX's getopt over opts ("ab:": b takes a value, zoptarg), -1 at the first operand (argv[zoptind]) or after "--";
+/* POSIX's getopt over opts ("ab:": b takes a value, zoptval), -1 at the first operand (argv[zoptnext]) or after "--";
  * an unknown option or a missing value ends the program with the message and the usage (status 2) */
-int zgetopt(int argc, char **argv, const char *opts, const char *usage);
-extern int zoptind;
-extern char *zoptarg;
+int zoptget(int argc, char **argv, const char *opts, const char *usage);
+extern int zoptnext;
+extern char *zoptval;
+int zisopt(int argc, char **argv, int *i, const char *usage);  /* a hand-written loop's test: argv[*i] is an option
+                                                       * (0 at an operand, or after "--", skipped; --word refused with a usage) */
+void zoperands(int *argc, char ***argv, const char *usage);  /* zopt for a program without options: one is
+                                                       * refused, "--" skipped, argv moved to the first operand at [1] */
+char *zslurpfd(int fd, u32 max, u32 *len);             /* the same from an open descriptor (left open) */
+/* the screen (user/zscr.c; docs/audit-2026-11-23-one-system.md OS-33): over the buffered output (oputn, oflush) */
+extern int zscr_rows, zscr_cols;      /* the terminal's size: 80 x 25 when it gives none */
+void zscr_init(void);                 /* the size now; a SIGWINCH from now on noted for zscr_resized */
+int zscr_size(void);                  /* the size read again: 1 if it changed */
+int zscr_resized(void);               /* 1 once after a SIGWINCH (the size read again): draw everything anew */
+void zscr_at(int row, int col);       /* the cursor to row, col (1-based) */
+void zscr_putw(const char *s, int w); /* s in exactly w columns: cut on whole characters, then spaces */
+void zscr_bar(int row, const char *s);   /* a line in reverse video (a title) */
+void zscr_status(const char *s);      /* the status line: reverse video, the bottom row */
 const char *zprogname(void);                          /* argv[0]'s last part, as zopt saw it */
 struct zdt { int year, mon, day, hour, min, sec, wday, yday; };  /* mon 1-12, day 1-31, wday 0 = Sunday, yday 0-365 */
 void zdate(u32 t, struct zdt *d);                     /* seconds since 1970 (UTC, to 2106) as a date */
 long zdays(int y, int m, int d);                      /* the days from 1970-01-01 to a date (m 1-12) */
 char *zslurp(const char *path, u32 max, u32 *len);    /* the whole file, malloc'd and NUL-terminated; 0 and zerrno
                                                        * (EFBIG: more than max bytes, refused, never cut) */
+
+/* the keys' codes beyond a byte (display/keys.h's KM_ names are these): the arrows, Shift and Ctrl with them, Help, F1 */
+#define ZK_UP 300
+#define ZK_DOWN 301
+#define ZK_LEFT 302
+#define ZK_RIGHT 303
+#define ZK_SUP 304
+#define ZK_SDOWN 305
+#define ZK_SLEFT 306
+#define ZK_SRIGHT 307
+#define ZK_HELP 308
+#define ZK_F1 310
+#define ZK_CUP 320
+#define ZK_CDOWN 321
+#define ZK_CLEFT 322
+#define ZK_CRIGHT 323
+/* the line editor (libz.c; docs/audit-2026-11-23-one-system.md OS-34): one typed line's keys for every program, the
+ * shell's: characters (a UTF-8 byte as 0x10000 + it), Left/Right and Ctrl-B/F, Home/End and Ctrl-A/E, Ctrl with the
+ * arrows a word, BS, Del and Ctrl-D, Ctrl-K, Ctrl-U, Ctrl-W, Ctrl-T, Return, Esc, Ctrl-G and Ctrl-C (a history is the
+ * program's: Up and Down come back as ZLED_OTHER) */
+struct zled { char *b; int n, pos, max; };
+enum { ZLED_MORE, ZLED_DONE, ZLED_CANCEL, ZLED_EOF, ZLED_OTHER, ZLED_FULL };
+void zled_init(struct zled *e, char *buf, int max, const char *init);
+void zled_set(struct zled *e, const char *t);
+int zled_insert(struct zled *e, const char *s, int n);  /* 0, or -1 when it does not fit (nothing inserted) */
+void zled_cut(struct zled *e, int from, int to);       /* the bytes from..to taken out */
+int zled_key(struct zled *e, int k);                     /* ZLED_OTHER: a key that is not the editor's (Tab...) */
+void zled_show(const struct zled *e, int row, int col, int width, const char *prompt);
 
 /* more of the C library */
 char *strdup(const char *s);

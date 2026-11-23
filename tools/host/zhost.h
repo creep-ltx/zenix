@@ -62,3 +62,9 @@ int sys_svc_load(void *buf, u32 n);
 int sys_svc_opens(u32 *ino, u32 bytes);
 #define SVC_MIDREQ 0x10000
 #define SVC_EXIT_DAMAGED 86
+
+/* the date conversion: libz's own source (user/zdate.h) */
+struct zdt { int year, mon, day, hour, min, sec, wday, yday; };
+static long zdays(int y, int m, int d);
+#define ZDATE_LINK static __attribute__((unused))
+#include "../../user/zdate.h"

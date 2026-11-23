@@ -298,12 +298,12 @@ const char *gai_strerror(int e)
 }
 
 /* the one connection helper (socket.h; docs/audit-2026-11-23-one-system.md OS-38) */
-static const char *zc_text(int e)
+__attribute__((optimize("Os"))) static const char *zc_text(int e)
 {
     const char *t = zstrerror(e);
     return t ? t : "cannot connect";
 }
-int zconnect_begin(const char *host, int port, int flags, const char **why)
+__attribute__((optimize("Os"))) int zconnect_begin(const char *host, int port, int flags, const char **why)
 {
     struct addrinfo h, *r = 0;
     char ps[8];
@@ -335,7 +335,7 @@ int zconnect_begin(const char *host, int port, int flags, const char **why)
     }
     return s;
 }
-int zconnect_end(int fd, int ms, const char **why)
+__attribute__((optimize("Os"))) int zconnect_end(int fd, int ms, const char **why)
 {
     struct pollfd q;
     int e = 0, w;
@@ -358,7 +358,7 @@ int zconnect_end(int fd, int ms, const char **why)
     *why = zc_text(e);
     return -e;
 }
-int zconnect(const char *host, int port, int flags, const char **why)
+__attribute__((optimize("Os"))) int zconnect(const char *host, int port, int flags, const char **why)
 {
     int s = zconnect_begin(host, port, flags, why), r;
     if (s < 0 || (flags & ZC_UDP))
@@ -373,7 +373,7 @@ int zconnect(const char *host, int port, int flags, const char **why)
     }
     if (!(flags & ZC_NONBLOCK)) {
         int off = 0;
-        ioctl(s, FIONBIO, &off);
+        sk_ioctl(s, FIONBIO, &off);     /* blocking again (not ioctl(): a program then links no terminal calls) */
     }
     return s;
 }

@@ -549,3 +549,122 @@ int peer_str(struct umsg *m, u32 addr, u32 max)
         }
     return 0;
 }
+
+/* ---- the line editor (docs/audit-2026-11-23-one-system.md OS-34; libz.h): one set of editing keys for every
+ * program's typed line, the shell's (Emacs's) ---- */
+static int zled_space(char c) { return c == ' ' || c == '\t'; }   /* the shell's words (bash's unix-word-rubout) */
+__attribute__((optimize("Os"))) void zled_init(struct zled *e, char *buf, int max, const char *init)
+{
+    memset(e, 0, sizeof *e);
+    e->b = buf;
+    e->max = max;
+    zled_set(e, init ? init : "");
+}
+__attribute__((optimize("Os"))) void zled_set(struct zled *e, const char *t)
+{
+    int n = (int)strlen(t);
+    if (n > e->max - 1) {
+        n = e->max - 1;
+        while (n > 0 && ((unsigned char)t[n] & 0xC0) == 0x80) n--;    /* not inside a character */
+    }
+    memmove(e->b, t, (u32)n);
+    e->b[n] = 0;
+    e->n = e->pos = n;
+}
+__attribute__((optimize("Os"))) int zled_insert(struct zled *e, const char *s, int k)
+{
+    if (e->n + k > e->max - 1) return -1;
+    memmove(e->b + e->pos + k, e->b + e->pos, (u32)(e->n - e->pos + 1));
+    memcpy(e->b + e->pos, s, (u32)k);
+    e->n += k;
+    e->pos += k;
+    return 0;
+}
+__attribute__((optimize("Os"))) void zled_cut(struct zled *e, int from, int to)
+{
+    memmove(e->b + from, e->b + to, (u32)(e->n - to + 1));
+    e->n -= to - from;
+    if (e->pos > to) e->pos -= to - from;
+    else if (e->pos > from) e->pos = from;
+}
+/* a character's bytes by UTF-8's continuation bytes alone (no width tables: a program that only edits links none) */
+static int zled_next(const struct zled *e, int p)
+{
+    if (p < e->n) p++;
+    while (p < e->n && ((unsigned char)e->b[p] & 0xC0) == 0x80) p++;
+    return p;
+}
+static int zled_prev(const struct zled *e, int p)
+{
+    if (p > 0) p--;
+    while (p > 0 && ((unsigned char)e->b[p] & 0xC0) == 0x80) p--;
+    return p;
+}
+static int zled_wordl(const struct zled *e, int p)
+{
+    while (p > 0 && zled_space(e->b[p - 1])) p--;
+    while (p > 0 && !zled_space(e->b[p - 1])) p--;
+    return p;
+}
+static int zled_wordr(const struct zled *e, int p)
+{
+    while (p < e->n && zled_space(e->b[p])) p++;
+    while (p < e->n && !zled_space(e->b[p])) p++;
+    return p;
+}
+__attribute__((optimize("Os"))) int zled_key(struct zled *e, int k)
+{
+    switch (k) {
+    case 13: case 10: return ZLED_DONE;
+    case 27: case 7: case 3: return ZLED_CANCEL;                /* Esc, Ctrl-G, Ctrl-C */
+    case 127: case 8: if (e->pos > 0) zled_cut(e, zled_prev(e, e->pos), e->pos); return ZLED_MORE;
+    case 4:                                                     /* Del, Ctrl-D: the character under the cursor */
+        if (!e->n) return ZLED_EOF;
+        if (e->pos < e->n) zled_cut(e, e->pos, zled_next(e, e->pos));
+        return ZLED_MORE;
+    case 1: case ZK_SLEFT: e->pos = 0; return ZLED_MORE;       /* Home, Ctrl-A */
+    case 5: case ZK_SRIGHT: e->pos = e->n; return ZLED_MORE;   /* End, Ctrl-E */
+    case 2: case ZK_LEFT: e->pos = zled_prev(e, e->pos); return ZLED_MORE;
+    case 6: case ZK_RIGHT: e->pos = zled_next(e, e->pos); return ZLED_MORE;
+    case ZK_CLEFT: e->pos = zled_wordl(e, e->pos); return ZLED_MORE;
+    case ZK_CRIGHT: e->pos = zled_wordr(e, e->pos); return ZLED_MORE;
+    case 11: e->n = e->pos; e->b[e->n] = 0; return ZLED_MORE;   /* Ctrl-K */
+    case 21: zled_cut(e, 0, e->pos); return ZLED_MORE;         /* Ctrl-U */
+    case 23: zled_cut(e, zled_wordl(e, e->pos), e->pos); return ZLED_MORE;   /* Ctrl-W */
+    case 20:                                                    /* Ctrl-T: the two characters around the cursor */
+        if (e->pos > 0 && e->n > 1) {
+            if (e->pos == e->n) e->pos = zled_prev(e, e->pos);
+            int a = zled_prev(e, e->pos), b = zled_next(e, e->pos) - e->pos, la = e->pos - a;
+            if (a < e->pos) {
+                char t[4];
+                memcpy(t, e->b + a, (u32)la);
+                memmove(e->b + a, e->b + e->pos, (u32)b);
+                memcpy(e->b + a + b, t, (u32)la);
+                e->pos = a + b + la;
+            }
+        }
+        return ZLED_MORE;
+    }
+    if ((k >= 32 && k < 127) || (k & 0x10000)) {                /* a typed character (a UTF-8 byte: 0x10000 + it) */
+        char c = (char)(k & 0xFF);
+        return zled_insert(e, &c, 1) < 0 ? ZLED_FULL : ZLED_MORE;
+    }
+    return ZLED_OTHER;
+}
+/* the line at row, after the prompt, in width columns from col: the part around the cursor (whole characters), the
+ * rest of the row cleared, the cursor put where it is */
+__attribute__((optimize("Os"))) void zled_show(const struct zled *e, int row, int col, int width, const char *prompt)
+{
+    int pc = zu8cols(prompt, (u32)strlen(prompt)), room = width - pc;
+    if (room < 4) { prompt = ""; pc = 0; room = width; }
+    u32 from = 0;
+    while (zu8cols(e->b + from, (u32)e->pos - from) > room - 1 && from < (u32)e->pos) {
+        int c;
+        from += (u32)zu8next(e->b + from, (u32)e->n - from, &c);
+    }
+    zscr_at(row, col);
+    oputs(prompt);
+    oputn(e->b + from, zu8fit(e->b + from, (u32)e->n - from, room));
+    oputs("\033[K");
+    zscr_at(row, col + pc + zu8cols(e->b + from, (u32)e->pos - from));
+}

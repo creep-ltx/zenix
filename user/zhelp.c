@@ -296,55 +296,53 @@ char *zs_bre_to_ere(const char *s)
 /* ---- the one-system helpers (docs/audit-2026-11-23-one-system.md section 3; OS-20, OS-35, OS-36) ---- */
 #include "../kernel/version.h"
 
-/* the command line: every program calls zopt first in main. --help (alone, as the first argument) writes the usage to
- * the output and ends with 0; --version writes "NAME VERSION" (the system's version) and ends with 0. zusage writes
- * the usage to the error stream and ends with 2; zbadopt writes "NAME: unknown option OPT" before it. Written without
- * the formatter, so a program that formats nothing links none. */
-static const char *zo_name = "";
-static void zo_put(int fd, const char *s) { sys_write(fd, s, strlen(s)); }
-const char *zprogname(void) { return zo_name; }
-void zopt(int argc, char **argv, const char *usage)
+/* the command line: every program calls zopt first in main. --help (as the first argument) writes the usage to the
+ * output and ends with 0; --version writes "NAME VERSION" (the system's version) and ends with 0. zusage writes the
+ * usage to the error stream and ends with 2; zbadopt writes "NAME: unknown option OPT" before it. Cold code, -Os and
+ * no formatter: about 0.5 KB in a program that takes all of them. */
+#define ZCOLD __attribute__((optimize("Os"), noinline))
+#ifdef ZENIX_LIBC
+#define zo_exit exit                    /* the C library's: its streams flushed */
+#else
+#define zo_exit _zexit                  /* libz's: the buffered output flushed */
+#endif
+static char **zo_argv;
+static ZCOLD void zo_put(int fd, const char *s) { sys_write(fd, s, strlen(s)); }
+ZCOLD const char *zprogname(void)
 {
-    const char *n = argc > 0 && argv[0] ? argv[0] : "", *sl = strrchr(n, '/');
-    zo_name = sl ? sl + 1 : n;
-    if (argc < 2 || argv[1][0] != '-' || argv[1][1] != '-')
-        return;
-    if (!strcmp(argv[1], "--help")) {
-        if (zout_at_exit) zout_at_exit();   /* nothing buffered may follow it */
-        zo_put(1, usage);
-        sys_exit(0);
-    }
-    if (!strcmp(argv[1], "--version")) {
-        zo_put(1, zo_name);
-        zo_put(1, " " ZENIX_VSTR "\n");
-        sys_exit(0);
-    }
+    const char *n = zo_argv && zo_argv[0] ? zo_argv[0] : "", *p = n;
+    for (; *p; p++)
+        if (*p == '/') n = p + 1;
+    return n;
 }
-void zusage(const char *usage)
+ZCOLD void zopt(int argc, char **argv, const char *usage)
 {
-    if (zout_at_exit) zout_at_exit();
+    zo_argv = argv;
+    if (argc < 2) return;
+    if (!strcmp(argv[1], "--help")) { zo_put(1, usage); zo_exit(0); }
+    if (!strcmp(argv[1], "--version")) { zo_put(1, zprogname()); zo_put(1, " " ZENIX_VSTR "\n"); zo_exit(0); }
+}
+ZCOLD void zusage(const char *usage)
+{
     zo_put(2, usage);
-    sys_exit(2);
-    for (;;);
+    zo_exit(2);
 }
-void zbadopt(const char *opt, const char *usage)
+ZCOLD void zbadopt(const char *opt, const char *usage)
 {
-    if (zout_at_exit) zout_at_exit();
-    zo_put(2, zo_name);
+    zo_put(2, zprogname());
     zo_put(2, ": unknown option ");
     zo_put(2, opt);
     zo_put(2, "\n");
     zusage(usage);
 }
-
-void zbadch(int c, const char *usage)
+ZCOLD void zbadch(int c, const char *usage)
 {
     char o[3] = { '-', (char)c, 0 };
     zbadopt(o, usage);
 }
 
 /* a program that takes no arguments at all: zopt, then any argument refused (an option: unknown; a word: the usage) */
-void znoargs(int argc, char **argv, const char *usage)
+ZCOLD void znoargs(int argc, char **argv, const char *usage)
 {
     zopt(argc, argv, usage);
     if (argc > 1) {
@@ -353,90 +351,86 @@ void znoargs(int argc, char **argv, const char *usage)
     }
 }
 
-/* the options' letters, one at a time, as POSIX's getopt (opts: the letters, a ':' after one that takes a value):
- * the letter, or -1 at the first operand (zoptind) or after "--". An unknown letter or long option ends the program
- * through zbadopt, a missing value through "NAME: option -x needs a value" and the usage: the caller never sees them. */
-int zoptind = 1;
-char *zoptarg;
-static int zo_pos;
-int zgetopt(int argc, char **argv, const char *opts, const char *usage)
+/* a program without options: zopt, then an option refused and "--" skipped; *argv and *argc moved so that (*argv)[1]
+ * is the first operand */
+ZCOLD void zoperands(int *argc, char ***argv, const char *usage)
 {
-    zoptarg = 0;
+    zopt(*argc, *argv, usage);
+    int i = 1;
+    while (zisopt(*argc, *argv, &i, usage)) zbadopt((*argv)[i], usage);
+    *argc -= i - 1;
+    *argv += i - 1;
+}
+
+/* a hand-written option loop's test, "for (; zisopt(argc, argv, &i, USAGE); i++)": 1 when argv[*i] is an option word;
+ * 0 at the first operand, or after "--" (skipped). With a usage, a long option ("--word") is refused through zbadopt;
+ * with none it is the caller's (--color) */
+ZCOLD int zisopt(int argc, char **argv, int *i, const char *usage)
+{
+    if (*i >= argc) return 0;
+    const char *a = argv[*i];
+    if (a[0] != '-' || !a[1]) return 0;
+    if (a[1] == '-') {
+        if (!a[2]) { (*i)++; return 0; }
+        if (usage) zbadopt(a, usage);
+    }
+    return 1;
+}
+
+/* the options' letters, one at a time, as POSIX's getopt (opts: the letters, a ':' after one that takes a value):
+ * the letter, or -1 at the first operand (zoptnext) or after "--". An unknown letter or long option ends the program
+ * through zbadopt, a missing value through "NAME: option -x needs a value" and the usage: the caller never sees them. */
+int zoptnext = 1;
+char *zoptval;
+static int zo_pos;
+ZCOLD int zoptget(int argc, char **argv, const char *opts, const char *usage)
+{
+    zoptval = 0;
     if (!zo_pos) {
-        if (zoptind >= argc) return -1;
-        const char *a = argv[zoptind];
-        if (a[0] != '-' || !a[1]) return -1;
-        if (a[1] == '-') {
-            if (!a[2]) { zoptind++; return -1; }
-            zbadopt(a, usage);
-        }
+        if (!zisopt(argc, argv, &zoptnext, usage)) return -1;
         zo_pos = 1;
     }
-    char *a = argv[zoptind];
+    char *a = argv[zoptnext];
     int c = (unsigned char)a[zo_pos++];
     const char *o = c == ':' ? 0 : strchr(opts, c);
     if (!o) zbadch(c, usage);
     if (o[1] == ':') {
-        if (a[zo_pos]) zoptarg = a + zo_pos;
-        else if (zoptind + 1 < argc) zoptarg = argv[++zoptind];
+        if (a[zo_pos]) zoptval = a + zo_pos;
+        else if (zoptnext + 1 < argc) zoptval = argv[++zoptnext];
         else {
             char m[3] = { '-', (char)c, 0 };
-            if (zout_at_exit) zout_at_exit();
-            zo_put(2, zo_name); zo_put(2, ": option "); zo_put(2, m); zo_put(2, " needs a value\n");
+            zo_put(2, zprogname());
+            zo_put(2, ": option ");
+            zo_put(2, m);
+            zo_put(2, " needs a value\n");
             zusage(usage);
         }
-        zoptind++;
+        zoptnext++;
         zo_pos = 0;
     } else if (!a[zo_pos]) {
-        zoptind++;
+        zoptnext++;
         zo_pos = 0;
     }
     return c;
 }
 
-/* dates: seconds since 1970 (UTC, to 2106) as a calendar date, and back (the civil-from-days formula, one for all) */
-void zdate(u32 t, struct zdt *d)
-{
-    u32 days = t / 86400, rem = t % 86400;
-    long z = (long)days + 719468, era = z / 146097;
-    u32 doe = (u32)(z - era * 146097);
-    u32 yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    u32 doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    u32 mp = (5 * doy + 2) / 153;
-    int m = (int)(mp < 10 ? mp + 3 : mp - 9), y = (int)(yoe + era * 400) + (m <= 2);
-    d->year = y;
-    d->mon = m;
-    d->day = (int)(doy - (153 * mp + 2) / 5 + 1);
-    d->hour = (int)(rem / 3600);
-    d->min = (int)(rem / 60 % 60);
-    d->sec = (int)(rem % 60);
-    d->wday = (int)((days + 4) % 7);
-    d->yday = (int)(days - (u32)zdays(y, 1, 1));
-}
-long zdays(int y, int m, int d)
-{
-    y -= m <= 2;
-    long era = (y >= 0 ? y : y - 399) / 400;
-    u32 yoe = (u32)(y - era * 400);
-    u32 doy = (u32)((153 * (m > 2 ? m - 3 : m + 9) + 2) / 5 + d - 1);
-    u32 doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    return era * 146097 + (long)doe - 719468;
-}
+/* dates: one source with the PC tests (user/zdate.h) */
+#include "zdate.h"
 
 /* a whole file into memory, NUL-terminated (the length without it in *len): malloc'd, or 0 and zerrno (the open's
  * error, EISDIR, EFBIG when it holds more than max bytes: refused, never cut, ENOMEM). A file of unknown size (a
- * pipe, a device) is read to its end. */
-char *zslurp(const char *path, u32 max, u32 *len)
+ * pipe, a device) is read to its end. zslurpfd reads an open descriptor (left open: a caller that checks its owner
+ * with fstat reads the same file it checked) */
+ZCOLD char *zslurpfd(int fd, u32 max, u32 *len)
 {
     struct ustat st;
-    int fd = sys_open(path, O_RDONLY), r;
-    if (fd < 0) return 0;
     u32 n = 0, cap = 0;
+    int r;
     if (sys_fstat(fd, &st) == 0) {
-        if ((st.mode & S_IFMT) == S_IFDIR) { sys_close(fd); zerrno = EISDIR; return 0; }
+        if ((st.mode & S_IFMT) == S_IFDIR) { zerrno = EISDIR; return 0; }
         if ((st.mode & S_IFMT) == S_IFREG) cap = st.size + 1;
     }
-    if (cap > max + 1) { sys_close(fd); zerrno = EFBIG; return 0; }
+    if (cap > max + 1) { zerrno = EFBIG; return 0; }
     if (!cap) cap = 1024;
     char *b = malloc(cap);
     if (!b) zerrno = ENOMEM;
@@ -449,8 +443,10 @@ char *zslurp(const char *path, u32 max, u32 *len)
             }
             if (n >= max) { free(b); b = 0; zerrno = EFBIG; break; }
             u32 nc = cap * 2 > max + 1 ? max + 1 : cap * 2;
-            char *nb = realloc(b, nc);
+            char *nb = malloc(nc);      /* (not realloc: a program reading only regular files links none of it) */
             if (!nb) { free(b); b = 0; zerrno = ENOMEM; break; }
+            memcpy(nb, b, n);
+            free(b);
             b = nb; cap = nc;
             b[n++] = c;
             continue;
@@ -460,9 +456,18 @@ char *zslurp(const char *path, u32 max, u32 *len)
         if (r == 0) break;
         n += (u32)r;
     }
-    sys_close(fd);
     if (!b) return 0;
     b[n] = 0;
     if (len) *len = n;
+    return b;
+}
+ZCOLD char *zslurp(const char *path, u32 max, u32 *len)
+{
+    int fd = sys_open(path, O_RDONLY);
+    if (fd < 0) return 0;
+    char *b = zslurpfd(fd, max, len);
+    int e = zerrno;
+    sys_close(fd);
+    zerrno = e;
     return b;
 }
