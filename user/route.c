@@ -20,8 +20,11 @@ static int route(int s, u32 op, u32 gw, struct uroute *out)
 
 static void col(u32 a) { struct in_addr in = { a }; oprintf("%-16s", inet_ntoa(in)); }
 
+static const char USAGE[] = "usage: route [-n]\n       route add default [gw] GATEWAY\n       route del default\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
+    if (argc > 1 && argv[1][0] == '-' && strcmp(argv[1], "-n")) zbadopt(argv[1], USAGE);
     int s = socket(AF_INET, SOCK_DGRAM, 0);
     if (s < 0) { dprintf(2, "route: the network server: %s\n", zwhy("not reachable")); return 1; }
     if (argc == 1 || (argc == 2 && !strcmp(argv[1], "-n"))) {
@@ -59,6 +62,5 @@ int main(int argc, char **argv)
     }
     return 0;
 usage:
-    dprintf(2, "usage: route [-n]\n       route add default [gw] GATEWAY\n       route del default\n");
-    return 2;
+    zusage(USAGE);
 }

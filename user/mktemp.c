@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "libz.h"
+static const char USAGE[] = "usage: mktemp [-d] [-p dir] [template]\n";
 /* mktemp [-d] [-p dir] [template]: create a file (or directory with -d) with a unique name and print it. The template
  * ends in X characters that are replaced (default /tmp/tmp.XXXXXX). */
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int dir = 0, i = 1; const char *base = 0, *tmpl = "tmp.XXXXXX";
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         if (!strcmp(argv[i], "-d")) dir = 1;
         else if (!strncmp(argv[i], "-p", 2)) base = argv[i][2] ? argv[i] + 2 : (i + 1 < argc ? argv[++i] : "/tmp");
-        else { dprintf(2, "mktemp: unknown option %s\n", argv[i]); return 2; }
+        else zbadopt(argv[i], USAGE);
     }
     if (i < argc) tmpl = argv[i];
     char name[ZPATH_MAX];

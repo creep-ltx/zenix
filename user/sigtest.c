@@ -625,8 +625,10 @@ static int intr_main(void)
     return 0;
 }
 
+static const char USAGE[] = "usage: sigtest CHECK...\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     if (!path_find(argv[0], self, sizeof self))
         strcpy(self, "/bin/sigtest");
     if (argc > 1 && argv[1][0] == '_') {

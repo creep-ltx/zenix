@@ -1,12 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
+static const char USAGE[] = "usage: ln [-sf] target link_name\n";
 /* ln [-s] [-f] target link_name   |   ln [-s] [-f] target... directory */
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int sym = 0, force = 0, i = 1;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) for (const char *p = argv[i] + 1; *p; p++) { if (*p == 's') sym = 1; else if (*p == 'f') force = 1; else { dprintf(2, "ln: unknown option -%c\n", *p); return 2; } }
+    for (; zisopt(argc, argv, &i, USAGE); i++) for (const char *p = argv[i] + 1; *p; p++) { if (*p == 's') sym = 1; else if (*p == 'f') force = 1; else zbadch(*p, USAGE); }
     int n = argc - i;
-    if (n < 2) { dprintf(2, "usage: ln [-sf] target link_name\n"); return 2; }
+    if (n < 2) zusage(USAGE);
     struct ustat st; int rc = 0;
     int todir = n > 2 || (sys_stat(argv[argc - 1], &st) == 0 && (st.mode & S_IFMT) == S_IFDIR);
     for (; i < argc - 1; i++) {

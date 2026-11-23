@@ -1,11 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
+static const char USAGE[] = "usage: mkdir [-pv] dir...\n";
 /* mkdir [-p] [-v] dir... */
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int o_p = 0, o_v = 0, i = 1, rc = 0;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'p') o_p = 1; else if (*p == 'v') o_v = 1; else { dprintf(2, "mkdir: unknown option -%c\n", *p); return 2; } }
-    if (i >= argc) { dprintf(2, "usage: mkdir [-pv] dir...\n"); return 2; }
+    for (; zisopt(argc, argv, &i, USAGE); i++) for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'p') o_p = 1; else if (*p == 'v') o_v = 1; else zbadch(*p, USAGE); }
+    if (i >= argc) zusage(USAGE);
     for (; i < argc; i++) {
         char *path = argv[i];                           /* (-p cuts it at each slash in turn and puts the slash back) */
         if (o_p) {

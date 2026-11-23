@@ -431,8 +431,10 @@ static void command(char *line)
     say("dpytest: %s %s %d\n", w[0], w[1], r);
 }
 
+static const char USAGE[] = "usage: dpytest [-fb WxHxB] [-f FILE]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     /* -f FILE: the commands from FILE, read as it grows (the shell stays free for the test's other commands) */
     int a = 1;
     if (argc > a + 1 && !strcmp(argv[a], "-fb")) {

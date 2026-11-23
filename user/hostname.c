@@ -1,8 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* hostname: $HOSTNAME (login sets it from /etc/hostname), else /etc/hostname's first line, else "zenix" */
-int main(void)
+int main(int argc, char **argv)
 {
+    znoargs(argc, argv, "usage: hostname\n");
     const char *u = getenv("HOSTNAME");
     if (u && *u) { dprintf(1, "%s\n", u); return 0; }
     char b[64];

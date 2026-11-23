@@ -43,14 +43,15 @@ static void run(char **items, int from, int count)
     free(av);
 }
 
+static const char USAGE[] = "usage: xargs [-n count] [-I string] [command [argument...]]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int i = 1, maxn = 0;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         if (!strcmp(argv[i], "-n") && i + 1 < argc) { maxn = atoi(argv[++i]); if (maxn < 1) { dprintf(2, "xargs: -n needs a number of at least 1\n"); return 2; } }
         else if (!strcmp(argv[i], "-I") && i + 1 < argc) { repl = argv[++i]; if (!repl[0]) { dprintf(2, "xargs: -I needs a non-empty string\n"); return 2; } }
-        else if (!strcmp(argv[i], "--")) { i++; break; }
-        else { dprintf(2, "xargs: unknown option %s\n", argv[i]); return 2; }
+        else zbadopt(argv[i], USAGE);
     }
     static char *echo_cmd[] = { "echo", 0 };
     if (i >= argc) { cmd = echo_cmd; nc = 1; } else { cmd = argv + i; nc = argc - i; }

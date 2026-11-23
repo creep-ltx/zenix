@@ -33,11 +33,12 @@ static void msort(char **v, char **tmp, u32 n)
     while (j < n) tmp[k++] = v[j++];
     memcpy(v, tmp, n * sizeof(char *));
 }
+static const char USAGE[] = "usage: sort [-rnufb] [-k field] [-t char] [-o file] [file...]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *outfile = 0; int i = 1, rc = 0;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
-        if (!strcmp(argv[i], "--")) { i++; break; }
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         if (argv[i][1] == 'k' || argv[i][1] == 't' || argv[i][1] == 'o') {      /* -k2 or -k 2 */
             char opt = argv[i][1];
             const char *v = argv[i][2] ? argv[i] + 2 : (i + 1 < argc ? argv[++i] : "");
@@ -46,7 +47,7 @@ int main(int argc, char **argv)
         }
         for (const char *p = argv[i] + 1; *p; p++) {
             if (*p == 'r') o_r = 1; else if (*p == 'n') o_n = 1; else if (*p == 'u') o_u = 1; else if (*p == 'f') o_f = 1; else if (*p == 'b') o_b = 1;
-            else { dprintf(2, "sort: unknown option -%c\n", *p); return 2; }
+            else zbadch(*p, USAGE);
         }
     }
     char **v = 0; u32 n = 0, cap = 0;

@@ -73,10 +73,12 @@ static char *cmpop(void)
 }
 static char *andop(void) { char *l = cmpop(); while (ai < ac && !strcmp(av[ai], "&")) { ai++; char *r = cmpop(); if (!*l || !strcmp(l, "0") || !*r || !strcmp(r, "0")) l = strdup("0"); } return l; }
 static char *val(void) { char *l = andop(); while (ai < ac && !strcmp(av[ai], "|")) { ai++; char *r = andop(); if (!*l || !strcmp(l, "0")) l = r; } return l; }
+static const char USAGE[] = "usage: expr expression\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     av = argv + 1; ac = argc - 1; ai = 0;
-    if (!ac) { dprintf(2, "usage: expr expression\n"); return 2; }
+    if (!ac) zusage(USAGE);
     char *v = val();
     dprintf(1, "%s\n", v);
     return (!*v || !strcmp(v, "0")) ? 1 : 0;

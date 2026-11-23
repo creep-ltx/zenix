@@ -640,8 +640,11 @@ static void c_watchdog(void)
     sys_close(s);
 }
 
+static const char USAGE[] = "usage: socktest CHECK... (basic ptr block poll restart partial connect sigpipe down hang stuck "
+                            "watchdog)\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     if (!path_find(argv[0], self, sizeof self))
         strcpy(self, "/bin/socktest");
     if (argc > 1 && argv[1][0] == '_') {
@@ -658,9 +661,7 @@ int main(int argc, char **argv)
         return argc > 2 ? peer_main(argv[1], argv[2]) : 99;
     }
     if (argc < 2) {
-        dprintf(2, "usage: socktest CHECK... (basic ptr block poll restart partial connect sigpipe down hang stuck "
-                   "watchdog)\n");
-        return 2;
+        zusage(USAGE);
     }
     for (int i = 1; i < argc; i++) {
         const char *c = argv[i];

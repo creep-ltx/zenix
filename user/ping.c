@@ -10,14 +10,16 @@ static void on_int(int sig) { (void)sig; stop = 1; }
 
 static u32 tenths_ms(u32 counts) { return (u32)((counts * 100u + 3547u) / 7094u); }   /* E-clock counts -> 0.1 ms */
 
+static const char USAGE[] = "usage: ping [-q] [-c COUNT] [-i SECONDS] [-s SIZE] [-W SECONDS] HOST\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     u32 count = 0, size = 56, wait_s = 2, quiet = 0, interval = 100;   /* interval in ticks */
     const char *host = 0;
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
         if (a[0] != '-') { if (host) goto usage; host = a; continue; }
-        if (!a[1] || a[2]) goto usage;
+        if (!a[1] || a[2] || !strchr("qicsW", a[1])) zbadopt(a, USAGE);
         if (a[1] == 'q') { quiet = 1; continue; }
         if (i + 1 >= argc) goto usage;
         const char *v = argv[++i];
@@ -102,6 +104,5 @@ int main(int argc, char **argv)
                     tmax / 10, tmax % 10);
     return got ? 0 : 1;
 usage:
-    dprintf(2, "usage: ping [-q] [-c COUNT] [-i SECONDS] [-s SIZE] [-W SECONDS] HOST\n");
-    return 2;
+    zusage(USAGE);
 }

@@ -172,9 +172,12 @@ static unsigned free_mb(unsigned disk_sectors)
     return (unsigned)((unsigned long long)(hi - lo + 1) * r.cylblocks / 2048);
 }
 
+static const char USAGE[] = "usage: fdisk list|init|add|del|boot ...\n";
 int main(int argc, char **argv)
 {
-    if (argc < 2) { dprintf(2, "usage: fdisk list|init|add|del|boot ...\n"); return 2; }
+    zopt(argc, argv, USAGE);
+    if (argc < 2) zusage(USAGE);
+    if (argv[1][0] == '-') zbadopt(argv[1], USAGE);
     port = sys_port_find("disk");
     if (port < 0) { dprintf(1, "fdisk: no disk server\n"); return 1; }
     if (!strcmp(argv[1], "list")) { list(argc > 2 ? argv[2] : 0); return 0; }

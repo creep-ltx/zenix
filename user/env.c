@@ -1,8 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
+static const char USAGE[] = "usage: env [name=value...] [command [argument...]]\n";
 /* env [NAME=value...] [command [args...]]: print the environment, or run a command with changes */
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
+    if (argc > 1 && argv[1][0] == '-' && argv[1][1]) {
+        if (strcmp(argv[1], "--")) zbadopt(argv[1], USAGE);
+        argv++, argc--;
+    }
     int i = 1;
     for (; i < argc && strchr(argv[i], '='); i++) { char *e = strdup(argv[i]); char *eq = strchr(e, '='); *eq = 0; setenv(e, eq + 1, 1); }
     if (i < argc) {

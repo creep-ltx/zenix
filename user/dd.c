@@ -47,8 +47,10 @@ static int xfer(struct ep *e, int write, u32 blk, void *buf, u32 n)
     return write ? sys_write(e->fd, buf, n) : sys_read(e->fd, buf, n);
 }
 
+static const char USAGE[] = "usage: dd if=SRC of=DST [bs=N] [count=N] [skip=N] [seek=N]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *in = 0, *out = 0;
     u32 count = 0xFFFFFFFFu, skip = 0, seek = 0;
     for (int i = 1; i < argc; i++) {
@@ -58,9 +60,10 @@ int main(int argc, char **argv)
         else if (!strncmp(argv[i], "count=", 6)) count = (u32)atoi(argv[i] + 6);
         else if (!strncmp(argv[i], "skip=", 5)) skip = (u32)atoi(argv[i] + 5);
         else if (!strncmp(argv[i], "seek=", 5)) seek = (u32)atoi(argv[i] + 5);
-        else { dprintf(2, "usage: dd if=SRC of=DST [bs=N] [count=N] [skip=N] [seek=N]\n"); return 2; }
+        else if (argv[i][0] == '-') zbadopt(argv[i], USAGE);
+        else zusage(USAGE);
     }
-    if (!in || !out || bs == 0 || bs > 65536) { dprintf(2, "usage: dd if=SRC of=DST [bs=N] [count=N] [skip=N] [seek=N]\n"); return 2; }
+    if (!in || !out || bs == 0 || bs > 65536) zusage(USAGE);
     port = sys_port_find("disk");
     struct ep a, b;
     if (open_ep(&a, in, 0, 0) || open_ep(&b, out, 1, seek)) return 1;

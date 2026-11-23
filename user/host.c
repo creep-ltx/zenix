@@ -4,20 +4,16 @@
  * (/etc/resolv.conf's, or DHCP's); a name without a dot gets resolv.conf's search domain. One getaddrinfo a name. */
 #include "socket.h"
 
+static const char USAGE[] = "usage: host NAME...\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int bad = 0, n = 0;
     for (int i = 1; i < argc; i++) {
-        if (argv[i][0] == '-') {
-            dprintf(2, "usage: host NAME...\n");
-            return 2;
-        }
+        if (argv[i][0] == '-') zbadopt(argv[i], USAGE);
         n++;
     }
-    if (!n) {
-        dprintf(2, "usage: host NAME...\n");
-        return 2;
-    }
+    if (!n) zusage(USAGE);
     for (int i = 1; i < argc; i++) {
         const char *name = argv[i];
         struct in_addr in;

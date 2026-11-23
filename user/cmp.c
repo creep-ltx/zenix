@@ -1,9 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
+static const char USAGE[] = "usage: cmp file1 file2\n";
 /* cmp file1 file2: the first byte where they differ */
 int main(int argc, char **argv)
 {
-    if (argc < 3) { dprintf(2, "usage: cmp file1 file2\n"); return 2; }
+    zoperands(&argc, &argv, USAGE);
+    if (argc < 3) zusage(USAGE);
     int a = !strcmp(argv[1], "-") ? 0 : sys_open(argv[1], O_RDONLY), b = !strcmp(argv[2], "-") ? 0 : sys_open(argv[2], O_RDONLY);
     if (a < 0 || b < 0) { dprintf(2, "cmp: cannot open %s\n", a < 0 ? argv[1] : argv[2]); return 2; }
     struct rd ra, rb; rd_init(&ra, a); rd_init(&rb, b);

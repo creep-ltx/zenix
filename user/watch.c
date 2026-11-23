@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "libz.h"
+static const char USAGE[] = "usage: watch [-n seconds] command [argument...]\n";
 /* watch [-n seconds] command [argument...]: run a command again and again, clearing the screen each time (default every
  * 2 seconds). Ctrl+C ends it. */
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int secs = 2, i = 1;
     if (i + 1 < argc && !strcmp(argv[i], "-n")) { secs = atoi(argv[i + 1]); i += 2; }
     if (secs < 1) secs = 1;
-    if (i >= argc) { dprintf(2, "usage: watch [-n seconds] command [argument...]\n"); return 2; }
+    if (i < argc && !strcmp(argv[i], "--")) i++;
+    else if (i < argc && argv[i][0] == '-') zbadopt(argv[i], USAGE);
+    if (i >= argc) zusage(USAGE);
     u32 len = 1;
     for (int k = i; k < argc; k++) len += strlen(argv[k]) + 1;
     char *cmd = xmalloc(len); cmd[0] = 0;                   /* the whole command, however long: nothing is cut */

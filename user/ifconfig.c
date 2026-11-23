@@ -144,10 +144,10 @@ static int updown(int argc, char **argv, int up)
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-a")) all = 1;
         else if (up && !strcmp(argv[i], "--boot")) boot = all = 1;     /* init's: netd may stop when nothing is there */
-        else if (argv[i][0] == '-') { dprintf(2, "usage: %s -a | IFACE...\n", prog); return 2; }
+        else if (argv[i][0] == '-') zbadopt(argv[i], up ? "usage: ifup -a | IFACE...\n" : "usage: ifdown -a | IFACE...\n");
         else n++;
     }
-    if (!all && !n) { dprintf(2, "usage: %s -a | IFACE...\n", prog); return 2; }
+    if (!all && !n) zusage(up ? "usage: ifup -a | IFACE...\n" : "usage: ifdown -a | IFACE...\n");
     int s = up ? sock_again() : sock(0);
     if (s < 0) return 1;
     if (all) {
@@ -183,10 +183,14 @@ static int addr_prefix(const char *t, u32 *a, u32 *m)
     return 1;
 }
 
+static const char USAGE[] = "usage: ifconfig [-a] [IFACE [ADDRESS[/PREFIX]] [netmask MASK] [up|down]]\n"
+                            "       ifup -a | IFACE...    ifdown -a | IFACE...\n";
 int main(int argc, char **argv)
 {
     const char *b = strrchr(argv[0], '/');
     b = b ? b + 1 : argv[0];
+    zopt(argc, argv, !strcmp(b, "ifup") ? "usage: ifup -a | IFACE...\n" : !strcmp(b, "ifdown") ?
+         "usage: ifdown -a | IFACE...\n" : USAGE);
     if (!strcmp(b, "ifup") || !strcmp(b, "ifdown")) {
         prog = b;
         return updown(argc, argv, b[2] == 'u');
@@ -198,7 +202,7 @@ int main(int argc, char **argv)
         sys_close(s);
         return r;
     }
-    if (argv[1][0] == '-') goto usage;
+    if (argv[1][0] == '-') zbadopt(argv[1], USAGE);
     const char *name = argv[1];
     if (argc == 2) {
         int s = sock(0);
@@ -235,7 +239,5 @@ int main(int argc, char **argv)
     sys_close(s);
     return 0;
 usage:
-    dprintf(2, "usage: ifconfig [-a] [IFACE [ADDRESS[/PREFIX]] [netmask MASK] [up|down]]\n"
-               "       ifup -a | IFACE...    ifdown -a | IFACE...\n");
-    return 2;
+    zusage(USAGE);
 }

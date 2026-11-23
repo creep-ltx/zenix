@@ -36,13 +36,15 @@ static void verbose(const unsigned char *c, int n)
     }
 }
 
+static const char USAGE[] = "usage: lsusb [-v] | lsusb --hold\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int v = 0, hold = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-v")) v = 1;
         else if (!strcmp(argv[i], "--hold")) hold = 1;
-        else { dprintf(2, "usage: lsusb [-v] | lsusb --hold\n"); return 2; }
+        else { if (argv[i][0] == '-') zbadopt(argv[i], USAGE); zusage(USAGE); }
     }
     int port = sys_port_find(USB_PORT);
     if (port < 0) { dprintf(2, "lsusb: no USB server (no service \"usb\" in /etc/svctab)\n"); return 1; }

@@ -32,12 +32,9 @@ static int vol = 64, mono, quiet, raw, rawu, raw2, ms;
 static unsigned rawrate = 8000;
 static struct sndinfo si;
 
-static void usage(void)
-{
-    dprintf(2, "usage: play [-v VOL] [-m] [-q] [-b MS] [-r [-u] [-2] [-R RATE]] [FILE... | -]\n"
-               "       play -S   (the sound server's state)\n");
-    sys_exit(2);
-}
+static const char USAGE[] = "usage: play [-v VOL] [-m] [-q] [-b MS] [-r [-u] [-2] [-R RATE]] [FILE... | -]\n"
+                            "       play -S   (the sound server's state)\n";
+static void usage(void) { zusage(USAGE); }
 
 static void state(void)
 {
@@ -120,8 +117,9 @@ static int play(const char *name, int fd)
 
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int i = 1;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         const char *a = argv[i];
         if (!strcmp(a, "-v") && i + 1 < argc) { vol = atoi(argv[++i]); if (vol < 0 || vol > 64) usage(); }
         else if (!strcmp(a, "-b") && i + 1 < argc) { ms = atoi(argv[++i]); if (ms < 20 || ms > 1000) usage(); }
@@ -132,8 +130,7 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "-u")) { rawu = 1; raw = 1; }
         else if (!strcmp(a, "-2")) { raw2 = 1; raw = 1; }
         else if (!strcmp(a, "-S")) state();
-        else if (!strcmp(a, "--")) { i++; break; }
-        else usage();
+        else zbadopt(a, USAGE);
     }
     if (raw && (rawrate < 1000 || rawrate > 100000)) { dprintf(2, "play: -R: 1000 to 100000\n"); return 2; }
     int r = snd_info(&si, 0);

@@ -187,9 +187,7 @@ static u32 ex_time(u32 ts, u32 ms10, u32 utc)
     static const u8 mdays[12] = { 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
     if (mo < 1 || mo > 12 || !d || d > mdays[mo - 1] || (mo == 2 && d == 29 && (y & 3)) || h > 23 || mi > 59 || s2 > 29 ||
         ms10 > 199 || y > 2105) return 0;   /* (2100 is not a leap year: no stick says 2100-02-29; past 2105 u32 wraps) */
-    u32 yy = mo <= 2 ? y - 1 : y, era = yy / 400, yoe = yy - era * 400;
-    u32 doy = (153 * (mo + (mo > 2 ? (u32)-3 : 9)) + 2) / 5 + d - 1;
-    u32 days = era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
+    u32 days = (u32)zdays((int)y, (int)mo, (int)d);
     u32 v = days * 86400 + h * 3600 + mi * 60 + s2 * 2 + ms10 / 100;
     if (utc & 0x80) {                  /* valid: the local time was UTC + offset x 15 minutes (a 7-bit signed number) */
         int off = (int)(utc & 0x7F) - (utc & 0x40 ? 128 : 0);

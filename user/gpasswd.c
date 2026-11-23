@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "pw.h"
+static const char USAGE[] = "usage: gpasswd -a user group\n       gpasswd -d user group\n";
 /* gpasswd -a user group | -d user group: add a user to a group's member list in /etc/group, or take them out (root
  * only). The file is replaced safely. Example: gpasswd -a adam wheel lets adam use sudo. */
 int main(int argc, char **argv)
 {
-    if (argc != 4 || (strcmp(argv[1], "-a") && strcmp(argv[1], "-d"))) { dprintf(2, "usage: gpasswd -a user group\n       gpasswd -d user group\n"); return 2; }
+    zopt(argc, argv, USAGE);
+    if (argc > 1 && argv[1][0] == '-' && strcmp(argv[1], "-a") && strcmp(argv[1], "-d")) zbadopt(argv[1], USAGE);
+    if (argc != 4 || (strcmp(argv[1], "-a") && strcmp(argv[1], "-d"))) zusage(USAGE);
     int add = argv[1][1] == 'a';
     const char *user = argv[2], *group = argv[3];
     if (sys_getuid() != 0) { dprintf(2, "gpasswd: only root may change groups\n"); return 1; }

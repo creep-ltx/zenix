@@ -22,24 +22,9 @@ static int have_rtc(void)
 
 static void civil(u32 t, char *out, u32 cap)
 {
-    static const unsigned char ml[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-    u32 days = t / 86400, rem = t % 86400;
-    int y = 1970, m;
-    for (;;) {
-        u32 yl = (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)) ? 366 : 365;
-        if (days < yl)
-            break;
-        days -= yl;
-        y++;
-    }
-    for (m = 0; m < 11; m++) {
-        u32 l = ml[m] + (m == 1 && y % 4 == 0 && (y % 100 != 0 || y % 400 == 0));
-        if (days < l)
-            break;
-        days -= l;
-    }
-    snprintf(out, cap, "%d-%02d-%02d %02u:%02u:%02u UTC", y, m + 1, (int)days + 1, rem / 3600, rem / 60 % 60,
-             rem % 60);
+    struct zdt z;
+    zdate(t, &z);
+    snprintf(out, cap, "%d-%02d-%02d %02d:%02d:%02d UTC", z.year, z.mon, z.day, z.hour, z.min, z.sec);
 }
 
 static void warn(void *u, int line, const char *what)
@@ -56,27 +41,15 @@ static u32 now_ms(void)
 /* one server, until it answers or `until` (ms): 0 and *t, or -1 (said why) */
 static int ask(const char *host, u32 until, uint32_t *t)
 {
-    struct addrinfo h, *r = 0;
     struct sntp_answer a;
     unsigned char q[SNTP_LEN], p[512], nonce[8];
     int s, e, fd;
     u32 sent;
-    memset(&h, 0, sizeof h);
-    h.ai_family = AF_INET;
-    h.ai_socktype = SOCK_DGRAM;
-    if ((e = getaddrinfo(host, "123", &h, &r)) != 0) {
-        dprintf(2, "sntp: %s: %s\n", host, e == EAI_NONAME ? "no such host" : gai_strerror(e));
+    const char *why;
+    if ((s = zconnect_begin(host, 123, ZC_UDP, &why)) < 0) {     /* a datagram socket: connected at once */
+        dprintf(2, "sntp: %s: %s\n", host, why);
         return -1;
     }
-    s = socket(AF_INET, SOCK_DGRAM, 0);
-    if (s < 0 || connect(s, r->ai_addr, r->ai_addrlen) < 0) {
-        dprintf(2, "sntp: %s: %s\n", host, zwhy("no socket"));
-        freeaddrinfo(r);
-        if (s >= 0)
-            sys_close(s);
-        return -1;
-    }
-    freeaddrinfo(r);
     /* the nonce need not be a key: /dev/urandom never waits (sntp runs early at boot, before the pool may be ready) */
     fd = sys_open("/dev/urandom", O_RDONLY);
     if (fd < 0 || sys_read(fd, nonce, 8) != 8) {
@@ -135,8 +108,10 @@ static int ask(const char *host, u32 until, uint32_t *t)
     return -1;
 }
 
+static const char USAGE[] = "usage: sntp [-r]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     static char text[4096];
     char d1[40], d2[40];
     struct sntp_conf c;
@@ -145,10 +120,7 @@ int main(int argc, char **argv)
     u32 start, deadline;
     if (argc == 2 && !strcmp(argv[1], "-r"))
         reset = 1;
-    else if (argc != 1) {
-        dprintf(2, "usage: sntp [-r]\n");
-        return 2;
-    }
+    else if (argc != 1) { if (argv[1][0] == '-') zbadopt(argv[1], USAGE); zusage(USAGE); }
     if (sys_geteuid() != 0) {
         dprintf(2, "sntp: only root may set the clock\n");
         return 1;

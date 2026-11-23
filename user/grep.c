@@ -138,13 +138,15 @@ static void grep_path(const char *path, int top)
 
 int main(int argc, char **argv)
 {
+    static const char USAGE[] = "usage: grep [-ivnclLoqhHrEFwxs] [-A n] [-B n] [-C n] [-e pattern] [--color[=when]] pattern [file...]\n";
     int i = 1, cmode = 2; const char *pat = 0;
+    zopt(argc, argv, USAGE);
     for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
         if (!strcmp(argv[i], "--")) { i++; break; }
         if (argv[i][1] == '-') {
             int m = color_arg(argv[i], 2);
             if (m == -2) { dprintf(2, "grep: invalid argument for --color: %s (always, never or auto)\n", argv[i]); return 2; }
-            if (m < 0) { dprintf(2, "grep: unknown option %s\n", argv[i]); return 2; }
+            if (m < 0) zbadopt(argv[i], USAGE);
             cmode = m;
             continue;
         }
@@ -164,11 +166,11 @@ int main(int argc, char **argv)
             case 'l': o_l = 1; break; case 'L': o_L = 1; break; case 'o': o_o = 1; break; case 'q': o_q = 1; break;
             case 'h': o_h = 1; break; case 'H': o_H = 1; break; case 'r': case 'R': o_r = 1; break; case 'E': break;
             case 'F': o_F = 1; break; case 'w': o_w = 1; break; case 'x': o_x = 1; break; case 's': o_s = 1; break;
-            default: dprintf(2, "grep: unknown option -%c\n", *p); return 2;
+            default: zbadch(*p, USAGE);
             }
         }
     }
-    if (!pat) { if (i >= argc) { dprintf(2, "usage: grep [options] PATTERN [file...]\n"); return 2; } pat = argv[i++]; }
+    if (!pat) { if (i >= argc) zusage(USAGE); pat = argv[i++]; }
     color = cmode == 2 ? color_auto(1) : cmode;
     if (o_F) fixed = pat;
     else { re = re_comp(pat, (o_i ? RE_ICASE : 0) | RE_LONGEST); if (!re) { dprintf(2, "grep: bad pattern %s\n", pat); return 2; } }

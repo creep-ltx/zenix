@@ -89,20 +89,6 @@ static int link_is(const char *path, const char *target)
     b[n] = 0;
     return !strcmp(b, target);
 }
-static char *slurp(const char *path, u32 *len)              /* the whole file, NUL-terminated (malloc'd), or 0 */
-{
-    struct ustat st;
-    if (sys_stat(path, &st) < 0 || st.size > (1u << 20)) return 0;
-    char *b = malloc(st.size + 1);
-    int fd = sys_open(path, O_RDONLY);
-    if (!b || fd < 0) { free(b); if (fd >= 0) sys_close(fd); return 0; }
-    int n = sys_read(fd, b, st.size);
-    sys_close(fd);
-    if (n != (int)st.size) { free(b); return 0; }
-    b[n] = 0;
-    if (len) *len = (u32)n;
-    return b;
-}
 static int write_all(int fd, const void *p, u32 n)
 {
     while (n) {
@@ -187,7 +173,7 @@ static int other_pkgprog(int me, int ppid)                  /* another living zu
 static int lock_holder(void)
 {
     u32 len;
-    char *t = slurp(LOCK, &len);
+    char *t = zslurp(LOCK, 1u << 20, &len);
     int h = t ? (int)strtoul(t, 0, 10) : 0;
     free(t);
     return h;
@@ -263,7 +249,7 @@ static struct zf_pkg *installed(const char *name)
         if (!n) { say("out of memory for the package database"); dberr = 1; return 0; }
         db = n; dbcap = nc;
     }
-    char *t = slurp(path, &len);
+    char *t = zslurp(path, 1u << 20, &len);
     struct zf_pkg *k = malloc(sizeof *k);
     if (!t || !k) { free(t); free(k); say("%s: cannot read it", path); dberr = 1; return 0; }
     if (zf_manifest_parse(k, t, len, path) || strcmp(k->name, name)) {
@@ -468,7 +454,7 @@ static int plan_takes(struct zf_pkg *k)
         char mpath[PMAX];
         u32 len, n = 0;
         if (pjoin(mpath, DB "/", ot->name) || pjoin(mpath, mpath, ".manifest")) return -ENAMETOOLONG;
-        char *raw = slurp(mpath, &len), *out = raw ? malloc(len + 1) : 0;
+        char *raw = zslurp(mpath, 1u << 20, &len), *out = raw ? malloc(len + 1) : 0;
         if (!out) { free(raw); say("%s: cannot read it", mpath); return -EIO; }
         int left = 0, gone = 0;
         for (char *l = raw, *e; *l; l = e) {            /* line by line: an entry k lists is dropped */
@@ -1023,7 +1009,7 @@ back:
 static int recover(void)
 {
     u32 len;
-    char *t = slurp(JOURNAL, &len);
+    char *t = zslurp(JOURNAL, 1u << 20, &len);
     if (!t) return 0;
     say("a journal from an install that did not end: finishing it or rolling it back");
     u32 v = 0, tn = 0; int undo = 0;
@@ -1142,7 +1128,7 @@ static int rollback(u32 v)
         snprintf(t, sizeof t, "/log.%u", tn);
         u32 ll;
         if (pjoin(p, prevdir, t)) break;
-        char *lg = slurp(p, &ll);
+        char *lg = zslurp(p, 1u << 20, &ll);
         if (!lg) continue;
         if (len + ll + 16 > cap) { cap = (len + ll) * 2 + 16; char *nj = realloc(j, cap); if (!nj) { free(lg); free(j); return -ENOMEM; } j = nj; }
         memcpy(j + len, lg, ll); len += ll;
@@ -1282,7 +1268,7 @@ static int in_prev(const char *name)                    /* its manifest in the n
         u32 ll;
         snprintf(t, sizeof t, "/log.%u", tn);
         if (pjoin(p, dir, t)) break;
-        char *lg = slurp(p, &ll);
+        char *lg = zslurp(p, 1u << 20, &ll);
         if (lg && strstr(lg, want)) hit = 1;
         free(lg);
     }
@@ -1540,13 +1526,10 @@ static int list(void)
     return 0;
 }
 
-static int usage(void)
-{
-    dprintf(2, "usage: zup [-l]          (boot runs zup at every start; see man zup)\n"
-           "       zup -f FILE [-d]  install one package file (zpkg runs this)\n"
-           "       zup -r NAME [-n]  remove one package\n");
-    return 2;
-}
+static const char USAGE[] = "usage: zup [-l]          (boot runs zup at every start; see man zup)\n"
+                            "       zup -f FILE [-d]  install one package file (zpkg runs this)\n"
+                            "       zup -r NAME [-n]  remove one package\n";
+static int usage(void) { zusage(USAGE); }
 static int live_main(int argc, char **argv)            /* zup -f FILE [-d], zup -r NAME [-n] */
 {
     int f = !strcmp(argv[1], "-f"), opt = 0;
@@ -1569,7 +1552,7 @@ static int live_main(int argc, char **argv)            /* zup -f FILE [-d], zup 
     if (sys_stat(DB, &st) < 0) { say("no package database here (%s): nothing done", DB); return 1; }
     if (lock_take()) return 1;
     u32 jl;
-    char *j = slurp(JOURNAL, &jl);
+    char *j = zslurp(JOURNAL, 1u << 20, &jl);
     if (j && strncmp(j, "zupj 1\nlive 1 ", 14)) {         /* a system update's: boot's to finish, with its result */
         free(j);
         say("a system update is unfinished: restart first (zup finishes it at the start), then try again");
@@ -1590,13 +1573,17 @@ static int live_main(int argc, char **argv)            /* zup -f FILE [-d], zup 
 
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     signal(SIGPIPE, SIG_IGN);           /* DESIGN D16 rule 11: `zup | less` and quitting less never end an update half-way */
     sys_umask(022);                     /* not the caller's (sudo keeps it): no file of an install half-way is
                                          * writable by others (audit 2026-11-14 U1) */
     int stage2 = argc > 1 && !strcmp(argv[1], "-2");
     if (argc > 1 && !strcmp(argv[1], "-l")) return list();
     if (argc > 1 && (!strcmp(argv[1], "-f") || !strcmp(argv[1], "-r"))) return live_main(argc, argv);
-    if (argc > 1 && !stage2) return usage();
+    if (argc > 1 && !stage2) {
+        if (argv[1][0] == '-') zbadopt(argv[1], USAGE);
+        return usage();
+    }
     if (sys_getuid() != 0) { dprintf(1, "zup: only root installs updates\n"); return 1; }
 #ifdef DIAG_SLOWZUP     /* test builds (tools/update-test.sh slowzup): a stage 2 that hangs, for boot's time limit */
     if (stage2) { say("diag: DIAG_SLOWZUP: stage 2 hangs"); for (;;) sys_sleep(100); }   /* say, as every message: the

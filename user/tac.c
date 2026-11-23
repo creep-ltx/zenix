@@ -15,8 +15,10 @@ static void one(int fd, const char *name)
     while (n) { oputs(v[--n]); oputc('\n'); free(v[n]); }
     free(v); free(line);
 }
+static const char USAGE[] = "usage: tac [file...]\n";
 int main(int argc, char **argv)
 {
+    zoperands(&argc, &argv, USAGE);
     if (argc < 2) { one(0, "-"); return rc; }
     for (int i = 1; i < argc; i++) {
         int fd = strcmp(argv[i], "-") ? sys_open(argv[i], O_RDONLY) : 0;

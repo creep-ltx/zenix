@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "pw.h"
+static const char USAGE[] = "usage: su [-] [user]\n";
 /* su [-] [user]: run a shell as another user (root by default). Set-user-id root. Root needs no password; others
  * give the target's password. The shell gets the target's USER, LOGNAME, HOME, SHELL and PATH=/bin, and no IFS;
  * with - it also starts in the target's home directory. */
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int login_env = 0, i = 1;
     const char *target = "root";
     if (i < argc && !strcmp(argv[i], "-")) { login_env = 1; i++; }
+    if (i < argc && argv[i][0] == '-' && argv[i][1]) zbadopt(argv[i], USAGE);
     if (i < argc) target = argv[i];
     struct pw p;
     if (pw_byname(target, &p)) { dprintf(2, "su: %s: no such user\n", target); return 1; }

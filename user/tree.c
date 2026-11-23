@@ -38,11 +38,13 @@ static void walk(const char *path, const char *prefix)
     }
     dir_free(names, nn);
 }
+static const char USAGE[] = "usage: tree [-a] [-d] [directory...]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int i = 1;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++)
-        for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'a') o_a = 1; else if (*p == 'd') o_d = 1; else { dprintf(2, "tree: unknown option -%c\n", *p); return 2; } }
+    for (; zisopt(argc, argv, &i, USAGE); i++)
+        for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'a') o_a = 1; else if (*p == 'd') o_d = 1; else zbadch(*p, USAGE); }
     if (i >= argc) { dprintf(1, ".\n"); walk(".", ""); }
     for (; i < argc; i++) { dprintf(1, "%s\n", argv[i]); walk(argv[i], ""); }
     dprintf(1, "\n%ld director%s, %ld file%s\n", ndirs, ndirs == 1 ? "y" : "ies", nfiles, nfiles == 1 ? "" : "s");

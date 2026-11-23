@@ -477,21 +477,21 @@ static int crash(const char *log, const char *prog)
     return 0;
 }
 
+static const char USAGE[] = "usage: zdb [-m MAP] PROG [ARG...] | zdb [-m MAP] -p PID PROG | zdb [-m MAP] -c LOG PROG\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *map = 0, *log = 0;
     int i = 1, apid = -1;
     while (i + 1 < argc && argv[i][0] == '-') {
         if (!strcmp(argv[i], "-m")) map = argv[i + 1];
         else if (!strcmp(argv[i], "-p")) apid = atoi(argv[i + 1]);
         else if (!strcmp(argv[i], "-c")) log = argv[i + 1];
-        else break;
+        else zbadopt(argv[i], USAGE);
         i += 2;
     }
-    if (i >= argc) {
-        dprintf(2, "usage: zdb [-m MAP] PROG [ARG...] | zdb [-m MAP] -p PID PROG | zdb [-m MAP] -c LOG PROG\n");
-        return 2;
-    }
+    if (i < argc && argv[i][0] == '-') zbadopt(argv[i], USAGE);
+    if (i >= argc) zusage(USAGE);
     char path[ZPATH_MAX];
     if (!path_find(argv[i], path, sizeof path)) { dprintf(2, "zdb: %s: not found\n", argv[i]); return 1; }
     header(path);

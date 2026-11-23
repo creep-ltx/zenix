@@ -9,15 +9,17 @@
 static int rd(unsigned off, void *b, unsigned n) { return sys_klog(off, b, n); }
 static void out(const char *s, unsigned n) { sys_write(1, s, n); }
 
+static const char USAGE[] = "usage: dmesg [-p]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     static char buf[512];
     u32 flag = 0;
     if (argc == 2 && !strcmp(argv[1], "-p"))
         flag = KLOG_PREV;
     else if (argc > 1) {
-        dprintf(2, "usage: dmesg [-p]\n");
-        return 2;
+        if (argv[1][0] == '-') zbadopt(argv[1], USAGE);
+        zusage(USAGE);
     }
     unsigned got = klog_dump(rd, flag, out, buf, sizeof buf);
     if (flag && !got) {

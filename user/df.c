@@ -1,8 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* df: space on every mounted filesystem, the root first (the mounts as SYS_mountinfo lists them) */
-int main(void)
+int main(int argc, char **argv)
 {
+    znoargs(argc, argv, "usage: df\n");
     struct umountinfo mi;
     struct ustatfs f;
     int shown = 0;

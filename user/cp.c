@@ -37,12 +37,14 @@ static void copy_path(const char *src, const char *dst)
     }
     if (copy_file(src, dst, &st)) rc = 1;
 }
+static const char USAGE[] = "usage: cp [-rfpv] source... dest\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int i = 1;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'r' || *p == 'R') o_r = 1; else if (*p == 'f') o_f = 1; else if (*p == 'p') o_p = 1; else if (*p == 'v') o_v = 1; else { dprintf(2, "cp: unknown option -%c\n", *p); return 2; } }
+    for (; zisopt(argc, argv, &i, USAGE); i++) for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'r' || *p == 'R') o_r = 1; else if (*p == 'f') o_f = 1; else if (*p == 'p') o_p = 1; else if (*p == 'v') o_v = 1; else zbadch(*p, USAGE); }
     int n = argc - i;
-    if (n < 2) { dprintf(2, "usage: cp [-rfpv] source... dest\n"); return 2; }
+    if (n < 2) zusage(USAGE);
     const char *dest = argv[argc - 1]; struct ustat dt;
     int todir = sys_stat(dest, &dt) == 0 && (dt.mode & S_IFMT) == S_IFDIR;
     if (n > 2 && !todir) { dprintf(2, "cp: %s: not a directory\n", dest); return 2; }

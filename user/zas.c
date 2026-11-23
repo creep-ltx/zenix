@@ -5285,16 +5285,26 @@ static void run(void)
         err(".if without .endif");
 }
 
+/* the one-system command line (docs/audit-2026-11-23-one-system.md section 3), written here: zas builds on the PC too.
+ * (os() shows a control character as ?: the line's end goes by oc.) */
+#include "../kernel/version.h"
+static void usage_to(int fd)
+{
+    os(fd, "usage: zas [-v] [-m68000|-m68010|-m68020|-m68030|-m68040|-m68060|-mcpu=CPU] [-m68881|-mno-float] "
+           "[--register-prefix-optional] [--pcrel] [-I DIR] [-o OBJECT] [FILE]");
+    oc(fd, '\n');
+    oflush(fd);
+}
 static void usage(void)
 {
-    os(2, "usage: zas [-v] [-m68000|-m68010|-m68020|-m68030|-m68040|-m68060|-mcpu=CPU] [-m68881|-mno-float] "
-          "[--register-prefix-optional] [--pcrel] [-I DIR] [-o OBJECT] [FILE]\n");
-    oflush(2);
+    usage_to(2);
     exit(2);
 }
 
 int main(int argc, char **argv)
 {
+    if (argc == 2 && !strcmp(argv[1], "--help")) { usage_to(1); return 0; }
+    if (argc == 2 && !strcmp(argv[1], "--version")) { os(1, "zas " ZENIX_VSTR); oc(1, '\n'); oflush(1); return 0; }
     int i, fpu = -1;
     const char *in = 0;
     for (i = 1; i < argc; i++) {
@@ -5332,8 +5342,12 @@ int main(int argc, char **argv)
             if (in)
                 usage();
             in = a;
-        } else
+        } else {
+            os(2, "zas: unknown option ");
+            os(2, a);
+            oc(2, '\n');
             usage();
+        }
     }
     if (fpu == 0)
         cpu &= ~CFPU;

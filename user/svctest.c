@@ -103,8 +103,10 @@ static int serve(const char *name, const char *type)
     }
 }
 
+static const char USAGE[] = "usage: svctest port|ports|reg|rm|call|kcall|raw|hold|keep|lost|mount|serve|catch|trunc|unlink ...\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     if (argc >= 3 && !strcmp(argv[1], "port")) {
         dprintf(1, "svctest port %s: %d\n", argv[2], sys_port_create(argv[2]));
         return 0;
@@ -228,6 +230,5 @@ int main(int argc, char **argv)
         dprintf(1, "svctest unlink: %d\n", sys_unlink(argv[2]));
         return 0;
     }
-    dprintf(1, "usage: svctest port|ports|reg|rm|call|kcall|raw|hold|keep|lost|mount|serve|catch|trunc|unlink ...\n");
-    return 2;
+    zusage(USAGE);
 }

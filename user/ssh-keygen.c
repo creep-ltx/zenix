@@ -31,25 +31,11 @@ static int seed(void *u, unsigned char *b, size_t n)
     return r == (int)n ? 0 : r < 0 ? r : -EIO;
 }
 
-static char *readfile(const char *path, long *n)
+static char *readfile(const char *path, long *n)    /* the whole file (zslurp, libz) */
 {
-    *n = 0;
-    int fd = sys_open(path, O_RDONLY);
-    if (fd < 0)
-        return 0;
-    struct ustat st;
-    if (sys_fstat(fd, &st) < 0 || st.size > (1u << 20)) { sys_close(fd); return 0; }
-    char *b = malloc(st.size + 1);
-    long got = 0;
-    if (b)
-        while (got < (long)st.size) {
-            int r = sys_read(fd, b + got, st.size - (u32)got);
-            if (r <= 0) break;
-            got += r;
-        }
-    sys_close(fd);
-    if (b) b[got] = 0;
-    *n = got;
+    u32 l = 0;
+    char *b = zslurp(path, 1u << 20, &l);
+    *n = (long)l;
     return b;
 }
 
@@ -163,15 +149,12 @@ static int remove_host(const char *file, const char *hostname)
     return 0;
 }
 
-static int usage(void)
-{
-    dprintf(2, "usage: ssh-keygen [-t ed25519] [-f FILE] [-C COMMENT] [-N PASS] [-a ROUNDS] [-q]\n"
-               "       ssh-keygen -l [-f FILE]    ssh-keygen -y [-f FILE] [-P PASS]    ssh-keygen -R HOST [-f FILE]\n");
-    return 2;
-}
-
+static const char USAGE[] = "usage: ssh-keygen [-t ed25519] [-f FILE] [-C COMMENT] [-N PASS] [-a ROUNDS] [-q]\n"
+    "       ssh-keygen -l [-f FILE]    ssh-keygen -y [-f FILE] [-P PASS]    ssh-keygen -R HOST [-f FILE]\n";
+static int usage(void) { zusage(USAGE); }
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *file = 0, *comment = 0, *pass = "", *rhost = 0;
     int list = 0, pub = 0, quiet = 0, rounds = 16;
     for (int i = 1; i < argc; i++) {
@@ -186,6 +169,7 @@ int main(int argc, char **argv)
         else if (!strcmp(o, "-l")) list = 1;
         else if (!strcmp(o, "-y")) pub = 1;
         else if (!strcmp(o, "-q")) quiet = 1;
+        else if (o[0] == '-') zbadopt(o, USAGE);
         else return usage();
     }
     if (rounds < 1 || rounds > SSH_KEY_ROUNDS_MAX)

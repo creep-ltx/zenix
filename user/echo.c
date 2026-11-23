@@ -12,6 +12,7 @@ static int put(const char *s, u32 n)
 }
 int main(int argc, char **argv)
 {
+    if (argc == 2) zopt(argc, argv, "usage: echo [argument...]\n");
     for (int i = 1; i < argc; i++) {
         if (i > 1 && put(" ", 1)) return 1;
         if (put(argv[i], strlen(argv[i]))) return 1;

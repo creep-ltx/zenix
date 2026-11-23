@@ -21,8 +21,11 @@ static int dump(int fd)
 }
 int main(int argc, char **argv)
 {
-    int i = 1, rc = 0;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'n') o_n = 1; else if (*p == 'b') o_b = 1; else if (*p == 's') o_s = 1; else if (*p == 'E') o_E = 1; else { dprintf(2, "cat: unknown option -%c\n", *p); return 2; } }
+    static const char USAGE[] = "usage: cat [-nbsE] [file...]\n";
+    int i, rc = 0, c;
+    zopt(argc, argv, USAGE);
+    while ((c = zoptget(argc, argv, "nbsE", USAGE)) != -1) { if (c == 'n') o_n = 1; else if (c == 'b') o_b = 1; else if (c == 's') o_s = 1; else o_E = 1; }
+    i = zoptnext;
     if (o_b) o_n = 0;
     if (i >= argc) return dump(0);
     for (; i < argc; i++) {

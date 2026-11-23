@@ -3,7 +3,6 @@
 /* date [+FORMAT]: the time (UTC; Zenix has no time zones yet). Formats: %Y %m %d %H %M %S %s %a %A %b %B %j %e %y %Z %% %F %T %D %n */
 static const char *const wd[7] = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
 static const char *const mn[12] = { "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" };
-static int leap(int y) { return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0; }
 static u32 parse_time(const char *s)
 {
     int y, mo, d, h = 0, mi = 0, sec = 0;
@@ -11,29 +10,25 @@ static u32 parse_time(const char *s)
     mo = (int)strtol(s, (char **)&s, 10); if (*s++ != '-') return 0;
     d = (int)strtol(s, (char **)&s, 10);
     if (*s == ' ' || *s == 'T') { s++; h = (int)strtol(s, (char **)&s, 10); if (*s == ':') { s++; mi = (int)strtol(s, (char **)&s, 10); if (*s == ':') { s++; sec = (int)strtol(s, (char **)&s, 10); } } }
-    static const int ml[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-    u32 days = 0;
-    for (int yy = 1970; yy < y; yy++) days += leap(yy) ? 366 : 365;
-    for (int mm = 0; mm < mo - 1; mm++) days += (u32)(ml[mm] + (mm == 1 && leap(y)));
-    days += (u32)(d - 1);
-    return days * 86400 + (u32)(h * 3600 + mi * 60 + sec);
+    if (y < 1970 || mo < 1 || mo > 12 || d < 1 || d > 31) return 0;
+    return (u32)zdays(y, mo, d) * 86400 + (u32)(h * 3600 + mi * 60 + sec);
 }
 
+static const char USAGE[] = "usage: date [+format]\n       date -s \"YYYY-MM-DD HH:MM:SS\"\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
+    if (argc > 1 && argv[1][0] == '-' && (strcmp(argv[1], "-s") || argc < 3)) zbadopt(argv[1], USAGE);
+    if (argc > 1 && argv[1][0] != '+' && argv[1][0] != '-') zusage(USAGE);
     if (argc > 2 && !strcmp(argv[1], "-s")) {
         u32 t = parse_time(argv[2]);
         if (!t) { dprintf(2, "date: invalid date '%s' (use YYYY-MM-DD HH:MM:SS)\n", argv[2]); return 1; }
         if (sys_settime(t) < 0) { dprintf(2, "date: cannot set the clock: %s\n", zwhy("refused")); return 1; }   /* root only */
     }
     u32 t = (u32)sys_time();
-    u32 days = t / 86400, rem = t % 86400;
-    int hh = (int)(rem / 3600), mm = (int)(rem / 60 % 60), ss = (int)(rem % 60), dow = (int)((days + 4) % 7), y = 1970;
-    for (;;) { u32 yl = leap(y) ? 366 : 365; if (days < yl) break; days -= yl; y++; }
-    static const int ml[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-    int doy = (int)days + 1, m = 0;
-    for (; m < 11; m++) { int l = ml[m] + (m == 1 && leap(y)); if ((int)days < l) break; days -= (u32)l; }
-    int d = (int)days + 1;
+    struct zdt z;
+    zdate(t, &z);
+    int hh = z.hour, mm = z.min, ss = z.sec, dow = z.wday, y = z.year, doy = z.yday + 1, m = z.mon - 1, d = z.day;
     const char *f = argc > 1 && argv[1][0] == '+' ? argv[1] + 1 : "%a %b %e %H:%M:%S UTC %Y";
     for (; *f; f++) {
         if (*f != '%') { oputc(*f); continue; }

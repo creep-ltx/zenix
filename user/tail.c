@@ -1,15 +1,16 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
+static const char USAGE[] = "usage: tail [-n count | -count | -n +count] [-c bytes] [file...]\n";
 /* tail [-n N | -N | -n +N] [-c N] [file...]: the last lines (default 10) or bytes */
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     long nl = 10, nc = -1; int from_start = 0, i = 1, rc = 0;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         if (!strcmp(argv[i], "-n") && i + 1 < argc) { i++; if (argv[i][0] == '+') { from_start = 1; nl = atoi(argv[i] + 1); } else nl = atoi(argv[i]); }
         else if (!strcmp(argv[i], "-c") && i + 1 < argc) nc = atoi(argv[++i]);
         else if (isdigit((unsigned char)argv[i][1])) nl = atoi(argv[i] + 1);
-        else if (!strcmp(argv[i], "--")) { i++; break; }
-        else { dprintf(2, "tail: unknown option %s\n", argv[i]); return 2; }
+        else zbadopt(argv[i], USAGE);
     }
     int nfiles = argc - i;
     for (int f = 0; f < (nfiles ? nfiles : 1); f++) {

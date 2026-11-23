@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "libz.h"
+static const char USAGE[] = "usage: expand [-t N] [file...]\n";
 /* expand [-t N] [file...]: replace tabs by spaces (tab stops every N columns, default 8) */
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int tab = 8, i = 1, rc = 0;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         if (!strncmp(argv[i], "-t", 2)) tab = argv[i][2] ? atoi(argv[i] + 2) : (i + 1 < argc ? atoi(argv[++i]) : 8);
-        else { dprintf(2, "expand: unknown option %s\n", argv[i]); return 2; }
+        else zbadopt(argv[i], USAGE);
     }
     if (tab < 1) tab = 8;
     for (int a = i; a < argc || a == i; a++) {

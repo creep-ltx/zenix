@@ -8,11 +8,13 @@ static int same(const char *a, const char *b)
     while (*a && tolower((unsigned char)*a) == tolower((unsigned char)*b)) { a++; b++; }
     return *a == *b;
 }
+static const char USAGE[] = "usage: uniq [-cdui] [input [output]]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int i = 1;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++)
-        for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'c') o_c = 1; else if (*p == 'd') o_d = 1; else if (*p == 'u') o_u = 1; else if (*p == 'i') o_i = 1; else { dprintf(2, "uniq: unknown option -%c\n", *p); return 2; } }
+    for (; zisopt(argc, argv, &i, USAGE); i++)
+        for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'c') o_c = 1; else if (*p == 'd') o_d = 1; else if (*p == 'u') o_u = 1; else if (*p == 'i') o_i = 1; else zbadch(*p, USAGE); }
     int fd = 0;
     if (i < argc) { fd = sys_open(argv[i], O_RDONLY); if (fd < 0) { dprintf(2, "uniq: %s: %s\n", argv[i], zwhy("cannot open")); return 1; } }
     struct rd r; rd_init(&r, fd);

@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "libz.h"
+static const char USAGE[] = "usage: comm [-123] file1 file2\n";
 /* comm [-123] file1 file2: compare two sorted files line by line; columns: only in 1, only in 2, in both */
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int hide[4] = {0}, i = 1;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++)
-        for (const char *p = argv[i] + 1; *p; p++) { if (*p >= '1' && *p <= '3') hide[*p - '0'] = 1; else { dprintf(2, "comm: unknown option -%c\n", *p); return 2; } }
-    if (argc - i != 2) { dprintf(2, "usage: comm [-123] file1 file2\n"); return 2; }
+    for (; zisopt(argc, argv, &i, USAGE); i++)
+        for (const char *p = argv[i] + 1; *p; p++) { if (*p >= '1' && *p <= '3') hide[*p - '0'] = 1; else zbadch(*p, USAGE); }
+    if (argc - i != 2) zusage(USAGE);
     int fa = strcmp(argv[i], "-") ? sys_open(argv[i], O_RDONLY) : 0, fb = strcmp(argv[i + 1], "-") ? sys_open(argv[i + 1], O_RDONLY) : 0;
     if (fa < 0 || fb < 0) { dprintf(2, "comm: %s: %s\n", fa < 0 ? argv[i] : argv[i + 1], zwhy("cannot open")); return 1; }
     struct rd ra, rb; rd_init(&ra, fa); rd_init(&rb, fb);

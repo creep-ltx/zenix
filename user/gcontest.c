@@ -94,18 +94,17 @@ static int dirty(void)
     return 0;
 }
 
+static const char USAGE[] = "usage: gcontest ack|late|noack [SECONDS [ACCEL]] | gcontest keys CODE... | gcontest mouse DX,DY,B... | gcontest dirty\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     if (argc > 1 && !strcmp(argv[1], "dirty"))
         return dirty();
     if (argc > 1 && !strcmp(argv[1], "keys"))
         return keys(argc, argv);
     if (argc > 1 && !strcmp(argv[1], "mouse"))
         return mouse(argc, argv);
-    if (argc < 2 || (strcmp(argv[1], "ack") && strcmp(argv[1], "noack") && strcmp(argv[1], "late"))) {
-        dprintf(2, "usage: gcontest ack|late|noack [SECONDS [ACCEL]] | gcontest keys CODE... | gcontest mouse DX,DY,B... | gcontest dirty\n");
-        return 2;
-    }
+    if (argc < 2 || (strcmp(argv[1], "ack") && strcmp(argv[1], "noack") && strcmp(argv[1], "late"))) zusage(USAGE);
     int ack = !strcmp(argv[1], "ack"), late = !strcmp(argv[1], "late");
     u32 secs = argc > 2 ? (u32)atoi(argv[2]) : 60;
     u16 *mem = sys_memalloc_chip(512 + 80);

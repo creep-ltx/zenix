@@ -3,8 +3,10 @@
 /* the whole target, however long (audit F15: a link made elsewhere may hold more than 255 bytes); ext2 keeps a
  * target in one block, so 4 KB holds any */
 #define TMAX 4096
+static const char USAGE[] = "usage: readlink link...\n";
 int main(int argc, char **argv)
 {
+    zoperands(&argc, &argv, USAGE);
     char *b = malloc(TMAX + 1); int rc = 0;
     if (!b) { dprintf(2, "readlink: out of memory\n"); return 1; }
     for (int i = 1; i < argc; i++) {

@@ -1,11 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
+static const char USAGE[] = "usage: hexdump [-C] [file]\n";
 /* hexdump -C [file]: canonical hex + ASCII dump (the only format) */
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int i = 1; if (i < argc && !strcmp(argv[i], "-C")) i++;
     if (i < argc && !strcmp(argv[i], "--")) i++;
-    else if (i < argc && argv[i][0] == '-' && argv[i][1]) { dprintf(2, "hexdump: unknown option %s\nusage: hexdump [-C] [file]\n", argv[i]); return 2; }
+    else if (zisopt(argc, argv, &i, USAGE)) { zbadopt(argv[i], USAGE); }
     int fd = 0; if (i < argc) { fd = sys_open(argv[i], O_RDONLY); if (fd < 0) { dprintf(2, "hexdump: %s: %s\n", argv[i], zwhy("cannot open")); return 1; } }
     unsigned char b[16]; u32 off = 0; int n;
     struct rd r; rd_init(&r, fd);

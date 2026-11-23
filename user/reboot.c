@@ -17,6 +17,11 @@ int main(int argc, char **argv)
     for (p = argv[0]; *p; p++)
         if (*p == '/')
             me = p + 1;
+    const char *USAGE = !strcmp(me, "shutdown") ? "usage: shutdown [-h | -r] [now]   (no delay: it happens at once)\n"
+                      : !strcmp(me, "halt") ? "usage: halt   (saves the disks, then halts: switch the Amiga off)\n"
+                      : !strcmp(me, "poweroff") ? "usage: poweroff   (saves the disks, then halts: switch the Amiga off)\n"
+                      : "usage: reboot [amigaos|zenix]   (bootamigaos = reboot amigaos)\n";
+    zopt(argc, argv, USAGE);
     u32 note = 0;
     if (!strcmp(me, "halt") || !strcmp(me, "poweroff"))
         note = REBOOT_HALT;
@@ -25,23 +30,19 @@ int main(int argc, char **argv)
         for (int i = 1; i < argc; i++) {
             if (!strcmp(argv[i], "-r"))
                 note = 0;
-            else if (strcmp(argv[i], "-h") && strcmp(argv[i], "-P") && strcmp(argv[i], "now")) {
-                dprintf(2, "usage: shutdown [-h | -r] [now]   (no delay: it happens at once)\n");
-                return 2;
-            }
+            else if (argv[i][0] == '-' && strcmp(argv[i], "-h") && strcmp(argv[i], "-P")) zbadopt(argv[i], USAGE);
+            else if (strcmp(argv[i], "-h") && strcmp(argv[i], "-P") && strcmp(argv[i], "now")) zusage(USAGE);
         }
         argc = 1;
     }
     if (note == REBOOT_HALT && argc > 1) {
-        dprintf(2, "usage: %s   (saves the disks, then halts: switch the Amiga off)\n", me);
-        return 2;
+        if (argv[1][0] == '-') zbadopt(argv[1], USAGE);
+        zusage(USAGE);
     }
     if (!strcmp(me, "bootamigaos"))
         note = BOOTNOTE_AMIGAOS;
-    if (argc > 2 || (argc == 2 && note)) {
-        dprintf(2, "usage: reboot [amigaos|zenix]   (bootamigaos = reboot amigaos)\n");
-        return 2;
-    }
+    if (argc > 1 && argv[1][0] == '-') zbadopt(argv[1], USAGE);
+    if (argc > 2 || (argc == 2 && note)) zusage(USAGE);
     if (argc == 2) {
         if (!strcmp(argv[1], "amigaos"))
             note = BOOTNOTE_AMIGAOS;

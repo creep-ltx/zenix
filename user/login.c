@@ -72,8 +72,10 @@ static int session(const struct pw *p)
     return 0;
 }
 
+static const char USAGE[] = "usage: login [--init] [-f] [-s PROGRAM] [user]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int force = 0, autologin = 0, i = 1;
     char name[32] = "", pass[100];
     struct pw p;
@@ -82,11 +84,12 @@ int main(int argc, char **argv)
     if (i < argc && !strcmp(argv[i], "--init")) { handover = 1; i++; }
     if (i < argc && !strcmp(argv[i], "-f")) { force = 1; i++; }
     if (i < argc && !strcmp(argv[i], "-s")) {                   /* the session's program (dlogin, DESIGN D38 revision 3) */
-        if (i + 1 >= argc) { dprintf(2, "usage: login [--init] [-f] [-s PROGRAM] [user]\n"); return 2; }
+        if (i + 1 >= argc) zusage(USAGE);
         if (sys_getuid() != 0) { dprintf(2, "login: -s is root's\n"); return 1; }
         program = argv[i + 1];
         i += 2;
     }
+    if (i < argc && argv[i][0] == '-') zbadopt(argv[i], USAGE);
     if (i < argc) strncpy(name, argv[i], 31);
     struct ustat ts;
     int console1 = sys_fstat(0, &ts) == 0 && (ts.mode & 0170000) == 020000 && ts.ino == 1;   /* a console's ino is its number */

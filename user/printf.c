@@ -38,9 +38,11 @@ static long number(const char *s)
     return v;
 }
 
+static const char USAGE[] = "usage: printf FORMAT [ARGUMENT...]\n";
 int main(int argc, char **argv)
 {
-    if (argc < 2) { dprintf(2, "usage: printf FORMAT [ARGUMENT...]\n"); return 2; }
+    zopt(argc, argv, USAGE);
+    if (argc < 2) zusage(USAGE);
     const char *fmt = argv[1];
     args = argv + 2; nargs = argc - 2;
     do {

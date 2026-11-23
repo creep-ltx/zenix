@@ -199,8 +199,10 @@ static void paula(void)
     dprintf(1, "msgpingd: paula: wrote Paula myself\n");
 }
 
+static const char USAGE[] = "usage: msgpingd [-port NAME] [-call NAME] [-uid N] [-old] [-paula]\n       [-fs | -fsstall | -fsbad | -fslinked | -fsdir | -fswin]\n       [count]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *pname = "ping";
     int left = -1, fs = 0, uid = -1, old = 0, pau = 0;
     for (int i = 1; i < argc; i++) {

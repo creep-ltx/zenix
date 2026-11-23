@@ -119,8 +119,10 @@ static int shm_test(void)
             "read-only child %d)\n", ok ? "ok" : "FAILED", o, o2, seen ? "seen" : "not seen", f, st, bad1, bad2, bad3, st2);
     return !ok;
 }
+static const char USAGE[] = "usage: msgping [rounds]\n       msgping winread FILE [CASE] | readpast FILE | rewrite | call PORT\n       msgping past PORT | peer PORT | wild PORT | shm\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     if (argc > 1 && !strcmp(argv[1], "shm"))
         return shm_test();
     if (argc > 2 && !strcmp(argv[1], "shmchild"))

@@ -1,15 +1,16 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
+static const char USAGE[] = "usage: head [-n count | -count] [-c bytes] [file...]\n";
 /* head [-n N | -N] [-c N] [file...]: the first lines (default 10) or bytes */
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     long nl = 10, nc = -1; int i = 1, rc = 0;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         if (!strcmp(argv[i], "-n") && i + 1 < argc) nl = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-c") && i + 1 < argc) nc = atoi(argv[++i]);
         else if (isdigit((unsigned char)argv[i][1])) nl = atoi(argv[i] + 1);
-        else if (!strcmp(argv[i], "--")) { i++; break; }
-        else { dprintf(2, "head: unknown option %s\n", argv[i]); return 2; }
+        else zbadopt(argv[i], USAGE);
     }
     int nfiles = argc - i;
     for (int f = 0; f < (nfiles ? nfiles : 1); f++) {

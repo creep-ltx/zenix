@@ -326,8 +326,10 @@ static void mul_check(void)
     }
 }
 
+static const char USAGE[] = "usage: cryptotest [time [N] | mul]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     if (argc >= 2 && !strcmp(argv[1], "time")) {
         int n = argc >= 3 ? atoi(argv[2]) : 3;
         times(n > 0 && n < 100 ? n : 3);
@@ -337,10 +339,7 @@ int main(int argc, char **argv)
         mul_check();
         return 0;
     }
-    if (argc != 1) {
-        dprintf(2, "usage: cryptotest [time [N] | mul]\n");
-        return 2;
-    }
+    if (argc != 1) zusage(USAGE);
     test_x25519();
     test_ed25519();
     test_chacha_poly();

@@ -51,11 +51,14 @@ static int repair(const char *dev, uint32_t want)
     return 0;
 }
 
+static const char USAGE[] = "usage: fsck.zenixfs [-y|--old] device\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int y = argc == 3 && !strcmp(argv[1], "-y"), old = argc == 3 && !strcmp(argv[1], "--old");
     const char *dev = argv[argc - 1];
-    if (argc != 2 && !y && !old) { dprintf(2, "usage: fsck.zenixfs [-y|--old] device\n"); return 2; }
+    if (argc != 2 && !y && !old) zusage(USAGE);
+    if (argc == 2 && dev[0] == '-') zbadopt(dev, USAGE);
     if (zdisk_open(dev, DISK_RAW) < 0) { dprintf(1, "fsck.zenixfs: cannot open %s (mounted, or no such device)\n", dev); return 1; }
     if (y || old) return repair(dev, old ? 0 : ZENIXFS_REPAIR_AUTO);
     struct zenixfs_dev d;

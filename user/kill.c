@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "libz.h"
+static const char USAGE[] = "usage: kill [-s SIGNAL | -SIGNAL] pid...\n       kill -l [N]\n";
 /* kill [-s NAME | -NAME | -N] pid...: send a signal (DESIGN D16), SIGTERM if none is named. A pid below -1 is a process
  * group (-g), 0 the caller's own group; -0 only checks that the process exists. kill -l lists the names; kill -l N
  * names signal N (or an exit status 128 + N). The shell's builtin kill does the same and also takes %job. */
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int i = 1, sig = SIGTERM, rc = 0;
     if (i < argc && !strcmp(argv[i], "-l")) {
         if (i + 1 < argc) {
@@ -25,7 +27,7 @@ int main(int argc, char **argv)
         i++;
     }
     if (i < argc && !strcmp(argv[i], "--")) i++;
-    if (i >= argc) { dprintf(2, "usage: kill [-s SIGNAL | -SIGNAL] pid...\n       kill -l [N]\n"); return 2; }
+    if (i >= argc) zusage(USAGE);
     for (; i < argc; i++) {
         char *e;
         int pid = (int)strtol(argv[i], &e, 10);

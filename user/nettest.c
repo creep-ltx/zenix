@@ -863,8 +863,10 @@ static void c_slipflood(void)
            rep[0] ? rep : "no answer", sum / 100, worst, tt, np, np2, m0 / 1024, mf / 1024, acc, ok ? "works" : "FAILED");
 }
 
+static const char USAGE[] = "usage: nettest [-p ADDR] [-n BYTES] CHECK... (tcp udp poll nonblock names many perm restart partial sigpipe down giveup drvperm asm hang listen slip sliptcp slipget slipudp slipdns slipflood)\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     strcpy(self, "/bin/nettest");
     if (argc >= 5 && !strcmp(argv[1], "serve")) return serve(argv[2], atoi(argv[3]), argv[4]);
     if (argc == 2 && !strcmp(argv[1], "_recv")) { char b; return recv(0, &b, 1, 0) < 0 ? zerrno : 0; }
@@ -882,7 +884,7 @@ int main(int argc, char **argv)
         else { dprintf(2, "nettest: %s %s: not an address or a size\n", argv[first], argv[first + 1]); return 2; }
         first += 2;
     }
-    if (argc < first + 1) { dprintf(2, "usage: nettest [-p ADDR] [-n BYTES] CHECK... (tcp udp poll nonblock names many perm restart partial sigpipe down giveup drvperm asm hang listen slip sliptcp slipget slipudp slipdns slipflood)\n"); return 2; }
+    if (argc < first + 1) zusage(USAGE);
     for (int i = first; i < argc; i++) {
         const char *c = argv[i];
         if (!strcmp(c, "tcp")) c_tcp();

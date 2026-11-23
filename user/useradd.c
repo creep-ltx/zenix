@@ -6,8 +6,10 @@
  * The home directory is made (owned by the user, mode 700) unless -M; the password is empty until passwd sets it.
  * /etc/passwd is replaced safely (pw_replace). */
 
+static const char USAGE[] = "usage: useradd [-u uid] [-g group] [-d home] [-s shell] [-c comment] [-G group,...] [-M] name\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *group = "users", *home = 0, *shell = "/bin/sh", *comment = "", *name = 0, *extra = 0;
     long uid = -1; int mkhome = 1;
     for (int i = 1; i < argc; i++) {
@@ -24,11 +26,11 @@ int main(int argc, char **argv)
             case 'G': extra = v; break;
             }
         } else if (!strcmp(a, "-M")) mkhome = 0;
-        else if (a[0] == '-') { dprintf(2, "usage: useradd [-u uid] [-g group] [-d home] [-s shell] [-c comment] [-G group,...] [-M] name\n"); return 2; }
+        else if (a[0] == '-') zbadopt(a, USAGE);
         else if (!name) name = a;
         else { dprintf(2, "useradd: one name at a time\n"); return 2; }
     }
-    if (!name) { dprintf(2, "usage: useradd [-u uid] [-g group] [-d home] [-s shell] [-c comment] [-G group,...] [-M] name\n"); return 2; }
+    if (!name) zusage(USAGE);
     if (sys_getuid() != 0) { dprintf(2, "useradd: only root may add users\n"); return 1; }
     char hbuf[64];
     if (!home) { if (strlen(name) + 7 > sizeof hbuf) return 2; strcpy(hbuf, "/home/"); strcat(hbuf, name); home = hbuf; }

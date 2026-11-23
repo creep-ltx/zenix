@@ -664,16 +664,17 @@ static int book_find(const char *name, struct book *b)
     return found;
 }
 
+static const char USAGE[] = "usage: telnet [-a|-p|-x] [-i] [-r] [-d DIR] [-e CHAR|none] HOST|NAME [PORT]\n";
 static int usage(void)
 {
-    dprintf(2, "usage: telnet [-a|-p|-x] [-i] [-r] [-d DIR] [-e CHAR|none] HOST|NAME [PORT]\n");
-    return 2;
+    zusage(USAGE);
 }
 
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int mode = 0, i = 1;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
+    for (; zisopt(argc, argv, &i, USAGE); i++) {
         const char *o = argv[i];
         if (!strcmp(o, "-x")) mode = TN_UNIX;
         else if (!strcmp(o, "-a")) mode = TN_AMIGA;
@@ -687,13 +688,14 @@ int main(int argc, char **argv)
             else if (e[0] == '^' && e[1] && !e[2]) esc_key = e[1] == '?' ? 0x7F : (e[1] & 0x1F);
             else if (e[0] && !e[1]) esc_key = (unsigned char)e[0];
             else return usage();
-        } else return usage();
+        } else zbadopt(o, USAGE);
     }
     if (i >= argc || argc - i > 2) {
         struct book b;
-        usage();
-        if (i >= argc)
-            book_find(0, &b);                   /* `telnet` alone: the phone book too */
+        if (i < argc)
+            usage();
+        sys_write(2, USAGE, strlen(USAGE));
+        book_find(0, &b);                       /* `telnet` alone: the phone book too */
         return 2;
     }
     host = argv[i];
@@ -721,23 +723,12 @@ int main(int argc, char **argv)
     int port = atoi(pstr);
     if (port <= 0 || port > 65535) { dprintf(2, "telnet: %s: not a port number\n", pstr); return 2; }
 
-    struct addrinfo h, *r = 0;
-    memset(&h, 0, sizeof h);
-    h.ai_family = AF_INET;
-    h.ai_socktype = SOCK_STREAM;
+    const char *why;
     dprintf(1, "Trying %s...\n", host);
-    int e = getaddrinfo(host, pstr, &h, &r);
-    if (e) {
-        dprintf(2, "telnet: %s: %s\n", host, e == EAI_NONAME ? "no such host" : gai_strerror(e));
+    if ((sock = zconnect(host, port, 0, &why)) < 0) {
+        dprintf(2, "telnet: %s port %d: %s\n", host, port, why);
         return 1;
     }
-    sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0 || connect(sock, r->ai_addr, r->ai_addrlen) < 0) {
-        dprintf(2, "telnet: %s port %d: %s\n", host, port, zstrerror(zerrno) ? zstrerror(zerrno) : "cannot connect");
-        freeaddrinfo(r);
-        return 1;
-    }
-    freeaddrinfo(r);
     dprintf(1, "Connected to %s. Escape key is %s.\n", host, esc_key < 0 ? "off" : "Ctrl-]");
     int pr = getpriority(PRIO_PROCESS, 0);      /* one level lower than started at (the SLIP plan) */
     if (pr < 19)

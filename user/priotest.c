@@ -236,10 +236,12 @@ static int t_stale(void)
                   r_old < 0 ? "refused" : "REACHED the new port", r_now == 0 ? "works" : "FAILED");
 }
 
+static const char USAGE[] = "usage: priotest fair|prio|wake|inherit|stale\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     if (argc == 6 && !strcmp(argv[1], "-c")) return child(argv);
-    if (argc != 2) { dprintf(2, "usage: priotest fair|prio|wake|inherit|stale\n"); return 2; }
+    if (argc != 2) zusage(USAGE);
     sh = sys_memalloc(sizeof *sh);
     if (!sh) { dprintf(2, "priotest: out of memory\n"); return 1; }
     memset(sh, 0, sizeof *sh);
@@ -248,6 +250,5 @@ int main(int argc, char **argv)
     if (!strcmp(argv[1], "wake")) return t_wake();
     if (!strcmp(argv[1], "inherit")) return t_inherit();
     if (!strcmp(argv[1], "stale")) return t_stale();
-    dprintf(2, "usage: priotest fair|prio|wake|inherit|stale\n");
-    return 2;
+    zusage(USAGE);
 }

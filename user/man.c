@@ -39,10 +39,13 @@ static int keyword(const char *w)
     }
     return found ? 0 : 1;
 }
+static const char USAGE[] = "usage: man name...   |   man -k word\n";
 int main(int argc, char **argv)
 {
-    if (argc < 2 || (!strcmp(argv[1], "-k") && argc < 3)) { dprintf(2, "usage: man name...   |   man -k word\n"); return 2; }
+    zopt(argc, argv, USAGE);
+    if (argc < 2 || (!strcmp(argv[1], "-k") && argc < 3)) zusage(USAGE);
     if (!strcmp(argv[1], "-k")) return keyword(argv[2]);
+    if (argv[1][0] == '-' && argv[1][1]) zbadopt(argv[1], USAGE);
     int rc = 0;
     for (int i = 1; i < argc; i++) rc |= show(argv[i]);
     return rc;

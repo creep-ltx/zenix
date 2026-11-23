@@ -4,23 +4,23 @@
 #include "../kernel/diskproto.h"
 #include "zenixfs_disk.h"
 
+static const char USAGE[] = "usage: mkfs.zenixfs [-b 10|11|12] [-l label] [-c latin1|utf8] device\n";
 /* mkfs.zenixfs [-b 10|11|12] [-l LABEL] [-c latin1|utf8] DEVICE
  * Makes a ZenixFS filesystem (docs/zenixfs-format.md). The block size is 1 << b bytes; by default 1 KB under 16 MB,
  * 2 KB under 256 MB, else 4 KB. The device must not be mounted. */
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *dev = 0, *label = 0;
     unsigned bs = 0, cs = ZENIXFS_CHARSET_LATIN1;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-b") && i + 1 < argc) bs = (unsigned)atoi(argv[++i]);
         else if (!strcmp(argv[i], "-l") && i + 1 < argc) label = argv[++i];
         else if (!strcmp(argv[i], "-c") && i + 1 < argc) cs = !strcmp(argv[++i], "utf8") ? ZENIXFS_CHARSET_UTF8 : ZENIXFS_CHARSET_LATIN1;
+        else if (argv[i][0] == '-') zbadopt(argv[i], USAGE);
         else dev = argv[i];
     }
-    if (!dev || (bs && (bs < 10 || bs > 12))) {
-        dprintf(2, "usage: mkfs.zenixfs [-b 10|11|12] [-l label] [-c latin1|utf8] device\n");
-        return 2;
-    }
+    if (!dev || (bs && (bs < 10 || bs > 12))) zusage(USAGE);
     if (zdisk_open(dev, DISK_RAW) < 0) { dprintf(1, "mkfs.zenixfs: cannot open %s (mounted, or no such device)\n", dev); return 1; }
     unsigned mb = zdisk_sectors() / 2048;
     if (!bs) bs = mb < 16 ? 10 : mb < 256 ? 11 : 12;

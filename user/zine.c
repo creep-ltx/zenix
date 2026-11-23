@@ -44,28 +44,15 @@ static void die(const char *fmt, const char *arg)
     _zexit(1);
 }
 
-/* the whole file into memory (malloc'd), its size and status */
+/* the whole file into memory (malloc'd; zslurpfd, libz), its size and status */
 static u8 *slurp(const char *path, u32 *len, struct ustat *st)
 {
     int fd = sys_open(path, 0);
     if (fd < 0)
         return 0;
     u8 *b = 0;
-    if (sys_fstat(fd, st) == 0 && !may_read(st)) {
-        sys_close(fd);
-        return 0;
-    }
-    if (sys_fstat(fd, st) == 0 && (b = malloc(st->size ? st->size : 1))) {
-        u32 got = 0;
-        int n;
-        while (got < st->size && (n = sys_read(fd, b + got, st->size - got)) > 0)
-            got += (u32)n;
-        if (got != st->size) {
-            free(b);
-            b = 0;
-        }
-        *len = got;
-    }
+    if (sys_fstat(fd, st) == 0 && may_read(st))
+        b = (u8 *)zslurpfd(fd, 16u << 20, len);
     sys_close(fd);
     return b;
 }
@@ -565,8 +552,10 @@ static int pre_alloc(void *u, zu32 size, zu32 memf, struct zh_seg *out)
 }
 static void pre_free(void *u, const struct zh_seg *s) { (void)u, (void)s; }   /* the regions go with zine */
 
+static const char USAGE[] = "usage: zine [--blob FILE] [-c | -l] [-m] PROGRAM [ARGS...]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     if (argc > 3 && !strcmp(argv[1], "--blob")) {     /* the tests' other blobs (/tests/zine/null.blob): root only */
         if (sys_getuid() != 0)
             die("zine: --blob is for root%s", "");
@@ -584,16 +573,10 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[1], "--")) {
             argv++, argc--;
             break;
-        } else {
-            dprintf(2, "zine: unknown option %s\n", argv[1]);
-            argc = 0;
-            break;
-        }
+        } else
+            zbadopt(argv[1], USAGE);
     }
-    if (argc < 2) {
-        dprintf(2, "usage: zine [--blob FILE] [-c | -l] [-m] PROGRAM [ARGS...]\n");
-        return 2;
-    }
+    if (argc < 2) zusage(USAGE);
     ruid = (u32)sys_getuid();
     if (ruid != 0 && !in_zine_group())
         die("zine: not allowed: root and the members of the group zine may (root can add: gpasswd -a %s zine)",

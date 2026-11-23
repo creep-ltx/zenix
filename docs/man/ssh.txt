@@ -45,7 +45,7 @@ OPTIONS
 
 EXIT STATUS
     The remote command's exit status; 255 for ssh's own errors and after
-    ~. (as OpenSSH's ssh).
+    ~. (as OpenSSH's ssh); 2 for a wrong command line.
 
 NOTES
     Algorithms: curve25519-sha256 key exchange with OpenSSH's strict key

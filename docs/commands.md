@@ -6,6 +6,14 @@ page in `docs/man/NAME.txt`; a few more pages are for names that start the same 
 `NAME(section)` header, `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`, `EXAMPLES`, `EXIT STATUS`, `SEE ALSO`); the
 root disk gets them in `/usr/man` (below). `man -k` reads the line after `NAME` ("name - summary").
 
+Every command follows one command line (docs/audit-2026-11-23-one-system.md section 3, written once in libz:
+`zopt`, `zoptget`, `zisopt`): `--help` writes its usage to the output (status 0), `--version` its name and the
+system's version (status 0), an unknown option is refused with `NAME: unknown option X` and the usage on the error
+stream (status 2), and `--` ends the options; the pages do not repeat this. Where the arguments are data (`echo`,
+`true`, `false`: only `--help` or `--version` alone) or another program's (the ports, which answer `--help` and
+`--version` from their SYNOPSIS), the page says so. Checked for every program in `/bin` by `rootfs/tests/conv.sh`
+(`tools/cmds2-test.sh`).
+
 The pages are written by reading each program's source (`user/*.c`): options, defaults, limits and exit codes are
 what the code does, not what the usual Unix tool does. Each NOTES section lists where a command is smaller than its
 Unix namesake. Whether a command is tested: features.md (the text tools and the shell are compared with GNU bash and

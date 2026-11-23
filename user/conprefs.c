@@ -293,13 +293,12 @@ static int getkey(int ms)               /* a byte, or -1 after ms */
     return sys_read(0, &c, 1) == 1 ? (unsigned char)c : -2;
 }
 
+static const char USAGE[] = "usage: conprefs [-q]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     int quiet = argc > 1 && !strcmp(argv[1], "-q");
-    if (argc > 1 && !quiet) {
-        dprintf(2, "usage: conprefs [-q]\n");
-        return 2;
-    }
+    if (argc > 1 && !quiet) { if (argv[1][0] == '-') zbadopt(argv[1], USAGE); zusage(USAGE); }
     fonts_scan();
     /* in effect: the colours the kernel shows; the font of this session's Use, else /etc/console's (no file, no line:
      * auto) - the kernel does not say which font it has */
