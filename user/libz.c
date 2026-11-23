@@ -635,7 +635,7 @@ __attribute__((optimize("Os"))) int zled_key(struct zled *e, int k)
         if (e->pos > 0 && e->n > 1) {
             if (e->pos == e->n) e->pos = zled_prev(e, e->pos);
             int a = zled_prev(e, e->pos), b = zled_next(e, e->pos) - e->pos, la = e->pos - a;
-            if (a < e->pos) {
+            if (a < e->pos && la <= 4 && b <= 4) {     /* (a run of stray continuation bytes is no character) */
                 char t[4];
                 memcpy(t, e->b + a, (u32)la);
                 memmove(e->b + a, e->b + e->pos, (u32)b);
