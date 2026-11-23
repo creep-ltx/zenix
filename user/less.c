@@ -114,7 +114,7 @@ static int read_key(void)
         if (poll(&p, 1, 500) > 0) break;
     }
     int c = getb(-1);
-    if (c < 0) return 'q';
+    if (c < 0) return -1;                /* the end of the terminal's input */
     if (c != 27) return c;
     int s1 = getb(30), s2 = 0, num = 0;
     if (s1 < 0) return 27;
@@ -147,6 +147,7 @@ static int less_key(int k)
     case ZK_SDOWN: return 'f';          /* Page Down */
     case ZK_F1: case ZK_HELP: return 'h';
     }
+    if (k < 0) return 'q';
     return k == K_RESIZE || (k > 0 && k < 0x80) ? k : 0;
 }
 static void prompt_line(const char *label, char *out, int max)     /* libz's line editor on the bottom row */
@@ -156,7 +157,7 @@ static void prompt_line(const char *label, char *out, int max)     /* libz's lin
     for (;;) {
         zled_show(&e, ROWS, 1, zscr_cols - 1, label);
         oflush();
-        int k = read_key(), r = k == K_RESIZE ? ZLED_MORE : zled_key(&e, k);
+        int k = read_key(), r = k < 0 ? ZLED_CANCEL : k == K_RESIZE ? ZLED_MORE : zled_key(&e, k);
         if (r == ZLED_DONE) break;
         if (r == ZLED_CANCEL || r == ZLED_EOF) { out[0] = 0; break; }
     }
@@ -224,7 +225,7 @@ int main(int argc, char **argv)
     int i = 1, bad = 0;                                            /* a file that could not be read: status 1 */
     zscr_size();                                                   /* the terminal's size: the rows' width too */
     if (ROWS < 3) ROWS = 3;
-    while (zisopt(argc, argv, &i, USAGE)) i++;         /* options are accepted and ignored */
+    while (zisopt(argc, argv, &i, 0)) i++;   /* options are accepted and ignored (long ones too) */
     int tty_out = sys_isatty(1);
     if (i >= argc) {
         if (sys_isatty(0)) zusage(USAGE);

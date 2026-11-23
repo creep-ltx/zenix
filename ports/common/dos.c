@@ -111,16 +111,17 @@ static int newconf(const char *rest, const char *dir, char *out)
     char r[ZPATH];
     const char *s = dir ? dir : rest, *t;
     size_t i = 0, k;
-    for (k = 0; s[k] && s[k] != '/' && s[k] != '.'; k++)     /* the program's name, lowercase */
+    for (k = 0; s[k] && s[k] != '/' && s[k] != '.' && i < sizeof r - 2; k++)  /* the program's name, lowercase */
         r[i++] = (char)tolower((unsigned char)s[k]);
     t = dir ? rest : rest + k;                                  /* what follows it */
+    int sep = dir ? 1 : *t != 0;                                /* a '/' after the name in the new path */
     if (!dir && *t)
         t++;                                                    /* its '/' or '.' */
-    if (dir || rest[k] == '/') {                                /* "Sumi/Sumi.keys", PROGDIR's "Ahiru.keys": the ext */
+    if (dir || t[-1] == '/') {                                /* "Sumi/Sumi.keys", PROGDIR's "Ahiru.keys": the ext */
         if (!strncmp(t, s, k) && t[k] == '.')
             t += k + 1;
     }
-    if (*t || rest[k])
+    if (sep)
         r[i++] = '/';
     if (i + strlen(t) >= sizeof r) {
         errno = ENAMETOOLONG;

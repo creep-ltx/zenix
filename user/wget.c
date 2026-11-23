@@ -193,6 +193,11 @@ static int conn_open(struct conn *c, const struct http_url *u, const char **why)
                 break;
             n++;
         }
+        if (n == (int)sizeof l - 1) {          /* longer than the buffer: the rest of the line skipped */
+            char ch;
+            while (wait_fd(c->fd, POLLIN, IDLE_MS) == 1 && sys_read(c->fd, &ch, 1) == 1 && ch != '\n')
+                ;
+        }
         if (n < 0) {
             r = tls_end(c);
             *why = "TLS: the helper ended without an answer";

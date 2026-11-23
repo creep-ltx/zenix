@@ -463,6 +463,7 @@ static unsigned char pq[4]; static int pqn;     /* bytes read ahead that were no
 #define M_ALT   0x2000
 #define M_CTRL  0x4000
 static int resized;                     /* a new terminal size came while a key was awaited (SIGWINCH) */
+static int midkey;                      /* within a key's bytes: a resize waits for its end */
 static int getb(void)
 {
     unsigned char c;
@@ -470,7 +471,7 @@ static int getb(void)
     for (;;) {                          /* the wait notices a resize (libz's screen layer) */
         struct pollfd p = { 0, POLLIN, 0 };
         if (zscr_resized()) resized = 1;
-        if (resized && !pqn) return -2;
+        if (resized && !pqn && !midkey) return -2;
         if (poll(&p, 1, 500) > 0) break;
     }
     return sys_read(0, &c, 1) == 1 ? c : -1;
@@ -478,9 +479,11 @@ static int getb(void)
 #define K_RESIZE 0x0FFF
 static int read_key(void)
 {
+    midkey = 0;
     int c = getb();
     if (c == -2) { resized = 0; return K_RESIZE; }
     if (c < 0) return -1;
+    midkey = 1;
     if (c >= 0xC2 && c <= 0xF4) {                       /* D28: a lead: its continuations come with it */
         int need = c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4, w;
         int other = -1;
