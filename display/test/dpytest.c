@@ -25,7 +25,15 @@
  *                      B pixels P glyphs G draws D paints N copies C (0)"
  *   mem                chip and fast RAM free, and the memory of displayd and dpytest (procinfo)
  *   peek X Y           (with -fb) the pretend card's pixel at X, Y: "dpytest: peek X Y HEX", its bytes in memory order
- *   mouse DX DY        the mouse moved DX, DY counts (CON_INPUT's CONI_MOUSE, root's), no button
+ *   mouse DX DY [B]    the mouse moved DX, DY counts (CON_INPUT's CONI_MOUSE, root's), the buttons B (bit 0 left,
+ *                      1 right; none by default), then 3 ticks waited
+ *   clicks N GAP       N clicks of the left button, their presses GAP ticks apart (CON_INPUT)
+ *   mget               the mouse's setting and the pointer's place (D61, DPY_MOUSE): "dpytest: mget X Y speed S thresh T
+ *                      mult M flags F dclick D hot HX HY"
+ *   mset S T M F D [HX HY]  the speed, threshold, multiplier, flags, double-click time (and hot spot) set, the
+ *                      picture and colours kept: "dpytest: mset R"
+ *   pstat              a card's pointer shows since the last pstat (DPY_STAT's three of D61), then from 0: "dpytest:
+ *                      pstat shows N ticks T most M"
  *   quit               the end (DPY_BYE)
  * -fb WxHxB (root, before the connection; DESIGN D43, docs/d43-rtg.md 10): a pretend graphics card of W x H pixels of
  * B bytes (2: R5G6B5, 3: R8G8B8, 4: A8R8G8B8) in fast RAM, its record written into the boot's hardware table as
@@ -122,9 +130,12 @@ static void events(void)
             ws[i].w = e.w;
             ws[i].h = e.h;
         }
-        char l[64];
-        int n = snprintf(l, sizeof l, "ev %d %s %d %d %d %d %d\n", e.type, i >= 0 ? ws[i].name : e.win ? "?" : "scr", e.code, e.x, e.y,
+        char l[72];
+        int n = snprintf(l, sizeof l, "ev %d %s %d %d %d %d %d", e.type, i >= 0 ? ws[i].name : e.win ? "?" : "scr", e.code, e.x, e.y,
                          e.w, e.h);
+        if (e.type == EV_BUTTON && e.arg)       /* D61: a double click */
+            n += snprintf(l + n, sizeof l - (u32)n, " arg %u", e.arg);
+        l[n++] = '\n';
         if (nev + (u32)n < sizeof evlog) {
             memcpy(evlog + nev, l, (u32)n);
             nev += (u32)n;
@@ -349,8 +360,41 @@ static void command(char *line)
         say("dpytest: peek %u %u %s\n", x, y, hx);
         return;
     }
+    if (!strcmp(w[0], "mget") || (!strcmp(w[0], "mset") && n >= 6)) {
+        static struct dpymouse ms;
+        int r = dpy_call(DPY_MOUSE, (u32)&ms, DPYMO_GET, 0, 0);
+        if (w[0][1] == 's' && r == 0) {
+            ms.speed = (u16)atoi(w[1]); ms.thresh = (u8)atoi(w[2]); ms.mult = (u16)atoi(w[3]);
+            ms.flags = (u8)atoi(w[4]); ms.dclick = (u16)atoi(w[5]);
+            if (n >= 8) { ms.hotx = (signed char)atoi(w[6]); ms.hoty = (signed char)atoi(w[7]); }
+            say("dpytest: mset %d\n", dpy_call(DPY_MOUSE, (u32)&ms, DPYMO_SET, 0, 0));
+            return;
+        }
+        say("dpytest: mget %d %d speed %u thresh %u mult %u flags %u dclick %u hot %d %d (%d)\n", ms.x, ms.y, ms.speed,
+            ms.thresh, ms.mult, ms.flags, ms.dclick, ms.hotx, ms.hoty, r);
+        return;
+    }
+    if (!strcmp(w[0], "pstat")) {
+        u32 st[15];
+        memset(st, 0, sizeof st);
+        int r = dpy_call(DPY_STAT, (u32)st, 5, 0, 0);
+        say("dpytest: pstat shows %u ticks %u most %u (%d)\n", st[12], st[13], st[14], r);
+        return;
+    }
+    if (!strcmp(w[0], "clicks") && n >= 3) {     /* N left clicks, their presses GAP ticks apart */
+        int k = atoi(w[1]), gap = atoi(w[2]), r = 0;
+        for (int j = 0; j < k; j++) {
+            u8 down[3] = { 0, 0, 1 }, up[3] = { 0, 0, 0 };
+            r |= sys_coninput(0, CONI_MOUSE, down, 3);
+            sys_sleep(3);
+            r |= sys_coninput(0, CONI_MOUSE, up, 3);
+            sys_sleep((u32)(gap > 3 ? gap - 3 : 3));
+        }
+        say("dpytest: clicks %d\n", r);
+        return;
+    }
     if (!strcmp(w[0], "mouse") && n >= 3) {
-        u8 r[3] = { (u8)atoi(w[1]), (u8)atoi(w[2]), 0 };
+        u8 r[3] = { (u8)atoi(w[1]), (u8)atoi(w[2]), (u8)(n > 3 ? atoi(w[3]) : 0) };
         say("dpytest: mouse %d\n", sys_coninput(0, CONI_MOUSE, r, 3));
         sys_sleep(3);
         return;

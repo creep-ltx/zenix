@@ -13,6 +13,7 @@
 #include "libz.h"
 #include "../display.h"
 #include "../screenfile.h"
+#include "../prefswin.h"
 #include "../server/amifont.h"
 #include "cfgfile.h"
 typedef unsigned char u8;
@@ -31,9 +32,12 @@ static int verbose;
 struct choice { int mode, font, theme; };
 static struct choice was, now, sel;
 static char use_was[16];                /* the session's theme file at the start ("": none) */
-static int win, row, ww, wh, lh;
-static struct dpyfont uf;
-static char msg[64];
+static void value(int i, char *b, int n);
+static const char *const label[3] = { "Screen mode", "Font", "Colours" };
+static const char *const button[4] = { "Test", "Use", "Save", "Cancel" };
+static struct prefswin pw = { .nrows = 3, .gx = 104, .label = label, .value = value };
+#define msg pw.msg
+#define uf pw.uf
 
 /* ---- what there is to choose ---- */
 static int font_find(const char *name, int size)
@@ -201,7 +205,7 @@ static int save_screen(const char *path, int mode, int font)
 }
 
 /* ---- applying ---- */
-static void say(const char *s) { strncpy(msg, s, sizeof msg - 1); msg[sizeof msg - 1] = 0; }
+static void say(const char *s) { pw_say(&pw, s); }
 /* zdesk reads its theme again on SIGHUP: every process called zdesk that this user may signal (the kernel refuses
  * another user's) */
 static void tell_zdesk(void)
@@ -255,14 +259,7 @@ static int apply(const struct choice *c)
     return 0;
 }
 
-/* ---- the window ---- */
-static const char *const label[3] = { "Screen mode", "Font", "Colours" };
-static const char *const button[4] = { "Test", "Use", "Save", "Cancel" };
-#define GX 104                          /* the gadgets' left */
-static int gy(int i) { return 6 + i * (lh + 6); }
-static int by(void) { return gy(3) + 4; }
-static int bx(int i) { return 8 + i * ((ww - 16 + 6) / 4); }
-static int bw(void) { return (ww - 16 + 6) / 4 - 6; }
+/* ---- the window (display/lib/prefswin.c) ---- */
 static void value(int i, char *b, int n)
 {
     if (i == 0)
@@ -275,59 +272,16 @@ static void value(int i, char *b, int n)
     } else
         snprintf(b, (u32)n, "%s", nthemes ? themes[sel.theme] : "flat");
 }
-static void text(int x, int y, int fg, int bg, const char *s)
-{
-    dpy_textf(win, &uf, x, y, fg, bg, 0, s, (int)strlen(s));
-}
-static void box(int x, int y, int w, int h, int light, int dark)
-{
-    dpy_fill(win, x, y, w, 1, light);
-    dpy_fill(win, x, y, 1, h, light);
-    dpy_fill(win, x, y + h - 1, w, 1, dark);
-    dpy_fill(win, x + w - 1, y, 1, h, dark);
-}
 static void draw(void)
 {
-    dpy_fill(win, 0, 0, ww, wh, 2);
-    for (int i = 0; i < 3; i++) {
-        char v[48];
-        text(8, gy(i) + 3, 1, 2, label[i]);
-        int on = i == row;
-        dpy_fill(win, GX, gy(i), ww - GX - 8, lh + 4, on ? 4 : 5);
-        box(GX, gy(i), ww - GX - 8, lh + 4, 7, 1);
-        value(i, v, sizeof v);
-        text(GX + 6, gy(i) + 2, on ? 7 : 1, on ? 4 : 5, "\xc2\xab");    /* the cycle mark */
-        text(GX + 18, gy(i) + 2, on ? 7 : 1, on ? 4 : 5, v);
-    }
-    for (int i = 0; i < 4; i++) {
-        dpy_fill(win, bx(i), by(), bw(), lh + 6, 5);
-        box(bx(i), by(), bw(), lh + 6, 7, 1);
-        int tw = dpy_textw(&uf, button[i], (int)strlen(button[i]));
-        text(bx(i) + (bw() - tw) / 2, by() + 3, 1, 5, button[i]);
-    }
-    dpy_fill(win, 8, by() + lh + 10, ww - 16, lh, 2);
-    if (msg[0])
-        text(8, by() + lh + 10, 9, 2, msg);
+    pw_draw(&pw);
     dpy_flush();
 }
-static void layout(void)
-{
-    dpy_font(DPYF_UI, &uf);
-    lh = uf.height > 8 ? uf.height : 8;
-    ww = 300;
-    wh = by() + lh + 6 + 4 + lh + 4;
-}
+static void layout(void) { pw_layout(&pw, 300); }
 static void where(void)
 {
-    struct dpyinfo in;
-    if (verbose && dpy_info(win, &in) == 0) {
-        dprintf(1, "deskprefs: window %d %d %d %d", in.ix, in.iy, ww, wh);
-        for (int i = 0; i < 3; i++)
-            dprintf(1, " row%d %d %d", i, in.ix + GX + 20, in.iy + gy(i) + 3);
-        for (int i = 0; i < 4; i++)
-            dprintf(1, " %s %d %d", button[i], in.ix + bx(i) + bw() / 2, in.iy + by() + 4);
-        dprintf(1, "\n");
-    }
+    if (verbose)
+        pw_where(&pw, "deskprefs");
 }
 static void cycle(int i, int d)
 {
@@ -338,7 +292,7 @@ static void cycle(int i, int d)
         sel.font = (sel.font + d + nfonts) % nfonts;
     else if (nthemes)
         sel.theme = (sel.theme + d + nthemes) % nthemes;
-    row = i;
+    pw.row = i;
 }
 static void report(const char *what)
 {
@@ -394,35 +348,23 @@ static int press(int b)
 }
 static int click(int x, int y, int shift)
 {
-    for (int i = 0; i < 3; i++)
-        if (x >= GX && x < ww - 8 && y >= gy(i) && y < gy(i) + lh + 4) {
-            cycle(i, shift ? -1 : 1);
-            draw();
-            return 0;
-        }
-    for (int i = 0; i < 4; i++)
-        if (x >= bx(i) && x < bx(i) + bw() && y >= by() && y < by() + lh + 6)
-            return press(i);
+    int h = pw_hit(&pw, x, y);
+    if (h >= 100)
+        return press(h - 100);
+    if (h >= 0) {
+        cycle(h, shift ? -1 : 1);
+        draw();
+    }
     return 0;
 }
 static int key(const struct dpyev *e)
 {
-    if (e->code & 0x80)
-        return 0;
-    switch (e->code) {
-    case 0x4C: row = (row + 2) % 3; draw(); return 0;
-    case 0x4D: row = (row + 1) % 3; draw(); return 0;
-    case 0x4E: cycle(row, 1); draw(); return 0;
-    case 0x4F: cycle(row, -1); draw(); return 0;
-    case 0x44: return press(1);
-    case 0x45: return press(3);
-    }
-    switch (e->ch[0] | 0x20) {
-    case 't': return press(0);
-    case 'u': return press(1);
-    case 's': return press(2);
-    case 'c': return press(3);
-    }
+    int k = pw_key(&pw, e);
+    if (k >= 100)
+        return press(k - 100);
+    if (k)
+        cycle(k > 0 ? k - 1 : -k - 1, k > 0 ? 1 : -1);
+    draw();
     return 0;
 }
 
@@ -470,9 +412,9 @@ int main(int argc, char **argv)
     was.theme = theme_find(t);
     now = sel = was;
     layout();
-    win = dpy_window(WK_NORMAL, "Desktop preferences", -1, -1, ww, wh, 0);
-    if (win < 0) {
-        dprintf(2, "deskprefs: no window: %s\n", zstrerror(win) ? zstrerror(win) : "refused");
+    pw.win = dpy_window(WK_NORMAL, "Desktop preferences", -1, -1, pw.ww, pw.wh, 0);
+    if (pw.win < 0) {
+        dprintf(2, "deskprefs: no window: %s\n", zstrerror(pw.win) ? zstrerror(pw.win) : "refused");
         dpy_close();
         return 1;
     }
@@ -495,7 +437,7 @@ int main(int argc, char **argv)
         case EV_SCREEN:
             if (e.code & DPYS_FONT) {
                 layout();
-                dpy_resize(win, ww, wh);
+                dpy_resize(pw.win, pw.ww, pw.wh);
             }
             draw();
             where();

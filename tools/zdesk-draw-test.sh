@@ -32,7 +32,7 @@ send q
 sleep 2
 send time seq 1 2000 2> /tmp/tt-con\r
 sleep 30
-send echo acceleration none > /etc/zdesk/mouse; printf 'right cmd 3600 echo .\n' > /etc/zdesk/bar\r
+send echo acceleration none > /etc/zdesk/mouse; echo speed 200 >> /etc/zdesk/mouse; printf 'right cmd 3600 echo .\n' > /etc/zdesk/bar\r
 sleep 1
 send : > /tmp/c; zdesk -v > /tmp/z.log 2>&1 &\r
 sleep 8

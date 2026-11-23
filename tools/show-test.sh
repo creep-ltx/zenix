@@ -50,7 +50,7 @@ send q
 sleep 2
 send t() { echo st-$1; grep '^show: (shown|picture|say|window|rendered|wrote|screen)' /tmp/s.log | tail -$2; }\r
 sleep 2
-send rm -rf $HOME/.config/show; echo acceleration none > /etc/zdesk/mouse; zdesk -v > /tmp/z.log 2>&1 &\r
+send rm -rf $HOME/.config/show; echo acceleration none > /etc/zdesk/mouse; echo speed 200 >> /etc/zdesk/mouse; zdesk -v > /tmp/z.log 2>&1 &\r
 sleep 8
 send w() { n=0; until grep -q "$1" /tmp/s.log || [ $n -gt 90 ]; do sleep 1; n=$((n+1)); done; echo rdy-$2; }\r
 sleep 2

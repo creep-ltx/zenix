@@ -4,7 +4,7 @@ NAME
     gcontest - test a console handed to a display server
 
 SYNOPSIS
-    gcontest ack|late|noack [SECONDS [ACCEL]]
+    gcontest ack|late|noack [SECONDS [ACCEL | m SET]]
     gcontest keys CODE...
     gcontest mouse DX,DY,BUTTONS...
     gcontest dirty
@@ -34,15 +34,21 @@ DESCRIPTION
     refused while the grab lasts). With ACCEL (hexadecimal, THRESHOLD |
     MULTIPLIER << 8) it then sets the mouse's acceleration (CON_MOUSE),
     after trying a wrong one: "gcontest: accel 0x900 -> -22", then
-    "gcontest: accel 0xACCEL -> 0". It ends after SECONDS (default 60) or
-    at the q key, giving the console back.
+    "gcontest: accel 0xACCEL -> 0". With m SET it sets the whole setting
+    of DESIGN D61 instead (CON_MOUSE's struct umouse; SET is
+    W,H,GAINX,GAINY,THRESH,MULT,SHIFT,X,Y, numbers as C writes them, the
+    ones left out D38's: 640, 256, 0x200, 0x100, 0, 0x100, 0, -1, -1),
+    after a wrong one (a gain of 0): "gcontest: set gain 0 -> -22", then
+    "gcontest: set SET -> 0"; the pointer's records are then in those
+    units. It ends after SECONDS (default 60) or at the q key, giving the
+    console back.
 
     keys types the raw key codes (hexadecimal; bit 7 set for a key going
     up) through CON_INPUT on descriptor 0, as the keyboard would: 66 51 d1
     e6 is Amiga+F2.
 
     mouse moves the mouse by DX, DY counts (-128..127; a count is two
-    hires pixels across, a line down, before the grab's acceleration) and
+    hires pixels across, a line down, before the grab's setting) and
     sets its buttons (bit 0 left, 1 right, 2 middle; held until the next
     record) through CON_INPUT's CONI_MOUSE, a record every 3 ticks. The
     desktop's tests drive it.

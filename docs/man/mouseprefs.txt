@@ -1,0 +1,86 @@
+MOUSEPREFS(1)			Zenix manual
+
+NAME
+    mouseprefs - the mouse's preferences: speed, acceleration, buttons,
+    double click, pointer
+
+SYNOPSIS
+    mouseprefs [-v]
+
+DESCRIPTION
+    A window on Zenix Desktop (the Zenix menu's Mouse) with the mouse's
+    settings and AmigaOS's four buttons. Each setting is a cycle gadget:
+    a click shows the next value, Shift and a click the one before.
+
+    Speed         how far the pointer goes when the mouse moves slowly:
+                  100% is one pixel of the screen a count of the mouse
+                  (hires, interlaced or a graphics card's pixel alike),
+                  so slow moves can reach every pixel; 25% to 800%.
+    Acceleration  a fast move goes further, as AmigaOS's Input
+                  preferences: off, low (the counts beyond 4 in a frame,
+                  a fiftieth of a second, count twice), medium (beyond 3,
+                  2.5 times), high (beyond 2, three times), or custom:
+    Threshold     the counts in a frame before the multiplier (0-16).
+    Multiplier    how much more the counts beyond it count (1-4 times).
+    Buttons       normal, or swapped for the left hand (every program
+                  and the desktop's menus see them swapped).
+    Double click  the longest time between the two clicks of a double
+                  click, 0.2 to 1.5 seconds, for every program (displayd
+                  marks the second press). Try it in the box "Double-click
+                  here": it answers at the time chosen, before Test.
+    Pointer       a pointer file: arrow, slim, cross, workbench, or one
+                  of your own.
+
+    The editor below the settings shows the pointer's 16 x 16 pixels
+    large. The small boxes beside it are the colour to paint with: none
+    (-) and the pointer's three colours; a click on the chosen box again
+    changes that colour (Shift and a click: back), a click in the editor
+    paints a pixel, Shift and a click there puts the hot spot (the pixel
+    that points) there. An edited pointer is "custom".
+
+    Test    the choice in effect now; the window stays, so Cancel can
+            still go back.
+    Use     in effect for this session (until Log out); nothing is saved.
+    Save    in effect and saved: ~/.config/zdesk/mouse (root:
+            /etc/zdesk/mouse, the default for everyone without their
+            own); an edited pointer as pointers/custom.pointer beside it.
+            The file's comments and other lines are kept.
+    Cancel  everything back as it was when the window opened.
+
+KEYS
+    Up and Down choose a setting, Left and Right change it; t, u, s and c
+    the buttons, Return Use, Esc Cancel. The close gadget is Cancel.
+
+OPTIONS
+    -v         say on standard output where the window's parts are, each
+               press of a button, and each button's result
+               ("mouseprefs: use: speed 100%, ...")
+    --help     the usage line on standard output
+    --version  "mouseprefs (Zenix) 1"
+
+EXIT STATUS
+    0 the window closed, 1 no desktop, 2 a wrong argument.
+
+FILES
+    ~/.config/zdesk/mouse, /etc/zdesk/mouse    the settings, lines of
+        speed PERCENT, acceleration none|low|medium|high|custom,
+        threshold N, multiplier PERCENT, buttons normal|swapped,
+        doubleclick HUNDREDTHS, pointer NAME; # starts a comment
+    ~/.config/zdesk/pointers/NAME.pointer, /etc/zdesk/pointers/
+        a pointer: "hot X Y", "colours RGB RGB RGB" (12-bit, hex),
+        then 16 rows of 16 characters: . clear, o, w, x colours 1-3
+
+NOTES
+    zdesk applies the file when a session starts and puts back what the
+    desktop had when the session ends; the login screen uses the
+    desktop's own defaults (100%, low, normal, 0.5 s, the arrow).
+    There is no scroll wheel setting: Zenix reads no wheel yet. The
+    middle button of a three-button mouse is passed on as button 3.
+    The speed and the acceleration are counted per frame: on NTSC (60
+    frames a second) the threshold is taken as 5/6 of it.
+
+EXAMPLES
+    mouseprefs &        open the window from a terminal
+
+SEE ALSO
+    deskprefs(1), zdesk(1), displayd(8), docs/d61-mouse.md

@@ -57,8 +57,10 @@ NOTES
     The theme is changed by zdesk: deskprefs sends SIGHUP to the user's
     zdesk, so under another window manager only the mode and the font
     change.
-    Not done: single colours (a theme file's palette line), the mouse and
-    the keys (their files), fonts in ~/.fonts, the terminals' font.
+    Not done: single colours (a theme file's palette line), the keys
+    (their file), fonts in ~/.fonts, the terminals' font. The mouse has
+    its own window, mouseprefs(1).
 
 SEE ALSO
-    zdesk(1), displayd(8), conprefs(8), docs/d38-desktop.md (Preferences)
+    zdesk(1), mouseprefs(1), displayd(8), conprefs(8),
+    docs/d38-desktop.md (Preferences)

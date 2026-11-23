@@ -4,3 +4,4 @@ Files = files
 Editor = term -e sumi
 Monitor = term -e ctop
 Preferences = deskprefs
+Mouse = mouseprefs

@@ -2,6 +2,7 @@
 #include "kernel.h"
 #include "mmu.h"
 #include "hw.h"
+#include "pointer.h"
 
 /* DESIGN D38 section 3.4, step 2: a console in graphics mode, handed to a display server (displayd), as Linux gives a
  * console to X. SYS_console's CON_GRAB (root; the console named by a descriptor) gives the caller a new descriptor:
@@ -51,12 +52,12 @@ struct gcon {
     u32 cop;                    /* the server's Copper list */
     volatile u16 *spr;          /* its sprite 0: the two control words */
     u16 sprh;
-    short hx, hy;
-    u16 w, h;
-    volatile short px, py;        /* the pointer (the tick) */
+    struct umouse m;            /* (D61) CON_MOUSE's setting: the pointer's units and bounds (m.w, m.h), its speed
+                                 * and acceleration, the sprite's scale (m.shift) and hot spot; m.x, m.y unused */
+    volatile short px, py;        /* the pointer in its units (the vertical blank): fx, fy >> 8 */
+    s32 fx, fy;                 /* (D61) the pointer in 1/256ths of its units: the fraction of slow moves kept */
     volatile u16 btn;           /* its buttons, as GQ_*BUTTON bits (the tick) */
     volatile u16 bdown, bup;    /* buttons pressed, released since kwork last looked (the tick latches them) */
-    u16 acc;                    /* CON_MOUSE: counts beyond its low byte in a frame count its high byte times */
     u8 forced;                  /* switched away without the server's answer: the kernel draws with the CPU */
     short lx, ly;                 /* what the ring was last told */
     u16 lbtn;
@@ -84,11 +85,14 @@ int chip_ok(u32 a, u32 n)
  * Sprites are placed in lores pixels: HSTART 0x80 is the first playfield pixel's column (DIWSTRT's 0x81) */
 static void sprite_pos(struct gcon *g)
 {
-    s32 h = g->px - g->hx + 0x100, y = g->py - g->hy + gfx_diwv(), e = y + g->sprh, x;
+    s32 h = (g->px >> (g->m.shift & 3)) - g->m.hotx + 0x100, y = (g->py >> (g->m.shift >> 2)) - g->m.hoty + gfx_diwv(),
+        e = y + g->sprh, x;
     if (h < 0) h = 0;
     x = h >> 1;                         /* lores; AGA places it to the hires pixel too (SPRxCTL bit 4, SH1: 70 ns;
                                          * ECS's SHSH1, OCS's unused bit) */
+    if (x > 0x1FF) x = 0x1FF;           /* HSTART's 9 bits (a card's units or a hot spot can pass them, D61) */
     if (y < 0) y = 0;
+    if (y > 510) y = 510;               /* VSTART below VSTOP, both 9 bits */
     if (e > 511) e = 511;               /* VSTOP has 9 bits: never wrapped above the image */
     g->spr[0] = (u16)((y & 0xFF) << 8 | (x >> 1 & 0xFF));
     g->spr[1] = (u16)((e & 0xFF) << 8 | (h & 1) << 4 | (y >> 8 & 1) << 2 | (e >> 8 & 1) << 1 |
@@ -225,7 +229,9 @@ long gcon_grab(int con, u32 a2)
         return g ? -ENFILE : -ENOMEM;
     }
     memset(g, 0, sizeof *g);
-    g->acc = 0x100;                     /* no acceleration until CON_MOUSE */
+    g->m.mult = 0x100;                  /* no acceleration until CON_MOUSE */
+    g->m.gainx = 0x200;                 /* two hires pixels a count across, a line down (D38's, until CON_MOUSE) */
+    g->m.gainy = 0x100;
     int fd = fd_install(current, f);
     if (fd < 0) {
         f->type = FT_NONE;
@@ -240,13 +246,15 @@ long gcon_grab(int con, u32 a2)
     g->cop = u->cop;
     g->spr = (volatile u16 *)u->sprite;
     g->sprh = u->sprh;
-    g->hx = u->hotx;
-    g->hy = u->hoty;
-    gfx_geom(&g->w, &g->h);
-    g->px = g->lx = (short)(g->w / 2);
-    g->py = g->ly = (short)(g->h / 2);
-    u->width = g->w;
-    u->height = g->h;
+    g->m.hotx = u->hotx;
+    g->m.hoty = u->hoty;
+    gfx_geom(&g->m.w, &g->m.h);
+    g->px = g->lx = (short)(g->m.w / 2);
+    g->py = g->ly = (short)(g->m.h / 2);
+    g->fx = g->px << 8 | 0x80;
+    g->fy = g->py << 8 | 0x80;
+    u->width = g->m.w;
+    u->height = g->m.h;
     u->depth = (u16)gfx_depth;
     u->chips = gfx_aga() ? GCHIP_AGA : 0;
     if (topaz)
@@ -261,17 +269,41 @@ long gcon_grab(int con, u32 a2)
     return fd;
 }
 
-/* SYS_console CON_GACK on the grab's descriptor: the server let go of GEV_RELEASE number seq */
-/* CON_GACK (SEQ the release's number) and CON_MOUSE (SEQ the acceleration) on the grab's descriptor */
-long gcon_ack(struct file *f, u32 op, u32 seq)
+/* CON_GACK (SEQ the release's number) and CON_MOUSE (SEQ the acceleration, or M a struct umouse) on the grab's
+ * descriptor */
+long gcon_ack(struct file *f, u32 op, u32 seq, u32 m)
 {
     struct gcon *g = gc;
     if (f->type != FT_GCON || !g || g->file != f || g->pid != current->pid)
         return -EBADF;
     if (op == CON_MOUSE) {
-        if ((seq & 0x80) || seq - 0x100 > 0x7FF)
-            return -EINVAL;             /* a threshold over 127, a multiplier not 1..8 */
-        g->acc = (u16)seq;              /* one store: the vertical blank sees the old or the new */
+        struct umouse u = g->m;         /* D61: a3 a whole setting (read once), else a2's acceleration alone */
+        u.x = u.y = -1;
+        if (m) {
+            if (seq || !user_ok_rd(current, m, UMOUSE_FIRST))
+                return seq ? -EINVAL : -EFAULT;
+            memcpy(&u, (const void *)m, UMOUSE_FIRST);
+            if (u.size < UMOUSE_FIRST || (u16)(u.mult - 0x100) > 0x700 || (u16)(u.gainx - 1) >= 0x1000 ||
+                (u16)(u.gainy - 1) >= 0x1000 || (u16)(u.w - 1) >= 4096 || (u16)(u.h - 1) >= 4096 || u.shift > 15)
+                return -EINVAL;
+        } else {
+            if (seq - 0x100 > 0x7FF)
+                return -EINVAL;         /* a multiplier not 1..8 (the threshold's 127 below) */
+            u.thresh = (u8)seq;
+            u.mult = (u16)(seq & 0xF00);        /* MULTIPLIER << 8: 256ths */
+        }
+        if (u.thresh > 127)
+            return -EINVAL;
+        u16 s = irq_save();             /* the vertical blank sees the old setting or the new, whole */
+        s32 x = u.x < 0 ? g->px : u.x, y = u.y < 0 ? g->py : u.y;
+        g->m = u;
+        g->fx = (x >= u.w ? u.w - 1 : x) << 8 | 0x80;   /* the pixel's middle: as near the next pixel both ways */
+        g->fy = (y >= u.h ? u.h - 1 : y) << 8 | 0x80;
+        g->px = (short)(g->fx >> 8);
+        g->py = (short)(g->fy >> 8);
+        sprite_pos(g);
+        irq_restore(s);
+        kwork_pending = 1;              /* the ring hears of a new place */
         return 0;
     }
     if ((u16)seq != g->seq)
@@ -453,14 +485,9 @@ void gcon_key(u8 code, u16 qual, const u8 *ch)
         push(g, GEV_KEY, code, qual | g->btn, g->px, g->py, ch, 0);
 }
 
-/* one axis: D counts, accelerated (ACC as CON_MOUSE's), SCALE pixels a count, kept in 0..LIM-1 */
-static __attribute__((noinline)) short step(s32 p, s32 d, u32 acc, int scale, s32 lim)
+static __attribute__((noinline)) s32 axis(s32 p, s32 d, const struct gcon *g, u32 gain, s32 lim)
 {
-    s32 a = d < 0 ? -d : d, t = (s32)(acc & 0xFF);
-    if (a > t)
-        a = t + (a - t) * (s32)(acc >> 8);
-    p += (d < 0 ? -a : a) * scale;
-    return (short)(p < 0 ? 0 : p >= lim ? lim - 1 : p);
+    return ptr_step(p, d, g->m.thresh, g->m.mult, gain, lim);
 }
 
 /* the vertical-blank interrupt: the mouse read now (its counters and buttons), the pointer moved and its control
@@ -477,8 +504,10 @@ void gcon_vblank(void)
     input_take(&dx, &dy, &b);
     u16 bq = (u16)((b & 1 ? GQ_LBUTTON : 0) | (b & 2 ? GQ_RBUTTON : 0) | (b & 4 ? GQ_MBUTTON : 0));
     if (dx || dy) {
-        g->px = step(g->px, dx, g->acc, 2, g->w);      /* a hires pixel is half a line's width */
-        g->py = step(g->py, dy, g->acc, 1, g->h);
+        g->fx = axis(g->fx, dx, g, g->m.gainx, g->m.w);       /* D61: kernel/pointer.h */
+        g->fy = axis(g->fy, dy, g, g->m.gainy, g->m.h);
+        g->px = (short)(g->fx >> 8);
+        g->py = (short)(g->fy >> 8);
         sprite_pos(g);
     }
     g->bdown |= (u16)(bq & ~g->btn);

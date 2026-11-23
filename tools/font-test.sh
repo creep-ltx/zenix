@@ -28,7 +28,7 @@ sleep 5
 shot columns
 send q
 sleep 2
-send cp -r /tests/fonts/* /usr/share/fonts/amiga/; echo acceleration none > /etc/zdesk/mouse; printf 'right cmd 3600 echo .\\n' > /etc/zdesk/bar\r
+send cp -r /tests/fonts/* /usr/share/fonts/amiga/; echo acceleration none > /etc/zdesk/mouse; echo speed 200 >> /etc/zdesk/mouse; printf 'right cmd 3600 echo .\\n' > /etc/zdesk/bar\r
 sleep 2
 send grep -v '^font' /etc/zdesk/screen > /tmp/s0; cp /tmp/s0 /tmp/scr; echo font zbad 11 >> /tmp/scr; cp /tmp/scr /etc/zdesk/screen\r
 sleep 1

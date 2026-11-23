@@ -1709,7 +1709,10 @@ name); `ls` 5.66 -> 1.05 s, `ls -l` 6.83 -> 2.19 s, the file view 6.6 -> 1.7 s.
   kernel. **The pointer** is hardware sprite 0, the server's image: the vertical-blank interrupt reads the mouse's
   counters and buttons itself, moves the pointer (two hires pixels a count across, one line down, clamped to the
   screen; `CON_MOUSE` on the grab's descriptor sets an acceleration: in a frame, the counts beyond a threshold count a
-  multiplier times, none at the grab) and writes the sprite's two control words before sprite DMA reads them (on AGA
+  multiplier times, none at the grab; with a `struct umouse` (DESIGN D61) the server names the pointer's units and
+  bounds, the screen's own pixels: hires, interlaced lines or a graphics card's, the speed in 256ths of a unit a
+  count, the multiplier in 256ths, the sprite's scale and hot spot; the place is kept in 256ths, so slow moves go by
+  single pixels and no count is lost, `kernel/pointer.h`) and writes the sprite's two control words before sprite DMA reads them (on AGA
   to the hires pixel, SPRxCTL's SH1), so the pointer never waits for the tick, the server or a busy disk; kwork then puts `GEV_POINTER` records in the ring (a press and a release between two runs both told;
   merged into an unread one while the qualifiers are the same). **Switching away** (Amiga+F*n* or the serial hook)
   puts `GEV_RELEASE` with a number in the ring; the server ends its blit, stops using the blitter and answers

@@ -42,7 +42,9 @@
                              * copies onto the screen; a[1] 1: then counted from 0 again. The tests' measure of what
                              * an action costs. a[1] 2: a[0] is u32[12], six more: a whole window's drag moves, their
                              * E-clock ticks, shows of the drawn screen onto the one on view (a whole drag draws off
-                             * the screen), their ticks, the ticks waited for the beam, shows that missed its rule */
+                             * the screen), their ticks, the ticks waited for the beam, shows that missed its rule;
+                             * a[1] 4 (D61): u32[15], three more: a card's pointer shows, their 100 Hz ticks from the
+                             * kernel's record to the card, the most */
 #define DPY_MODE        15  /* a[0] the screen's mode (DPYM_*; DPYM_ASK: none changed) -> the mode now, or -EBUSY (a
                              * drag under way, the console not shown), -ENOMEM (no chip RAM for it: unchanged). Every
                              * client gets EV_SCREEN; windows are kept on the screen and drawn again (D38 "Screen
@@ -77,6 +79,26 @@
                              * that instruction on (other instructions passed over) get them, in place; -EINVAL with
                              * a[3] the colours set when the list has fewer */
 #define DPYSCR_COPMAX   1024
+/* DESIGN D61 (docs/d61-mouse.md 5): the mouse's setting. Any client of the desktop's session, as DPY_MODE */
+#define DPY_MOUSE       21  /* a[0] struct dpymouse * (the client's memory), a[1] DPYMO_SET or DPYMO_GET -> 0, -EINVAL
+                             * (a value out of range: nothing changes), -EFAULT */
+#define DPYMO_SET       0
+#define DPYMO_GET       1   /* the setting in effect, and the pointer's place in x, y */
+struct dpymouse {
+    unsigned short size;     /* DPYMOUSE_FIRST or more */
+    unsigned short speed;    /* percent: 100 moves one pixel of the screen a count at slow speed (10..800) */
+    unsigned short mult;     /* percent (100..800): in a frame (a fiftieth of a second) the counts beyond thresh count
+                              * this much (AmigaOS's acceleration; 100 is none) */
+    unsigned char thresh;    /* 0..127 */
+    unsigned char flags;     /* DPYMF_* */
+    unsigned short dclick;   /* the double-click time, 100 Hz ticks (10..300) */
+    signed char hotx, hoty;  /* the pointer's hot spot in its picture (0..15) */
+    unsigned short colour[3];   /* the pointer's colours 1-3, 0x0RGB */
+    unsigned short image[32];   /* its picture: 16 rows of two words, sprite 0's own layout (plane 0, plane 1) */
+    short x, y;              /* DPYMO_GET: the pointer's place on the screen */
+};
+#define DPYMOUSE_FIRST  86
+#define DPYMF_SWAP      1   /* the left and right buttons swapped */
 /* the window manager's (only after DPY_WM_HELLO; one window manager at a time) */
 #define DPY_WM_HELLO    32  /* become the window manager -> 0, -EBUSY (another one), -EPERM (not the session's user) */
 #define DPY_WM_STYLE    33  /* a[0] struct dpystyle *: frames from now on (and the screen's palette) */
@@ -282,7 +304,8 @@ struct dpyev {
     };
 };
 #define EV_KEY          1
-#define EV_BUTTON       2
+#define EV_BUTTON       2   /* (D61) arg 2: a double click: the same button again within the double-click time and 4
+                             * pixels of the last press (a third press counts as a first) */
 #define EV_MOTION       3
 #define EV_RESIZE       4   /* the inside is w x h now (and EV_EXPOSE follows for what must be drawn) */
 #define EV_EXPOSE       5   /* x, y, w, h: draw this again */

@@ -42,11 +42,26 @@ DESCRIPTION
                            time (showt), the time waited for the beam
                            (waitt), shows late for it; then counted
                            from 0 again
-        events             the events received so far, a line each
+        events             the events received so far, a line each (a
+                           double click's EV_BUTTON ends "arg 2")
         peek X Y           (with -fb) the pretend card's pixel at X, Y,
                            its bytes in hex as they lie in memory
-        mouse DX DY        the mouse moved DX, DY counts (CON_INPUT,
-                           root's), no button
+        mouse DX DY [B]    the mouse moved DX, DY counts (CON_INPUT,
+                           root's) with the buttons B held (bit 0 left,
+                           1 right; none by default), then 3 ticks
+        clicks N GAP       N clicks of the left button, their presses GAP
+                           ticks apart (CON_INPUT, root's)
+        mget               the mouse's setting and the pointer's place
+                           (DESIGN D61, DPY_MOUSE): "dpytest: mget X Y
+                           speed S thresh T mult M flags F dclick D hot
+                           HX HY (R)"
+        mset S T M F D [HX HY]
+                           the speed, threshold, multiplier, flags and
+                           double-click time (and hot spot) set, the
+                           pointer's picture kept: "dpytest: mset R"
+        pstat              a card's pointer shows since the last pstat,
+                           their ticks from the kernel's record and the
+                           most (DPY_STAT's D61 three), then from 0
         scr W H DEPTH FLAGS NCOP [fetch]
                            a screen of its own (DESIGN D55): two pictures
                            of interleaved planes in a chip RAM region of

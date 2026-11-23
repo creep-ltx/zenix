@@ -1,4 +1,13 @@
-# zdesk's mouse (docs/man/zdesk.txt "FILES"). A user's ~/.config/zdesk/mouse replaces this file.
-# acceleration none|low|high: a fast move goes further. low doubles the counts beyond 4 in a frame (a fiftieth of a
-# second on PAL), high triples those beyond 2; none moves 2 pixels across and 1 line down a count, always.
+# The desktop's mouse (docs/man/mouseprefs.txt, which sets it; DESIGN D61). A user's ~/.config/zdesk/mouse replaces
+# this file. Applied when a session starts.
+# speed: percent; 100 moves the pointer one pixel of the screen a count when the mouse moves slowly (10-800).
+speed 100
+# acceleration none|low|medium|high|custom: a fast move goes further. low doubles the counts beyond 4 in a frame (a
+# fiftieth of a second), medium makes those beyond 3 count 2.5 times, high triples those beyond 2; custom takes
+# threshold (counts in a frame) and multiplier (percent) below.
 acceleration low
+# buttons normal|swapped (swapped: for the left hand). doubleclick: hundredths of a second (10-300).
+buttons normal
+doubleclick 50
+# pointer NAME: NAME.pointer in ~/.config/zdesk/pointers/ or /etc/zdesk/pointers/ (arrow, slim, cross, workbench).
+pointer arrow

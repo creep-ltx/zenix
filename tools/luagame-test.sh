@@ -29,7 +29,7 @@ send q
 sleep 2
 send cd /tests/games; lua zbad.lua > /tmp/zb.txt 2>&1; echo zbst=$?; echo ==z""out; cat /tmp/zb.txt; echo ==z""end\r
 wait ==zend 120
-send cd /; echo acceleration none > /etc/zdesk/mouse; zdesk -v > /tmp/z.log 2>&1 &\r
+send cd /; echo acceleration none > /etc/zdesk/mouse; echo speed 200 >> /etc/zdesk/mouse; zdesk -v > /tmp/z.log 2>&1 &\r
 sleep 10
 send w() { n=0; until grep -q "$1" /tmp/g.log || [ $n -gt 120 ]; do sleep 1; n=$((n+1)); done; echo rdy-$2; }\r
 sleep 2

@@ -28,7 +28,7 @@ sleep 5
 shot columns
 send q
 sleep 2
-send echo acceleration none > /etc/zdesk/mouse; printf 'right cmd 3600 echo .\\n' > /etc/zdesk/bar; rm -rf /var/cache/fonts\r
+send echo acceleration none > /etc/zdesk/mouse; echo speed 200 >> /etc/zdesk/mouse; printf 'right cmd 3600 echo .\\n' > /etc/zdesk/bar; rm -rf /var/cache/fonts\r
 sleep 2
 send ttf2font -o /tmp/tf /usr/share/fonts/truetype/go.ttf 8 11 13 16; echo ttf-sizes-$?\r
 wait ttf-sizes- 600

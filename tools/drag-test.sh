@@ -48,7 +48,7 @@ send q
 sleep 2
 send sed 's/^drag auto/drag whole/' /etc/zdesk/themes/flat.theme > /etc/zdesk/themes/whole.theme\r
 sleep 1
-send echo acceleration none > /etc/zdesk/mouse; printf 'right cmd 3600 echo .\n' > /etc/zdesk/bar\r
+send echo acceleration none > /etc/zdesk/mouse; echo speed 200 >> /etc/zdesk/mouse; printf 'right cmd 3600 echo .\n' > /etc/zdesk/bar\r
 sleep 1
 send : > /tmp/c; zdesk -v -theme whole > /tmp/z.log 2>&1 &\r
 sleep 8

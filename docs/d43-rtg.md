@@ -232,7 +232,8 @@ palette in the list memory, the HVS's sprite as the pointer: no software pointer
 1. **The pointer's precision on a card**: today it moves in steps of 4 pixels at 1280 x 960 (the kernel's
    pointer is the chipset's 640 x 256, scaled). Exact steps need about 30 bytes of kernel code (a grab may name the
    pointer's bounds: `struct ucongrab` grows at its end), and the mount tests' floppy has 4 bytes of room beyond the
-   800 kept. Meanwhile: scaled.
+   800 kept. Meanwhile: scaled. **Answered by D61 (2026-11-23, d61-mouse.md 4):** `CON_MOUSE` names the card's own
+   pixels (not `ucongrab`: the units must change with the mode), so the pointer moves by single pixels on a card.
 2. **Taking the front screen as it is** (the Workbench's own picture memory) versus zenixboot opening a screen of a
    size asked for (`RTG=1280x960`): built is the first, the simplest; the second is a few lines more in zenixboot.
 

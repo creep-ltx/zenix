@@ -65,10 +65,13 @@ FILES
     menu        the Zenix menu's programs: LABEL = COMMAND
     icons       the desktop's icons: PICTURE LABEL = COMMAND (term,
                 folder, gear, disk)
-    mouse       acceleration none|low|high (low without the file): low
-                doubles the counts beyond 4 in a frame, high triples the
-                counts beyond 2; none is 2 pixels across and a line down a
-                count (the kernel moves the pointer: DPY_WM_MOUSE)
+    mouse       the mouse (mouseprefs(1) sets it; DESIGN D61): speed
+                PERCENT (100: a pixel of the screen a count when slow),
+                acceleration none|low|medium|high|custom with threshold
+                and multiplier, buttons normal|swapped, doubleclick
+                (hundredths of a second), pointer NAME (a pointer file in
+                pointers/); applied when the session starts, and what
+                displayd had put back when it ends
     screen      mode hires|hires-lace|auto (auto, or no file: hires):
                 the screen displayd(8) makes when it starts, 640 x 256
                 (NTSC 640 x 200) or interlaced 640 x 512 (640 x 400);

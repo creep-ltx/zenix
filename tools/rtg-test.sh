@@ -57,11 +57,12 @@ send mode lace\r
 send mem\r
 sleep 2
 shot native
+send mset 100 0 100 0 50\r
 send mouse 10 5\r
 sleep 2
 send peek $((w / 2)) $((h / 2))\r
-send peek $(((340 * w / 640))) $(((133 * h / 256)))\r
-send peek $(((340 * w / 640) + 1)) $(((133 * h / 256) + 2))\r
+send peek $((w / 2 + 10)) $((h / 2 + 5))\r
+send peek $((w / 2 + 11)) $((h / 2 + 7))\r
 send win C 100 40 5 900 700\r
 sleep 2
 send info C\r
@@ -143,9 +144,8 @@ EOS
     check "$n: the pointer's arrow at the middle (its outline black, its face white)" $?
     [ "$(grep -c "dpytest: mode 2 screen ${w}x${h}" "$L")" = 2 ]
     check "$n: DPY_MODE answers DPYM_RTG (2) and changes nothing" $?
-    pk $((w / 2)) $((h / 2)) 344 2 && pk $((340 * w / 640)) $((133 * h / 256)) 000 && \
-        pk $((340 * w / 640 + 1)) $((133 * h / 256 + 2)) FFF
-    check "$n: the mouse moved 10, 5 counts: the pointer at its new place (scaled), the old place the desktop again" $?
+    pk $((w / 2)) $((h / 2)) 344 2 && pk $((w / 2 + 10)) $((h / 2 + 5)) 000 && pk $((w / 2 + 11)) $((h / 2 + 7)) FFF
+    check "$n: the mouse moved 10, 5 counts (D61: the card's own pixels, speed 100%, 0.9375 down): the pointer at its new place, the old place the desktop again" $?
     grep -o "dpytest: info C .*" "$L" | head -1 | awk -v w="$w" -v h="$h" '{ exit !($4 >= 0 && $5 >= 0 &&
         $8 + $6 <= w && $9 + $7 <= h && $6 == 100 && $7 == 40) }'
     check "$n: a window asking for 900,700 opens wholly on the screen ($(grep -o 'dpytest: info C .*' "$L" | head -1))" $?
