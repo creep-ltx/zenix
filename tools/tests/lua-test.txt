@@ -1,14 +1,19 @@
 wait zenix:/# 120
 send cd /tests/lua; lua zenix.lua /tmp > /tmp/lz.txt 2>&1; echo zst=$?; echo ==z""out; cat /tmp/lz.txt; echo ==z""end\r
-wait ==zend 900
+wait ==zend\n 900
+wait zenix:\S*# 30
 send ./tlua zenix.lua /tmp > /tmp/lt.txt 2>&1; echo tst=$?; echo ==t""out; cat /tmp/lt.txt; echo ==t""end\r
-wait ==tend 900
+wait ==tend\n 900
+wait zenix:\S*# 30
 send ./tlua-cut -v; echo kst=$?; dmesg | grep tlua-cut; echo ==k""end\r
-wait ==kend 60
+wait ==kend\n 60
+wait zenix:\S*# 30
 send lua cstack.lua > /tmp/cs.txt 2>&1; echo cst=$?; echo ==c""out; cat /tmp/cs.txt; echo ==c""end\r
-wait ==cend 900
+wait ==cend\n 900
+wait zenix:\S*# 30
 send ./luaprobe cstack.lua 2>&1 | grep -v ok; ./luaprobe zenix.lua /tmp 2>&1 >/dev/null; echo ==p""end\r
-wait ==pend 900
+wait ==pend\n 900
+wait zenix:\S*# 30
 send lua -v; lua -e 'print(1 + 1, #arg, arg[0])'; lua -e 'print(string.format("fmt=%.17g|%.14g", 0.1, 2^-1074))'; echo 'print("from a pipe", ...)' | lua - x y; echo pst=$?\r
 waitecho pst=0 60
 send lua -e 'error("boom")'; echo est=$?; lua /no/such/file.lua; echo nst=$?; lua -e 'os.exit(7)'; echo xst=$?\r
@@ -21,5 +26,6 @@ send print("i=" .. x + 1)\r
 wait i=42 30
 send os.exit(0)\r
 send echo ==m""em; free; lua -e 'os.execute("ps")'; lua -e 'local t = {} for i = 1, 1000 do t[i] = ("x"):rep(100) end os.execute("free; ps")'; echo ==m""end\r
-wait ==mend 120
+wait ==mend\n 120
+wait zenix:\S*# 30
 stop
