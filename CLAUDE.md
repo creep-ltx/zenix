@@ -22,7 +22,7 @@ must **take little**: disk, RAM, floppy. Where the two pull apart, take the midd
 - **Safety stays:** the checks (pointers, stack guards, owners of memory, the clean mark) are Zenix's edge over AmigaOS;
   make them cheap, never drop them for speed.
 - **The three test machines (owner, 2026-10-26):** the stock A1200 (68EC020 14 MHz, 2 MB chip RAM only, no fast RAM:
-  the floor for memory and speed; 1,132 KB free with one login, measured), the A1200 with the Apollo 1260 (68060
+  the floor for memory and speed; 1,311 KB free with one login, measured in FS-UAE 2026-11-23), the A1200 with the Apollo 1260 (68060
   50 MHz since 2026-11-04 (its 50 MHz crystal; was 80), 64 MB fast, a CF card on the IDE port, the FA411 PC Card), and the PiStorm (Emu68). No other memory expansion exists.
   **The minimum Zenix is made for (owner 2026-11-04): a stock A1200 with 4 MB of fast RAM** ("not a hard limit, just
   that it is what it's made for. Obviously we will try to be as lean as possible."). AmigaOS has its 512 KB in ROM;
@@ -67,6 +67,21 @@ unseen). So:
   `zenixfs`, `floppy`. After every merge: rebuild every image, check the floppy sizes, run the tests.
 - Never `git stash`, `git checkout .`, `git reset --hard` or `git add -A` in a shared tree. Commit your own files by
   path (`git commit -- path...`).
+
+## One system: the conventions every program follows (the partner 2026-11-23: "we want everything to be consistent, like it's ONE system")
+The full list with reasons is docs/audit-2026-11-23-one-system.md section 3; it is binding for new and changed code, and the
+audit's findings list what still breaks it. In short:
+- **Command line:** a usage line goes to the error stream with exit status 2; `--help` and `--version` everywhere (one libz
+  helper); `--` ends options; unknown options are refused; exit statuses 0, 1, 2 (usage), 124, 126, 127.
+- **Errors:** `prog: object: reason`, the reason from the system's error table (zwhy/zerrno), never a private wording.
+- **Keys:** one format and one parser, the file `~/.config/NAME/keys`; `NAME -K` prints the defaults; `?`/F1/Help shows the
+  keys, `q` quits or goes back, Esc cancels, Ctrl-C always ends a viewer.
+- **Screens:** read the terminal's size and follow SIGWINCH; the status line in reverse video at the bottom; one shared
+  screen layer, one line editor.
+- **Settings:** `setting value` lines with `#` comments; `/etc/NAME` for the system, `~/.config/NAME/` for the user.
+- **Network:** one connect helper with one time limit; TLS only through the shared tlspipe.
+- **Shared code:** a helper used twice belongs in libz (or display/lib), written once; never a private copy.
+- **Manual pages:** one section order (NAME, SYNOPSIS, DESCRIPTION, OPTIONS, EXIT STATUS, FILES, NOTES, EXAMPLES, SEE ALSO).
 
 ## Numbers that are claimed
 Every system call number, message type, port name, error number and flag in use or reserved is listed in
