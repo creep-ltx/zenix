@@ -54,6 +54,10 @@ extern struct hwinfo khw;
 #define KOPT_MMU_OFF    8u              /* DESIGN D41: memory protection off (wins over the kernel's default) */
 #define KOPT_MMU_AUTO   16u             /* D41 section 19: only in the kernel file's default (ZKOPTDEF): protection on
                                          * where the CPU is known to have an MMU (LC/EC 040/060 not tried) */
+#define KOPT_MMU_STRICT 32u             /* D60 12, 5.8: protection on refuses old servers' lends (zenixboot MMU=STRICT;
+                                         * also in the kernel file's default, tools/kopts.py) */
+#define KOPT_MMU_D41    64u             /* D60 12: D41's model, its system processes seeing all memory (zenixboot
+                                         * MMU=D41): the way back on the first hardware runs; wins over STRICT */
 
 /* serial.c */
 void serial_init(void);
