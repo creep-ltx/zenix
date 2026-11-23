@@ -19,12 +19,16 @@ DESCRIPTION
     names. TLS 1.2 only, with forward secrecy (ECDHE) and AES-GCM or
     ChaCha20-Poly1305; nothing weaker is accepted.
 
+    TLS is the system's one TLS path, the helper /lib/tls/tlspipe (the
+    package tls, irc's and mail's too): wget starts it for an https://
+    connection and passes the plain text through it.
+
     Up to 3 redirects are followed (absolute, relative and //HOST
     Locations), never one from https to http. The file keeps the name
     from the URL given. Requests to the same server go over one
-    connection, and a TLS session is reused for the next connection
-    to it in the same run. A connection that is not made in 60 s, or a
-    server silent for 60 s, fails.
+    connection. A connection that is not made in 30 s (the system's one
+    limit for every network program), or a server silent for 60 s,
+    fails.
 
     Progress goes to standard error: the connection, the handshake,
     the answer, the bytes saved.
@@ -88,8 +92,9 @@ NOTES
     cookies, no passwords, no recursion, no time stamps. A file name
     longer than 63 bytes cannot be made (a folder's names).
 
-    irc(1)'s TLS checks certificates with the same rules and files (one
-    copy of the code, user/tlstrust.c).
+    irc(1)'s and mail(1)'s TLS is the same helper (one copy of the code).
+    A TLS session is not reused between connections (each is a new
+    helper): a connection the server closed costs a whole handshake.
 
 SEE ALSO
     sntp(8), ssh(1), host(1), irc(1)

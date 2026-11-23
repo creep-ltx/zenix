@@ -85,8 +85,9 @@ case " $PROGS " in *" tcc "*) lic ports/tcc/upstream/COPYING tcc;; esac
 # files and Lua games as the package holds them (mkzup.py stage), on an image with the games
 case " $PROGS " in *" frotz "*) lic ports/frotz/upstream/COPYING frotz; lic ports/frotz/stories/README devours;; esac
 case " $PROGS " in *" robots "*) lic ports/bsdgames/LICENSE bsdgames;; esac
-# the TLS helper of irc and mail (DESIGN D58, D59), as its package tls holds it, on an image with either
-case " $PROGS " in *" irc "*|*" mail "*) python3 "$(dirname "$0")/mkzup.py" stage tls "$T" "$B";; esac
+# the TLS helper of irc, mail and wget (DESIGN D58, D59; audit 2026-11-23 OS-12), as its package tls holds it, on an
+# image with any of them
+case " $PROGS " in *" irc "*|*" mail "*|*" wget "*) python3 "$(dirname "$0")/mkzup.py" stage tls "$T" "$B";; esac
 case " $PROGS " in *" frotz "*|*" robots "*) python3 "$(dirname "$0")/mkzup.py" stage games "$T" "$B";; esac
 # the development package's C library, start-up code and headers (DESIGN D52 section 2) with tcc, zld, zas and zdb on
 # the full images (PKGDB): the whole package, so zpkg owns and updates its files (the full audit, FA-7)

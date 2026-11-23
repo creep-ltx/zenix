@@ -26,6 +26,7 @@ int wget_args(struct wget_opts *o, int argc, char *const *argv, const char **why
                 o->output = argv[++i];
             else {
                 *why = "unknown option";
+                o->bad = a;
                 return WGET_EXIT_USAGE;
             }
             continue;
@@ -49,7 +50,10 @@ int wget_args(struct wget_opts *o, int argc, char *const *argv, const char **why
                     }
                     break;
                 } else {
+                    static char one[3] = "-";
+                    one[1] = *c;
                     *why = "unknown option";
+                    o->bad = one;
                     return WGET_EXIT_USAGE;
                 }
             }

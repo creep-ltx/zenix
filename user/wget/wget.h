@@ -41,6 +41,7 @@ struct wget_opts {
     const char *output;                 /* -O FILE ("-" standard output), or null */
     int nurl;
     const char *url[WGET_URLMAX];
+    const char *bad;                    /* the unknown option, when wget_args refused one */
 };
 /* argv[1..argc-1]: "-q", "-c", "-O FILE", "-OFILE", combined "-qc", "--" ends the options. 0, or WGET_EXIT_USAGE
    with *why. */
