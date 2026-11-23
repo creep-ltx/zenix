@@ -6,7 +6,7 @@
 # disks, "no network" while netd is not running), h (the keys), Space (back), e (only the Shells: none on Zenix), q;
 # then with netd running (netstat starts it) and -d 0.5: the net box's rates and totals from the interfaces' counters
 # (bsdsocket.library's calls, ports/ctop/zenix), q; a bad delay and an extra word (status 10, said), ? (the usage,
-# status 0); the keys file written ($HOME/.config/ctop.keys); the memory with ctop open printed (free and ps). Every
+# status 0); the keys file written ($HOME/.config/ctop/keys); the memory with ctop open printed (free and ps). Every
 # wait is for an event (the grid, the shell's lines), none for a time.
 # Part n: the net box with real traffic, over FS-UAE's A2065 and slirp in a namespace of its own (as tools/eth-test.sh:
 # DHCP, the PC's test servers on 10.0.2.2): eth0's address in the box's title, 200 KB fetched (nettest slipget) while
@@ -93,9 +93,9 @@ check(L.status("st3") == 10 and re.search(r"^ctop: x: not a delay in seconds$", 
       L.status("st4") == 10 and re.search(r"^ctop: extra: unexpected argument$", L.text, re.M) is not None and
       re.search(r"^usage: ctop \[-d SECONDS\]$", L.text, re.M) is not None,
       "a bad delay and an extra word: said, status 10; ?: the usage", (L.status("st3"), L.status("st4")))
-check(re.search(r"^-rw-r--r-- .*\.config/ctop\.keys$", f, re.M) is not None and
+check(re.search(r"^-rw-r--r-- .*\.config/ctop/keys$", f, re.M) is not None and
       re.search(r"^; ctop's keys: KEY ACTION", f, re.M) is not None,
-      "the keys file written at the first start ($HOME/.config/ctop.keys, the built-in keys)", f[:400])
+      "the keys file written at the first start ($HOME/.config/ctop/keys, the built-in keys)", f[:400])
 L.memory(f, "ctop", "ctop")
 L.waits()
 L.done()

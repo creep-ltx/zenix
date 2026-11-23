@@ -3,6 +3,7 @@
  * calls they make (ports/PROG/upstream, compiled unchanged), over the C library. What each one means here is said in
  * include/amigados.h; the reasons and the choices in ports/common/README. Compiled once per program, with the
  * settings names it maps (ZENIX_TT_NAMES, the Makefile's TT_NAMES_PROG). */
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -101,20 +102,85 @@ static int confpath(const char *rest, const char *sub, char *out)
     return 1;
 }
 
+/* The one place for settings (docs/audit-2026-11-23-one-system.md OS-29, section 3 "Settings"): $HOME/.config/NAME/,
+ * lowercase, one folder per program, the file named for what it holds: "ENVARC:Sumi/Sumi.keys" is sumi/keys,
+ * "ENVARC:Sumi" the folder sumi, "ENVARC:ctop.keys" ctop/keys, "ENVARC:FileColours" filecolours, "PROGDIR:Ahiru.keys"
+ * ahiru/keys (dir: the program's name, for PROGDIR:). Into out; 0 (errno set) without a HOME or room. */
+static int newconf(const char *rest, const char *dir, char *out)
+{
+    char r[ZPATH];
+    const char *s = dir ? dir : rest, *t;
+    size_t i = 0, k;
+    for (k = 0; s[k] && s[k] != '/' && s[k] != '.'; k++)     /* the program's name, lowercase */
+        r[i++] = (char)tolower((unsigned char)s[k]);
+    t = dir ? rest : rest + k;                                  /* what follows it */
+    if (!dir && *t)
+        t++;                                                    /* its '/' or '.' */
+    if (dir || rest[k] == '/') {                                /* "Sumi/Sumi.keys", PROGDIR's "Ahiru.keys": the ext */
+        if (!strncmp(t, s, k) && t[k] == '.')
+            t += k + 1;
+    }
+    if (*t || rest[k])
+        r[i++] = '/';
+    if (i + strlen(t) >= sizeof r) {
+        errno = ENAMETOOLONG;
+        return 0;
+    }
+    strcpy(r + i, t);
+    return confpath(r, 0, out);
+}
+/* a settings file still at its old place (the AmigaOS names under $HOME/.config, before 2026-11-23) is moved to the
+ * new one the first time it is asked for, with a line saying so; its old folder goes when it is left empty. Only
+ * files are moved (a folder of the old names would keep them). */
+static void moveold(const char *old, const char *now)
+{
+    struct stat st;
+    char d[ZPATH], *sl;
+    if (!strcmp(old, now) || lstat(now, &st) == 0 || errno != ENOENT || lstat(old, &st) < 0 || !S_ISREG(st.st_mode))
+        return;
+    strcpy(d, now);
+    if ((sl = strrchr(d, '/')) && sl > d) {
+        *sl = 0;
+        mkdir(d, 0700);                 /* the program's folder: this user's only */
+    }
+    if (rename(old, now) == 0) {
+        const char *w[] = { envnames[0], ": settings moved from ", old, " to ", now, " (one place for every program's)\n" };
+        for (int i = 0; i < 6; i++)     /* (no formatter: the programs that print nothing link none) */
+            if (write(2, w[i], strlen(w[i])) < 0)
+                break;
+        strcpy(d, old);
+        if ((sl = strrchr(d, '/')) && sl > d) {
+            *sl = 0;
+            rmdir(d);                   /* the old folder, once it is empty */
+        }
+    }
+}
+
 /* name as a Zenix path into out; 0 (errno set) when it has none */
 static int zpath(const char *name, char *out)
 {
     const char *rest = 0, *pre = 0;
     size_t n;
     int i;
-    if (mapped(name, "ENVARC:", 0, 0))
-        return confpath(name + 7, 0, out);      /* "Sumi..." after "/.config/" */
+    char old[ZPATH];
+    if (mapped(name, "ENVARC:", 0, 0)) {
+        if (!newconf(name + 7, 0, out))
+            return 0;
+        if (confpath(name + 7, 0, old))         /* the old place: "Sumi/Sumi.keys" after "/.config/" */
+            moveold(old, out);
+        return 1;
+    }
     if (mapped(name, "ENV:", 0, 0)) {
         errno = ENOENT;
         return 0;
     }
-    if (mapped(name, "PROGDIR:", 0, 0))
-        return confpath(name + 8, envnames[0], out);    /* "Ahiru.keys" after "/.config/Ahiru/" */
+    if (mapped(name, "PROGDIR:", 0, 0)) {
+        if (!newconf(name + 8, envnames[0], out))
+            return 0;
+        if (confpath(name + 8, envnames[0], old))   /* the old place: "Ahiru.keys" after "/.config/Ahiru/" */
+            moveold(old, out);
+        return 1;
+    }
     for (i = 0; places[i].amiga && !pre; i++)
         if (!strncmp(name, places[i].amiga, strlen(places[i].amiga))) {
             pre = places[i].zenix;
@@ -153,18 +219,15 @@ static int zpath(const char *name, char *out)
 static void mkconf(const char *name)
 {
     char p[ZPATH], *slash;
-    if (mapped(name, "ENVARC:", 0, 0) && confpath("", 0, p)) {
-        p[strlen(p) - 1] = 0;
-        mkdir(p, 0755);                 /* $HOME/.config, as AmigaOS's ENVARC: is always there (ctop.keys) */
+    if ((!mapped(name, "ENVARC:", 0, 0) && !mapped(name, "PROGDIR:", 0, 0)) || !confpath("", 0, p))
         return;
-    }
-    if (!mapped(name, "PROGDIR:", 0, 0) || !confpath(envnames[0], 0, p))
+    p[strlen(p) - 1] = 0;
+    mkdir(p, 0755);                     /* $HOME/.config, as AmigaOS's ENVARC: is always there */
+    if (!zpath(name, p) || !(slash = strrchr(p, '/')))
         return;
-    slash = strrchr(p, '/');
     *slash = 0;
-    mkdir(p, 0755);                     /* $HOME/.config */
-    *slash = '/';
-    mkdir(p, 0700);                     /* its own folder: this user's only */
+    if (strrchr(p, '/') && strcmp(strrchr(p, '/'), "/.config"))
+        mkdir(p, 0700);                 /* the program's own folder (ctop/, ahiru/): this user's only */
 }
 
 /* ---- files: a handle is the descriptor + 1 ---- */

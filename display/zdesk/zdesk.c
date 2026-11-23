@@ -529,14 +529,17 @@ static void end_session(void)
 }
 static void on_signal(int sig) { (void)sig; quit = 1; }
 
+static const char USAGE[] = "usage: zdesk [-v] [-theme NAME]\n";
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     const char *tname = 0;
     char path[ZPATH_MAX];
     for (int i = 1; i < argc; i++)
         if (!strcmp(argv[i], "-theme") && i + 1 < argc) tname = argv[++i];
         else if (!strcmp(argv[i], "-v")) verbose = 1;
-        else { dprintf(2, "usage: zdesk [-v] [-theme NAME]\n"); return 2; }
+        else if (argv[i][0] == '-') zbadopt(argv[i], USAGE);
+        else zusage(USAGE);
     if (conf_load(tname) < 0)
         return 1;
     top0 = th.st.top;

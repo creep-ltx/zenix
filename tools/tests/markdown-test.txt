@@ -3,6 +3,6 @@ send printf '# Big Title\\n\\nSome **bold** and *italic* text with `code`.\\n\\n
 wait ==mset 30
 send (termtest screen /dev/tty1 'all  vi''ew' 60 'e' > /tmp/scr0.txt; free > /tmp/f1.txt; ps > /tmp/ps1.txt; termtest screen /dev/tty1 '# Big Ti''tle' 60 '\\x17' > /tmp/scr1.txt) & markdown /tmp/t.md; echo st=$?\r
 waitecho st=0 90
-send echo ==scr0; cat /tmp/scr0.txt; echo ==scr1; cat /tmp/scr1.txt; echo ==file; ls -ld $HOME/.config/Markdown; ls -l $HOME/.config/Markdown; cat $HOME/.config/Markdown/Markdown.places; cat /tmp/f0.txt /tmp/f1.txt /tmp/ps1.txt; echo ==m""done\r
+send echo ==scr0; cat /tmp/scr0.txt; echo ==scr1; cat /tmp/scr1.txt; echo ==file; ls -ld $HOME/.config/markdown; ls -l $HOME/.config/markdown; cat $HOME/.config/markdown/places; cat /tmp/f0.txt /tmp/f1.txt /tmp/ps1.txt; echo ==m""done\r
 wait ==mdone 60
 stop

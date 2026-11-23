@@ -5,7 +5,7 @@
 # (CON_INPUT): Space (a page on), a search for "line 25" (the first match at the top, every match marked), q. Then a
 # pipe whose second line comes 2 s later (the screen fills without a key: the wait wakes for the pipe), a directory
 # (its listing, as ls -l), and Maki's output into a pipe (written out as cat would, byte for byte). The settings
-# folder ($HOME/.config/Maki) holds the keys file, $HOME/.config/FileColours the colours; the memory with Maki open is
+# folder ($HOME/.config/maki) holds the keys file, $HOME/.config/filecolours the colours; the memory with Maki open is
 # printed (free and ps). Every wait is for an event (the grid, the shell's lines), none for a time.
 cd "$(dirname "$0")/.." || exit 1
 OUT=${ZENIX_OUT:-/tmp/zenix-maki}; mkdir -p $OUT
@@ -46,9 +46,9 @@ check(re.search(r"^row \d\d\|[-hspa]{4}[-r][-w][-e][-d] +2592 \d\d-[A-Z][a-z][a-
       "a directory: its listing as ls -l (AmigaOS's bits, the size, the date, the name)", s4[:900])
 check(re.search(r"^300$", f, re.M) is not None and re.search(r"^same=yes$", L.text, re.M) is not None,
       "output into a pipe: the file written out as cat would, byte for byte", f[:200])
-check(re.search(r"^drwx------ .*Maki$", f, re.M) is not None and re.search(r"^-rw-r--r-- .* Maki\.keys$", f, re.M)
-      is not None and re.search(r"^-rw-r--r-- .*\.config/FileColours$", f, re.M) is not None,
-      "the settings: $HOME/.config/Maki (this user's only) with the keys, $HOME/.config/FileColours", f[:600])
+check(re.search(r"^drwx------ .*maki$", f, re.M) is not None and re.search(r"^-rw-r--r-- .* keys$", f, re.M)
+      is not None and re.search(r"^-rw-r--r-- .*\.config/filecolours$", f, re.M) is not None,
+      "the settings: $HOME/.config/maki (this user's only) with the keys, $HOME/.config/filecolours", f[:600])
 r5 = rows(s5)                           # DESIGN D28: a UTF-8 file (a Swedish letter, a box line, a wide character)
 check(r5.get(0) == "b\u00e5r \u2500 \u4e00x" and "UTF-8" in r5.get(31, "") and L.status("st4") == 0,
       "a UTF-8 file shown as it is (the wide character two cells), the status line says UTF-8", (r5.get(0), r5.get(31)))

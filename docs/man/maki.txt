@@ -5,6 +5,7 @@ NAME
 
 SYNOPSIS
     maki [-N] [-S] [+LINE | +/TEXT] [FILE | DIRECTORY | - ...]
+    maki -K
     command | maki
 
 DESCRIPTION
@@ -60,10 +61,10 @@ KEYS (the defaults; every one can be changed, FILES)
     A number typed first counts: 5 Space goes five pages on.
 
 FILES
-    $HOME/.config/Maki/Maki.keys    the keys: one "KEY ACTION" a line,
+    $HOME/.config/maki/keys         the keys: one "KEY ACTION" a line,
                                     written with the defaults at the
                                     first start
-    $HOME/.config/FileColours       the colours of a directory's names by
+    $HOME/.config/filecolours       the colours of a directory's names by
                                     kind (written with the defaults when
                                     missing)
     The folder is made at the first start, readable by this user only

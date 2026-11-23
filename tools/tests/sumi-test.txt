@@ -7,6 +7,6 @@ send termtest screen /dev/tty1 'line 2/''3' 60 '\\x17' > /tmp/scr2.txt & sumi /t
 waitecho st2=0 60
 send printf 'b\\303\\245r \\342\\224\\200\\n' > /tmp/u.txt; (termtest screen /dev/tty1 'line 1/''1' 60 '\\xc3\\xb6\\x13' > /tmp/scr3.txt; termtest screen /dev/tty1 'saved u.txt' 60 '\\x17' > /tmp/scr4.txt) & sumi /tmp/u.txt; echo st3=$?\r
 waitecho st3=0 60
-send echo ==scr0; cat /tmp/scr0.txt; echo ==scr1; cat /tmp/scr1.txt; echo ==scr2; cat /tmp/scr2.txt; echo ==scr3; cat /tmp/scr3.txt; echo ==scr4; cat /tmp/scr4.txt; echo ==file; hexdump /tmp/u.txt; hexdump /tmp/s.txt; ls -l /tmp/s.txt; echo home=$HOME; ls -ld $HOME/.config/Sumi; ls -l $HOME/.config/Sumi; cat $HOME/.config/Sumi/Sumi.places; cat /tmp/f0.txt /tmp/f1.txt /tmp/ps1.txt; echo ==s""done\r
+send echo ==scr0; cat /tmp/scr0.txt; echo ==scr1; cat /tmp/scr1.txt; echo ==scr2; cat /tmp/scr2.txt; echo ==scr3; cat /tmp/scr3.txt; echo ==scr4; cat /tmp/scr4.txt; echo ==file; hexdump /tmp/u.txt; hexdump /tmp/s.txt; ls -l /tmp/s.txt; echo home=$HOME; ls -ld $HOME/.config/sumi; ls -l $HOME/.config/sumi; cat $HOME/.config/sumi/places; cat /tmp/f0.txt /tmp/f1.txt /tmp/ps1.txt; echo ==s""done\r
 wait ==sdone 60
 stop

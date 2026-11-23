@@ -30,15 +30,23 @@ gui.c      Ahiru's screen calls (include/amigagui.h: Intuition, graphics, diskfo
 
 Decided here (conservatively; for the main session to confirm):
 - The names: only the program's own literals and a few AmigaOS places are mapped, nothing else is ever rewritten (a
-  file the user names is a Unix path as typed): "ENVARC:NAME" is $HOME/.config/NAME for the program's names (Sumi;
-  Maki and FileColours; Markdown: TT_NAMES_PROG), its folder made at the first start, mode 700 (the places file lists
-  the files read or edited); "ENV:NAME" is no file (AmigaOS keeps a RAM copy of the settings there; on Zenix one place
+  file the user names is a Unix path as typed): "ENVARC:NAME" is in $HOME/.config/name/ for the program's names
+  (Sumi; Maki and FileColours; Markdown: TT_NAMES_PROG), lowercase, one folder a program, a file named for what it
+  holds (docs/audit-2026-11-23-one-system.md OS-29): ENVARC:Sumi/Sumi.keys is $HOME/.config/sumi/keys, .prefs and
+  .places likewise, ENVARC:ctop.keys $HOME/.config/ctop/keys, ENVARC:FileColours $HOME/.config/filecolours; the folder
+  made at the first start, mode 700 (the places file lists the files read or edited). A file still at its old place
+  (the AmigaOS names under $HOME/.config, before 2026-11-23) is moved to the new one the first time it is asked for,
+  with a line on the error stream saying so, and its old folder goes when it is empty; "ENV:NAME" is no file (AmigaOS keeps a RAM copy of the settings there; on Zenix one place
   is enough, so that copy is never written and never read); "T:" (and so "T:PROG-") and "RAM:" are /tmp/T-UID, this user's own folder
   there (made with mode 700; one of that name that is not the user's own, or is a link, is refused: audit B3-7), "SYS:"
   /, "NIL:" /dev/null (the places Ahiru's literals and its default keys name; a Unix name starting so is rare: such a
-  name in the current folder is taken for the place); "PROGDIR:NAME..." of the program's own names is
-  $HOME/.config/NAME/NAME... (Ahiru keeps its files beside itself on AmigaOS; the folder is made, mode 700, when one
-  is written). No HOME: no settings are kept.
+  name in the current folder is taken for the place); "PROGDIR:NAME.EXT" of the program's own name is
+  $HOME/.config/name/EXT (Ahiru keeps its files beside itself on AmigaOS: PROGDIR:Ahiru.keys is ahiru/keys; the
+  folder is made, mode 700, when one is written). No HOME: no settings are kept.
+- The command line (zmain.c, docs/audit-2026-11-23-one-system.md section 3): --help (the manual page's SYNOPSIS),
+  --version and, for the programs with a keys file, -K (the built-in keys: upstream's own table, made global by the
+  Makefile's objcopy as zport_keys) answered before upstream's main runs (-Wl,--wrap=main); upstream's source is
+  unchanged.
 - AmigaOS's meanings kept where Zenix's differ (audit 2026-10-30, block 3): Rename never replaces an existing other
   object (ERROR_OBJECT_EXISTS; Zenix's rename(2) would, and upstream relies on the refusal); MODE_OLDFILE opens for
   reading and writing (read only when writing is not allowed: Ahiru writes disk images in place); SameLock tells
@@ -86,7 +94,8 @@ Decided here (conservatively; for the main session to confirm):
   give ("mem: N KB chip, M KB fast free"; 0 when the log no longer holds the line), SysBase->AttnFlags the log's CPU
   line; timer.device opens and ReadEClock counts the 100 Hz tick (rate 100: the E-clock's own count wraps every 101
   minutes); a Unix path with a colon after it ("/mnt/nas:", a mount named as a volume) is that path; BADDR of a value
-  above the handles is that address (a BSTR's, a MKBADDR's); "ENVARC:NAME" written makes $HOME/.config first, as
+  above the handles is that address (a BSTR's, a MKBADDR's); "ENVARC:NAME" written makes $HOME/.config (and the
+  program's folder) first, as
   AmigaOS's ENVARC: is always there; OpenLibrary asks zenix_openlib, a program's own layer's hook, for a library it
   does not know (ctop's bsdsocket.library); SysBase has the TaskReady and TaskWait lists (empty, for ctop's layer);
   the volumes (LockDosList) and SetTaskPri are ctop's layer's.

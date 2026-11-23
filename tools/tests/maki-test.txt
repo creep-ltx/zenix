@@ -9,6 +9,6 @@ send termtest screen /dev/tty1 'm.t''xt' 60 'q' > /tmp/scr4.txt & maki /tmp; ech
 waitecho st3=0 60
 send printf 'b\\303\\245r \\342\\224\\200 \\344\\270\\200x\\n' > /tmp/u.txt; termtest screen /dev/tty1 'line 1-''1/1' 60 'q' > /tmp/scr5.txt & maki /tmp/u.txt; echo st4=$?\r
 waitecho st4=0 60
-send maki /tmp/m.txt | wc -l > /tmp/wc.txt; maki /tmp/m.txt | cmp - /tmp/m.txt && echo same=yes; echo ==scr0; cat /tmp/scr0.txt; echo ==scr1; cat /tmp/scr1.txt; echo ==scr2; cat /tmp/scr2.txt; echo ==scr3; cat /tmp/scr3.txt; echo ==scr4; cat /tmp/scr4.txt; echo ==scr5; cat /tmp/scr5.txt; echo ==file; cat /tmp/wc.txt; ls -ld $HOME/.config/Maki; ls -l $HOME/.config/Maki $HOME/.config/FileColours; cat /tmp/f0.txt /tmp/f1.txt /tmp/ps1.txt; echo ==m""done\r
+send maki /tmp/m.txt | wc -l > /tmp/wc.txt; maki /tmp/m.txt | cmp - /tmp/m.txt && echo same=yes; echo ==scr0; cat /tmp/scr0.txt; echo ==scr1; cat /tmp/scr1.txt; echo ==scr2; cat /tmp/scr2.txt; echo ==scr3; cat /tmp/scr3.txt; echo ==scr4; cat /tmp/scr4.txt; echo ==scr5; cat /tmp/scr5.txt; echo ==file; cat /tmp/wc.txt; ls -ld $HOME/.config/maki; ls -l $HOME/.config/maki $HOME/.config/filecolours; cat /tmp/f0.txt /tmp/f1.txt /tmp/ps1.txt; echo ==m""done\r
 wait ==mdone 60
 stop

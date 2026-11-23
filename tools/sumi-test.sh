@@ -5,7 +5,7 @@
 # console (CON_INPUT) a Tab, a line of text with a Latin-1 letter, Shift+Tab as raw key codes (the keyboard's ESC [ Z:
 # Sumi unindents the line, the tab is gone again), Enter and Ctrl+S; a second read once "saved s.txt" is
 # on the grid, then Ctrl+W quits. The file is compared byte for byte, its mode kept, the settings folder
-# ($HOME/.config/Sumi) holds the keys file and where the file was left, and a second start puts the cursor back
+# ($HOME/.config/sumi) holds the keys file and where the file was left, and a second start puts the cursor back
 # there; a UTF-8 file (DESIGN D28) shown, a letter typed as UTF-8, saved byte for byte. The memory with Sumi open is printed (free and ps). Every wait is for an event (the grid, the shell's
 # lines), none for a time.
 cd "$(dirname "$0")/.." || exit 1
@@ -47,10 +47,10 @@ data = bytes(int(b, 16) for line in hx for b in line.split())
 check(data == b"Hello Zenix \xe5\nfirst line\nsecond\n", "the file on disk, byte for byte (Latin-1 kept)", data)
 check(re.search(r"^-rw-r----- 1 root root 32 .* /tmp/s.txt$", f, re.M) is not None,
       "its mode kept (640) through the save's new copy", f[:400])
-check(re.search(r"^-rw-r--r-- .* Sumi\.keys$", f, re.M) is not None and
-      re.search(r"^-rw-r--r-- .* Sumi\.places$", f, re.M) is not None and re.search(r"^1 0 /tmp/s\.txt$", f, re.M),
-      "the settings folder $HOME/.config/Sumi: the keys written at the first start, where the file was left", f)
-check(re.search(r"^drwx------ .*Sumi$", f, re.M) is not None, "the settings folder is this user's only (700)", f[:600])
+check(re.search(r"^-rw-r--r-- .* keys$", f, re.M) is not None and
+      re.search(r"^-rw-r--r-- .* places$", f, re.M) is not None and re.search(r"^1 0 /tmp/s\.txt$", f, re.M),
+      "the settings folder $HOME/.config/sumi: the keys written at the first start, where the file was left", f)
+check(re.search(r"^drwx------ .*sumi$", f, re.M) is not None, "the settings folder is this user's only (700)", f[:600])
 check(r2.get(1) == "  1 Hello Zenix \xe5" and r2.get(30, "").endswith("line 2/3  col 1   Latin-1   text") and
       cursor(s2) == (2, 4, True), "a second start: the cursor back where it was left", (r2.get(30), cursor(s2)))
 # DESIGN D28: a UTF-8 file shown in UTF-8 on the console, a letter typed as UTF-8 (the keyboard's), saved as UTF-8

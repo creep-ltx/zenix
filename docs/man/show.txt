@@ -5,6 +5,7 @@ NAME
 
 SYNOPSIS
     show [-v] [-s | -w] [-n | -f] PICTURE
+    show -K
 
 DESCRIPTION
     Opens PICTURE on a screen of its own (as AmigaOS viewers do), or with -w
@@ -52,8 +53,8 @@ KEYS
     h j k l, arrows        move a picture bigger than the window; Left
                            and Right are the previous and next picture
                            when the picture's width fits the window
-    ?, Help                the keys (any key goes back)
-    q, Esc                 quit (also the close gadget)
+    ?, F1, Help            the keys (any key goes back)
+    q, Esc, Ctrl-C         quit (also the close gadget)
 
     The keys are read from ~/.config/show/keys, written with the
     built-in ones when it is missing. Its format is files'(1) and
@@ -67,6 +68,8 @@ MOUSE
     Dither, Own screen, Keys and Quit.
 
 OPTIONS
+    -K      write the built-in keys to standard output, as the keys
+            file holds them, and end
     -n      the nearest colour from the start (no dithering)
     -f      Floyd-Steinberg from the start
     -s      the picture on a screen of its own from the start (the default)

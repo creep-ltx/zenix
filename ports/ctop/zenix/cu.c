@@ -307,3 +307,9 @@ LONG zenix_queryif(const char *name, struct TagItem *t)
     return 0;
 }
 LONG zenix_sockbad(void) { return -1; }
+
+/* the one-system command line (--help, --version, -K: ports/common/zmain.c), here in ctop's own glue rather than an
+ * object of its own (with one, zld's address table for ctop came out in another order than ld's: tools/zld-host-test.sh) */
+#define ZPORT_NAME ctop
+#define ZPORT_KEYS
+#include "../../common/zmain.c"

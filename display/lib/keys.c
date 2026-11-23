@@ -49,6 +49,27 @@ static int key_parse(const char **sp)
     *sp = s + n + 1;
     return cp < 300 && cp > 127 ? cp : 0;
 }
+int keys_mods(const char **sp, char *base)
+{
+    const char *s = *sp, *e;
+    int mods = 0;
+    if (*s != '<' || !(e = strchr(s, '>')) || e == s + 1)
+        return -1;
+    for (s++;;) {
+        int m = !strncmp(s, "S-", 2) ? KMOD_SHIFT : !strncmp(s, "C-", 2) ? KMOD_CTRL : !strncmp(s, "A-", 2) ? KMOD_AMIGA
+              : !strncmp(s, "M-", 2) ? KMOD_ALT : !strncmp(s, "RA-", 3) ? KMOD_RAMIGA : 0;
+        if (!m || s + (m == KMOD_RAMIGA ? 3 : 2) >= e)
+            break;
+        mods |= m;
+        s += m == KMOD_RAMIGA ? 3 : 2;
+    }
+    if (e - s >= 16)
+        return -1;
+    memcpy(base, s, (u32)(e - s));
+    base[e - s] = 0;
+    *sp = e + 1;
+    return mods;
+}
 void keys_name(int k, char *o)
 {
     for (u32 i = 0; i < sizeof knames / sizeof knames[0]; i++)

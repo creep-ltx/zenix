@@ -44,9 +44,12 @@ KEYS
     Amiga+M minimise, Amiga+Z zoom, Amiga+Tab the next window, Amiga+Space
     the menu, Amiga+arrows move the active window, Amiga+Shift+arrows
     resize it, Amiga+1..9 and Amiga+Shift+1..9 the workspaces. A line is
-    KEYS ACTION [ARGUMENTS]: KEYS is modifiers (lamiga, ramiga, shift,
-    ctrl, alt) and a key (return, tab, space, esc, del, backspace, help,
-    up, down, left, right, 0-9, a-z) joined by +; ACTION is terminal,
+    KEYS ACTION [ARGUMENTS], the keys format of every program: KEYS is a
+    key in <> with its modifiers, <A-x> the left Amiga key, <RA-x> the
+    right one, <S-x> Shift, <C-x> Ctrl, <M-x> Alt, joined as <S-A-Left>;
+    the key is Return, Tab, Space, Esc, Del, BS, Help, Up, Down, Left,
+    Right, 0-9 or a-z (the older "lamiga+shift+left" is still read);
+    ACTION is terminal,
     run COMMAND..., close, minimise, zoom, next, menu, move DX DY,
     resize DW DH, workspace N, sendto N, about or logout. Amiga+F1..F10
     stay the consoles' and cannot be bound.

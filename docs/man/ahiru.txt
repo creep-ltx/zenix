@@ -5,6 +5,7 @@ NAME
 
 SYNOPSIS
     ahiru [PATH] [LOG] [KEYS=...]
+    ahiru -K
 
 DESCRIPTION
     Ahiru is the owner's file manager for the Amiga, in the way of ranger
@@ -25,7 +26,7 @@ DESCRIPTION
     deleted as a link, never followed into.
 
 KEYS
-    Every key is in $HOME/.config/Ahiru/Ahiru.keys (written at the first
+    Every key is in $HOME/.config/ahiru/keys (written at the first
     start; ? lists them as they are). The usual ones:
     j k, Up Down     move (J K half a page, gg G top and bottom)
     h l, Left Right  up a folder, into a folder or an archive
@@ -63,17 +64,21 @@ OPTIONS
                text to /tmp/T-UID/Ahiru.grid
 
 FILES
-    $HOME/.config/Ahiru/Ahiru.keys     the keys
-    $HOME/.config/Ahiru/Ahiru.config   the settings (sort, line mode,
+    $HOME/.config/ahiru/keys           the keys (ahiru -K prints the
+                                       built-in ones)
+    $HOME/.config/ahiru/config         the settings (sort, line mode,
                                        EDITOR, START, OPENWITH ...),
                                        written on quit
-    $HOME/.config/Ahiru/Ahiru.theme    the colours of each thing drawn
-    $HOME/.config/Ahiru/Ahiru.places   the folders used (Z)
-    $HOME/.config/Ahiru/Ahiru.marks    the bookmarks
-    $HOME/.config/FileColours          the colours of names by kind, as
+    $HOME/.config/ahiru/theme          the colours of each thing drawn
+    $HOME/.config/ahiru/places         the folders used (Z)
+    $HOME/.config/ahiru/marks          the bookmarks
+    $HOME/.config/filecolours          the colours of names by kind, as
                                        maki's
     The folder is made at the first start, readable by this user only
     (AmigaOS's PROGDIR: and ENVARC:). Without HOME nothing is kept.
+    Settings kept under the AmigaOS names before 2026-11-23
+    ($HOME/.config/Ahiru/Ahiru.keys and the others, FileColours) are moved
+    here the first time they are read, with a line saying so.
 
 EXIT STATUS
     0 when it quits; 20 when there is not enough memory or no terminal

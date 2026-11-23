@@ -5,6 +5,7 @@ NAME
 
 SYNOPSIS
     sumi [+LINE] [FILE ...]
+    sumi -K
 
 DESCRIPTION
     Sumi is the owner's text editor for the Amiga, in the way of micro and
@@ -69,18 +70,22 @@ COMMANDS (Ctrl+U)
     NAME.bak), encoding utf8/latin1, lineends lf/crlf.
 
 FILES
-    $HOME/.config/Sumi/Sumi.keys    the keys: one "KEY ACTION" a line,
-                                    written with the defaults at the
-                                    first start; a line of its own wins
-    $HOME/.config/Sumi/Sumi.prefs   the settings that set changes
-    $HOME/.config/Sumi/Sumi.places  where each file was left (the last
-                                    100): the cursor goes back there
+    $HOME/.config/sumi/keys     the keys: one "KEY ACTION" a line,
+                                written with the defaults at the first
+                                start (sumi -K prints them); a line of
+                                its own wins
+    $HOME/.config/sumi/prefs    the settings that set changes
+    $HOME/.config/sumi/places   where each file was left (the last 100):
+                                the cursor goes back there
     The folder is made at the first start, readable by this user only
     (AmigaOS's ENVARC:Sumi; there is no second copy as ENV: has). Without
-    HOME nothing is kept. When the terminal goes away with changes not
-    saved (the input ends), each changed file is kept as NAME.save, an
-    unnamed one as /tmp/T-UID/Sumi-N.save (UID: the user's number; a
-    folder of the user's own, mode 700).
+    HOME nothing is kept. Settings kept under the AmigaOS names before
+    2026-11-23 ($HOME/.config/Sumi/Sumi.keys, .prefs, .places) are moved
+    here the first time they are read, with a line saying so. When the
+    terminal goes away with changes not saved (the input ends), each
+    changed file is kept as NAME.save, an unnamed one as
+    /tmp/T-UID/Sumi-N.save (UID: the user's number; a folder of the user's
+    own, mode 700).
 
 EXIT STATUS
     0 when it quits; 10 when it is not started in a terminal; 20 when
