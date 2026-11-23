@@ -8,7 +8,8 @@ SYNOPSIS
 
 DESCRIPTION
     Copies the standard input to the standard output and also to each file
-    (at most 8). Useful to keep a copy of what flows through a pipe.
+    (at most 8; more is refused). Useful to keep a copy of what flows
+    through a pipe.
 
 OPTIONS
     -a    append to the files instead of replacing them
@@ -16,6 +17,10 @@ OPTIONS
 EXAMPLES
     make 2>&1 | tee build.log
     ls | tee list | wc -l
+
+EXIT STATUS
+    0; 1 when a file cannot be written (the others still get the
+    copy); 2 for an unknown option or more than 8 files.
 
 NOTES
     An access the user is not allowed is reported as "permission denied".

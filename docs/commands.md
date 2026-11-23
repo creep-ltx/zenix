@@ -79,6 +79,7 @@ spot-checked against the code that day.
 | [rescue](man/rescue.txt) | not a command: what to do when the disk check at boot cannot repair the root (the four choices boot offers, step by step) |
 | [fatd](man/fatd.txt) | not a command: a FAT mount's server (`/sbin/fatd`, DESIGN D30), started by the kernel for `mount -t fat`; its manual is mount's |
 | [ffsd](man/ffsd.txt) | not a command: an OFS or FFS mount's server (`/sbin/ffsd`, DESIGN D31), started by the kernel for `mount -t ffs`; its manual is mount's |
+| [zfsd](man/zfsd.txt) | not a command: a ZenixFS volume's server (`/sbin/zfsd`, DESIGN D19 step 1, D34), started by the kernel for `mount -t zenixfs`; built into the ZenixFS root's kernel |
 | [pfs3d](man/pfs3d.txt) | not a command: a PFS3 mount's server, read-only (`/sbin/pfs3d`, DESIGN D32), started by the kernel for `mount -t pfs3`; its manual is mount's |
 | [exfatd](man/exfatd.txt) | not a command: an exFAT mount's server (a USB stick), read-only (`/sbin/exfatd`, DESIGN D47), started by the kernel for `mount -t exfat`; its manual is mount's |
 | [iso9660d](man/iso9660d.txt) | not a command: an ISO 9660 mount's server (a CD-ROM), read-only (`/sbin/iso9660d`, DESIGN D44), started by the kernel for `mount -t iso9660`; its manual is mount's |

@@ -4,7 +4,7 @@
 static u32 tl, tw, tc;
 static void count(int fd, const char *name, int fl, int fw, int fc, int show)
 {
-    char b[512]; int n, inw = 0;
+    char b[4096]; int n, inw = 0;          /* 4 KB a call: one trip to the server per 4 KB (audit 2026-11-23 OS-15) */
     u32 lines = 0, words = 0, bytes = 0;
     while ((n = sys_read(fd, b, sizeof b)) > 0)
         for (int i = 0; i < n; i++) {
@@ -26,7 +26,8 @@ int main(int argc, char **argv)
 {
     int fl = 0, fw = 0, fc = 0, files = 0, i = 1;
     for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++)
-        for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'l') fl = 1; else if (*p == 'w') fw = 1; else if (*p == 'c') fc = 1; }
+        for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'l') fl = 1; else if (*p == 'w') fw = 1; else if (*p == 'c') fc = 1;
+            else { dprintf(2, "wc: unknown option -%c\nusage: wc [-lwc] [file...]\n", *p); return 2; } }
     if (!fl && !fw && !fc) fl = fw = fc = 1;
     int rc = 0;
     if (i >= argc) { count(0, "", fl, fw, fc, 0); return 0; }

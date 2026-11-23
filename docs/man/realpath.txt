@@ -18,7 +18,8 @@ NOTES
     wasabid(8) uses too.
 
 EXIT STATUS
-    0, 1 if a path cannot be resolved (or with -e does not exist).
+    0, 1 if a path cannot be resolved (or with -e does not exist). With -e
+    a missing path reads "realpath: PATH: no such file or directory".
 
 SEE ALSO
     pwd(1), readlink(1)

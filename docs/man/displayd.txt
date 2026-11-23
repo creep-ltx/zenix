@@ -140,3 +140,6 @@ NOTES
     (4 pixels at 1280 x 960); the chips' drag is the chipset's only;
     the card is never switched off or back except on a PiStorm; never
     run on a real card yet (docs/d43-rtg.md section 11).
+
+SEE ALSO
+    zdesk(1), term(1), dlogin(8)

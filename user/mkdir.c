@@ -13,7 +13,7 @@ int main(int argc, char **argv)
             struct ustat st; if (sys_stat(path, &st) == 0 && (st.mode & S_IFMT) == S_IFDIR) continue;
         }
         int r = sys_mkdir(path);
-        if (r == -EEXIST) { dprintf(2, "mkdir: %s: exists\n", argv[i]); rc = 1; }
+        if (r == -EEXIST) { dprintf(2, "mkdir: %s: %s\n", argv[i], zstrerror(r)); rc = 1; }
         else if (r < 0) { dprintf(2, "mkdir: %s: %s\n", argv[i], zwhy("cannot create")); rc = 1; }
         else if (o_v) dprintf(1, "mkdir: created directory '%s'\n", argv[i]);
     }

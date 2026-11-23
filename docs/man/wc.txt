@@ -23,7 +23,7 @@ EXAMPLES
     cat a b | wc -w
 
 EXIT STATUS
-    0, or 1 if a file could not be opened.
+    0; 1 when a file cannot be read; 2 for an unknown option.
 
 NOTES
     An access the user is not allowed is reported as "permission denied".

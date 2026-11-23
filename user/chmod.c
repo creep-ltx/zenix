@@ -31,10 +31,10 @@ int main(int argc, char **argv)
     int rc = 0;
     for (int i = 2; i < argc; i++) {
         struct ustat st;
-        if (sys_stat(argv[i], &st) < 0) { dprintf(2, "chmod: %s: not found\n", argv[i]); rc = 1; continue; }
+        { int e = sys_stat(argv[i], &st); if (e < 0) { dprintf(2, "chmod: %s: %s\n", argv[i], zstrerror(e)); rc = 1; continue; } }
         unsigned mode;
         if (!apply(argv[1], st.mode, &mode, (st.mode & S_IFMT) == S_IFDIR)) { dprintf(2, "chmod: invalid mode '%s'\n", argv[1]); return 2; }
-        if (sys_chmod(argv[i], mode) < 0) { dprintf(2, "chmod: %s: cannot change\n", argv[i]); rc = 1; }
+        { int e = sys_chmod(argv[i], mode); if (e < 0) { dprintf(2, "chmod: %s: %s\n", argv[i], zstrerror(e) ? zstrerror(e) : "cannot change"); rc = 1; } }
     }
     return rc;
 }

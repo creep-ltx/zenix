@@ -309,8 +309,8 @@ int main(int argc, char **argv)
     if (all) return mount_all();
     if (argc == 1) { list(); return 0; }
     if (!dev || !dir) {
-        dprintf(1, "usage: mount [-t ext2|zenixfs|fat|exfat|ffs|pfs3|iso9660] [-o OPTIONS] DEVICE DIR     mount -t nfs [-o OPTIONS] HOST:/EXPORT DIR\n"
-               "       mount -a     mount (list)\n");
+        dprintf(2, "usage: mount [-t ext2|zenixfs|fat|exfat|ffs|pfs3|iso9660] [-o OPTIONS] DEVICE DIR     mount -t nfs [-o OPTIONS] HOST:/EXPORT DIR\n"
+               "       mount -a     mount every line of /etc/fstab;   mount   list the mounts\n");
         return 2;
     }
     if ((type && !strcmp(type, "nfs")) || (!type && strstr(dev, ":/"))) return mount_nfs(dev, dir, opts, 0);

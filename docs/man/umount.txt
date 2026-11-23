@@ -19,7 +19,8 @@ DESCRIPTION
     mounted below it, or while its server is being started.
 
 EXIT STATUS
-    0, 1 on an error (not a mount point, busy), 2 usage.
+    0, 1 on an error (not a mount point, busy), 2 usage. The usage line
+    goes to the error stream.
 
 NOTES
     The root filesystem cannot be unmounted.

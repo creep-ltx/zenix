@@ -41,8 +41,8 @@ static int keyword(const char *w)
 }
 int main(int argc, char **argv)
 {
-    if (argc < 2) { dprintf(2, "usage: man name...   |   man -k word\n"); return 1; }
-    if (!strcmp(argv[1], "-k")) { if (argc < 3) return 1; return keyword(argv[2]); }
+    if (argc < 2 || (!strcmp(argv[1], "-k") && argc < 3)) { dprintf(2, "usage: man name...   |   man -k word\n"); return 2; }
+    if (!strcmp(argv[1], "-k")) return keyword(argv[2]);
     int rc = 0;
     for (int i = 1; i < argc; i++) rc |= show(argv[i]);
     return rc;

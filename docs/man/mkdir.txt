@@ -16,7 +16,8 @@ EXAMPLES
     mkdir -p a/b/c
 
 EXIT STATUS
-    0, 1 if a directory exists or cannot be made, 2 usage error.
+    0, 1 if a directory exists or cannot be made, 2 usage error. Errors
+    read "mkdir: DIR: REASON" with the system's reason ("file exists").
 
 NOTES
     An access the user is not allowed is reported as "permission denied".

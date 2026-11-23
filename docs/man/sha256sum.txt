@@ -19,3 +19,6 @@ NOTES
 
 EXIT STATUS
     0, 1 if a file cannot be read.
+
+SEE ALSO
+    md5sum(1), base64(1)

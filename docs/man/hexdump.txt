@@ -12,8 +12,11 @@ DESCRIPTION
     between bars (non-printable bytes as "."). The final line shows the
     total length. -C is accepted but is the only format.
 
-EXAMPLE
+EXAMPLES
     00000000  5a 45 58 45 ...                                  |ZEXE....|
+
+EXIT STATUS
+    0; 1 when the file cannot be read; 2 for an unknown option.
 
 NOTES
     An access the user is not allowed is reported as "permission denied".

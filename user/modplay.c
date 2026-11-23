@@ -62,7 +62,7 @@ static const char defkeys[] =
     "# <Esc> <Tab> <Space> <BS> <Del> <F1>..<F10> <C-x>; \"KEY none\" takes a key away. Ctrl-C always quits.\n"
     "q quit\n<Esc> quit\n<Space> pause\nn next\np prev\n. forward\n<Right> forward\n, back\n<Left> back\n"
     "+ volume_up\n= volume_up\n- volume_down\nr repeat\ns shuffle\n<Tab> view\n1 pattern\n2 instruments\n3 list\n"
-    "? help\n<F1> help\n<Up> up\nk up\n<Down> down\nj down\n<Return> play\n[ channels_left\n] channels_right\n"
+    "? help\n<F1> help\n<Help> help\n<Up> up\nk up\n<Down> down\nj down\n<Return> play\n[ channels_left\n] channels_right\n"
     "g playing\n";
 static struct kbind kb[64];
 static struct keyset ks = { aname, A_N, kb, 0, 64, "" };

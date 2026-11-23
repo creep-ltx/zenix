@@ -56,6 +56,7 @@ KEYS
     r                repeat: off, the list, the song
     s                shuffle the list (from the next song)
     Tab 1 2 3 ? F1   the next view; pattern, instruments, list, keys
+    Help             the keys (as ? and F1)
     Up Down k j      move in the list; Return plays the one chosen
     g                the list: back to the song playing
     [ ]              the channels shown in the pattern view
@@ -66,9 +67,9 @@ KEYS
     and show(1)). A mistake in it is said when modplay ends.
 
 EXIT STATUS
-    0 everything played; 1 a file it could not play (it goes on with
-    the next); 2 no sound (no server, the channels in use, not enough
-    chip RAM).
+    0 everything played; 1 a file it could not play (it goes on with the
+    next); 2 no sound (no server, the channels in use, not enough chip
+    RAM). Help is on ?, F1 and Help.
 
 NOTES
     MOD: every ProTracker effect but E0, E8 and EF; FLT8 and tags not

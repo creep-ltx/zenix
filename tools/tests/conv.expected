@@ -1,0 +1,22 @@
+man-noargs st=2 out=0 err=1
+man-k-noword st=2 out=0 err=1
+sudo-badopt st=2 out=0 err=3
+wc-badopt st=2 out=0 err=2
+touch-badopt st=2 out=0 err=2
+tee-badopt st=2 out=0 err=2
+tee-nine st=2 out=0 err=1
+hexdump-badopt st=2 out=0 err=2
+umount-usage st=2 out=0 err=1
+mount-usage st=2 out=0 err=2
+fdisk-usage st=2 out=0 err=1
+zpkg-usage st=2 out=0 err=5
+tee-cannot st=1 tee: T/nodir/f: no such file or directory
+less-none st=1 less: T/none: no such file or directory
+chmod: T/none: no such file or directory
+rm: T/none: no such file or directory
+mkdir: T/d: file exists
+rmdir: T/d: directory not empty
+stat: T/none: no such file or directory
+realpath: T/none: no such file or directory
+status-before-subst=1 
+conv-done

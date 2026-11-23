@@ -60,7 +60,8 @@ EXAMPLES
     mkfs.ext2 ide1p1
 
 EXIT STATUS
-    0, 1 on an error (not a whole disk, mounted, no such partition), 2 usage.
+    0, 1 on an error (not a whole disk, mounted, no such partition), 2
+    usage. The usage line goes to the error stream.
 
 NOTES
     Root only: the disk server lists devices to anyone but opens them only

@@ -25,6 +25,10 @@ KEYS
     continues a long line starts with the line's colours. Other control
     characters are shown as ^X (ESC as ^[).
 
+EXIT STATUS
+    0; 1 when a file cannot be read or memory runs out; 2 for a wrong
+    command line (no file and the input a terminal).
+
 NOTES
     Ctrl+Z stops less (and the command it pages for, its whole job: man
     too) with the screen left tidy; fg brings it back drawn anew. SIGINT,

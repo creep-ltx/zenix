@@ -2,6 +2,8 @@ wait zenix:/# 90
 sleep 1
 send modplay -K | head -3; echo "k0=$?"\r
 wait k0= 20
+send echo "helpkeys=$(modplay -K | grep -cE '^(\\?|<F1>|<Help>) help$')"\r
+wait helpkeys=[0-9] 20
 send modplay -s /trk/tune8.mod; echo "t0=$?"\r
 wait t0= 60
 send modplay -q /trk/tune8.mod & sleep 3; echo T1; play -S; wait; echo "t1=$?"\r

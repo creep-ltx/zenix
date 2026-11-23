@@ -77,7 +77,7 @@ send sh /tests/k1.sh & HOME=/tmp/h mail; echo st1=$?\r
 wait st1= 3000
 send printf 'Batch text: åäö\\n.dot first\\nend\\n' | HOME=/tmp/h mail -s 'Batch ünïcode' carol@example.org dave@example.org; echo st2=$?\r
 wait st2= 900
-send for i in 0 1 2 3 4 5 6 7 8 9 10; do echo ==s$i; cat /tmp/s$i.txt; done; echo ==mem; cat /tmp/free.txt /tmp/ps.txt; echo ==files; ls -l /tmp/h/.config/mail; grep -c reply_all /tmp/h/.config/mail/keys; sync; echo ==m""done\r
+send for i in 0 1 2 3 4 5 6 7 8 9 10; do echo ==s$i; cat /tmp/s$i.txt; done; echo ==mem; cat /tmp/free.txt /tmp/ps.txt; echo ==files; ls -l /tmp/h/.config/mail; grep -c reply_all /tmp/h/.config/mail/keys; echo helpkeys=$(grep -cE '^(\\?|<F1>|<Help>) help$' /tmp/h/.config/mail/keys); sync; echo ==m""done\r
 wait ==mdone 120
 stop
 EOS
@@ -194,6 +194,7 @@ check("STARTTLS" in srv and "SMTP 3 > STARTTLS" in srv, "every message sent thro
 f = L.part("files", "mdone")
 check(re.search(r"^-rw------- .* config$", f, re.M) is not None and re.search(r"^1$", f, re.M) is not None,
       "the settings kept at mode 600; the keys file written with the defaults", f)
+check(re.search(r"^helpkeys=3$", f, re.M) is not None, "help on ?, F1 and Help, as every text UI (audit 2026-11-23 OS-27)", f)
 m = L.part("mem", "files")
 ps = re.search(r"^ +\d+ +\d+ +\d+ +-?\d+ +\w+ +(\d+) +(\d+) mail$", m, re.M)
 tp = re.search(r"^ +\d+ +\d+ +\d+ +-?\d+ +\w+ +(\d+) +(\d+) tlspipe$", m, re.M)

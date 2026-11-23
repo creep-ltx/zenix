@@ -7,6 +7,8 @@ int main(int argc, char **argv)
 {
     int no_create = 0, i = 1, rc = 0;
     if (i < argc && !strcmp(argv[i], "-c")) { no_create = 1; i++; }
+    if (i < argc && !strcmp(argv[i], "--")) i++;
+    else if (i < argc && argv[i][0] == '-' && argv[i][1]) { dprintf(2, "touch: unknown option %s\nusage: touch [-c] file...\n", argv[i]); return 2; }
     for (; i < argc; i++) {
         struct ustat st;
         if (sys_stat(argv[i], &st) == 0) {

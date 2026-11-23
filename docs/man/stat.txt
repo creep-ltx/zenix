@@ -13,7 +13,8 @@ DESCRIPTION
     seconds. Symbolic links are followed. There are no options.
 
 EXIT STATUS
-    0, 1 if a file is not found.
+    0, 1 if a file is not found. Errors read "stat: FILE: REASON" with the
+    system's reason ("no such file or directory").
 
 SEE ALSO
     ls(1), chmod(1), date(1)

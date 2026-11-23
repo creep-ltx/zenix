@@ -27,6 +27,7 @@ debugfs -w -f "$OUT/debugfs.cmd" "$BD/zenix.hdf" >/dev/null 2>&1 || { echo "FAIL
 ZENIX_BUILD=$BD tools/run-test.sh fsuae/a1200-020-fast.fs-uae 600 tools/tests/tracker-test.txt 2>&1 | sed 's/\x1b\[[0-9;:?]*[a-zA-Z]//g' > "$L"
 has "the script ran to the end" '^(.*# )?tracker-test-done$'
 has "modplay -K: the default keys" '^q quit'
+has "modplay: help on ?, F1 and Help, as every text UI (audit 2026-11-23 OS-27)" '^(.*# )?helpkeys=3$'
 # 1: the 8-channel MOD, mixed: one stereo stream, channels 0 and 1 at 16,000 Hz (period round(3546895 / 16000) = 222)
 has "8CHN: its line (mixed)" '/trk/tune8.mod: "zenix eight", 8-channel MOD, 8 channels, 2 positions \(mixed, PAL\)'
 S=$(after T1)

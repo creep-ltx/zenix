@@ -23,7 +23,7 @@ OPTIONS
     -i n      one inode per n bytes of space (default 4096); a larger number
               gives fewer inodes, more room for data. Minimum 1024.
 
-EXAMPLE
+EXAMPLES
     fdisk add ide1 DH0 rest
     mkfs.ext2 -b 4096 ide1p1
 

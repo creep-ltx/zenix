@@ -52,3 +52,6 @@ NOTES
     screen: zdesk makes it 78 or 79); a later resize is told by SIGWINCH,
     which the full-screen programs here (Ahiru, Sumi, ctop) do not follow
     yet.
+
+SEE ALSO
+    zdesk(1), displayd(8)

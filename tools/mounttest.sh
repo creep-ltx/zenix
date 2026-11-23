@@ -180,7 +180,7 @@ is "D26 15: '..' directly after a link is taken on the text (the pinned deviatio
 has "D26 17: a service whose program is a link into a mount starts and serves" '^svctest call lp 3: 1 in [0-9]+ ms$'
 has "D26 4: a server's FS_LINKED with bits outside the table: -EIO" '^cat: /tmp/ml/x: input/output error$'
 has "D26 4: ... one to a request that never asks (a read): -EIO" '^sha256sum: /tmp/ml/f: input/output error$'
-has "D26 4: ... a valid one goes on at its text, from /" '^stat: /tmp/ml/z: not found$'
+has "D26 4: ... a valid one goes on at its text, from /" '^stat: /tmp/ml/z: no such file or directory$'
 is "D26 4: ... and that server unmounts" cml 0
 is "D26: everything unmounted at the end" um-end 0
 has "D26: the links script ran to the end" '^(.*# )?links-done$'

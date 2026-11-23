@@ -222,7 +222,7 @@ EXAMPLES
 EXIT STATUS
     0, 1 on an error (no such device, already in use or mounted, unknown
     type, the server did not start, directory missing; for mount -a, any
-    line failed), 2 usage.
+    line failed), 2 usage. The usage line goes to the error stream.
 
 NOTES
     Once something is mounted, paths are resolved as text for the mount

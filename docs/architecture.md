@@ -2,9 +2,10 @@
 
 Zenix is a small Unix-like operating system for Amigas with a 68020 or better and **no MMU**. It does not sit on
 top of AmigaOS: the floppy bootblock borrows Kickstart only to load the kernel and read the memory map, then
-switches the OS off and owns the machine. The sources are about 9,000 lines of kernel C, assembler and headers
-(`kernel/`) and the user-mode programs and servers (`user/`, about 11,000 lines), plus the ZenixFS library
-(`zenixfs/`). Last checked against the code: 2026-10-23.
+switches the OS off and owns the machine. The sources are about 24,000 lines of kernel C, assembler and headers
+(`kernel/`), about 86,000 lines of user-mode programs and servers (`user/`, its folders included), the desktop
+(`display/`), the network (`net/`), the ZenixFS library (`zenixfs/`) and the ported programs (`ports/`). Line
+counts checked 2026-11-23 (audit 2026-11-23 OS-41).
 
 ## 1. The shape of the system
 

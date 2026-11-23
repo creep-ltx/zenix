@@ -594,7 +594,7 @@ static const char defkeys[] =
     "<Up> up\nk up\n<Down> down\nj down\n<S-Up> page_up\n- page_up\n<S-Down> page_down\n<Space> page_down\n"
     "<C-a> top\n< top\n<C-e> bottom\n> bottom\n<Return> open\n<Right> open\nq back\n<Left> back\nQ quit\n"
     "c folders\nm compose\nr reply\ng reply_all\nf forward\nd delete\nu undelete\nN toggle_read\nM move\ns save\n"
-    "$ sync\nh headers\nn next\np prev\n? help\n<Help> help\n<C-l> redraw\n";
+    "$ sync\nh headers\nn next\np prev\n? help\n<F1> help\n<Help> help\n<C-l> redraw\n";
 static struct kbind kb[96];
 static struct keyset ks = { aname, A_N, kb, 0, 96, "" };
 

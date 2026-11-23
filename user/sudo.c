@@ -5,12 +5,13 @@
  * having it as their own group). They give their OWN password, three tries (an empty one asks nothing, a locked "*"
  * never passes). Like su, the command gets the target's USER, LOGNAME, HOME, SHELL and PATH=/bin, and no IFS, ENV or
  * CDPATH; TERM and the rest stay. A command name without '/' is looked for in /bin. -i also starts in the target's
- * home. The exit status is the command's; 1 when sudo refuses, 127 when the command is not found.
+ * home. The exit status is the command's; 1 when sudo refuses, 2 for a wrong command line, 127 when the command is not
+ * found.
  * After a right password sudo asks no more for 5 minutes in the same session (owner 2026-10-31, as Linux's sudo):
  * a timestamp in /var/run/sudo (root's, mode 700) per user and parent shell, holding the wall clock and the
  * seconds since boot; both must agree, so a restart or a moved clock ends it. sudo -k forgets it. */
 
-static int usage(void) { dprintf(2, "usage: sudo [-k] [-u user] command [arg...]\n       sudo [-u user] -s | -i\n       sudo -k\n"); return 1; }
+static int usage(void) { dprintf(2, "usage: sudo [-k] [-u user] command [arg...]\n       sudo [-u user] -s | -i\n       sudo -k\n"); return 2; }
 
 #define STAMP_DIR "/var/run/sudo"
 #define STAMP_SECS 300

@@ -152,9 +152,9 @@ FILES
     /var/cache/zpkg/pkg/      downloaded package files and their .sig
 
 EXIT STATUS
-    0 when everything worked or there was nothing to do, 1 when
-    something was refused or failed (zpkg or zup says why), 2 for a
-    wrong argument.
+    0 when everything worked or there was nothing to do, 1 when something
+    was refused or failed (zpkg or zup says why), 2 for a wrong argument.
+    The usage line goes to the error stream.
 
 NOTES
     zpkg sets its own umask (022) first, whatever the caller's (sudo

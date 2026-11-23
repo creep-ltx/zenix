@@ -174,7 +174,7 @@ static unsigned free_mb(unsigned disk_sectors)
 
 int main(int argc, char **argv)
 {
-    if (argc < 2) { dprintf(1, "usage: fdisk list|init|add|del|boot ...\n"); return 2; }
+    if (argc < 2) { dprintf(2, "usage: fdisk list|init|add|del|boot ...\n"); return 2; }
     port = sys_port_find("disk");
     if (port < 0) { dprintf(1, "fdisk: no disk server\n"); return 1; }
     if (!strcmp(argv[1], "list")) { list(argc > 2 ? argv[2] : 0); return 0; }
@@ -220,7 +220,7 @@ int main(int argc, char **argv)
     if (!may_write(argv[2])) return 1;
     int rc = 0;
     if (!strcmp(argv[1], "add")) {
-        if (argc < 5) { dprintf(1, "usage: fdisk add DISK LABEL SIZE [ext2|zenixfs]\n"); return 2; }
+        if (argc < 5) { dprintf(2, "usage: fdisk add DISK LABEL SIZE [ext2|zenixfs]\n"); return 2; }
         if (r.nparts >= RDB_MAXPART) { dprintf(1, "fdisk: too many partitions (%d)\n", RDB_MAXPART); return 1; }
         if (strlen(argv[3]) > 31 || !argv[3][0]) { dprintf(1, "fdisk: a label has 1 to 31 characters\n"); return 1; }
         unsigned mb = strcmp(argv[4], "rest") ? (unsigned)atoi(argv[4]) : 0, lo, hi;
@@ -255,7 +255,7 @@ int main(int argc, char **argv)
         else rc = poke(r.blk, 7, nb, RDB_ID_RDSK);
         if (!rc && rd(r.blk, b) == 0 && b[38] < nb) rc = poke(r.blk, 38, nb, RDB_ID_RDSK);   /* HighRDSKBlock */
     } else if (!strcmp(argv[1], "del") || !strcmp(argv[1], "boot")) {
-        if (argc < 4) { dprintf(1, "usage: fdisk %s DISK N\n", argv[1]); return 2; }
+        if (argc < 4) { dprintf(2, "usage: fdisk %s DISK N\n", argv[1]); return 2; }
         int n = atoi(argv[3]) - 1;
         if (n < 0 || n >= r.nparts) { dprintf(1, "fdisk: no partition %s\n", argv[3]); return 1; }
         if (!strcmp(argv[1], "del")) {

@@ -12,6 +12,8 @@ DESCRIPTION
 
 EXIT STATUS
     0, 1 if a directory is not empty or cannot be removed, 2 usage error.
+    Errors read "rmdir: DIR: REASON" with the system's reason ("directory
+    not empty").
 
 NOTES
     An access the user is not allowed is reported as "permission denied".

@@ -105,3 +105,6 @@ NOTES
     are not there yet; icons only start commands. The bar's command
     blocks run through /bin/sh -c and are ended when they take longer
     than their interval (at least 10 s).
+
+SEE ALSO
+    term(1), files(1), deskprefs(1), displayd(8)

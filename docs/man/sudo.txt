@@ -39,13 +39,15 @@ EXAMPLES
 
 EXIT STATUS
     The command's own status; 1 when sudo refuses (not in wheel, wrong
-    password, unknown user) and 127 when the command is not found.
+    password, unknown user), 2 for a wrong command line and 127 when the
+    command is not found.
 
 NOTES
     The command runs in sudo's process group, the shell's job: Ctrl+C
     and Ctrl+Z reach both.
     There is no /etc/sudoers: membership of wheel is the whole rule, and
-    the password is asked every time (it is not remembered for a while).
+    a right password is remembered for 5 minutes in the same session
+    (sudo -k forgets it).
     Add someone with "gpasswd -a NAME wheel", remove them with
     "gpasswd -d NAME wheel".
 
