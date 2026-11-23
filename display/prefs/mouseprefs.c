@@ -316,28 +316,18 @@ static int own_click(const struct dpyev *e)
     return 0;
 }
 
-static void usage(int fd)
-{
-    dprintf(fd, "usage: mouseprefs [-v]\n");
-}
+static const char USAGE[] = "usage: mouseprefs [-v]\n";
 
 int main(int argc, char **argv)
 {
+    zopt(argc, argv, USAGE);
     for (int i = 1; i < argc; i++)
         if (!strcmp(argv[i], "-v"))
             verbose = 1;
-        else if (!strcmp(argv[i], "--help")) {
-            usage(1);
-            return 0;
-        } else if (!strcmp(argv[i], "--version")) {
-            dprintf(1, "mouseprefs (Zenix) 1\n");
-            return 0;
-        } else if (!strcmp(argv[i], "--") && i + 1 == argc)
+        else if (!strcmp(argv[i], "--") && i + 1 == argc)
             break;
-        else {
-            usage(2);
-            return 2;
-        }
+        else
+            zusage(USAGE);
     int r = dpy_open("mouseprefs");
     if (r < 0) {
         dprintf(2, "mouseprefs: the desktop: %s\n", zstrerror(r) ? zstrerror(r) : "not reachable");

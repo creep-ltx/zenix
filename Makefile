@@ -1600,7 +1600,7 @@ box: $(BUILD)/box.zx
 DEMOAPPS := sh login init mount zdesk term files ahiru sumi ctop telnet rz sntp displayd-nortg dlogin netd drv-a2065 drv-genet drv-ne2000
 DEMOAPPS_HD := $(DEMOAPPS) show wget ssh maki markdown zine drv-plipbox fdisk mkfs_ext2 fsck_ext2 mkfs_zenixfs fsck_zenixfs \
                dd sync zfsd fatd ffsd pfs3d
-DEMODEPS := $(BUILD)/demoboot.bin $(BUILD)/demoload.zx $(BUILD)/kernel.bin $(BUILD)/box.zx $(USERZX) $(SBINZX) $(NETDRVZX) \
+DEMODEPS := $(BUILD)/demoboot.bin $(BUILD)/demoload.zx $(BUILD)/tlspipe.zx $(BUILD)/kernel.bin $(BUILD)/box.zx $(USERZX) $(SBINZX) $(NETDRVZX) \
             $(BUILD)/displayd-nortg.zx $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(BUILD)/zine.blob $(BUILD)/sp060 $(BUILD)/sp040 $(shell find rootfs tools/demo -type f) \
             tools/mkroot.sh tools/mkdemo.sh tools/mkdemo.py tools/mkman.py
 $(BUILD)/zenix-demo.adf: $(DEMODEPS)
