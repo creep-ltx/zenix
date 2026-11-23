@@ -48,7 +48,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet irc mail \
-          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs files show ttf2font \
+          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs mouseprefs files show ttf2font \
           play modplay lsusb lua make zld zas tcc zdb \
           frotz adventure arithmetic banner fortune hangman number rain robots tetris worm worms wump zintro
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
@@ -597,18 +597,29 @@ $(BUILD)/dpytest.uelf: $(BUILD)/dpytest.uo $(BUILD)/libdisplay.no $(BUILD)/crt0.
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/dpytest.uo $(BUILD)/libdisplay.no $(BUILD)/libz.uo $(LIBGCC) -o $@
 # zdesk (DESIGN D38 step 5): the floating window manager, its bar, desktop and settings (display/zdesk/), cold: -Os
 ZDESKOBJS := $(patsubst %,$(BUILD)/zd-%.no,zdesk conf bar desk)
-$(BUILD)/zd-%.no: display/zdesk/%.c display/zdesk/zdesk.h display/display.h display/proto.h user/libz.h user/usys.h user/socket.h | $(BUILD)
+$(BUILD)/zd-%.no: display/zdesk/%.c display/zdesk/zdesk.h display/display.h display/proto.h display/mousefile.h user/libz.h user/usys.h user/socket.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
-$(BUILD)/zdesk.uelf: $(ZDESKOBJS) $(BUILD)/libdisplay.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(ZDESKOBJS) $(BUILD)/libdisplay.no $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(BUILD)/zdesk.uelf: $(ZDESKOBJS) $(BUILD)/libdisplay.no $(BUILD)/mousefile.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(ZDESKOBJS) $(BUILD)/libdisplay.no $(BUILD)/mousefile.no $(BUILD)/libz.uo $(LIBGCC) -o $@
+# the mouse's settings and pointer files (DESIGN D61, display/mousefile.h): zdesk's and mouseprefs'
+$(BUILD)/mousefile.no: display/lib/mousefile.c display/mousefile.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
 # the preference programs (D38 "Preferences", D28 section 22): settings files written by user/cfgfile.c; deskprefs
 # lists the Amiga fonts' sizes with the server's own contents reader (amifont.c), cold: -Os
 $(BUILD)/cfgfile.uo: user/cfgfile.c user/cfgfile.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
-$(BUILD)/deskprefs.uo: display/prefs/deskprefs.c display/display.h display/proto.h display/screenfile.h display/server/amifont.h user/cfgfile.h user/libz.h user/usys.h | $(BUILD)
+$(BUILD)/deskprefs.uo: display/prefs/deskprefs.c display/prefswin.h display/display.h display/proto.h display/screenfile.h display/server/amifont.h user/cfgfile.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
-$(BUILD)/deskprefs.uelf: $(BUILD)/deskprefs.uo $(BUILD)/libdisplay.no $(BUILD)/dpyd-amifont.no $(BUILD)/cfgfile.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/deskprefs.uo $(BUILD)/libdisplay.no $(BUILD)/dpyd-amifont.no $(BUILD)/cfgfile.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(BUILD)/deskprefs.uelf: $(BUILD)/deskprefs.uo $(BUILD)/libdisplay.no $(BUILD)/prefswin.no $(BUILD)/dpyd-amifont.no $(BUILD)/cfgfile.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/deskprefs.uo $(BUILD)/libdisplay.no $(BUILD)/prefswin.no $(BUILD)/dpyd-amifont.no $(BUILD)/cfgfile.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+# the preference programs' window (display/prefswin.h): deskprefs' and mouseprefs'
+$(BUILD)/prefswin.no: display/lib/prefswin.c display/prefswin.h display/display.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
+# mouseprefs (DESIGN D61, docs/d61-mouse.md 7): the mouse's settings
+$(BUILD)/mouseprefs.uo: display/prefs/mouseprefs.c display/prefswin.h display/mousefile.h display/display.h display/proto.h user/cfgfile.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
+$(BUILD)/mouseprefs.uelf: $(BUILD)/mouseprefs.uo $(BUILD)/libdisplay.no $(BUILD)/prefswin.no $(BUILD)/mousefile.no $(BUILD)/cfgfile.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/mouseprefs.uo $(BUILD)/libdisplay.no $(BUILD)/prefswin.no $(BUILD)/mousefile.no $(BUILD)/cfgfile.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 # ttf2font (DESIGN D51, docs/d51-truetype.md): a TrueType font drawn once a size into an AmigaOS bitmap font, run by
 # displayd for a .ttf with no cache file; run once a size, so cold: -Os (ttf.c's reader and rasteriser, ttfont.c's
 # writer: no system calls, tools/ttf-host-test.sh builds the same files)
