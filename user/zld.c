@@ -1826,8 +1826,12 @@ static int u32cmp(const void *a, const void *b)
     return x < y ? -1 : x > y;
 }
 
-/* the one-system command line (docs/audit-2026-11-23-one-system.md section 3), written here: zld builds on the PC too */
-#include "../kernel/version.h"
+/* the one-system command line (docs/audit-2026-11-23-one-system.md section 3), written here: zld builds on the PC
+ * too, and by tcc from this file alone (tools/tcc-test.sh): the version is kernel/version.h's, which the Makefile
+ * gives with -include; the same number stands here for a build without it */
+#ifndef ZENIX_VSTR
+#define ZENIX_VSTR "0.2"
+#endif
 static const char USAGE[] = "usage: zld [-v] [-s STACK] [-M MAP] [--defsym=SYM=VALUE] [--wrap=SYM] [-L DIR] -o OUT "
                             "FILE.o|LIB.a|-lNAME ...\n";
 static void usage(void)
