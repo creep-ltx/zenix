@@ -627,6 +627,7 @@ KINIT void klog_show_prev(void)
     const char *why = kprev->reason == KLOG_END_PANIC ? " with a kernel panic" :
                       kprev->reason == KLOG_END_REBOOT ? " with reboot" :
                       kprev->reason == KLOG_END_ZINE ? " while an Amiga program ran under ZINE (the disks were synced first)" :
+                      kprev->reason == KLOG_END_ZINE_DAMAGED ? " after ZINE: the Amiga program wrote over Zenix's memory (the disks were synced first)" :
                       " without a panic message (it hung, or was reset or switched off)";
     if (!prev_text) {
         kprintf("klog: previous boot (%u) ended%s; its log text is damaged (checksum): not shown\n", kprev->bootno, why);

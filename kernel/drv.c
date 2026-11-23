@@ -350,10 +350,11 @@ static u32 aud_lc[4], aud_len[4], aud_lo[4], aud_hi[4];
 u8 aud_valid;
 
 /* the sound server built before D60: its port "audio" is not marked PEER_EXACT; with full protection only it still
- * gets the custom chips' page at its claim (it writes Paula itself, as the old lend's rule allows: 5.8) */
+ * gets the custom chips' page at its claim (it writes Paula itself, as the old lend's rule allows: 5.8), but not with
+ * MMU=STRICT */
 static int old_sndd(const struct proc *p)
 {
-    return mmu_on && !port_exact_of(p->pid, "audio");
+    return mmu_on && !mmu_strict && !port_exact_of(p->pid, "audio");     /* (MMU=STRICT: none, 5.8) */
 }
 
 static u32 aud_bytes(u32 len) { return (len ? len : 0x10000u) * 2; }
@@ -596,6 +597,7 @@ long drv_sys(u32 opw, u32 a, u32 b)
             return -ENOMEM;
         claims[f].page = a == DRV_PAULA && old_sndd(current);   /* (its release takes out what was granted) */
         claims[f].pid = current->pid;
+        mmu_sysmark(current);           /* (MMU=D41, D60 12: D41 7's system process) */
         if (a == DRV_PAULA)
             audio_hold(1);              /* D40: the bell stopped and silent; the log line says the base (0xdff0a0) */
         if (a == DRV_PARPORT) {

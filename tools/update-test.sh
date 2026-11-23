@@ -194,7 +194,11 @@ EOF
     check $n "shells on two consoles keep working while /bin/sh is renamed over" "$(grep -aq '^c2-2$' $OUT/$n/1.txt && grep -aq '^renamed-4$' $OUT/$n/1.txt && grep -aq '^c2-5$' $OUT/$n/1.txt && echo ok || echo bad)"
     local f1 f2
     f1=$(grep -a '^fast RAM free' $OUT/$n/1.txt | sed -n 1p | grep -oE '[0-9]+'); f2=$(grep -a '^fast RAM free' $OUT/$n/1.txt | sed -n 2p | grep -oE '[0-9]+')
-    check $n "the bundle's memory is back in the pool: free after the update ($f1 KB) is free without one ($f2 KB)" "$([ -n "$f1" ] && [ "$f1" = "$f2" ] && echo ok || echo bad)"
+    # with memory protection on (tools/mmu-suite.sh) the translation tables' pool keeps the pages it grew by for the
+    # bundle's tables in zup's tree (D60 section 4: the pool keeps its pages): 4 KB in FS-UAE's 040, 5 in Amiberry's
+    # (D60 stage 5; the cause read from the code, not measured apart)
+    local tol=0; grep -aq '^mmu: memory protection on' $OUT/$n/1.txt && tol=8
+    check $n "the bundle's memory is back in the pool: free after the update ($f1 KB) is free without one ($f2 KB${tol:+, less $tol KB of tables with protection})" "$([ -n "$f1" ] && [ -n "$f2" ] && [ "$f1" -le "$f2" ] && [ "$f1" -ge $((f2 - tol)) ] && echo ok || echo bad)"
     check $n "the next start reads the confirmation and renames the bundle .done" "$(inorder $n 1 'reboot: filesystems synced' 'version '$V2' came up' 'renamed zenix-update.zup to zenix-update.done' 'state confirmed')"
     check $n "boot partition: zenix is the new kernel, zenix.old the old one, the bundle .done, state confirmed" \
         "$([ "$(same $b/zenix $OUT/b2/kernel.bin)" = ok ] && [ "$(same $b/zenix.old $B/kernel.bin)" = ok ] && [ -f $b/zenix-update.done ] && [ ! -f $b/zenix-update.zup ] && grep -q '^phase confirmed$' $b/state && echo ok || echo bad)"

@@ -1,0 +1,6 @@
+wait zenix:/# 20
+send zine /tests/zine/zpoke $(dmesg | grep '^kernel:' | head -1 | cut -d' ' -f5) @OFF@; echo poke-rc=$?\r
+wait zenix:/# 240
+sleep 2
+send dmesg | grep -e 'previous boot'; echo zdmg-done\r
+wait zdmg-done 30

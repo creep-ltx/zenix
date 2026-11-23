@@ -432,7 +432,7 @@ void syscall_c(u32 *rb)
     case SYS_fd_rw:                     /* (with protection on the buffer is checked: the caller's, or a window it holds) */
         if (!current->priv)
             r = -EPERM;
-        else if (!mmu_on || (a2 < 0x800000u && ((a1 >> 27) & 1 ? UOKR(a3, a2 * 512) : UOKW(a3, a2 * 512))))
+        else if (!mmu_on || mmu_d41 || (a2 < 0x800000u && ((a1 >> 27) & 1 ? UOKR(a3, a2 * 512) : UOKW(a3, a2 * 512))))
             r = fd_rw(a1 >> 28, a1 & 0x07FFFFFF, a2, (void *)a3, (a1 >> 27) & 1);
         else
             r = -EFAULT;
@@ -444,7 +444,7 @@ void syscall_c(u32 *rb)
         r = -EPERM;
         if (current->priv && UOKW(a1, UATAPI_FIRST)) {
             const struct uatapi *q = (const struct uatapi *)a1;
-            if (mmu_on && q->len && !UOKW((u32)q->buf, q->len))
+            if (mmu_on && !mmu_d41 && q->len && !UOKW((u32)q->buf, q->len))
                 break;                  /* (D60 stage 3: the buffer is the caller's, or a window it holds) */
             r = ide_atapi((struct uatapi *)a1);
         }
@@ -582,7 +582,7 @@ void syscall_c(u32 *rb)
         /* raw disk: only the disk server (trusted; the buffer is a client's, so
          * it is not checked against this process's own memory) */
         r = !current->priv ? -EPERM : -EFAULT;
-        if (current->priv && (!mmu_on || (a2 < 0x800000u && (nr == SYS_blk_read ? UOKW(a3, a2 * 512) : UOKR(a3, a2 * 512)))))
+        if (current->priv && (!mmu_on || mmu_d41 || (a2 < 0x800000u && (nr == SYS_blk_read ? UOKW(a3, a2 * 512) : UOKR(a3, a2 * 512)))))
             r = nr == SYS_blk_read ? blk_read(a1, a2, (void *)a3) : blk_write(a1, a2, (const void *)a3);
             /* (D60 stage 3: with protection on the buffer is checked: the caller's, or a window it holds) */
         break;
@@ -680,7 +680,7 @@ void syscall_c(u32 *rb)
             mem_stats(&((u32 *)a1)[0], &((u32 *)a1)[1]);
             seg_stats(&((u32 *)a1)[2], &((u32 *)a1)[3]);
             if (n >= UMEMINFO_PROT)
-                ((u32 *)a1)[4] = mmu_on ? 2 : 0;
+                ((u32 *)a1)[4] = mmu_on ? 2u - mmu_d41 : 0;     /* (1: MMU=D41) */
             r = 0;
         }
         break;
@@ -795,6 +795,8 @@ void syscall_c(u32 *rb)
                 memcpy(u.kver, zver.vstr, 16);
                 memcpy((void *)a2, &u, (u32)n);
                 r = 0;
+                if (upd_pa && current->uid == 0)
+                    mmu_upd_ask();      /* D60 7.2: the bundle in its view, read only, until UPD_RELEASE or its end */
             }
         } else if (current->uid != 0)
             r = -EPERM;

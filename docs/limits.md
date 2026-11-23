@@ -63,6 +63,12 @@ RAM disk's copy form; an old filesystem, display, sound or USB server does, thro
 grants 32 in all (shared regions taken may use 20 of them: 12 stay for claims and the display's grab), `SYS_shm` 8
 offers and 8 holds a process and 24 in all, `SYS_callv` 4 buffers, a request's
 windows 8 (those of a request that share a page become one).
+Since stage 5 (2026-11-23): ZINE's check after a session (the kernel's code and read-only data against a sum, its
+records for consistency, every tree made again) finds damage; it cannot promise there is none (a record rewritten
+into another consistent state passes), and on the damaged path the kernel's own code still runs to reset the machine.
+`MMU=D41` is the way back, not a mode to keep: its system processes see all memory and may hand any process's memory
+to a system call. A process that sets its uid away from root keeps the update bundle's pages (read only) until its
+next switch.
 Never run on a real 68030/040/060 yet; not on the stock A1200 (a 68EC020 has no MMU) nor under Emu68.
 
 What the permissions do cover (audit D): a user cannot kill, stop or take over the terminal of another user's or a

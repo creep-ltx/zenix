@@ -53,6 +53,8 @@ static const char version[] __attribute__((used, section(".text.start"))) = "$VE
 #define KOPT_DCACHE_WT  2u
 #define KOPT_MMU_ON     4u              /* DESIGN D41: memory protection on */
 #define KOPT_MMU_OFF    8u
+#define KOPT_MMU_STRICT 32u             /* D60 12: old servers get no lend */
+#define KOPT_MMU_D41    64u             /* D60 12: D41's system processes (the way back) */
 #define HWINFO_DRYRUN   0x5A485744u     /* kernel/hwinfo.h: "ZHWD" in the hwinfo magic, stage0 writes no hardware */
 #define ZUP_HDR 96
 #define ZUP_TOCE 80
@@ -921,15 +923,22 @@ int zb_main(void)
             goto out;                   /* rc 20; nothing allocated yet */
         }
     }
-    if (args[6]) {                      /* DESIGN D41: memory protection on or off */
+    if (args[6]) {                      /* DESIGN D41: memory protection on or off; D60 12: STRICT, D41 */
         const char *d = (const char *)args[6];
-        int on = (d[0] | 32) == 'o' && (d[1] | 32) == 'n' && !d[2];
-        int no = (d[0] | 32) == 'o' && (d[1] | 32) == 'f' && (d[2] | 32) == 'f' && !d[3];
-        if (!on && !no) {
-            say("zenixboot: MMU=%s: say ON or OFF (memory protection; off is the default)\n", args[6], 0, 0);
+        char w[8];
+        int i = 0;
+        for (; i < 7 && d[i]; i++)
+            w[i] = (char)(d[i] >= 'a' && d[i] <= 'z' ? d[i] - 32 : d[i]);
+        w[i] = 0;
+        if (d[i]) w[0] = 0;             /* longer than STRICT: none of the words */
+        if (streq(w, "ON")) kopts |= KOPT_MMU_ON;
+        else if (streq(w, "OFF")) kopts |= KOPT_MMU_OFF;
+        else if (streq(w, "STRICT")) kopts |= KOPT_MMU_STRICT;
+        else if (streq(w, "D41")) kopts |= KOPT_MMU_D41;
+        else {
+            say("zenixboot: MMU=%s: say ON, OFF, STRICT or D41 (memory protection)\n", args[6], 0, 0);
             goto out;
         }
-        kopts |= on ? KOPT_MMU_ON : KOPT_MMU_OFF;
     }
     if (args[4]) {                      /* DESIGN D21 6.4: unsigned bundles only in test builds, and only when asked */
         if (KEY_RELEASE) say("zenixboot: UNSIGNED_OK is for test builds: ignored (unsigned bundles are refused)\n", 0, 0, 0);

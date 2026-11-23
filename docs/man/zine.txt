@@ -35,6 +35,16 @@ DESCRIPTION
     drive's disk counts as changed (the program may have swapped it):
     open it again before using it.
 
+    The program is the one thing on Zenix that runs unprotected: with
+    memory protection on (a 68030, 68040 or 68060 with its MMU), the
+    kernel log says "memory protection paused for ZINE" and, after, "back
+    on". Before turning it back on the kernel checks its own code against
+    a sum taken at boot and its records (the processes, the memory's
+    block headers, the windows and grants) and makes every process's
+    translation tables again from them; if the program changed any of it,
+    the machine is reset (the disks were written out first) and the next
+    boot says so. This finds damage; it cannot promise there is none.
+
     On a 68040 or 68060 (and the PiStorm's Emu68) a 68030 MMU
     instruction an old program uses to switch the MMU off (PMOVE,
     PFLUSH, PTEST) is taken as a no-op, as the MMU is off. On a 68040

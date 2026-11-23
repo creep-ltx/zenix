@@ -241,6 +241,7 @@ long gcon_grab(int con, u32 a2)
     }
     g->file = f;
     g->pid = current->pid;
+    mmu_sysmark(current);               /* (MMU=D41, D60 12: D41 7's system process) */
     g->con = (u8)con;
     g->target = (u8)con;
     g->cop = u->cop;

@@ -4,6 +4,10 @@
 # (/tests/zine/null.blob: back at once through the resume routine), once and then twenty times in a row in a script,
 # and Zenix as before afterwards: the memory (as after the first run), the console's input (CON_INPUT), a file written
 # and read back. zine runs only at the Amiga's own console: the serial line's input is the shown console's (kernel/tty.c).
+# DESIGN D60 7.3 (stage 5): on the 68030, 68040 and 68060 with memory protection on, every session pauses it and turns
+# it back on after the kernel checked its code and records and made every tree again; on the 030 and the 040 a last
+# session changes a byte of the kernel's code (zpoke, tools/tests/zine-poke-test.txt): the check finds it, the machine
+# is reset, and the next boot says the previous one ended so.
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
 make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
@@ -144,8 +148,24 @@ echo "$log" | grep -aq '^zine-null-done' || no "the script did not reach its end
 # 16.4/16.5 on a 68040 with its FPU (the matrix's A1200 040 with FS-UAE's 68040 FPU, fsuae/zine): the MMU's registers
 # saved and put back around each session, the 68030 MMU instructions as no-ops; 16.14: FSIN and zfpux's 36 other
 # instructions the 040 lacks (as a real one) emulated by Motorola's package (/lib/zine/sp040), every answer right
+# the stray write's place: a byte of upd_release, kernel code that no session's way back runs (D60 7.3)
+NM=${TOOLPREFIX:-$( command -v m68k-elf-nm >/dev/null && echo m68k-elf- || echo "$HOME/opt/m68k-elf/bin/m68k-elf-")}nm
+off=$($NM $BD/kernel.elf | awk '$3 == "upd_release" { print $1 }')
+withpoke() { cat "$1" tools/tests/zine-poke-test.txt | sed "s/@OFF@/${off:-0}/" > "$2"; }
+damaged() {     # damaged NAME LOG: the stray write found, the machine reset, the next boot says why
+    echo "$2" | grep -aq "^mmu: after ZINE: Zenix's memory is damaged (code)" &&
+        echo "$2" | grep -aq "=== previous boot ([0-9]*) ended here after ZINE: the Amiga program wrote over Zenix's memory" &&
+        ! echo "$2" | grep -aq '^poke-rc=' && echo "$2" | grep -aq '^zdmg-done' &&
+        ok "$1: a byte of the kernel's code changed during a session: found after it, the machine reset, the next boot says why (D60 7.3)" ||
+        no "$1 damaged path: $(echo "$2" | grep -a 'after ZINE\|previous boot\|poke-rc' | tail -3)"
+    local np nb
+    np=$(echo "$2" | grep -ac '^mmu: memory protection paused for ZINE'); nb=$(echo "$2" | grep -ac '^mmu: memory protection back on, the kernel checked')
+    [ "$np" -ge 2 ] && [ "$nb" = $((np - 1)) ] && ok "$1: every session paused protection and turned it back on after the checks ($nb), but the damaged one" ||
+        no "$1: paused $np times, back on $nb times"
+}
 L4=$OUT/serial-040.log
-ZENIX_BUILD=$BD tools/run-test.sh fsuae/zine/a1200-040fpu.fs-uae 300 tools/tests/zine-040-test.txt > $L4 2>&1
+withpoke tools/tests/zine-040-test.txt "$OUT/zine-040.txt"
+ZENIX_BUILD=$BD tools/run-test.sh fsuae/zine/a1200-040fpu.fs-uae 500 "$OUT/zine-040.txt" > $L4 2>&1
 log4=$(tr -d '\r' < $L4)
 echo "$log4" | grep -aq '^zmmu-rc=0' && echo "$log4" | grep -aq 'ZINE: an MMU instruction (PMOVE, PFLUSH, PTEST) taken as a no-op' && ok "68040: zmmu's 68030 MMU instructions as no-ops" || no "68040 zmmu: $(echo "$log4" | grep -a 'zmmu\|MMU instruction' | tail -2)"
 echo "$log4" | grep -aq "^ZINE: the 68040's missing FPU instructions are emulated (Motorola's M68040 Floating Point Software Package)" && echo "$log4" | grep -aq '^zfpu-rc=0' && ok "68040: FSIN (the 040 lacks it) emulated by the 68040 package (16.14)" || no "68040 zfpu: $(echo "$log4" | grep -a 'zfpu\|sp040\|68040.s' | tail -2)"
@@ -166,6 +186,7 @@ prot() {    # prot NAME LOG
         no "$1 protection: $(echo "$2" | grep -a '^mmu:\|prot-rc\|memory protection' | tail -3)"
 }
 prot 68040 "$log4"
+damaged 68040 "$log4"
 echo "$log4" | grep -aiE 'panic|exception|guru' && no "68040: the kernel log has a panic or exception"
 # 16.14 on a 68060 with its FPU (fsuae/zine: FS-UAE's 68060 FPU, PCR ID 0x0430, switched off at the start as on a real
 # 68060 before 68060.library): Motorola's 68060 package (/lib/zine/sp060) for the FPU's and the integer unit's
@@ -187,6 +208,22 @@ echo "$log6" | grep -aq '^ZINE: zalloc sees chip RAM and the fast RAM below 16 M
 h1=$(echo "$log6" | grep -a -m1 '^fast RAM free' | tr -dc 0-9); h2=$(echo "$log6" | grep -a '^fast RAM free' | sed -n 2p | tr -dc 0-9)
 [ -n "$h1" ] && [ "$h1" = "$h2" ] && echo "$log6" | grep -aq '^zine-060-done' && echo "$log6" | grep -aq '^disk-ok' && ok "68060: free memory as before, the disk written afterwards" || no "68060: memory $h1 -> $h2 KB, or the end not reached"
 prot 68060 "$log6"
+n6=$(echo "$log6" | grep -ac '^mmu: memory protection back on, the kernel checked'); z6=$(echo "$log6" | grep -ac '^zine: back after')
+[ "$z6" -ge 5 ] && [ "$n6" = "$z6" ] && ok "68060: every session's way back checked the kernel and made the trees again ($n6)" || no "68060: back on $n6 times for $z6 sessions"
 echo "$log6" | grep -aiE 'panic|exception|guru' && no "68060: the kernel log has a panic or exception"
+# D60 7.3 on the 68030 (FS-UAE's 68030 MMU, the 8 MB Zorro II fast RAM): sessions, Zenix and protection back each time,
+# the memory as before; then the stray write found
+L3=$OUT/serial-030.log
+withpoke tools/tests/zine-030-test.txt "$OUT/zine-030.txt"
+ZENIX_BUILD=$BD tools/run-test.sh fsuae/matrix/a1200-030.fs-uae 400 "$OUT/zine-030.txt" > $L3 2>&1
+log3=$(tr -d '\r' < $L3)
+echo "$log3" | grep -aq '^first-rc=7' && echo "$log3" | grep -aq '^zhello-rc=0' && echo "$log3" | grep -aq '^ztake-rc=0' &&
+    echo "$log3" | grep -aq '^zcrash-rc=1' && echo "$log3" | grep -aq '^zalloc-rc=0' &&
+    ok "68030: zexit, zhello, ztake, zcrash and zalloc as on the 68020" || no "68030: $(echo "$log3" | grep -a -- '-rc=' | tr '\n' ' ')"
+k1=$(echo "$log3" | grep -a -m1 '^fast RAM free' | tr -dc 0-9); k2=$(echo "$log3" | grep -a '^fast RAM free' | sed -n 2p | tr -dc 0-9)
+[ -n "$k1" ] && [ "$k1" = "$k2" ] && echo "$log3" | grep -aq '^zine-030-done' && echo "$log3" | grep -aq '^disk-ok' && ok "68030: free memory as before, the disk written afterwards" || no "68030: memory $k1 -> $k2 KB, or the end not reached"
+prot 68030 "$log3"
+damaged 68030 "$log3"
+echo "$log3" | grep -aiE 'panic|exception in the kernel|guru' && no "68030: the kernel log has a panic or exception"
 echo "$log" | grep -aiE 'panic|exception|guru' && no "the kernel log has a panic or exception"
 exit $((1 - pass))

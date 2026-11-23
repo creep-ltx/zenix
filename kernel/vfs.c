@@ -1193,6 +1193,8 @@ long vfs_mount(const struct umountreq *r)
     mt->net = (u8)net_type(&fi);
     mt->root = (u32)root;
     nmnt++;
+    if (mmu_d41 && port_owner(port))
+        mmu_sysmark(port_owner(port));          /* MMU=D41 (D60 12): D41 7's system process, once mounted */
     perm_epoch++;                       /* F13: a new mount can sit between a mount and its parent */
     return 0;
 }

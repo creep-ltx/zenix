@@ -58,6 +58,9 @@ struct krec {
 #define D_VALW  0x20
 extern const u8 sock_dirs[];
 extern u32 mmu_winners;         /* bit n: procs[n] holds a window of a request (resident) */
+/* D60 stage 5 (resident): the boot options MMU=STRICT (old servers get no lend, 5.8) and MMU=D41 (D41's system
+ * processes, section 12), set by mmu_setup */
+extern u8 mmu_strict, mmu_d41;
 extern u32 mmu_syncing;         /* bit n: procs[n] is in a system call with a window's copy page given back to its
                                  * client (D60 5.7); resident, tested at every system call's end */
 
@@ -68,7 +71,7 @@ struct mmu_ops {
     int (*block)(u32, u32, u32);
     void (*upd_gone)(void);
     void (*freed)(u32, u32, u32);
-    void (*hand)(int);
+    int (*hand)(int);
     void (*before_reset)(void);
     int (*fault)(const u8 *, u32);
     struct umsg *(*rec)(struct umsg *, u32);
@@ -88,6 +91,7 @@ struct mmu_ops {
     long (*ramdisk)(u32, u32, u32);
     void (*postbuf)(struct port *, u32, struct port *, u32, u32);
     long (*drv)(u32, void *, u32);      /* D60 stage 4: drv.c's DRV_AUDIO and DRV_PARXFER (op, the caller's claim, b) */
+    void (*mark)(struct proc *, int);   /* D60 stage 5: 0 MMU=D41's system process (D41 7), 1 the bundle asked for */
 };
 long drv_span_(u32 op, void *claim, u32 a);
 /* D60 stage 3, SYS_callv: the declaration of the call being made (syscall.c sets it, mmu_rec takes it; resident) */
@@ -111,12 +115,17 @@ static inline __attribute__((always_inline)) void mmu_forget(struct proc *p) { i
 static inline __attribute__((always_inline)) void mmu_redo(struct proc *p) { if (__builtin_expect(mmu_on, 0)) mmu_ops->redo(p); }
 /* mem.c: a MEM_USER block was made: valid now in its owner's tree */
 static inline __attribute__((always_inline)) void mmu_block(u32 data, u32 len, u32 owner) { if (__builtin_expect(mmu_on, 0)) mmu_ops->block(data, len, owner); }
+/* syscall.c UPD_INFO: current (root) sees the bundle from now on, read only, until UPD_RELEASE or its end (7.2) */
+static inline void mmu_upd_ask(void) { if (__builtin_expect(mmu_on, 0)) mmu_ops->mark(current, 1); }
+/* MMU=D41 (D60 12): p becomes a system process by D41 section 7's rules (svc.c, ipc.c, vfs.c, drv.c, gcon.c) */
+static inline void mmu_sysmark(struct proc *p) { if (__builtin_expect(mmu_d41, 0)) mmu_ops->mark(p, 0); }
 /* mem.c upd_release: the update bundle's pages out of every view */
 static inline __attribute__((always_inline)) void mmu_upd_gone(void) { if (__builtin_expect(mmu_on, 0)) mmu_ops->upd_gone(); }
 /* mem.c: a block is freed: its whole pages invalid in every tree (a shared segment's owner: every global entry too) */
 static inline __attribute__((always_inline)) void mmu_freed(u32 data, u32 len, u32 owner) { if (__builtin_expect(mmu_on, 0)) mmu_ops->freed(data, len, owner); }
-/* ZINE: translation off (0) for the session, back on (1) after */
-static inline __attribute__((always_inline)) void mmu_hand(int back) { if (__builtin_expect(mmu_on, 0)) mmu_ops->hand(back); }
+/* ZINE: translation off (0) for the session, back on (1) after: then the kernel's code and records are checked and every
+ * tree is made again (D60 7.3); not 0: they were found damaged (translation stays off: the caller resets) */
+static inline __attribute__((always_inline)) int mmu_hand(int back) { return __builtin_expect(mmu_on, 0) ? mmu_ops->hand(back) : 0; }
 /* machine_reset: translation off, the TTRs cleared */
 static inline __attribute__((always_inline)) void mmu_before_reset(void) { if (__builtin_expect(mmu_on, 0)) mmu_ops->before_reset(); }
 /* exc_c, a user-mode exception: 1 if it was protection (said) */
@@ -131,6 +140,7 @@ static inline __attribute__((always_inline)) void mmu_unsync(void) { if (__built
 /* mem.c, for mmu_fault's line: the owner of the block holding a (*used 0: free), or MEM_NOT_POOL outside the pools */
 #define MEM_NOT_POOL 0xFFFFFFFFu
 u32 mem_owner_of(u32 a, int *used);
+u32 mem_sane(void);             /* D60 7.3: every block header consistent (0), else the first bad one's address */
 
 /* cache.c (D37), for mmu.c: D37's block over the fast RAM (a CP_* answer, kernel/cache_plan.h) and in io[8] the 16 MB
  * units that hold a board that is not RAM; the hardware table must be there */

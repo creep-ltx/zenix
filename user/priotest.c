@@ -7,7 +7,9 @@
  *   wake     a nice 0 process waking from a one-tick sleep runs at once, although a nice 5 spinner is busy
  *   inherit  a nice 0 client calling a nice 10 server is not held up by a nice 5 spinner: the server works at the
  *            client's level while it serves it (QNX-style priority inheritance), and drops back after the reply
- * The children share one block of the parent's memory (no MMU: the address is passed as an argument). */
+ * The children share one region of the parent's memory: its address passed as an argument, offered to each child with
+ * SYS_shm and taken by it (DESIGN D60 7.4: with memory protection on, a child sees it only then; without, the calls
+ * change nothing). */
 #define E_MS   709u                     /* E-clock ticks per millisecond (PAL; NTSC is 1% faster: within the limits) */
 #define GAP    (2 * E_MS)               /* a pause this long in a spinner's own clock readings: it was off the CPU */
 #define MAXS   64
@@ -74,6 +76,12 @@ static void server(void)
 static int child(char **argv)
 {
     sh = (struct shared *)strtoul(argv[3], 0, 16);
+    int t = sys_shm(SHM_TAKE, sh, 0);   /* the parent offers it right after the spawn: until then -ENOENT */
+    for (int i = 0; t == -2 && i < 200; i++) {
+        sys_sleep(1);
+        t = sys_shm(SHM_TAKE, sh, 0);
+    }
+    if (t < 0) { dprintf(2, "priotest: cannot take the shared region (%d)\n", t); return 1; }
     if (setpriority(PRIO_PROCESS, 0, atoi(argv[4])) < 0) { dprintf(2, "priotest: setpriority: %s\n", zwhy("refused")); return 1; }
     if (argv[2][0] == 's') server();
     spin(&sh->r[argv[2][0] - '0'], (u32)atoi(argv[5]));
@@ -89,6 +97,8 @@ static int start(const char *role, int nice, u32 ms)
     char *argv[] = { "priotest", "-c", (char *)role, a, n, t, 0 };
     int pid = sys_spawn("/bin/priotest", argv, 0);
     if (pid < 0) { dprintf(2, "priotest: cannot start a child: %s\n", zwhy("failed")); sys_exit(1); }
+    int o = sys_shm(SHM_OFFER, sh, (u32)pid);
+    if (o < 0) { dprintf(2, "priotest: cannot offer the shared region (%d)\n", o); sys_exit(1); }
     return pid;
 }
 

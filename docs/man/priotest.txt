@@ -32,7 +32,9 @@ EXIT STATUS
     0 if the check passed, 1 if not, 2 for a usage error.
 
 NOTES
-    The children share a block of the parent's memory (no MMU), and the
+    The children share a region of the parent's memory: the parent
+    offers it to each child with SYS_shm and the child takes it (DESIGN
+    D60 7.4), so the checks run with memory protection on too. The
     inherit and stale checks use a port called "priot".
 
 SEE ALSO

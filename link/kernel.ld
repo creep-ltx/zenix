@@ -10,6 +10,8 @@ SECTIONS
         *(.text*)
     }
     .rodata : { *(.rodata*) }
+    . = ALIGN(4);
+    __kro_end = .;                  /* D60 7.3: the end of what ZINE's check sums (from _start) */
     .data : { *(.data*) }
     /* DESIGN D45 (docs/d45-boot-memory.md): the spans given back to the pool after the boot. Each starts with 32 bytes
      * for the pool's block header; tools/check-init.py checks that nothing outside reaches into them. The boot's: its

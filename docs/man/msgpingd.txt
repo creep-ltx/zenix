@@ -41,7 +41,11 @@ DESCRIPTION
                 DMAEN, an AUDxLCH alone, a channel playing from a block it
                 then frees; one line "msgpingd: paula ..." with the
                 answers, then it writes Paula itself, which with memory
-                protection on ends it (tools/mmu-test.sh).
+                protection on ends it (tools/mmu-test.sh). With -old: an
+                old sound server, which claims Paula and only writes it
+                itself ("msgpingd: paula (old): wrote Paula myself"): the
+                custom chips' page an old one gets at its claim allows it,
+                and with MMU=STRICT (zenixboot(8)) it ends instead.
     -call NAME  call port NAME once before opening its own port (a server
                 whose start needs another service; D11's tests use it to
                 make a cycle).

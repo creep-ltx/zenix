@@ -812,7 +812,8 @@ pattern (section 6).
 - **Memory protection** (D41, on by default where the MMU is known, section 2; docs/d41-memory-protection.md). Every
   process, the servers, drivers, `init` and the service manager's programs included (DESIGN D60 stage 3: there are no
   system processes), sees in user mode only its view: its block, its regions, its code read only (what
-  `user_ok_wr`/`rd` allow; root's also the update bundle, read only, for zup), its inbox, the windows of the requests
+  `user_ok_wr`/`rd` allow; a root process that asked `SYS_update` `UPD_INFO` also the update bundle, read only, until
+  `UPD_RELEASE` or its end, the two part pages at its ends as copies holding only its bytes: D60 stage 5), its inbox, the windows of the requests
   it holds, and its **grants** (stage 3, mmu.c, at most 32 in all): the register pages of the device it claimed
   (`SYS_drv` `DRV_CLAIM`: a Zorro board's window, the PC Card slot's 0xA00000-0xA4FFFF, the custom chips' page for
   an old sound server only (D60 stage 4: a sound server built with D60 drives Paula through `DRV_AUDIO`, the
@@ -826,7 +827,17 @@ pattern (section 6).
   also gets, at a program's request, its client's whole view when `SYS_debug`'s rule would let it debug the client
   (lent into its tree at `ipc_recv`; after the reply kept while that client's next request waits at one of its ports,
   taken back at its next switch to user mode otherwise, or at once when the client gets a block, ends or has its code
-  made again); any other client's request to it is answered -EACCES. **Each process
+  made again); any other client's request to it is answered -EACCES. Two boot options (D60 stage 5, zenixboot(8),
+  `kopts` 32 and 64): `MMU=STRICT` gives an old server nothing beyond what its clients declare (no whole-client lend,
+  no chips' page for an old sound server, no old poster's ring); `MMU=D41`, the way back for the first hardware runs,
+  makes the processes D41 section 7 named (services, a reserved port's or a mount's server, a driver after its claim,
+  the display server after its grab) system processes again: while one runs every user access is let through by the
+  transparent translation registers, it gets no windows (it reaches its clients' buffers in place, and may hand any
+  process's memory to a system call), every other server gets D41's whole-client lend, and `SYS_meminfo`'s fifth
+  word is 1. A ZINE session runs with translation off; after it the kernel checks its code and read-only data against
+  a sum taken at boot and its records (the process slots, every block header, the windows, bounce pages, grants and
+  the tables' pool), then makes every tree again from the records (a damage found: the machine is reset,
+  `KLOG_END_ZINE_DAMAGED`). **Each process
   has its own translation tree** (DESIGN D60 stage 1, docs/d60-full-protection.md section 4 and "As built"), identity
   mapped, made at its first switch to user mode from a pool of 256- and 512-byte tables cut from kernel pages; its
   tables go back to the pool when their last page goes (a lend's stay until the tree ends). `schedule()` calls

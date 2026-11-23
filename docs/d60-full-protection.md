@@ -1356,3 +1356,114 @@ Tests (FS-UAE in fast mode unless said):
   the kernel (the next command typed while the shell still waited; fixed in its own commit, 9cf40f8).
 - Not done: any real CPU; a plipbox (no emulator has one: `DRV_PARXFER`'s receive into the frame pool is checked by
   review only); the old-sndd page and `MMU=STRICT` (stage 5).
+
+## 22. As built: stage 5 (2026-11-23, branch d60s5)
+
+The special cases (section 14's stage 5): zup's bundle, `priotest` and `pure-test` on `SYS_shm` with protection on,
+ZINE's checks and rebuild, `MMU=STRICT` and `MMU=D41`, the old sound server's page tested, the update path with
+protection on.
+
+### 22.1 What was built
+
+`kernel/mmu.c` (the bundle's map, ZINE's checks and rebuild, the system mark), `kernel/mem.c` (`mem_sane`, in the
+span), `kernel/zine.c`, `kernel/syscall.c`, `kernel/serial.c`, the D41 mark sites (proc.c, ipc.c, vfs.c, drv.c,
+gcon.c), `link/kernel.ld` (`__kro_end`), `boot/zenixboot.c`, `tools/kopts.py`; `user/priotest.c`, `user/msgpingd.c`,
+`tools/tests/zine/zpoke.S`.
+
+- **zup's bundle (7.2)**: shown only to a root process that asked `SYS_update` `UPD_INFO` (every zup does, older
+  ones too; also boot, login, zpkg, wasabid and uname as root: read only, and only until boot's `UPD_RELEASE`),
+  until `UPD_RELEASE` or its end; its whole pages as they are, read only; each part page at its ends onto a kernel
+  page holding only the bundle's bytes there (made once, shared by every tree that shows it, freed with the bundle).
+  The ask maps it at once (the caller reads it next). A copy that cannot be made leaves the bundle out of the tree,
+  tried again at the next switch. The tables' pool keeps the page it grew by for those tables (4 KB of `free` after
+  an update on the 040, update-test allows it with protection on).
+- **ZINE (7.3)**: "memory protection paused for ZINE" before the hand-over; after the session, before translation
+  comes back, the kernel's code and read-only data (`_start` to `__kro_end`, and the protection span past its block
+  header) against a sum taken at the boot, the memory's block headers (magic, sizes, back links, each range ending
+  exactly), every live process slot (its state, its block, regions, code and inbox pages in use), the windows (a
+  record in the records' table or the heap, its server alive, its bounce pages in use), the bounce pages, the grants,
+  the tables' pool and the kept bounce pages (whole kernel pages, never the kernel's own tree); then every tree
+  dropped without freeing (the pool's pages, listed since stage 5, cut into free units again, the kernel's tree
+  cleared) and made again from the records at each process's next switch, current's at once; "back on, the kernel
+  checked". A change found: "after ZINE: Zenix's memory is damaged (code|blocks|slots|windows|grants|tables)",
+  `KLOG_END_ZINE_DAMAGED`, the machine reset; the next boot's previous-boot line says it. On that path the kernel's
+  own code still runs (kprintf, the reset): D29 9.4 wants none, which only the blob's own sums could give.
+- **`MMU=STRICT` (kopts 32)**: a program's request to an old server -EACCES (the log line says MMU=STRICT), no lend
+  in a rebuilt tree, no old poster's ring pages, no chips' page for an old sound server (it ends at its first write
+  to Paula).
+- **`MMU=D41` (kopts 64, wins over STRICT)**: D41 section 7's five rules mark system processes again (a service's
+  process at its start, a reserved port's creator once the port is made, a mount's server once mounted, a driver at
+  its claim, the display server at its grab). While one runs every user access goes through the transparent
+  translation registers (D41's windows, `win[0]`); it gets no windows (those it held are dropped, their bytes back to
+  the client) and its tree goes; `user_ok_call_*` accept for it any range in one process's own memory; the raw-disk
+  calls (`SYS_blk_*`, `SYS_fd_rw`, `SYS_atapi`) do not check the disk server's buffer, as under D41. A program's
+  request to any other server gets D41's whole-client lend where `SYS_debug`'s rule allows, its declared buffers
+  otherwise; `SYS_meminfo`'s fifth word is 1, so libz's helpers, sndd, diskd and netd act as before D60. Not D41
+  exactly: the trees per process, the kernel's records, inboxes and declared windows of stages 1-2 stay, and
+  `CON_GRAB` stays the display service's.
+- **An old server's lent client** (5.8): a range in its memory or in a window it holds passes `user_ok_call_*` for
+  the server (an old disk server reading into its client's buffer, as D41's did).
+- **The boot line** ends "(a tree per process; MMU=STRICT)" or "(...; MMU=D41)".
+- **Tests**: priotest offers its region to each child (`SHM_OFFER`), which takes it (`SHM_TAKE`, tried again a tick
+  later until offered); pure-test expects, with protection, the two writes into shared code ended with the
+  protection line and the copy kept; both are in `tools/mmu-suite.sh`'s list (`ZENIX_MMU_TESTS` gives another);
+  mmu-test checks the old sound server (`msgpingd -paula -old`: it writes Paula through its claim's page) and has the
+  models `+strict` and `+d41` (in check.sh's split); zine-emu-test runs a 68030 too and ends the 030 and 040 runs with
+  `zpoke` changing a byte of `upd_release` during a session.
+
+### 22.2 Size and memory
+
+kernel.bin 227,824 -> 231,248 bytes (+3,424): `mmu` 19,524 -> 22,066 bytes of code and data and bss + 50 (in the
+protection span: the bundle's map, ZINE's checks and rebuild, the D41 mode; given back after the boot when protection
+is off), `mem` + 148 (`mem_sane`, in the span), `zine` + 150 (its two log lines and the damaged path), `syscall` + 104,
+`serial` + 91 (the next boot's line), `ipc` + 86, `vfs` + 56, `drv` + 34, `proc` + 28, `gcon` + 26. The mount tests' RAM disk 655 -> 652 KB (its floppy keeps
+1,200 bytes, above the 800 kept); the DD demo floppy 7,680 -> 5,632 bytes free (-2,048: the packed stream grew by 2,221
+bytes). RAM with protection on only: the bundle's two copy pages while it is shown, the pool's page list (128 bytes a
+32 pages). Speed: no request's path changed (the switch's bundle test reads one more word; a D41 test one more).
+
+### 22.3 Reviews and tests
+
+Two independent reviews of the code (2026-11-23). **The mechanics**: must-fix: `__kro_end` not aligned, so the
+long-wise sum could take `.data`'s first bytes and every session would have looked damaged (now `ALIGN(4)`). Fixed
+too: the pool's page list, the kept bounce pages and each window's record checked before the rebuild writes into
+them; a bundle copy that cannot be made is not marked (tried again); a D41 system process drops its tree. Checked
+fine: the part-page arithmetic, the copies' descriptors and cache modes, the removal, the rebuild's order with the
+registers (`mmu_regs_load` flushes everything), D41's windows and the switch back, every flush. **The interface and
+security model**: must-fix: under `MMU=D41` the raw-disk calls still checked the disk server's buffer (D41 never
+did: a ZenixFS root's program loads would fail): unchecked again under D41; an old server's lent client's windows
+also pass `user_ok_call_*` (an old disk server serving a forwarded window); the +strict/+d41 models into check.sh's
+split; frozen-interfaces.md's stage 5 entry and claims.md. Should-fix done: D41 without the debug rule serves a marked
+port's declared buffers (not -EACCES); the -EACCES line says MMU=STRICT; kopts.py's two words exclusive; the D41
+marks after the port or the mount succeeded. Written down, not changed: the damaged path runs the kernel's code (22.1);
+zpoke tests only the code's sum (the records' checks are read, not run); `MMU=D41`'s owner check walks the blocks
+(a system process's foreign pointer, not the disk server's now); a process that gives up root keeps the bundle until
+its next switch (limits.md); `CON_GRAB` stays the display service's under D41.
+
+Tests (FS-UAE 3.2.35 in fast mode unless said; Amiberry 8.5.0; protection on where the CPU has an MMU):
+- `mmu-test` FS-UAE 020 030 lc040 040 060 lc060 030+d41 040+strict 060+d41 060+strict, Amiberry 030 040 060 040+strict
+  060+d41: pass; new checks: the old sound server writes Paula through its claim's page (and only the hostile one is
+  ended at 0xdff0a8); STRICT: an old server's request -13, the old sound server ended at its write; D41: a service and
+  a user's server write their client's memory without asking, an old server served, the system works.
+- `zine-emu-test`: pass (the 020's sessions unchanged; 040 and 060 with protection: every session paused and turned
+  back on with the checks, 9 each; the 030 run; on the 030 and the 040 zpoke's changed byte found, the machine reset,
+  the next boot's "ended here after ZINE: the Amiga program wrote over Zenix's memory").
+- `mmu-suite` (now with prio-test and pure-test) 030, 040, 060 in FS-UAE: every test passes; in Amiberry the same but
+  svc-test's "fsd is pid 3, at nice -10" on the 040 (Amiberry's timing, as since 18.4) and pure-test on the 030 before
+  its fix (8e74019: the protection lines counted twice, the shell's state; passes after it). lua-test passes on
+  Amiberry's 060 (its marker race fixed, 2ce5e34). prio-test with priotest on `SYS_shm` passes on all six.
+- **The update path with protection on**: `update-test` (install, bad, cold, previous, panic, hang, refused, nozup,
+  zfsroot, zfsreal, slowzup) on 030, 040, 060 in both emulators: pass, zup reading its bundle through the new map,
+  but install's free check in Amiberry before 388b60f (5 KB of tables kept, the allowance was 4). `sysupdate-test`
+  b (the owner's way from 2026103000: the old zpkg, then the new kernel's first boot with the old programs, zup the
+  root half, then the next update) at stock speed on the 040: pass; in fast mode on the 030, 040 and 060 its downloads
+  time out (zpkg's time-outs in emulated seconds against the PC's server; 020 in fast mode passes), on the 060 every
+  step but one download. `sysupdate-test` m and `zpkg-emu-test` e (stock) on the 040 and 060: pass; on the 030 e with
+  8 MB of fast RAM: pass (with the tests' 2 MB of chip RAM alone protection's tables and page-rounded blocks leave zup
+  and zpkg without memory: a 68030 without fast RAM, none of the target machines). Amiberry runs no network
+  (`tools/fsuae_conf.py` gives it no A2065): sysupdate-test and zpkg-emu-test not there.
+- Without an MMU (FS-UAE's 68020, `tools/check.sh`, fast mode): cmds-test, svc-test (every part), bootmem-test,
+  zdb-test, readdir-test, sock-test, netd-test, pure-test, prio-test, mounttest, zine-emu-test, sound-test, eth-test,
+  gcon-test, update-test (every part), lua-test, memtest, and sysupdate-test b: pass.
+- Not done: the update path with `MMU=STRICT` (13 asks it: the update tests build their new kernels from source, so the
+  kernel file's default cannot be set; zenixboot `MMU=STRICT` on the test's boot partition would do it, as the next
+  step); any real CPU; the records' checks after ZINE run against a deliberate damage (only the code's).

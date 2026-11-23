@@ -1,0 +1,20 @@
+wait zenix:/# 120
+sleep 1
+send zine /tests/zine/zexit; echo first-rc=$?\r
+wait first-rc= 60
+send free\r
+wait (?m)^fast RAM free.*\n 20
+send zine /tests/zine/zhello; echo zhello-rc=$?\r
+wait zhello-rc= 60
+send zine /tests/zine/ztake; echo ztake-rc=$?\r
+wait ztake-rc= 60
+send zine /tests/zine/zcrash; echo zcrash-rc=$?\r
+wait zcrash-rc= 60
+send zine /tests/zine/zalloc; echo zalloc-rc=$?\r
+wait zalloc-rc= 90
+send free\r
+wait (?m)^fast RAM free.*\n 20
+send crash write 0x1000; echo prot-rc=$?\r
+wait prot-rc= 30
+send echo disk-ok > /home/z30.disk; sync; cat /home/z30.disk; echo zine-030-done\r
+wait zine-030-done 20

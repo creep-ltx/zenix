@@ -34,7 +34,9 @@
  * DESIGN D60 stage 4 (tools/mmu-test.sh): -paula, registered as the service "audio" (svctest reg), claims Paula and
  * tries DRV_AUDIO with a channel in the kernel's memory, in its own chip RAM, past its end, in its own fast RAM, with
  * DMAEN, with an AUDxLCH alone; plays from its own chip RAM and frees it (the channel must stop) and turns the channel
- * on again without a new pointer; says every answer in one line, then writes Paula itself (which must end it). */
+ * on again without a new pointer; says every answer in one line, then writes Paula itself (which must end it).
+ * DESIGN D60 stage 5: -paula -old, an old sound server (its port not marked): claims Paula and writes it itself, which
+ * the custom chips' page granted at its claim allows (5.8), and says so; with MMU=STRICT it gets no page and ends. */
 #define FS_OPEN 1
 #define FS_READDIR 6
 #define FS_CLOSE 24
@@ -176,9 +178,15 @@ static int aud(int claim, int n, const unsigned short *w)
     int r = sys_drv(DRV_AUDIO, (u32)claim, (u32)&q);
     return n && r > 0 ? 0 : r;                      /* (a batch's answer: its registers; 0 for the line) */
 }
-static void paula(void)
+static void paula(int old)
 {
     int c = sys_drv(DRV_CLAIM, DRV_PAULA, 0);
+    if (old) {                                      /* an old sndd writes Paula itself */
+        if (c < 0) { dprintf(1, "msgpingd: paula (old): claim %d\n", c); return; }
+        *(volatile unsigned short *)0xDFF0A8 = 0;
+        dprintf(1, "msgpingd: paula (old): wrote Paula myself\n");
+        return;
+    }
     char *chip = sys_memalloc_chip(8192), *fast = sys_memalloc(8192);
     if (c < 0 || !chip || !fast) { dprintf(1, "msgpingd: paula: claim %d, memory %d\n", c, chip && fast); return; }
     u32 k = 0x2000, a = (u32)chip, f = (u32)fast;      /* 0x2000: low chip RAM, the kernel's */
@@ -227,7 +235,7 @@ int main(int argc, char **argv)
     int port = old ? sys3(29, (u32)pname, 0, 0) : sys_port_create(pname);    /* (-old: not marked PEER_EXACT) */
     if (port < 0) { dprintf(1, "msgpingd: port busy\n"); return 1; }
     if (pau)
-        paula();
+        paula(old);
     if (uid >= 0 && sys_setuid((u32)uid) < 0) { dprintf(1, "msgpingd: setuid %d failed\n", uid); return 1; }
     struct umsg *m = sys_recv(port, 1);
     for (;;) {

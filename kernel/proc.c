@@ -696,8 +696,10 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
         rq_push(p);
         irq_restore(s);
     }
-    if (current->svc_depth)
+    if (current->svc_depth) {
         svc_born(pid);                  /* a service's server (D11): its entry is starting from now on (confined: D60) */
+        mmu_sysmark(p);                 /* (MMU=D41, D60 12: D41 7's system process) */
+    }
     return pid;
 }
 

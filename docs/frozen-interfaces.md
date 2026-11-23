@@ -328,6 +328,22 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   keeps the custom chips' page); the kernel's own blocks never come from chip RAM while there is fast RAM (an
   allocation the fast RAM cannot give fails, -ENOMEM, internal). An old (pre-stage-4) plipbox driver does not work
   with full protection (stage 5's update-path list).
+- **D60 stage 5 (the special cases; branch `d60s5`, 2026-11-23; docs/d60-full-protection.md 7.2, 7.3, 12 and "As
+  built"), while memory protection is on unless said:** bootinfo `kopts` bit 32 `KOPT_MMU_STRICT` and bit 64
+  `KOPT_MMU_D41` (also in the kernel file's default long, `tools/kopts.py MMU=STRICT|MMU=D41`, which set their bit and
+  clear the other's; `MMU=ON|OFF|AUTO` clear both); zenixboot's `MMU=` takes one word, `ON`, `OFF`, `STRICT` or
+  `D41`: neither of the last two turns protection on by itself (the kernel's default decides). `D41` wins over
+  `STRICT`. With `STRICT` a program's request to an old server (a port not `PEER_EXACT`) is -EACCES whatever
+  `SYS_debug`'s rule says, an old sound server's `DRV_CLAIM` of Paula maps no register page and an old poster gets no
+  window's pages (stage 3's sentence on old servers holds without `STRICT`). With `D41` the processes D41 section 7
+  named are system processes again (they see all memory), a program's request to a marked port gets the whole-client
+  lend where `SYS_debug`'s rule allows and its declared buffers otherwise, and `SYS_meminfo`'s fifth word is 1. The
+  boot line ends `(a tree per process; MMU=STRICT)` or `(...; MMU=D41)` (its start, which the tests read, is
+  unchanged). The update bundle (D15) is shown, read only, only to a root process that asked `SYS_update` `UPD_INFO`,
+  until `UPD_RELEASE` or its end (D41: every uid 0 process); every zup asks first, older ones included. `ZINE_GO` may
+  not return: when the kernel's code or records are found changed after the session the machine is reset (the
+  previous boot's reason `KLOG_END_ZINE_DAMAGED` 4); the kernel log's lines `mmu: memory protection paused for
+  ZINE`, `mmu: memory protection back on, the kernel checked` and `mmu: after ZINE: Zenix's memory is damaged (WHAT)`.
 - **One accepted change of meaning (D60 6.3, approved by the partner 2026-11-22, a deliberate security change):**
   with full memory protection `CON_GRAB` is the display service's alone (the process the service manager started for
   port `display`): any other process, root included, gets -EPERM (the kernel log says so once). Before, any root
