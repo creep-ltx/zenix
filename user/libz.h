@@ -76,6 +76,7 @@ void zscr_init(void);                 /* the size now; a SIGWINCH from now on no
 int zscr_size(void);                  /* the size read again: 1 if it changed */
 int zscr_resized(void);               /* 1 once after a SIGWINCH (the size read again): draw everything anew */
 void zscr_at(int row, int col);       /* the cursor to row, col (1-based) */
+int zscr_move(char *b, int row, int col);   /* the same escape into b (24 bytes): its length */
 void zscr_putw(const char *s, int w); /* s in exactly w columns: cut on whole characters, then spaces */
 void zscr_bar(int row, const char *s);   /* a line in reverse video (a title) */
 void zscr_status(const char *s);      /* the status line: reverse video, the bottom row */

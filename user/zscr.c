@@ -44,16 +44,23 @@ static void zscr_num(u32 v, char *e)
     while (k) *e++ = d[--k];
     *e = 0;
 }
-void zscr_at(int row, int col)
+int zscr_move(char *b, int row, int col)
 {
-    char b[24] = "\033[";
+    b[0] = '\033';
+    b[1] = '[';
     zscr_num((u32)(row > 0 ? row : 1), b + 2);
     u32 n = strlen(b);
     b[n++] = ';';
     zscr_num((u32)(col > 0 ? col : 1), b + n);
     n = strlen(b);
     b[n++] = 'H';
-    oputn(b, n);
+    b[n] = 0;
+    return (int)n;
+}
+void zscr_at(int row, int col)
+{
+    char b[24];
+    oputn(b, (u32)zscr_move(b, row, col));
 }
 #ifndef ZENIX_LIBC                     /* (the UTF-8 widths are libz's: the C library's programs, the games, need none) */
 void zscr_putw(const char *s, int w)

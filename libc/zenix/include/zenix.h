@@ -51,6 +51,7 @@ void zscr_init(void);
 int zscr_size(void);
 int zscr_resized(void);
 void zscr_at(int row, int col);
+int zscr_move(char *b, int row, int col);  /* the escape into b (24 bytes), for a program with its own buffer */
 const char *zprogname(void);
 struct zdt { int year, mon, day, hour, min, sec, wday, yday; };
 void zdate(unsigned int t, struct zdt *d);
