@@ -170,7 +170,7 @@ sock      4700   1060
 drv       7000    720
 zine      1850     16
 cache     1800     32
-gcon      4500     16
+gcon      5000     16
 dbg       4100     20
 mmu      19800    240
 embed    51000      0

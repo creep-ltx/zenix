@@ -68,7 +68,7 @@ int input_inject(const u8 *r, int n) { (void)r; (void)n; return -EINVAL; }
 int gcon_away(int to) { (void)to; return 0; }
 int gcon_shown(int con) { (void)con; return 0; }
 long gcon_grab(int con, u32 a2) { (void)con; (void)a2; return -EPERM; }
-long gcon_ack(struct file *f, u32 op, u32 seq) { (void)f; (void)op; (void)seq; return -EBADF; }
+long gcon_ack(struct file *f, u32 op, u32 seq, u32 m) { (void)f; (void)op; (void)seq; (void)m; return -EBADF; }
 
 /* the program's side */
 void m_write(const char *s, unsigned n) { term_write(1, s, n); }

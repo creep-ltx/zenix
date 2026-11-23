@@ -1029,8 +1029,24 @@ struct uconline {            /* CON_LINE: the caller fills size, pens, npens; th
 #define CON_GACK        9
 /* D38 (zdesk's mouse setting): CON_MOUSE on the grab's descriptor, a2 THRESHOLD | MULTIPLIER << 8: in each frame, the
  * mouse's counts beyond THRESHOLD (0..127) along an axis count MULTIPLIER (1..8) times; 1 is none. A grab starts
- * without. -EINVAL out of range, -EBADF not the grab's descriptor */
+ * without. -EINVAL out of range, -EBADF not the grab's descriptor. D61 (docs/d61-mouse.md): a3 not 0 is a struct
+ * umouse in the caller's memory (a2 then 0, else -EINVAL): the pointer's units, bounds, speed, acceleration, sprite scale and
+ * hot spot, and where it goes; -EFAULT, -EINVAL out of range. A grab starts in hires pixels and frame lines, gains
+ * 0x200 across and 0x100 down, as D38's. */
 #define CON_MOUSE       10
+struct umouse {              /* D61: CON_MOUSE's a3 (kernel/pointer.h has the arithmetic) */
+    u16 size;                /* UMOUSE_FIRST or more */
+    u16 gainx, gainy;        /* the pointer's units a mouse count across and down, in 256ths (1..0x1000) */
+    u16 mult;                /* in a frame, the counts beyond `thresh` along an axis count mult/256 times (0x100..0x800;
+                              * 0x100 is no acceleration) */
+    u8 thresh;               /* 0..127 */
+    u8 shift;                /* the sprite: x >> (shift & 3) is its hires pixel, y >> (shift >> 2) its frame line (0..15) */
+    u16 w, h;                /* the pointer stays in 0..w-1, 0..h-1 (1..4096): GEV_* records' x, y are these units */
+    short x, y;              /* where it goes now (clamped); negative: where it is */
+    s8 hotx, hoty;           /* the sprite's hot spot: hires pixels, frame lines (as ucongrab's) */
+};
+#define UMOUSE_FIRST    20
+_Static_assert(sizeof(struct umouse) == UMOUSE_FIRST, "umouse is 20 bytes");
 /* DESIGN D28 22: the text console's mode, every console's (no descriptor; root to set): a2 CONM_HIRES (32 rows PAL,
  * 25 NTSC) or CONM_LACE (interlaced: 64 and 50), CONM_ASK asks -> the mode shown now. -EBUSY while a display server
  * has the screen, -ENOMEM (the screen's chip RAM or the consoles' grids), the display as it was. Each console's
@@ -1099,7 +1115,7 @@ struct ugevent {             /* a record of the grab's ring (16 bytes, frozen) *
 #define GQ_RBUTTON      0x2000
 #define GQ_LBUTTON      0x4000
 long gcon_grab(int con, u32 a2);
-long gcon_ack(struct file *f, u32 op, u32 a);   /* CON_GACK, CON_MOUSE */
+long gcon_ack(struct file *f, u32 op, u32 a, u32 m);    /* CON_GACK, CON_MOUSE */
 long gcon_hold(struct file *f, u32 pid, u32 base);      /* CON_HOLD (D55) */
 long gfx_vwait(u32 want);               /* CON_VBLANK (D55) */
 void gfx_vwake(void);                   /* kwork (gcon_work): the vertical blank's waiters woken */

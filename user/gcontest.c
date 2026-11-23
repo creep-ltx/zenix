@@ -11,7 +11,9 @@ typedef unsigned short u16;
  * deadline: the answer that lets the kernel use the blitter again), with noack never. It also tries to free the
  * grab's memory (refused, EBUSY).
  * With ACCEL (hex, after SECONDS) it sets the mouse's acceleration (CON_MOUSE: THRESHOLD | MULTIPLIER << 8), after
- * trying a wrong one (0x900: refused, EINVAL). It ends after SECONDS (default 60) or at the q key, giving the console
+ * trying a wrong one (0x900: refused, EINVAL); ACCEL "m" with SET (D61, docs/d61-mouse.md) sets the whole setting
+ * instead (CON_MOUSE's struct umouse; SET is W,H,GAINX,GAINY,THRESH,MULT,SHIFT,X,Y, numbers as C writes them), after
+ * trying a wrong one (a gain of 0: EINVAL). It ends after SECONDS (default 60) or at the q key, giving the console
  * back. `gcontest keys CODE...` types raw key
  * codes (hex) through CON_INPUT on descriptor 0, as the keyboard would (root); `gcontest mouse DX,DY,B ...` moves the
  * mouse and sets its buttons the same way (CONI_MOUSE); `gcontest dirty` fills the free chip RAM with 0xFF and gives
@@ -94,6 +96,22 @@ static int dirty(void)
     return 0;
 }
 
+/* "W,H,GAINX,GAINY,THRESH,MULT,SHIFT,X,Y" -> m */
+static void umouse_of(const char *s, struct umouse *m)
+{
+    long v[9] = { 640, 256, 0x200, 0x100, 0, 0x100, 0, -1, -1 };
+    char *e = (char *)s;
+    for (int i = 0; i < 9 && *e; i++) {
+        v[i] = strtol(e, &e, 0);
+        if (*e == ',')
+            e++;
+    }
+    memset(m, 0, sizeof *m);
+    m->size = sizeof *m;
+    m->w = (u16)v[0]; m->h = (u16)v[1]; m->gainx = (u16)v[2]; m->gainy = (u16)v[3];
+    m->thresh = (u8)v[4]; m->mult = (u16)v[5]; m->shift = (u8)v[6]; m->x = (short)v[7]; m->y = (short)v[8];
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 1 && !strcmp(argv[1], "dirty"))
@@ -103,7 +121,7 @@ int main(int argc, char **argv)
     if (argc > 1 && !strcmp(argv[1], "mouse"))
         return mouse(argc, argv);
     if (argc < 2 || (strcmp(argv[1], "ack") && strcmp(argv[1], "noack") && strcmp(argv[1], "late"))) {
-        dprintf(2, "usage: gcontest ack|late|noack [SECONDS [ACCEL]] | gcontest keys CODE... | gcontest mouse DX,DY,B... | gcontest dirty\n");
+        dprintf(2, "usage: gcontest ack|late|noack [SECONDS [ACCEL | m SET]] | gcontest keys CODE... | gcontest mouse DX,DY,B... | gcontest dirty\n");
         return 2;
     }
     int ack = !strcmp(argv[1], "ack"), late = !strcmp(argv[1], "late");
@@ -159,7 +177,15 @@ int main(int argc, char **argv)
     }
     say("gcontest: grabbed fd %d %ux%u depth %u chips %u\n", gfd, g.width, g.height, g.depth, g.chips);
     say("gcontest: memfree of the grab's memory -> %d\n", sys_memfree(mem));
-    if (argc > 3) {                     /* the mouse's acceleration (CON_MOUSE): a wrong one first, then ACCEL */
+    if (argc > 4 && !strcmp(argv[3], "m")) {     /* D61: the whole setting, a wrong one first */
+        struct umouse m;
+        umouse_of(argv[4], &m);
+        u16 gx = m.gainx;
+        m.gainx = 0;
+        say("gcontest: set gain 0 -> %d\n", sys_conmouseset(gfd, &m));
+        m.gainx = gx;
+        say("gcontest: set %s -> %d\n", argv[4], sys_conmouseset(gfd, &m));
+    } else if (argc > 3) {              /* the mouse's acceleration (CON_MOUSE): a wrong one first, then ACCEL */
         u32 acc = (u32)strtoul(argv[3], 0, 16);
         say("gcontest: accel 0x900 -> %d\n", sys_conmouse(gfd, 0x900));
         say("gcontest: accel 0x%x -> %d\n", acc, sys_conmouse(gfd, acc));

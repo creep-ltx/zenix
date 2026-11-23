@@ -97,6 +97,11 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   is free).
   `CON_MOUSE` 10 on the grab's descriptor (a2 THRESHOLD 0..127 | MULTIPLIER 1..8 << 8: in a frame the counts beyond
   THRESHOLD count MULTIPLIER times; 0x100 none, the grab's start; -EINVAL out of range, -EBADF not the grab's).
+  D61 (the mouse, branch mouse, 2026-11-23): `CON_MOUSE`'s a3, 0 before (every caller passed 0): not 0, a `struct
+  umouse` in the caller's memory, first size `UMOUSE_FIRST` 20 (size, gainx, gainy, mult, thresh, shift, w, h, x, y,
+  hotx, hoty; the ranges in kernel/kernel.h; -EFAULT, -EINVAL; x, y negative keep the place), a2 then 0 (-EINVAL
+  otherwise); with it the `ugevent` records' x and y
+  are in the units it names, until the grab ends; without it (a2's form) the units stay hires pixels and frame lines.
 - **D38 step 3 (the display server, branch desk, 2026-11-04):** `SYS_peer` 96 (msg a request the caller serves, else
   -EINVAL; `PEER_CTTY` 1 the client's controlling tty; `PEER_RD` 2 and `PEER_WR` 3 with `struct upeermem` {addr,
   len}: 0 or -EFAULT; `PEER_PORT` 4, arg a port: 0 if the client owns it, else -EPERM); `SYS_post` 97 (`POST_BUF` 1: the port's owner, else -EPERM; `struct upostbuf` {addr, size,

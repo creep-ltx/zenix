@@ -367,6 +367,16 @@ static inline int sys_congrab(int fd, struct ucongrab *g) { return sys3(89, CON_
 static inline int sys_congack(int gfd, u32 seq) { return sys3(89, CON_GACK | (u32)(gfd + 1) << 8, seq, 0); }
 #define CON_MOUSE 10            /* the grab's descriptor: the mouse's acceleration, THRESHOLD | MULTIPLIER << 8 */
 static inline int sys_conmouse(int gfd, u32 acc) { return sys3(89, CON_MOUSE | (u32)(gfd + 1) << 8, acc, 0); }
+struct umouse {                 /* D61 (kernel/kernel.h): CON_MOUSE's whole setting, in the screen's own units */
+    unsigned short size, gainx, gainy, mult;
+    unsigned char thresh, shift;
+    unsigned short w, h;
+    short x, y;
+    signed char hotx, hoty;
+};
+#define UMOUSE_FIRST 20
+_Static_assert(sizeof(struct umouse) == UMOUSE_FIRST, "umouse is 20 bytes");
+static inline int sys_conmouseset(int gfd, const struct umouse *m) { return sys3(89, CON_MOUSE | (u32)(gfd + 1) << 8, 0, (u32)m); }
 /* DESIGN D55 6: the vertical blank's count (any process; a2 the count to wait for, CONV_ASK only asks) and the
  * display server's hold on a client's chip RAM region while a screen shows it (kernel/kernel.h has the contract) */
 #define CON_VBLANK 12
