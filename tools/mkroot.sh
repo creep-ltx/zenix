@@ -94,7 +94,12 @@ case " $PROGS " in *" frotz "*|*" robots "*) python3 "$(dirname "$0")/mkzup.py" 
 if [ -n "$PKGDB" ]; then case " $PROGS " in *" tcc "*) python3 "$(dirname "$0")/mkzup.py" stage devel "$T" "$B" || exit 1;; esac; fi
 # the C library's notice (picolibc, BSD-style licences file by file, DESIGN D27 3.2) on the full images, as the base
 # package; and its test program in /tests
-[ -z "$NOMAN" ] && lic libc/picolibc/COPYING.picolibc picolibc
+# (the demo floppies: only the stanzas of the files that are vendored, tools/picolibc-notice.py; 12 KB packed less)
+if [ -z "$NOMAN" ]; then
+    if [ -n "$DEMO" ]; then mkdir -p "$T/usr/share/licenses"
+        python3 "$(dirname "$0")/picolibc-notice.py" "$(dirname "$0")/../libc/picolibc" "$T/usr/share/licenses/picolibc" || exit 1
+    else lic libc/picolibc/COPYING.picolibc picolibc; fi
+fi
 if [ -z "$NOTESTS" ] && [ -f "$B/libctest.zx" ]; then cp "$B/libctest.zx" "$T/tests/libctest" && chmod 755 "$T/tests/libctest"; fi
 if [ -z "$NOTESTS" ] && [ -f "$B/libctest.pzx" ]; then cp "$B/libctest.pzx" "$T/tests/libctestpure" && chmod 755 "$T/tests/libctestpure"; fi
 # Lua's stack probe build (DESIGN D52 9) beside the Lua test scripts

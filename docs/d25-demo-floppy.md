@@ -65,7 +65,9 @@ Plain only: `ssh` 109,028, `rz` 25,952, `sntp` 18,220, `mount` 17,964, `init` 14
 drivers `a2065` 8,596, `genet` 17,716, `ne2000` 18,400, `plipbox` 12,520; `zenix-8x8.zcf` 10,424, `cp437-8x8.psf`
 2,052, `/etc/ssl/anchors` 52,231, `/etc/zdesk` 5,624 (the three themes 3,040); the manual pages of the commands on the
 disk 172,703; the licence notices 273,834, of which picolibc's `COPYING.picolibc` is 237,194 (it packs to about a
-fifth).
+fifth). The demo floppies carry only the part of it for the files that are vendored (`tools/picolibc-notice.py`,
+124,124 bytes, 17.7 KB packed against 29.4): 2026-11-23 it gave the DD disk 11.4 KB back (stream 884,040 -> 872,608,
+9,728 bytes free after the one-system `--help` code and the mouse rework).
 
 Since revision 2 the programs grew: `kernel.bin` 155,944 -> 183,508 (pseudo-terminals, the console handed to the
 display server, the data cache, UTF-8), `ls` 20,676 -> 25,796 (the C library's allocator); the TUI programs carry
