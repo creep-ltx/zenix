@@ -1170,9 +1170,9 @@ $(BUILD)/make-probe.zx: $(BUILD)/make-probe.cpuelf tools/mkzexe.py tools/check-6
 # ---- zld, the linker (roadmap block 7, DESIGN D52 section 5, docs/d52-self-hosting.md): ELF objects and archives
 # straight to a ZEXE or ZEX2 program, the same bytes as ld + tools/mkzexe.py (tools/zld-host-test.sh). Ours, written in
 # standard C, so the same file builds for the PC (the host test); on Zenix a C library program with shared code.
-$(BUILD)/zld/zld.o: user/zld.c $(LIBC_HDRS) tools/purecc.sh
+$(BUILD)/zld/zld.o: user/zld.c kernel/version.h $(LIBC_HDRS) tools/purecc.sh
 	@mkdir -p $(dir $@)
-	tools/purecc.sh $(CC) $(LIBC_PFLAGS) -c $< -o $@
+	tools/purecc.sh $(CC) $(LIBC_PFLAGS) -include kernel/version.h -c $< -o $@
 $(BUILD)/zld.cpuelf: $(BUILD)/zld/zld.o $(BUILD)/crt0-pure.o $(BUILD)/libc-pure.a link/pure.ld
 	$(CC) $(LIBC_PFLAGS) $(PULDFLAGS) $(LIBC_LDFLAGS) $(BUILD)/crt0-pure.o $(BUILD)/zld/zld.o $(BUILD)/libc-pure.a \
 	    $(LIBGCC) -o $@
