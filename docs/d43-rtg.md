@@ -235,3 +235,13 @@ palette in the list memory, the HVS's sprite as the pointer: no software pointer
    800 kept. Meanwhile: scaled.
 2. **Taking the front screen as it is** (the Workbench's own picture memory) versus zenixboot opening a screen of a
    size asked for (`RTG=1280x960`): built is the first, the simplest; the second is a few lines more in zenixboot.
+
+## 14. The first run on the partner's PiStorm (2026-11-23, verified on the A1200)
+
+From the Workbench (1280 x 960, 32 bits): `zenixboot CHECK RTG` printed "RTG: the front screen, 1280x960, format 9, 4
+bytes a pixel, 5120 a row, the Pi's HDMI switched with the consoles" and "everything is loaded and checked". Then
+`zenixboot RTG`: the Zenix desktop on the HDMI at 1280 x 960, the colours right, the Zenix pointer following the mouse and
+no AmigaOS pointer; Amiga+F2..F10 switch to the text consoles as normal (the partner's monitor switches inputs by
+itself, so which output showed the consoles was not seen). The pointer's 4-pixel steps (section 13 question 1) still to
+be judged. The first zenixboot on the card predated D43 ("RTG: object not found"): zenixboot is never updated by a
+bundle and was copied by hand (BOOT:zenixboot, the old one kept as zenixboot.old).
