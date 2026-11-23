@@ -5,7 +5,7 @@ NAME
 
 SYNOPSIS
     zenixboot [KERNEL] [RAM=FILE] [CHECK] [PREVIOUS] [UNSIGNED_OK]
-              [DCACHE=OFF|WT|CB] [MMU=ON|OFF] [RTG]
+              [DCACHE=OFF|WT|CB] [MMU=ON|OFF|STRICT|D41] [RTG]
 
 DESCRIPTION
     zenixboot is an AmigaOS program, not a Zenix one. It boots Zenix on an
@@ -196,7 +196,16 @@ ARGUMENTS
                 that has no MMU is refused, but the manuals call the
                 instructions the kernel tries undefined there. OFF: off.
                 The left mouse button held at boot turns it off too.
-                Without the word: the kernel's default (tools/kopts.py)
+                Without the word: the kernel's default (tools/kopts.py).
+                STRICT (DESIGN D60 5.8): protection as by default, but a
+                server built before D60 gets nothing more than what its
+                clients declare (no lend of a whole client, no custom
+                chips' page for an old sound server): such a server
+                fails instead. D41: the servers (services, mounts,
+                drivers, the display server) see all memory as they did
+                before D60 (D41's model): the way back if full
+                protection misbehaves on new hardware; it wins over
+                STRICT
     RTG         the desktop on a graphics card (DESIGN D43): the front
                 screen, if it is a Picasso96 screen of 16, 24 or 32 bits
                 (the Workbench on an RTG card or the PiStorm's VideoCore),

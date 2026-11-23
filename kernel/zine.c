@@ -150,6 +150,8 @@ static long go(const struct uzine_go *g)
     klog_set_reason(KLOG_END_ZINE);     /* 7.2 step 7: a cold start during the session says why (9.4) */
     bootnote_set(BOOTNOTE_ZENIX);       /* and starts Zenix where the boot menu runs */
     fd_zine();                          /* 7.2 step 8: the floppy's motors off (audio: the blob turns all DMA off) */
+    if (mmu_on)
+        kprintf("mmu: memory protection paused for ZINE\n");     /* (D60 7.3) */
     serial_flush();
     struct zine_args a;
     memset(&a, 0, sizeof a);
@@ -174,7 +176,11 @@ static long go(const struct uzine_go *g)
     blk_zine(a.ide);
     mmu_hand(0);                        /* D41 11: the program expects no translation; the blob saves what it finds */
     long r = zine_enter(g->blob, &a);
-    mmu_hand(1);
+    if (mmu_hand(1)) {                  /* D60 7.3: the kernel's code or its records changed: the damaged path (9.4) */
+        klog_set_reason(KLOG_END_ZINE_DAMAGED);
+        serial_flush();
+        machine_reset();                /* (the boot note still says Zenix: the boot menu starts it again) */
+    }
     /* 9.6: the blob put the chips' registers and the CIAs back (the E-clock counter where it stood); the kernel's
      * devices now, then DMA and the interrupts Zenix had, last */
     INTREQ = 0x7FFF;
@@ -197,6 +203,8 @@ static long go(const struct uzine_go *g)
     bootnote_set(0);                    /* no note: a later reset boots as usual */
     irq_restore(s);
     kprintf("zine: back after %u s (%d)\n", zine_secs, r);
+    if (mmu_on)
+        kprintf("mmu: memory protection back on, the kernel checked\n");
     vfs_hold = 0;
     busy = 0;
     return r;

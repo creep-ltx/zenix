@@ -8,6 +8,9 @@
 #   TEST: a tools/TEST.sh, or TEST:A,B,... for its parts A B ... (default: the list below; svc-test without its part f
 #   and sound-test are tools/check.sh's STOCK tests: the suite runs them that way only at stock speed, ZENIX_FAST=0)
 #   ZENIX_EMU=amiberry: in Amiberry (tools/run-test.sh); the cage rig's screenshot tests run in FS-UAE only
+#   ZENIX_MMU_TESTS="TEST ...": that list instead of the default (as the arguments; for tools/check.sh mmu-suite)
+#   prio-test and pure-test are in the list since D60 stage 5 (priotest's children share its memory by SYS_shm; the
+#   shared code's write is stopped by protection)
 cd "$(dirname "$0")/.." || exit 1
 cpu=$1; shift
 case $cpu in
@@ -16,9 +19,9 @@ case $cpu in
 060) set='uae_cpu_model=68060;uae_mmu_model=68060;uae_fpu_model=68060;uae_mbresmem_size=64' ;;
 *) echo "usage: tools/mmu-suite.sh 030|040|060 [TEST ...]"; exit 2 ;;
 esac
-DEF="cmds-test memtest mounttest svc-test:a,z,zs,b,n,r,d,o,zo,u,l,s,h,t,dmg,c lua-test tcc-test zdb-test:020"
+DEF="cmds-test memtest mounttest svc-test:a,z,zs,b,n,r,d,o,zo,u,l,s,h,t,dmg,c lua-test tcc-test zdb-test:020 prio-test pure-test"
 [ "${ZENIX_FAST:-0}" = 0 ] && DEF="$DEF svc-test:f sound-test"
-TESTS="${*:-$DEF}"
+TESTS="${*:-${ZENIX_MMU_TESTS:-$DEF}}"
 BD=${ZENIX_BUILD:-build}
 make -s BUILD="$BD" all >/dev/null 2>&1 || { echo "FAIL mmu-suite: the build"; exit 1; }
 OUT=${ZENIX_OUT:-$(mktemp -d "${TMPDIR:-/tmp}/zenix-mmusuite.XXXXXX")}; mkdir -p "$OUT"

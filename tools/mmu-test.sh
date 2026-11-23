@@ -27,8 +27,14 @@
 # Paula's DMA into the kernel's chip RAM, past its own block, into its fast RAM, or set DMAEN, is refused; a block it
 # frees while a channel plays from it stops that channel; writing Paula itself ends it. Root's CON_GRAB from a shell
 # (gcontest, not the display service) is refused.
+# DESIGN D60 stage 5 (5.8, 12): an old sound server (msgpingd -paula -old) writes Paula itself through the custom chips'
+# page its claim got. The models +strict and +d41 (a 030, 040 or 060 with its kernel made MMU=STRICT or MMU=D41,
+# tools/kopts.py): with STRICT an old server's request is refused (-13) and the old sound server ends at its write;
+# with D41 a service and a user's server see their client's memory as D41's servers did (a write without asking
+# goes through), and the system works.
 # usage: tools/mmu-test.sh [MODEL ...]           (default: 020 030 040 lc040 060 lc060)
-#   MODEL: 020 030 ec030 040 lc040 ec040 060 lc060 ec060, each also with +on (lc060+on: forced with MMU=ON)
+#   MODEL: 020 030 ec030 040 lc040 ec040 060 lc060 ec060, each also with +on (lc060+on: forced with MMU=ON);
+#   030, 040 and 060 also with +strict or +d41
 #   MMU_TEST_OFF=1: the kernel made MMU=OFF (the figures to compare with); every model then expects "off"
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
@@ -46,7 +52,7 @@ mkb() {     # mkb NAME WORD: $OUT/build-NAME with its kernel set to WORD (none: 
         python3 tools/kopts.py "$b/kernel.bin" "$2" >/dev/null || return 1
         make -s BUILD="$b" "$b/zenix.adf" >/dev/null || { echo "FAIL: the floppy with the $2 kernel"; return 1; }
         local v; v=$(python3 tools/kopts.py "$b/kernel.bin")
-        case "$2:$v" in MMU=ON:*"wherever the MMU works"*|MMU=OFF:*"memory protection off by default"*) ;;
+        case "$2:$v" in MMU=ON:*"wherever the MMU works"*|MMU=OFF:*"memory protection off by default"*|MMU=STRICT:*"; MMU=STRICT by"*|MMU=D41:*"; MMU=D41 by"*) ;;
         *) echo "FAIL: the $2 kernel says: $v"; return 1 ;; esac
     fi
 }
@@ -117,6 +123,8 @@ send msgping shm; echo shm-status \$?\r
 wait $P 30
 send svctest reg audio 0 /bin/msgpingd -port audio -paula; msgping call audio; sleep 1; echo paula-done\r
 wait $P 30
+send svctest reg audio 0 /bin/msgpingd -port audio -paula -old; msgping call audio; sleep 1; echo oldpaula-done\r
+wait $P 30
 send gcontest ack 1 < /dev/tty1; echo grab-status \$?\r
 wait $P 30
 EOF
@@ -134,6 +142,28 @@ send cat /tmp/w/after > /dev/null; ls /tmp/w > /dev/null; sleep 1; echo win-conf
 wait $P 30
 EOF
 
+# D60 stage 5: MMU=STRICT and MMU=D41 (the models +strict, +d41)
+cat >"$OUT/script-word.txt" <<EOF
+wait zenix:/# 120
+send dmesg | grep -e '^mmu:' -e '^kernel:'\r
+wait $P 30
+send msgpingd -old -port po > /dev/null & sleep 1; msgping call po\r
+wait $P 30
+send svctest reg audio 0 /bin/msgpingd -port audio -paula -old; msgping call audio; sleep 1; echo oldpaula-done\r
+wait $P 30
+send svctest reg pz 0 /bin/msgpingd -port pz; msgping wild pz\r
+wait $P 30
+send msgpingd -port py > /dev/null & sleep 1; msgping wild py\r
+wait $P 30
+send crash write 0x1000; echo status \$?\r
+wait $P 30
+send msgpingd > /dev/null & sleep 1; ls -l /bin | wc -l; msgping 200; echo status \$?\r
+wait $P 60
+send echo done\r
+wait $P 30
+stop
+EOF
+
 cat >"$OUT/script-off.txt" <<EOF
 wait zenix:/# 120
 send dmesg | grep -e '^mmu:' -e '^cpu:'\r
@@ -149,6 +179,7 @@ fail=0
 for cpu in $CPUS; do
     m=${cpu%+on}; word=
     [ "$m" != "$cpu" ] && word=MMU=ON
+    case $m in *+strict) m=${m%+strict}; word=MMU=STRICT ;; *+d41) m=${m%+d41}; word=MMU=D41 ;; esac
     [ -n "$MMU_TEST_OFF" ] && word=MMU=OFF
     # the machine: the A1200 with the CPU, its MMU model and its FPU (none: an LC or EC part); what must happen
     case $m in
@@ -176,12 +207,34 @@ for cpu in $CPUS; do
     B="$OUT/build-${word:-auto}"
     L="$OUT/$cpu.log"
     script="$OUT/script.txt"; [ "$want" = on ] || [ -n "$MMU_TEST_OFF" ] || script="$OUT/script-off.txt"
+    case $word in MMU=STRICT|MMU=D41) script="$OUT/script-word.txt" ;; esac
     echo "mmu-test $cpu (${ZENIX_EMU:-fs-uae}, kernel ${word:-as built}): expects protection $want"
     ZENIX_BUILD="$B" ZENIX_FSUAE_SET="$set${ZENIX_FSUAE_SET:+;$ZENIX_FSUAE_SET}" \
         tools/run-test.sh "$conf" 700 "$script" 2>&1 | sed 's/\x1b\[[0-9;:]*[mK]//g' > "$L"
     ok=1
     chk() { if grep -qaE -- "$2" "$L"; then echo "  ok   $1"; else echo "  FAIL $1"; ok=0; fi; }
     grep -a -m1 '^mmu: memory protection' "$L" | sed 's/^/  boot: /'
+    if [ "$want" = on ] && { [ "$word" = MMU=STRICT ] || [ "$word" = MMU=D41 ]; }; then     # D60 stage 5
+        chk "the boot line says ${word}" "^mmu: memory protection on: 680${m: -2}, 4 KB pages, [0-9]+ KB of tables \\(a tree per process; $word\\)"
+        chk "a stray write still ends its process" 'memory protection: a write to 0x1000 \(the kernel.s memory\): killed'
+        chk "the system works: 200 calls, the commands" 'msgping: 200 round trips'
+        chk "... and after them" '^done$'
+        if [ "$word" = MMU=STRICT ]; then
+            chk "an old server's request: refused (no lend)" 'msgping: call to po: -13'
+            chk "an old sound server writing Paula ends (no chips' page)" 'pid [0-9]+ \(msgpingd\): memory protection: a write to 0xdff0a8'
+            if grep -qa 'paula (old): wrote Paula myself' "$L"; then echo "  FAIL the old sound server wrote Paula"; ok=0; fi
+            chk "a service touching memory it was not given ends" 'msgping: wild pz: -104, a\[2\] 0, untouched'
+        else
+            chk "an old server's request: served (D41's lend)" 'msgping: call to po: 0'
+            chk "an old sound server writes Paula itself" 'msgpingd: paula \(old\): wrote Paula myself'
+            chk "a service (D41's system process) writes its client's memory without asking" 'msgping: wild pz: 0, a\[2\] 0, changed'
+            chk "a user's server too (D41's lend of the whole client)" 'msgping: wild py: 0, a\[2\] 0, changed'
+            if grep -qa '(msgpingd): memory protection' "$L"; then echo "  FAIL a server ended with the protection line"; ok=0; fi
+        fi
+        if grep -qa 'exception in the kernel\|panic' "$L"; then echo "  FAIL the kernel stopped"; ok=0; fi
+        [ $ok = 1 ] && echo "PASS mmu-test $cpu" || { echo "FAIL mmu-test $cpu (see $L)"; fail=1; }
+        continue
+    fi
     if [ "$want" != on ]; then
         chk "protection off: ${want#off: }" "^mmu: memory protection off: ${want#off: }"
         chk "the system goes on" '^alive$'
@@ -238,6 +291,10 @@ for cpu in $CPUS; do
         chk "... and the sound server writing Paula itself ends (the chips' page is not its)" \
             'pid [0-9]+ \(msgpingd\): memory protection: a write to 0xdff0a8'
         if grep -qa 'paula: wrote Paula myself' "$L"; then echo "  FAIL the sound server wrote Paula itself"; ok=0; fi
+        chk "an old sound server (not PEER_EXACT) writes Paula itself through the chips' page of its claim (5.8)" \
+            'msgpingd: paula \(old\): wrote Paula myself'
+        [ "$(grep -caE 'memory protection: a write to 0xdff0a8' "$L")" = 1 ] && echo "  ok   ... and is not ended for it" ||
+            { echo "  FAIL ... the protection line for 0xdff0a8 $(grep -caE 'memory protection: a write to 0xdff0a8' "$L") times, not 1"; ok=0; }
         chk "CON_GRAB by root, not the display service: refused" 'display: pid [0-9]+ \(gcontest\) is not the display service'
         chk "... with -EPERM" 'gcontest: grab refused -1'
         chk "SYS_shm: offered, taken, shared both ways, freed early, kept, dropped" 'msgping: shm ok'

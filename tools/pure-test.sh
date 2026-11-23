@@ -12,7 +12,9 @@
 #      started as a private copy (SHR 0); a restart of the filesystem server is a new generation (the next start loads a
 #      new copy); a damaged copy is found at the next start (checksum) and when a process running it faults (the log
 #      names the other one still running it), and is not used again; the corrupt ZEX2 files are refused with reasons;
-#      a ZEXE program still runs
+#      a ZEXE program still runs. With memory protection on (a 68030/040/060: tools/mmu-suite.sh, DESIGN D60 7.4) the
+#      write into the shared code never lands: it ends the writer with the protection line ("its own code (read only)")
+#      and the copy stays in use, intact
 #   m  a remount in the same slot: the same file (inode, size, time) on a floppy mounted again is not reused
 #   s  sh and login are ZEX2 (stage 1): one session's sh is the shared code (login steps aside once the shell runs,
 #      DESIGN D18: no login process stays); logins on consoles 2, 3 and 4 add no copy (free: what sharing saves grows
@@ -93,11 +95,19 @@ rx   $L "a file open for writing is started as a private copy (SHR 0, its code i
 cmp_ "... no shared copy of it" "$(S $L private)" -eq "$(S $L base)"
 rx   $L "the filesystem server restarted" "svc: fs: started @fsd \(pid [0-9]+, for pid [0-9]+ [a-z]+\)"
 cmp_ "... a start after it is a new generation: a new copy" "$(S $L gen2)" -gt "$(S $L gen1)"
+if grep -aq '^mmu: memory protection on' "$OUT/$L.log"; then      # D41/D60: the write is stopped
+count $L "with memory protection: both writes into the shared code end the writer (read only)" 2 \
+     "\[kernel\] pid [0-9]+ \(crashpure\): memory protection: a write to 0x[0-9a-f]+ \(its own code \(read only\)\): killed \(SIGSEGV\).*"
+count $L "... the code was never changed (no checksum line)" 0 ".*(damaged|DAMAGED) \(checksum\).*"
+cmp_ "... the copy stays in use after the first" "$(S $L poked)" -eq "$(S $L one)"
+cmp_ "... and after the second" "$(S $L damaged)" -eq "$(S $L one)"
+else
 line $L "a damaged copy is found at the next start" "exec: /tests/crashpure: its shared code in memory is damaged (checksum): loading a fresh copy"
 cmp_ "... a fresh copy is loaded" "$(S $L poked)" -gt "$(S $L one)"
 rx   $L "a process that damaged it and faulted: the log says so and names the one still running it" \
      "\[kernel\] pid [0-9]+ \(crashpure\): its shared code is DAMAGED \(checksum\): not used again; still running it: [0-9]+"
 cmp_ "... it is not used again" "$(S $L damaged)" -gt "$(S $L one)"
+fi
 for k in $(seq 1 14); do
     rx $L "corrupt ZEX2 file $k refused, with its reason" "exec: /tests/badzex2_$k refused: [a-z].*"
 done

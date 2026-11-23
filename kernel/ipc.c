@@ -71,6 +71,8 @@ KCOLD int port_create(const char *name, int owner)
             ports[i].op = current;
             for (int k = 0; k < 15 && name[k]; k++)
                 ports[i].name[k] = name[k];
+            if (reserved(name))
+                mmu_sysmark(current);   /* (MMU=D41, D60 12: D41 7's system process) */
             return PORT_ID(i);
         }
     return -2;

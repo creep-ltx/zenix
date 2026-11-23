@@ -418,6 +418,27 @@ u32 mem_free_owner(u32 owner)
     return got;
 }
 
+/* D60 7.3 (after ZINE, before anything walks the blocks): every block of every range with its magic, a size that leads
+ * to the next inside the range, ending exactly at its end, each one's back link its predecessor's size. 0, or the
+ * first bad block's address (no panic: the caller resets) */
+KMMU u32 mem_sane(void)
+{
+    for (int i = 0; i < nranges; i++) {
+        const struct range *r = &ranges[i];
+        u32 a = r->lo, prev = 0;
+        while (a < r->hi) {
+            const struct mblk *b = (const struct mblk *)a;
+            if (b->magic != MAGIC || SZ(b) < HDR || (SZ(b) & 15) || SZ(b) > r->hi - a || b->prev != prev)
+                return a;
+            prev = SZ(b);
+            a += prev;
+        }
+        if (a != r->hi)
+            return a;
+    }
+    return 0;
+}
+
 /* D41: whose block holds a (a fault's line): its owner, *used 0 for a free block; MEM_NOT_POOL outside the pools */
 KCOLD u32 mem_owner_of(u32 a, int *used)
 {
