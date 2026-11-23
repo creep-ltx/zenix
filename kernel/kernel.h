@@ -405,6 +405,7 @@ struct uproc {                  /* returned by SYS_procinfo */
 #define UUPDATE_FIRST    32     /* addr .. kver[16] */
 #define USTATFS_FIRST    20     /* struct ustatfs (fsproto.h) */
 #define UMEMINFO_FIRST   16     /* SYS_meminfo's four words */
+#define UMEMINFO_PROT    20     /* D60 11: and a fifth, memory protection: 0 none, 1 D41's, 2 full */
 /* how many bytes a caller with a buffer of GIVEN bytes gets of a struct whose first size is FIRST and whose size is
  * NOW: 0 (given) -> first, below first -> 0 (refused), else at most now */
 static inline u32 usize_n(u32 given, u32 first, u32 now)
@@ -673,6 +674,7 @@ struct port {
     u32 pbuf, psize;            /* D38: the owner's post window (SYS_post POST_BUF), 0: none */
     int pfrom;                  /* the port whose owner alone may post into it */
     u32 npost, nseenpost;       /* posts into it; how many its owner saw (POLLRDBAND) */
+    u8 exact;                   /* D60 5.8: its server asks for what it touches (PEER_EXACT): no lend of the whole client */
 };
 extern struct port ports[NPORT];
 #define PORT_ID(i) ((int)((ports[i].gen << 8) | (u32)(i)))     /* a port number: (generation << 8) | slot */
@@ -924,7 +926,9 @@ void tty_proc_gone(struct proc *p);     /* p is a zombie: its leadership ends, a
 #define SYS_fd_rw       77   /* lba | drive << 28 | write << 27, count, buffer -> 0 or -1 (disk server only) */
 #define SYS_input       74   /* s32[4] <- mouse dx, dy (since the last call), mouse buttons, joystick bits */
 #define SYS_klog        73   /* offset, buffer, length -> characters of the kernel log copied (0 = nothing more) */
-#define SYS_blk_ram     42   /* where the boot ramdisk is: u32[2] = address, size (disk server only) */
+#define SYS_blk_ram     42   /* where the boot ramdisk is: u32[2] = address, size (disk server only); D60 stage 3, a2 not 0:
+                              * a2 sectors from sector a1 (bit 31: write) to or from buffer a3, copied by the kernel (with
+                              * memory protection on only, else -EINVAL) */
 #define SYS_blk_size    41   /* sectors on the disk (disk server only) */
 #define SYS_jobctl      75   /* pid, op: 0 = stop, 1 = continue (own processes, or root) */
 #define SYS_mount       69   /* struct umountreq*: put a running filesystem server on a directory */
@@ -1139,6 +1143,8 @@ struct uwinsize { u16 row, col, xpixel, ypixel; };   /* Linux's struct winsize (
 #define PEER_RD         2    /* arg struct upeermem *: 0 if those bytes are the client's own memory to read, else -EFAULT */
 #define PEER_WR         3    /* ... to write */
 #define PEER_PORT       4    /* arg a port number: 0 if the client owns it, else -EPERM */
+#define PEER_EXACT      5    /* D60 5.5, 5.8 (msg 0): arg a port the caller owns: its server asks (PEER_RD/WR) for
+                              * every client byte it touches, and gets no lend of the whole client (0, else -EPERM) */
 struct upeermem { u32 addr, len; };
 #define SYS_post        97   /* op (POST_*), port, arg: a window in a port owner's memory others may write into */
 #define POST_BUF        1    /* the caller owns port; arg struct upostbuf *: its window (0 size: none) and who may post */
@@ -1146,11 +1152,31 @@ struct upeermem { u32 addr, len; };
                               * window at off, then the port's owner woken (POLLRDBAND); len 0 only wakes */
 struct upostbuf { u32 addr, size; s32 from; };
 struct upost { u32 off, src, len; };
+#define POST_READ       3    /* D60 5.5: as POST_WRITE, but up to 16 bytes copied out of the window into src */
 #define SYS_atapi       98   /* struct uatapi * (diskproto.h): a packet to the ATAPI CD drive (disk server only; DESIGN D44) */
 #define SYS_readdirs    99   /* fd, buffer, size (>= UDIRX_MAX): the directory's next records (kernel/udirx.h), as many
                               * whole ones as fit -> their bytes, 0 at the end; -ENOSYS: its server lacks FS_READDIRS
                               * (DESIGN D49, docs/d49-readdir.md 3.1) */
 #define SYS_debug      100   /* op, pid, arg: the debugger's call (DESIGN D54, kernel/dbgproto.h, kernel/dbg.c) */
+/* DESIGN D60 stage 3 (docs/d60-full-protection.md 7.4): memory shared on purpose. Without memory protection the calls
+ * answer 0 and change nothing (all memory is visible anyway) */
+#define SYS_shm        101   /* op (SHM_*), addr, arg */
+#define SHM_OFFER       1    /* addr a region of the caller's (SYS_memalloc, or its claim's DMA memory), arg a pid | SHMF_RO */
+#define SHM_TAKE        2    /* addr in a region offered to the caller: part of its view from now on, at the same address */
+#define SHM_DROP        3    /* addr in a region: a holder lets go; its owner withdraws the offers not taken */
+#define SHM_INFO        4    /* addr in a region the caller owns or holds, arg struct ushm * (16 bytes, fixed: a bigger one
+                              * would come with an op of its own) */
+#define SHMF_RO         0x80000000u     /* in SHM_OFFER's arg: read only for the receiver */
+#define NSHM            8    /* regions a process may hold of others' (and offers it may make) */
+struct ushm { u32 size, owner, holders, flags; };
+/* D60 5.5: SYS_call with the buffers of the request declared (lent to the server at its receive, exactly those bytes) */
+#define SYS_callv      102   /* port, message, struct ucalldecl * */
+#define NCALLB          4
+#define CALLB_RD        1    /* the server may read the buffer */
+#define CALLB_WR        2    /* ... and write it */
+struct ucallbuf { u32 addr, len, flags; };
+struct ucalldecl { u32 n; struct ucallbuf b[NCALLB]; };     /* n 0..NCALLB */
+int svc_any(void);           /* current is the process the service manager started (or runs) for some service */
 struct uatapi;
 int ide_atapi(struct uatapi *q);
 /* dbg.c (DESIGN D54, docs/d54-debugger.md): the live debugger's kernel part. struct proc's dbgf: */
@@ -1167,7 +1193,6 @@ int dbg_stopped(struct proc *p);        /* schedule()'s stop branch: 1 = a debug
 int dbg_held(const struct proc *p);     /* held by its debugger: SIGCONT and wait leave it */
 int dbg_sigint(struct proc *p);         /* SIGINT to a traced process: 1 = made a debugger's stop */
 void dbg_jobstop(struct proc *p);       /* a job-control stop while held: remembered */
-void dbg_sysmark(struct proc *p);       /* it became a system process: detached */
 void dbg_exit(struct proc *p, int code);/* proc_exit (ndbg or dbgf set): as a debugger and as a target */
 struct dbg;
 struct dbg *dbg_pending(const struct proc *parent);  /* proc_load, the parent's DBGF_NEXT: the block DBG_NEXT reserved */

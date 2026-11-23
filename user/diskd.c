@@ -440,6 +440,7 @@ static int handle(struct umsg *m)
     switch (m->type) {
     case DISK_OPEN: {
         const char *nm = (const char *)m->a[0];
+        if (!peer_str(m, m->a[0], 16)) return -EFAULT;              /* D60: the client's bytes it reads, asked for */
         if (nm[0] == 'd' && nm[1] == 'f' && nm[2] >= '0' && nm[2] <= '3' && !nm[3]) {
             fd_probe |= 1 << (nm[2] - '0');
             scan();                                                  /* a disk may have been put in since */
@@ -468,6 +469,9 @@ static int handle(struct umsg *m)
     case DISK_READ: case DISK_WRITE: {
         u32 h = m->a[0], lba = m->a[1], n = m->a[2];
         if (h >= MAXDEV || !used[h]) return -EBADF;
+        if (n == 0 || n > 0x800000) return -EINVAL;
+        if (!(m->type == DISK_READ ? peer_wr(m, m->a[3], n * 512) : peer_rd(m, m->a[3], n * 512)))
+            return -EFAULT;                                         /* D60: the client's buffer, asked for */
         if (phys[h] == PH_CD && dev[h].mounted == (u32)m->from && sgen[h] != cd_gen) return -ESTALE;  /* mounted on another disc */
         if (phys[h] == PH_USB) {                                    /* D46: the stick, read-only, while it is the same */
             if (dev[h].mounted == (u32)m->from && sgen[h] != usb_gen) return -ESTALE;
@@ -489,6 +493,8 @@ static int handle(struct umsg *m)
         }
         if (m->type == DISK_WRITE && blocked((int)h, lba, n, (u32)m->from)) return -EBUSY;
         if (phys[h] == 1) {                                         /* the RAM disk: plain memory */
+            if (prot_full())                                        /* D60: copied by the kernel (not in our view) */
+                return sys_blk_ramrw(lba, n, (void *)m->a[3], m->type == DISK_WRITE);
             if (m->type == DISK_READ) memcpy((void *)m->a[3], ram_base + lba * 512, n * 512);
             else memcpy(ram_base + lba * 512, (const void *)m->a[3], n * 512);
             return 0;
@@ -513,6 +519,7 @@ static int handle(struct umsg *m)
             h = order[m->a[0]];
         }
         holder((int)h);
+        if (!peer_wr(m, m->a[1], n)) return -EFAULT;                /* D60: the client's buffer, asked for */
         memcpy((void *)m->a[1], &dev[h], n);
         return 0;
     }

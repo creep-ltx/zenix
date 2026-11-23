@@ -800,19 +800,24 @@ pattern (section 6).
 - **Shared code** (DESIGN D13, section 4): a ZEX2 program's processes run one copy of its code (a segment); each has
   its own data part, and `a5` set in its first register frame (`TRAP #0` and the interrupt handlers keep every user
   register; the kernel is not built with `-msep-data` and keeps `a5` by the C calling rules; `switch_to` saves it).
-- **Memory protection** (D41, on by default where the MMU is known, section 2; docs/d41-memory-protection.md). A *protected* process (every program a
-  user runs) sees in user mode only its view: its block, its regions, its code read only (what `user_ok_wr`/`rd`
-  allow; root's also the update bundle, read only, for zup), and while it holds a client's request that client's view
-  too (DESIGN D60 stage 1: lent into its tree at `ipc_recv`; after the reply kept while that client's next request
-  waits at one of its ports, taken back at its next switch to user mode otherwise, or at once when the client gets a
-  block, ends or has its code made again). A *system* process (a per-slot mask: `svc_born`, a reserved port's creator,
-  any passing `SYS_drv` call, `CON_GRAB`, the owner of a port `SYS_mount` mounts; at once when marked mid-run) runs
-  with the windows matching user accesses too, so it sees everything as before. **Each protected process
+- **Memory protection** (D41, on by default where the MMU is known, section 2; docs/d41-memory-protection.md). Every
+  process, the servers, drivers, `init` and the service manager's programs included (DESIGN D60 stage 3: there are no
+  system processes), sees in user mode only its view: its block, its regions, its code read only (what
+  `user_ok_wr`/`rd` allow; root's also the update bundle, read only, for zup), its inbox, the windows of the requests
+  it holds, and its **grants** (stage 3, mmu.c, at most 32 in all): the register pages of the device it claimed
+  (`SYS_drv` `DRV_CLAIM`: a Zorro board's window, the PC Card slot's 0xA00000-0xA4FFFF, the custom chips' page for
+  Paula, CIA-A's and CIA-B's pages for the parallel port; inhibited, serialized, on the 030 CI), its claim's DMA
+  memory (whole pages), the custom chips' page for the display server (`CON_GRAB`, until the grab ends), and the
+  shared regions it took (`SYS_shm`). An *old server* (one whose port is not marked `PEER_EXACT`: built before D60)
+  also gets, at a program's request, its client's whole view when `SYS_debug`'s rule would let it debug the client
+  (lent into its tree at `ipc_recv`; after the reply kept while that client's next request waits at one of its ports,
+  taken back at its next switch to user mode otherwise, or at once when the client gets a block, ends or has its code
+  made again); any other client's request to it is answered -EACCES. **Each process
   has its own translation tree** (DESIGN D60 stage 1, docs/d60-full-protection.md section 4 and "As built"), identity
   mapped, made at its first switch to user mode from a pool of 256- and 512-byte tables cut from kernel pages; its
   tables go back to the pool when their last page goes (a lend's stay until the tree ends). `schedule()` calls
-  `mmu_switch(next)` before `switch_to`: idle and an exiting process nothing; a system process the windows to "every
-  access"; a protected one the windows to "supervisor only" and, when its tree is not the one loaded, its root into
+  `mmu_switch(next)` before `switch_to`: idle and an exiting process nothing; any other the windows to "supervisor
+  only" (after the first switch they stay so) and, when its tree is not the one loaded, its root into
   `URP` and `PFLUSHAN` (040/060: the pages of a shared segment whose file everyone may read are global and stay in the
   ATC) or into `CRP` (030, which flushes). Descriptors are pushed when written (040/060 with the data cache on); the
   serial port's level 5 is let in during long flips. `SRP` is an empty tree. `proc_exit` gives the tree back first. **Faults:** a user-mode
@@ -825,10 +830,22 @@ pattern (section 6).
   priority chain and every kernel reader use; the caller's message is written once at the end (`result`, `a[]`).
   `ipc_recv` gives the server a copy in its inbox (1 KB slots in pages of its own memory, made at its first receive),
   with the small buffers the kernel declares for its own requests (a static table per `FS_*` type, `struct netreq`'s
-  pointers by `sock_dirs`) copied after it and the arguments rewritten to them; for a protected server every other
-  buffer of such a request is a **window**: its whole pages mapped as they are, its part pages and pages of the
-  client's code onto bounce pages holding exactly its bytes, taken down at the end (the written bytes back to the
-  client at a reply). A system process gets the copies, no windows (it sees everything). A pointer into a window is
+  pointers by `sock_dirs`) copied after it and the arguments rewritten to them; every other buffer of such a request
+  is a **window**: its whole pages mapped as they are, its part pages and pages of the client's code onto bounce pages
+  holding exactly its bytes, taken down at the end (the written bytes back to the client at a reply). A program's
+  request (stage 3) lends the buffers its client declared with `SYS_callv` (102: at most 4, each the client's memory
+  or a window it holds, never its message) as windows at `ipc_recv`, and a range a server asks for with `SYS_peer`
+  `PEER_RD`/`PEER_WR` until the reply, but only to a server trusted to ask (a process the service manager started for
+  a service, or one that could debug the client); any other server gets 0 only for what was declared, else -EFAULT.
+  Windows of one request that share a page are made one. `SYS_shm` (101) shares a region on purpose: its owner
+  offers a `SYS_memalloc` region (or its claim's DMA memory) to a process, which takes it into its view at the same
+  address, read only or read and write; the owner's `SYS_memfree` of a region someone holds, or its end, hands the
+  memory to a holder; a holder's drop or end lets go (at most 8 offers and 8 holds a process, 24 in all). netd and its
+  drivers pass frames so: a frame pool netd offers the driver (receive buffers, then send buffers: netd copies each
+  frame it sends into it), or a DMA driver's claim memory it offers netd. The display server reads a client's ring
+  tail with `SYS_post` `POST_READ` (3, up to 16 bytes out of the window the client opened), the disk server the RAM
+  disk through `SYS_blk_ram`'s copy form (a2 sectors from a1, bit 31 write, buffer a3), and every buffer `blk_*`,
+  `fd_rw` and `SYS_atapi` get is checked as the caller's memory or a window. A pointer into a window is
   accepted for the time of a system call (`user_ok_call_*`); the bounce bytes are then the client's page's again until
   the call returns (`mmu_unsync`), so the kernel and any server the call reaches work on the client's address. ZINE: translation off around the session (`mmu_hand`); a
   software reset: off before `RESET` (`mmu_before_reset`).
@@ -844,7 +861,7 @@ pattern (section 6).
   (before, a process whose fd 0 was a pipe fell back to console 1).
 - **The debugger** (DESIGN D54, `kernel/dbg.c`, `kernel/dbgproto.h`, docs/d54-debugger.md). `SYS_debug` (100),
   `debug(op, pid, arg)`, ptrace-like: `DBG_ATTACH` (your own processes, root any; never pid 0/1, a process without a
-  parent, a system process, `priv`, one already traced or in the caller's own chain of debuggers, nor a `nodebug`
+  parent, `priv`, one already traced or in the caller's own chain of debuggers, nor a `nodebug`
   one for a user: set when the loader honoured a set-user-id bit or the caller could not read the file, and by
   `setuid`), `DBG_NEXT` (the caller's next spawn starts traced: a ZEX2 program gets a private copy of its code, a
   set-user-id bit is not honoured, an unreadable file is -EACCES, and an `ILLEGAL` at its entry stops it there),
@@ -862,8 +879,8 @@ pattern (section 6).
   in an untraced process (a T1 a debugger left) are harmless. `schedule()`'s stop branch skips a process loading a
   service (`svc_depth`) and one held in `exc_c`. `sigreturn` keeps the trace bits. When the debugger ends, what it
   attached to is detached (breakpoints out, T1 off, a held stop ended), what it started is killed; when the target ends
-  its block becomes an exit record for `DBG_WAIT`. `ZINE_GO` from a traced process is -EBUSY; a traced process that becomes a system process (`mmu_sysmark`)
-  is detached; `DBG_NEXT`'s bit is taken by every spawn attempt. Every user-mode crash
+  its block becomes an exit record for `DBG_WAIT`. `ZINE_GO` from a traced process is -EBUSY; `DBG_NEXT`'s bit is
+  taken by every spawn attempt. Every user-mode crash
   (not `nodebug`, not root's, the kernel stack sound) adds two log lines after the crash line: `[kernel] pid N regs: base B code C
   sr S pc P d0..d7 ... a0..a7 ...` and `[kernel] pid N frames: K R1 .. RK` (up to 8 return addresses along `a6`, each
   frame inside the process's block). Nothing of it runs on the hot paths: byte tests in the exception path, the stop
@@ -882,8 +899,8 @@ pattern (section 6).
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 97 system calls (the numbers and
-a line on each are in `kernel/kernel.h`; numbers 1-100, of which 39, 40 and 68 are unused; the next free number is
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 99 system calls (the numbers and
+a line on each are in `kernel/kernel.h`; numbers 1-102, of which 39, 40 and 68 are unused; the next free number is
 claimed in docs/claims.md first): the network (`sock`, `netsrv`, `drv`: section 11, "Sockets" and "The network's drivers"), files (`open close read write lseek readdir readdirs stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
 index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority setpgid`, and `debug`, the debugger's: section 6),

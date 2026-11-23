@@ -47,7 +47,7 @@ int main(int argc, char **argv)
             sys_sleep(2);
         }
     }
-    if (!strcmp(a, "sysport")) {        /* becomes a system process (a reserved port) while its debugger waits */
+    if (!strcmp(a, "sysport")) {        /* makes a reserved port while its debugger waits (a system process before D60) */
         sys_sleep(20);
         return sys_port_create("fs.dbgk") >= 0 ? 6 : 7;
     }

@@ -131,7 +131,7 @@ declare -A SPLIT
 SPLIT[svc-test]="a z zs b n r d|o zo u l|f|s h t dmg c"   # f alone: it stays at stock speed (STOCK)
 SPLIT[demo-test]="d|h|c x y t|n"                    # D25: DD, HD, the refusals (2 MB chip, damaged, tracks), term size; the network by itself
 SPLIT[rtg-test]="32|16"                             # D43: a 32-bit and a 16-bit pretend card
-SPLIT[mmu-test]="020 030 lc040|040 060 lc060|030+confine 040+confine 060+confine"   # D41 section 19: every FS-UAE CPU model, protection on or the reason off; D60 stage 2: the confined server
+SPLIT[mmu-test]="020 030 lc040|040 060 lc060"   # D41 section 19: every FS-UAE CPU model, protection on or the reason off (D60 stage 3: every server confined)
 SPLIT[mmubench-test]="030|040|060"                  # D60 9.4: the cost of protection, one job per CPU
 SPLIT[mmu-suite]="030|040|060"                      # D41 section 19: the core suites with protection on, one job per CPU
 SPLIT[lace-test]="pal|ntsc"                         # D38 "Screen modes": PAL and NTSC

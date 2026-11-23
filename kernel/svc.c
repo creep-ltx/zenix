@@ -375,6 +375,7 @@ void svc_exit(struct proc *p)
             sock_server_gone();                 /* D19 rule 10: its sockets die and their waiters wake, now */
         pt->owner = 0;                          /* back to held: the queued messages wait for the next server */
         pt->op = 0;
+        pt->exact = 0;                          /* (D60 5.8: the next server marks it again, or is an old one) */
         pt->waiter = 0;
         struct umsg *in = 0;
         for (int k = 1; k < NPROC; k++) {
@@ -422,6 +423,8 @@ static int mine(void)                   /* the entry whose started (or running) 
             return i;
     return -1;
 }
+
+int svc_any(void) { return mine() >= 0; }      /* D60 5.5: a server trusted to ask (SYS_peer) */
 
 int svc_is(const char *name)
 {

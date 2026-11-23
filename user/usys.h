@@ -86,6 +86,8 @@ static inline u32 sys_ticks(void) { return (u32)sys3(20, 0, 0, 0); }
 static inline u32 sys_uptime(void) { return (u32)sys3(20, 1, 0, 0); }   /* whole seconds since boot (F9) */
 static inline int sys_procinfo(u32 i, struct uproc *p) { return sys3(21, i, (u32)p, sizeof *p); }
 static inline int sys_meminfo(u32 out[4]) { return sys3(22, (u32)out, 16, 0); }
+/* D60 11: the five words, the fifth memory protection (0 none, 1 D41's, 2 full); an older kernel fills only four */
+static inline int sys_meminfo5(u32 out[5]) { out[4] = 0; return sys3(22, (u32)out, 20, 0); }
 static inline int sys_setfg(int pid) { return sys3(23, (u32)pid, 0, 0); }
 static inline int sys_kill(int pid) { return sys3(24, (u32)pid, 0, 0); }   /* the old form: end it (status 130) */
 
@@ -107,7 +109,15 @@ struct umsg { struct umsg *next; int from, server; u32 state; int result; u32 ty
 #define UMSG_KERNEL 1     /* kflags: the kernel sent this message for a system call (servers trust only these, and root) */
 #define UMSG_CANCEL 4     /* kflags: its client was killed while waiting (DESIGN D23, kernel/fsproto.h): -EINTR is allowed */
 #define UMSG_LINKS 8      /* kflags: the kernel takes the FS_LINKED answer (DESIGN D26, kernel/fsproto.h); only it sets it */
-static inline int sys_port_create(const char *n) { return sys3(29, (u32)n, 0, 0); }
+/* D60 5.8: a port made by a program built with this header is marked PEER_EXACT at once (its server asks for every
+ * client byte it touches); an older kernel answers the mark -EINVAL, which changes nothing */
+static inline int sys_port_create(const char *n)
+{
+    int p = sys3(29, (u32)n, 0, 0);
+    if (p >= 0)
+        sys3(96, 0, 5, (u32)p);
+    return p;
+}
 static inline int sys_port_find(const char *n) { return sys3(30, (u32)n, 0, 0); }
 static inline int sys_call(int port, struct umsg *m) { return sys3(31, (u32)port, (u32)m, 0); }
 static inline struct umsg *sys_recv(int port, int wait) { return (struct umsg *)sys3(32, (u32)port, (u32)wait, 0); }
@@ -123,6 +133,8 @@ static inline int sys_fd_info(u32 d) { return sys3(76, d, 0, 0); }   /* floppy: 
 static inline int sys_fd_rw(u32 d, u32 lba, u32 n, void *buf, int wr) { return sys3(77, lba | d << 28 | (u32)(wr != 0) << 27, n, (u32)buf); }
 static inline int sys_blk_size(void) { return sys3(41, 0, 0, 0); }
 static inline int sys_blk_ram(u32 out[2]) { return sys3(42, (u32)out, 0, 0); }
+/* D60 stage 3: n sectors of the RAM disk from sector lba (write: from buf) copied by the kernel; with protection on only */
+static inline int sys_blk_ramrw(u32 lba, u32 n, void *buf, int write) { return sys3(42, lba | (write ? 0x80000000u : 0), n, (u32)buf); }
 struct ustatfs { unsigned bsize, blocks, bfree, files, ffree; };
 static inline int sys_statfs(struct ustatfs *f) { return sys3(43, (u32)f, 0, sizeof *f); }
 static inline int sys_statfs_mount(struct ustatfs *f, u32 mount) { return sys3(43, (u32)f, mount, sizeof *f); }
@@ -368,12 +380,28 @@ static inline int sys_conhold(int gfd, int pid, u32 base) { return sys3(89, CON_
 #define PEER_RD 2               /* struct upeermem: those bytes are the client's to read -> 0, else -EFAULT */
 #define PEER_WR 3
 #define PEER_PORT 4             /* arg a port: 0 if the client owns it */
+#define PEER_EXACT 5            /* D60 (msg 0) arg a port of the caller's: its server asks for what it touches */
 struct upeermem { u32 addr, len; };
 static inline int sys_peer(void *msg, int op, void *arg) { return sys3(96, (u32)msg, (u32)op, (u32)arg); }
+/* D60 5.5: a request with its buffers declared: the server is lent exactly those bytes (SYS_call without protection) */
+#define CALLB_RD 1
+#define CALLB_WR 2
+struct ucallbuf { u32 addr, len, flags; };
+struct ucalldecl { u32 n; struct ucallbuf b[4]; };
+static inline int sys_callv(int port, struct umsg *m, struct ucalldecl *d) { return sys3(102, (u32)port, (u32)m, (u32)d); }
+/* D60 7.4: shared memory (without protection: 0, nothing changes) */
+#define SHM_OFFER 1
+#define SHM_TAKE 2
+#define SHM_DROP 3
+#define SHM_INFO 4
+#define SHMF_RO 0x80000000u
+struct ushm { u32 size, owner, holders, flags; };
+static inline int sys_shm(int op, void *addr, u32 arg) { return sys3(101, (u32)op, (u32)addr, arg); }
 #define POST_BUF 1              /* the port's owner: its window and who may post into it */
 #define POST_WRITE 2            /* the poster: bytes into the window, the owner woken (POLLRDBAND) */
 struct upostbuf { u32 addr, size; int from; };
 struct upost { u32 off, src, len; };
+#define POST_READ 3             /* D60: the poster: up to 16 bytes out of the window into src */
 static inline int sys_post(int op, int port, void *arg) { return sys3(97, (u32)op, (u32)port, (u32)arg); }
 /* DESIGN D44: a packet to the ATAPI CD drive, struct uatapi (kernel/diskproto.h); the disk server only */
 static inline int sys_atapi(void *q) { return sys3(98, (u32)q, 0, 0); }

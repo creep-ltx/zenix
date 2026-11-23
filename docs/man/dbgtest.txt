@@ -19,8 +19,9 @@ DESCRIPTION
     loop    count for ever, a short sleep a round (to be attached to)
     crash   three calls deep (b1, b2, boom), then a division by zero
     trap    three system calls in a loop, then "trap done", status 4
-    sysport sleep briefly, then create the port fs.dbgk (a system
-            process from then on); status 6 (7 if refused)
+    sysport sleep briefly, then create the port fs.dbgk (a reserved
+            port; it stays debuggable, DESIGN D60); status 6 (7 if
+            refused)
 
 SEE ALSO
     zdb(1), dbgcheck(1)

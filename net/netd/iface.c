@@ -421,7 +421,8 @@ struct drvif {
     struct nif *f;
     unsigned nbuf, bufsize, held, dma, ntxq;
     unsigned char *mem;                 /* netd's own memory for the buffers, after this struct in its region (0: DMA) */
-    unsigned char *dmatx;               /* DMA: the send buffers */
+    unsigned char *dmatx;               /* DMA, or the frame pool: the send buffers */
+    unsigned char *pool;                /* D60: the frame pool (the driver's view of netd: nothing else), 0: none */
     unsigned long seq;
     int reports;                        /* wrong numbers logged so far (at most a few a driver) */
     struct dbuf b[NETD_DRV_MAXBUF];
@@ -434,6 +435,7 @@ static void drv_free_mem(struct drvif *d)
 {
     int i;
     for (i = 0; i < NETD_IFMAX * 2; i++) if (drvifs[i] == d) drvifs[i] = NULL;
+    if (d->pool) netd_os_free(d->pool); /* (D60: the driver may still hold it: the kernel keeps it for it then) */
     netd_os_free(d);                    /* the struct and the buffers: one region (a process has 16, netd's heap at most 5) */
 }
 static void dbuf_free(struct pbuf *p)
@@ -459,7 +461,7 @@ static err_t drv_linkoutput(struct netif *n, struct pbuf *p)
     if (!d || d->dead) return ERR_IF;
     for (i = 0; i < d->ntxq; i++) if (d->tx[i].state == Q_FREE) { t = &d->tx[i]; break; }
     if (!t || p->tot_len > d->bufsize) { f->tx_drop++; return ERR_MEM; }    /* TCP sends it again */
-    if (d->dma) {
+    if (d->dma || d->pool) {
         pbuf_copy_partial(p, d->dmatx + (unsigned long)i * d->bufsize, p->tot_len, 0);
         t->p = NULL;
     } else {
@@ -503,20 +505,27 @@ int netd_drv_attach(const struct netd_ifcfg *c, const struct netd_drvattach *a, 
     for (i = 0; i < NETD_IFMAX * 2; i++) if (!drvifs[i]) break;
     if (!f || i == NETD_IFMAX * 2) return -ENOSPC;
     unsigned long head = (sizeof *d + 63) & ~63ul;
-    if (!(d = netd_os_alloc(head + (a->dma ? 0 : (unsigned long)a->nrx * bs)))) return -ENOMEM;
+    unsigned char *pool = NULL;
+    if (a->pool && !a->dma && !(pool = netd_os_alloc((unsigned long)(a->nrx + NETD_DRV_BATCH) * bs))) return -ENOMEM;
+    if (!(d = netd_os_alloc(head + (a->dma || pool ? 0 : (unsigned long)a->nrx * bs)))) {
+        if (pool) netd_os_free(pool);
+        return -ENOMEM;
+    }
     memset(f, 0, sizeof *f);
     memset(d, 0, sizeof *d);
+    d->pool = pool;
     drvifs[i] = d;
     slot = (int)i;
     d->nbuf = a->nrx;
     d->bufsize = bs;
     d->dma = a->dma != 0;
-    d->ntxq = d->dma ? NETD_DRV_BATCH : TXQ;
+    d->ntxq = d->dma || pool ? NETD_DRV_BATCH : TXQ;
     if (d->dma) {
         d->dmatx = (unsigned char *)a->dmamem + (unsigned long)a->nrx * bs;
         for (i = 0; i < d->nbuf; i++) d->b[i].p = (unsigned char *)a->dmamem + (unsigned long)i * bs;
     } else {
-        d->mem = (unsigned char *)d + head;
+        d->mem = pool ? pool : (unsigned char *)d + head;
+        if (pool) d->dmatx = pool + (unsigned long)a->nrx * bs;
         for (i = 0; i < d->nbuf; i++) d->b[i].p = d->mem + (unsigned long)i * bs;
     }
     for (i = 0; i < d->nbuf; i++) {
@@ -646,7 +655,7 @@ int netd_drv_tx(int h, struct netd_frame *fr, int max)
         struct netd_frame *o = &fr[n++];
         memset(o, 0, sizeof *o);
         o->tag = (unsigned short)best;
-        if (d->dma) {
+        if (d->dma || d->pool) {
             o->npieces = 1;
             o->piece[0].addr = d->dmatx + (unsigned long)best * d->bufsize;
             o->piece[0].len = t->len;

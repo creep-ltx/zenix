@@ -20,8 +20,7 @@ The documentation must keep saying this.
 or 68060 with a working MMU (an LC or EC 68040/68060 only with `zenixboot MMU=ON`; d41 section 19), every program a
 user runs sees only its own memory (its block, its regions, its
 code read only): a stray read or write ends it with a line naming whose memory it was, and nothing else is damaged.
-Still unprotected then: the system processes (the servers the service manager starts, reserved ports, drivers, a
-display server, a mount's server), which are trusted as before; the kernel itself; a program's own memory (its stack
+Still unprotected then: the kernel itself; a program's own memory (its stack
 overflowing into its own BSS, as above); and a protected server's clients while it holds their requests. Programs can
 no longer share memory by passing an address to each other, nor a protected server hand a client's pointer on to
 another protected server. The rounding of every protected block to whole 4 KB pages costs memory (d41 section 15).
@@ -38,8 +37,22 @@ windows onto the buffers of the kernel's requests it holds. Their limits (d60 "A
 request, 8 bounce pages a window (a buffer in the client's code is copied page by page, so a `write` of more than
 about 7 pages of a program's constants to a protected server fails with -ENOMEM), 32 bounce pages a server, and for
 all servers together 32 windows and 64 bounce pages at once; past one the request is answered -ENOMEM. A program's own
-request to a protected server that could not debug its client is answered -EACCES. A slot handed to a system call
-is refused (-EFAULT). Until stage 3 the system processes still see everything.
+request to an old server (its port not `PEER_EXACT`) that could not debug its client is answered -EACCES. A slot
+handed to a system call is refused (-EFAULT).
+Since D60 stage 3 (2026-11-23) there are no system processes: the servers, drivers, `init` and the services are
+confined too. What stays: the display server and the sound server hold the custom chips' page, so through the blitter,
+the Copper and Paula's DMA they can read (the display server also write) any chip RAM, never fast RAM (stage 4's
+`DRV_AUDIO`, stage 7's checked blitter close it), and the chips' page also holds `INTENA`, `DMACON`, the Copper and
+the blitter, so either server can stop the machine; the parallel port's driver holds CIA-A's and CIA-B's pages (the
+keyboard, the timers, the ROM overlay bit and the floppy's lines too: it could stop the kernel's clock or hang the
+machine, until stage 4's `DRV_PARXFER`); with 8 KB pages (`DIAG=-DMMU_PAGE8`) a PC Card driver gets none of Gayle's
+card pages (they share 8 KB with the IDE's interrupt latch), so it cannot run; a service may ask for any range of
+its client (it is the system's own code), a server any user runs only for what its client declared; a network driver
+or a disk server built before D60 does not work with full protection (it neither shares the frame pool nor uses the
+RAM disk's copy form; an old filesystem, display, sound or USB server does, through the old lend). The tables:
+grants 32 in all (shared regions taken may use 20 of them: 12 stay for claims and the display's grab), `SYS_shm` 8
+offers and 8 holds a process and 24 in all, `SYS_callv` 4 buffers, a request's
+windows 8 (those of a request that share a page become one).
 Never run on a real 68030/040/060 yet; not on the stock A1200 (a 68EC020 has no MMU) nor under Emu68.
 
 What the permissions do cover (audit D): a user cannot kill, stop or take over the terminal of another user's or a

@@ -6,6 +6,7 @@ NAME
 SYNOPSIS
     msgping [rounds]
     msgping winread FILE [CASE] | readpast FILE | rewrite | call PORT
+    msgping past PORT | peer PORT | wild PORT | shm
 
 DESCRIPTION
     Talks to msgpingd(1) through its message port "ping": calls it to add
@@ -25,7 +26,23 @@ DESCRIPTION
     bytes into the last 10 bytes of its own memory (-14 expected).
     rewrite has msgpingd rewrite this program's message while it is
     served (type 10). call PORT makes one call there and prints its
-    result.
+    result. The string it has edited is declared with callv (DESIGN D60
+    stage 3: a server that asks for what it touches sees only that).
+
+    For D60 stage 3 (each prints the call's result, a[2], and whether its
+    buffer is untouched): past PORT declares a page of its own and has
+    the server write the byte after it (type 11: the server must end);
+    peer PORT has it ask for 4 bytes of this program's stack (type 13,
+    the answer in a[2]: -14 from a server any user runs that may not
+    debug this program); wild PORT has it write that stack without
+    asking (type 14: the server must end). shm offers an 8 KB region to
+    a child (msgping shmchild ADDR), which takes it, checks this
+    program's bytes and writes one; this program frees the region early,
+    the child must still read it and own it, drops it, and is ended by
+    its next read; then an offer of its stack, an offer to itself and a
+    take of what was not offered must be refused (-22, -3, -2), and a
+    child given a region read only is ended by its write ("msgping: shm
+    ok"; with full memory protection only).
 
 OUTPUT
     msgping: 1000 round trips in 3012 us, 3.0 us each

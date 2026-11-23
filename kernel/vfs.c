@@ -1172,13 +1172,6 @@ long vfs_mount(const struct umountreq *r)
     int port = port_find(r->port);
     if (port < 0)
         return -ENODEV;                         /* no server on that port */
-    struct proc *srv = port_owner(port);
-#ifndef MMU_CONFINE
-    if (srv)
-        mmu_sysmark(srv);                       /* D41 7: it gets the kernel's requests, on a kernel stack (D60 stage
-                                                 * 2's records and windows make that needless; stage 3 drops it: make
-                                                 * DIAG=-DMMU_CONFINE tests the servers so, tools/mmu-test.sh) */
-#endif
     struct mount *mt = &mnt[free];
     memset(mt, 0, sizeof *mt);
     strcpy_(mt->path, abs);

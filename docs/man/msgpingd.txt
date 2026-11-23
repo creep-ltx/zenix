@@ -4,7 +4,7 @@ NAME
     msgpingd - test message server
 
 SYNOPSIS
-    msgpingd [-port NAME] [-call NAME] [-uid N]
+    msgpingd [-port NAME] [-call NAME] [-uid N] [-old]
              [-fs | -fsstall | -fsbad | -fslinked | -fsdir | -fswin]
              [count]
 
@@ -19,13 +19,21 @@ DESCRIPTION
     type 9 ends the server, type 10 rewrites the client's own message
     (whose address the client puts in a[0]) while it serves it and then
     answers 7 with a[2] 4242 (with memory protection on the kernel must
-    not use what the client's memory says: DESIGN D60 5.1). It also ends
+    not use what the client's memory says: DESIGN D60 5.1), type 11
+    writes the byte a[1] bytes after a[0], type 13 asks the kernel for 4
+    bytes at a[0] (SYS_peer PEER_RD, the answer in a[2]), type 14 writes
+    a[0] without asking (msgping past, peer, wild). It also ends
     after serving count requests if given. Start it in the background:
     msgpingd &
     -port NAME  serve port NAME instead of "ping".
     -uid N      serve as user N (root only): a server that may not see
-                a root client's memory, whose requests are refused with
-                -13 while memory protection is on (D60 5.8).
+                a root client's memory.
+    -old        open the port without marking it PEER_EXACT: an old
+                server (DESIGN D60 5.8), which with memory protection on
+                gets its client's whole memory when it could debug the
+                client, and refuses the request with -13 when it could not
+                (with -uid N and a root client). Without it, it sees only
+                what its clients declare.
     -call NAME  call port NAME once before opening its own port (a server
                 whose start needs another service; D11's tests use it to
                 make a cycle).

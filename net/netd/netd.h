@@ -218,6 +218,9 @@ struct netd_drvattach {
                                          * buffers and NETD_DRV_BATCH send buffers); the link is up */
     void *dmamem;
     unsigned long dmalen;
+    int pool;                           /* DESIGN D60 7.4 (full memory protection): no DMA, but the buffers in a frame pool
+                                         * of their own, receive buffers then NETD_DRV_BATCH send buffers, shared with
+                                         * the driver (SYS_shm); every frame sent is copied into it */
 };
 /* the driver of the stanza c attached: its interface comes up (static, or DHCP started). The buffers it is lent:
  * *nbuf of *bufsize bytes at bufs[]. -> the handle, or -EEXIST, -EINVAL, -ENOSPC, -ENOMEM */

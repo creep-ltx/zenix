@@ -62,7 +62,7 @@ EXIT STATUS
 
 NOTES
     You may debug only your own processes (root: any), never pid 1, the
-    servers the kernel starts, system processes, a set-user-id program
+    servers the kernel starts (they have no parent), a set-user-id program
     running as someone else, or a program that changed its user id; a
     set-user-id program started under zdb runs as you, and one you may
     not read is refused. A program started under zdb gets its own copy of

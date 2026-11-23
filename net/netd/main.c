@@ -349,8 +349,21 @@ static long do_attach(struct umsg *m)
     na.link = (a->flags & DRVA_LINK) != 0;
     na.dmamem = (void *)a->dma;
     na.dmalen = a->dmalen;
+    /* D60 7.4: with full memory protection the frames cross by shared memory: a DMA driver's region offered to us, or
+     * our frame pool offered to the driver; nothing else of either is the other's to see */
+    na.pool = !na.dma && prot_full();
+    if (na.dma && prot_full() && sys_shm(SHM_TAKE, (void *)a->dma, 0) < 0) {
+        dprintf(1, "netd: %s: its driver did not share its DMA memory: not attached\n", d->cfg.name);
+        return -EACCES;
+    }
     int h = netd_drv_attach(&d->cfg, &na, &bs, &nb, bufs);
     if (h < 0) return h;
+    int se = na.pool ? sys_shm(SHM_OFFER, bufs[0], (u32)m->a[0]) : 0;
+    if (se < 0) {
+        dprintf(1, "netd: %s: the frame pool could not be shared (%d): not attached\n", d->cfg.name, se);
+        netd_drv_gone(h);
+        return se;
+    }
     d->h = h;                                   /* a good start does not clear the end count: the window does (D11) */
     stop_idle = 0;                              /* an interface: netd stays */
     if (d->probe && !d->attached) {

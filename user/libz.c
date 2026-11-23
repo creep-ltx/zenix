@@ -516,3 +516,36 @@ u32 zu8fit(const char *s, u32 n, int cols)
     }
     return i;
 }
+
+/* DESIGN D60 (docs/d60-full-protection.md 5.5, 11): the peer helpers; no system call while protection is not full */
+static signed char prot_seen = -1;
+int prot_full(void)
+{
+    if (prot_seen < 0) {
+        u32 w[5];
+        prot_seen = (signed char)(sys_meminfo5(w) >= 0 && w[4] == 2);
+    }
+    return prot_seen;
+}
+static int peer_ask(struct umsg *m, int op, u32 addr, u32 len)
+{
+    if (!prot_full())
+        return 1;
+    struct upeermem pm = { addr, len };
+    return len == 0 || sys_peer(m, op, &pm) == 0;
+}
+int peer_rd(struct umsg *m, u32 addr, u32 len) { return peer_ask(m, PEER_RD, addr, len); }
+int peer_wr(struct umsg *m, u32 addr, u32 len) { return peer_ask(m, PEER_WR, addr, len); }
+int peer_str(struct umsg *m, u32 addr, u32 max)
+{
+    if (!prot_full())
+        return 1;
+    for (u32 n = max; n; n--)           /* the longest range that is the client's (a name near its memory's end) */
+        if (peer_rd(m, addr, n)) {
+            for (u32 i = 0; i < n; i++)
+                if (!((const char *)addr)[i])
+                    return 1;
+            return n == max;            /* (no 0 in it: a string longer than max, or one past the client's memory) */
+        }
+    return 0;
+}

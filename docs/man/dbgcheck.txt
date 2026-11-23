@@ -20,8 +20,8 @@ DESCRIPTION
     runs on; a raw step over TRAP #0 (no panic on any CPU) and the
     program's own end; a target blocked in a system call stops and its
     registers read; a step left pending at a detach does no harm; a
-    target made a system process while its debugger waits ends the wait
-    (ESRCH) and runs to its end. It
+    target that makes a reserved port stays traced (DESIGN D60: there
+    are no system processes) and the debugger's wait sees its end. It
     expects /tmp/sid (a set-user-id copy of /bin/id) and /tmp/sidx (the
     same without read for others) and /tests/dbgtest.
 

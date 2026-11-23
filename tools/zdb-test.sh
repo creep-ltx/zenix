@@ -112,7 +112,7 @@ for line in re.findall(r"^dbgcheck: (.*) (?:ok|FAILED)$", k, re.M):
 oks = re.findall(r"^dbgcheck: (.*) ok$", k, re.M)
 bad = re.findall(r"^dbgcheck: (.*) FAILED$", k, re.M)
 check(L.status("zk") == 0 and not bad and len(oks) == 20, "dbgcheck: %d checks ok (permissions, nodebug, set-user-id, "
-      "EFAULT, EAGAIN, a raw step over TRAP #0, a pending step at a detach, SIGCONT, a target made a system process)" % len(oks), bad or k[-900:])
+      "EFAULT, EAGAIN, a raw step over TRAP #0, a pending step at a detach, SIGCONT, a target making a reserved port)" % len(oks), bad or k[-900:])
 check("kernel panic" not in L.text and "exception in the kernel" not in L.text, "no kernel panic", L.text[-500:])
 check(est == 0, "e2fsck clean after the run", est)
 L.waits()

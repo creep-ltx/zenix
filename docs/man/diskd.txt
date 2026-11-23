@@ -83,6 +83,15 @@ NOTES
     (10) take the buffer's size in a[2] and write at most that many bytes
     (less than 80 is -EINVAL). The struct only grows at its end (the
     frozen-interface rule, CLAUDE.md).
+    With full memory protection (DESIGN D60 stage 3) diskd sees nothing of
+    its clients but what it asks for: it asks the kernel (SYS_peer, the
+    libz helpers peer_rd, peer_wr, peer_str) for the device name of
+    DISK_OPEN, the buffer of DISK_READ and DISK_WRITE and the struct of
+    DISK_INFO before it touches them (-EFAULT if a range is not the
+    client's), and reads and writes the RAM disk through the kernel's copy
+    (SYS_blk_ram with a count), never in place. A diskd built before D60
+    reads the RAM disk in place and stops at its first access there with
+    full protection.
 
 SEE ALSO
     fdisk(1), mkfs.ext2(1), fsck.ext2(1), usbd(8), docs/architecture.md

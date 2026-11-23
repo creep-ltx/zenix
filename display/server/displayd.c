@@ -14,6 +14,7 @@
 #include "../screenfile.h"
 #include "fb.h"
 #include "../../kernel/hwinfo.h"
+#include "../../kernel/netproto.h"          /* DRV_HWINFO (D60 stage 3) */
 
 int aga;
 int wm_cl = -1;
@@ -149,7 +150,16 @@ static void flush(int cl)
     if (!c->used || c->dead || (!c->npend && !c->lost))
         return;
     volatile const struct dpyring *r = (const struct dpyring *)c->ring;
-    u32 tail = r->tail, used = c->head - tail;
+    u32 tail;
+    if (prot_full()) {                  /* D60 5.5: the client's memory is not ours to read: the tail through its window */
+        struct upost q = { 4, (u32)&tail, 4 };
+        if (sys_post(POST_READ, c->port, &q) < 0) {
+            c->dead = 1;
+            return;
+        }
+    } else
+        tail = r->tail;
+    u32 used = c->head - tail;
     if (used > c->nrec)                 /* the client's tail is nonsense: nothing fits, the client is told */
         used = c->nrec;
     int put = 0, rc = 0;
@@ -432,14 +442,25 @@ static void fb_scale(int *x, int *y)
     *x = (int)((u32)*x * card.w / (u32)base_w);
     *y = (int)((u32)*y * card.h / (u32)base_h);
 }
-/* the record in the boot's hardware table (read as a system process, after the grab: D41 7), checked; 1: the screen
+/* the record in the boot's hardware table (with full protection the kernel's copy, DRV_HWINFO), checked; 1: the screen
  * is the card's from now on (scr the pens' bitmap in fast RAM) */
+static struct hwinfo hwcopy;
 static int card_take(void)
 {
     const struct hwinfo *h = (const struct hwinfo *)HWINFO_ADDR;
+    if (prot_full()) {                  /* D60 stage 3: low chip RAM is not ours to read: the kernel's copy */
+        if (sys_drv(DRV_HWINFO, (u32)&hwcopy, sizeof hwcopy) < (int)sizeof hwcopy)
+            return 0;
+        h = &hwcopy;
+    }
     if (h->magic != HWINFO_MAGIC || h->fb.magic != HWFB_MAGIC)
         return 0;
     struct hwfb *f = (struct hwfb *)&h->fb;
+    if (prot_full() && !(f->flags & HWFB_TEST)) {
+        dprintf(2, "displayd: a graphics card's memory is not granted under full memory protection yet (D60 stage 4): "
+                "the chipset's screen\n");
+        return 0;
+    }
     if ((f->flags & HWFB_TEST) && !f->base && fb_size_ok(f->width, f->height, f->bpp, f->bpr) &&
         (f->base = (u32)sys_memalloc(f->bpr * f->height)) != 0) {
         memset((void *)f->base, 0x5A, f->bpr * f->height);     /* a test's pretend card (dpytest -fb): ours, so it
@@ -1086,7 +1107,13 @@ static int req(struct umsg *m)
             return -ENOENT;
         if (a[1] == WS_TITLE) {
             int whole = peer(m, PEER_RD, a[2], DPY_TITLE - 1) == 0, i = 0;    /* else byte by byte (its memory's end) */
-            for (; i < DPY_TITLE - 1; i++) {
+            u32 lim = DPY_TITLE - 1, pg = 4096 - (a[2] & 4095);
+            if (!whole && pg < lim && peer(m, PEER_RD, a[2], pg) == 0) {
+                whole = 1;              /* D60: to its page's end (memory with protection on is whole pages; asking
+                                         * byte by byte would use up the request's windows) */
+                lim = pg;
+            }
+            for (; i < (int)lim; i++) {
                 if (!whole && peer(m, PEER_RD, a[2] + (u32)i, 1) < 0)
                     return -EFAULT;
                 char ch = ((const char *)a[2])[i];
@@ -1094,6 +1121,8 @@ static int req(struct umsg *m)
                     break;
                 w->title[i] = ch;
             }
+            if (i == (int)lim && lim < DPY_TITLE - 1)
+                return -EFAULT;         /* (past its memory's end, as byte by byte said) */
             w->title[i] = 0;
             win_title((int)(w - wins));
             ev_wm(EV_WM_TITLE, w->id, 0, 0, 0, 0, 0, 0);

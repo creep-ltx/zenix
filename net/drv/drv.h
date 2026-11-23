@@ -50,9 +50,20 @@ static inline int drv_attach(struct drvq *q, const char *ifname, const unsigned 
     q->at.claim = (u32)claim;
     q->at.dma = dma;
     q->at.dmalen = dmalen;
+    if (flags & DRVA_DMA) {             /* D60 7.4: the DMA memory shared with netd (our parent; nothing without protection) */
+        struct uproc u;
+        int me = sys_getpid();
+        for (u32 i = 1; i < 64 && sys_procinfo(i, &u) >= 0; i++)
+            if ((int)u.pid == me) {
+                sys_shm(SHM_OFFER, (void *)dma, u.ppid);
+                break;
+            }
+    }
     int r = sys_drv(DRV_ATTACH, (u32)&q->at, sizeof q->at);
     if (r < 0) return r;
     if (q->at.nbuf > DRV_MAXBUF) return -EINVAL;
+    if (q->at.nbuf && !(flags & DRVA_DMA))
+        sys_shm(SHM_TAKE, (void *)q->at.buf[0], 0);    /* D60 7.4: netd's frame pool (an older netd: none, and no need) */
     for (u32 i = 0; i < q->at.nbuf; i++) q->own[i] = 1;
     q->x.size = sizeof q->x;
     return r;

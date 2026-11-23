@@ -654,9 +654,6 @@ static void quit(void)
 
 int main(void)
 {
-    ntsc = (CUST(VPOSR) & 0x1000) != 0;         /* the Agnus/Alice NTSC bit, as the kernel reads it */
-    clock_hz = ntsc ? 3579545u : 3546895u;
-    eclock_hz = ntsc ? 715909u : 709379u;
     gen = sys_svc_self() & 0x7FFF;
     port = sys_port_create(SND_PORT);           /* first: the kernel knows the service's process by its port */
     if (port < 0) { say("port audio busy"); return 1; }
@@ -665,6 +662,10 @@ int main(void)
         dprintf(1, "sndd: Paula could not be claimed (%d): not started by the service manager?\n", claim);
         return 1;
     }
+    /* after the claim (D60 stage 3: with full memory protection the chips' page is ours only from then on) */
+    ntsc = (CUST(VPOSR) & 0x1000) != 0;         /* the Agnus/Alice NTSC bit, as the kernel reads it */
+    clock_hz = ntsc ? 3579545u : 3546895u;
+    eclock_hz = ntsc ? 715909u : 709379u;
     silent = sys_memalloc_chip(4);
     if (!silent) { say("no chip RAM"); return 1; }
     memset(silent, 0, 4);

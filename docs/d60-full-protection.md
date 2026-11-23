@@ -1015,3 +1015,191 @@ Tests (all with protection where the machine has it unless said; FS-UAE in fast 
 - Without an MMU (FS-UAE's 68020): cmds-test, svc-test (every part), bootmem-test, zdb-test, readdir-test, sock-test,
   netd-test, pure-test, prio-test, mounttest: pass.
 - Not done: any real CPU; the desktop's and sound's rows of 9.4; the update path's test (stage 5).
+
+## 20. As built: stage 3 (2026-11-23, branch d60s3)
+
+Every server confined (section 14's stage 3): `svc_born`, a reserved port's creation, `SYS_mount`, `SYS_drv` and
+`CON_GRAB` mark nothing; D41's system mode, its mask and `mmu_sysmark` are gone (and D54's "a system process has no
+debugger" with them). `DIAG=-DMMU_CONFINE` went with them: its tests are tools/mmu-test.sh's defaults.
+
+### 20.1 What was built
+
+`kernel/mmu.c` (the block "D60 stage 3"), the hooks in `ipc.c`, `syscall.c`, `drv.c`, `gcon.c`, `svc.c`, `proc.c`;
+`user/diskd.c`, `display/server/displayd.c`, `net/netd/` and `net/drv/drv.h`; libz's `prot_full`, `peer_rd`,
+`peer_wr`, `peer_str`; `usys.h`'s `sys_port_create` marks its port.
+
+- **Grants (3.1 items 2, 4)**: beside its view, the inbox and its windows a process's tree holds its grants (32 in
+  all, made again with the tree): the register pages of the device it claimed (`DRV_CLAIM`: a Zorro board's window,
+  the PC Card slot's 0xA00000-0xA4FFFF and Gayle's card status and configuration pages 0xDA8000 and 0xDAB000, the
+  custom chips' page for Paula, CIA-A's and CIA-B's pages for the parallel port; inhibited and serialized whatever
+  the address, CI on the 030), its claim's DMA memory (`DRV_DMAMEM` gives whole pages with protection on), the
+  custom chips' page for the display server (`CON_GRAB`, until the grab ends), and the shared regions it took. A
+  claim's registers go at its end; its DMA memory stays the driver's until it is reaped (as before).
+- **What is still trusted, honestly**: the display server and the sound server hold the custom chips' page, so the
+  blitter, the Copper and Paula's DMA reach any chip RAM (never fast RAM); the plipbox driver holds both CIAs'
+  pages. Stage 4 (`DRV_AUDIO`, `DRV_PARXFER`) and stage 7 (`CON_BLIT`, `CON_COPPER`) close these; the boot tables at
+  0x1000 and 0x1100 are still read in low chip RAM by the kernel (stage 4, 6.3).
+- **Program requests (5.5)**: `SYS_callv` (102) records up to four declared buffers in the kernel's record (each the
+  client's memory or a window it holds, never its message), lent as windows at the receive. `SYS_peer`
+  `PEER_RD`/`PEER_WR` lend the asked range until the reply to a server trusted to ask (a process the service manager
+  started for a service: `svc_any`, or one that could debug the client: `may_see`); for any other server 0 only
+  within a declared buffer, else -EFAULT. A range of the request's that shares a page with an earlier window of it
+  is merged with it (the windows dropped with their bytes back, one made of their union, but only when the union too
+  is the client's memory or its windows, writable where it is written), so asking byte by byte does not use up the 8
+  windows. A range overlapping the client's message is refused (the server has its copy). At the receive no such
+  merge is tried: a client that declares a read-only buffer and then a written one in one part page of a service is
+  refused with -EBUSY (none in the tree does). A program's request to an old server is refused -EACCES when the server
+  may not debug the client, declared buffers or not (5.8 as built: such a server does not ask, so it would touch
+  more than was declared). `PEER_EXACT` marks a port (`usys.h`'s `sys_port_create` asks it for every port it makes;
+  a service's port loses the mark when it goes back to held); the record takes the mark at the receive, as the port
+  is then. A port without it is an old server's: D41's whole-client lend by `SYS_debug`'s rule, else -EACCES (stage
+  2's rule, kept).
+- **A deviation, for speed (5.3)**: a window's part page that is wholly its client's own memory (not its code, not the
+  kernel's, not another process's) is mapped as it is, not onto a bounce page, when the server is a service (`svc_any`):
+  such a server may ask for any range of its client anyway (5.5, the partner's answer 2), and the bounce copies of
+  unaligned buffers (`cat`'s, `bench`'s static buffers) were most of a confined fsd's cost (read4k x4.1 in FS-UAE). A
+  server any user runs, and every page of the kernel's or of another process (the loader's block, a kernel stack),
+  still gets bounce pages: the hostile tests' servers are of that kind. The cost of the choice: a service's stray
+  write past a buffer lands in its client's page, the client damaged (3.2's containment to the clients it serves, and
+  to whoever shares that region with the client; in a program of the old ZEXE format, whose code lies in its block,
+  its code too).
+- **Cheaper windows**: a server's tree keeps the tables its windows needed (made and freed at every request they cost
+  more than the request: as stage 1 kept a lend's); the bounce pages are copied and cleared 32 bytes a MOVEM pair, a
+  page from the pool is cleared around its window's bytes when it is taken (not cleared twice), one given back to the
+  kernel cleared first; a server's window count is kept (no scan of every window at each drop).
+- **`SYS_shm` (101, 7.4)**: an entry per (region, receiver), 24 in all, `NSHM` 8 offers made, 8 received and 8 holds a
+  process; a process that is neither a service nor a driver of the network service may use at most 16 entries in all
+  and leaves 12 of the 32 grants to the system's (claims, the display's grab, netd's pool). The grab's Copper list
+  and sprite regions cannot be offered (as `SYS_memfree` refuses them). `struct ushm` is 16 bytes, fixed.
+  `SHM_OFFER` a region (`SYS_memalloc`'s, by its exact address) or the caller's claim's DMA memory to a living
+  process; `SHM_TAKE` (any address in it) grants it to the taker (read only with `SHMF_RO`); `SHM_DROP` by a holder
+  lets go, by the owner withdraws its offers not taken; the owner's `SYS_memfree` of a region someone holds, or its
+  end, hands the block to a holder (`mem_set_owner`; out of the old owner's tree), which frees it when it drops it or
+  ends; a block freed takes its entries and grants with it. Pointers into a taken region pass `user_ok_call_*`.
+  Without protection ops 1-3 answer 0 and change nothing (D60 11; the netd pool below is used only with full
+  protection, so the stock A1200 copies no frame more).
+- **netd's frame pool (6.2)**: with full protection a driver without DMA gets its receive buffers and
+  `NETD_DRV_BATCH` send buffers in a region of their own, offered to it (`SHM_OFFER` at `NETDRV_ATTACH`, taken by
+  `drv.h`'s `drv_attach`); every frame sent is copied into a send buffer (as for a DMA driver); received frames go
+  to lwIP without a copy as before. A DMA driver offers its claim's memory to netd (its parent) before it attaches,
+  and netd takes it or refuses the attach. netd's own memory (the lwIP buffers, its structs) is never the driver's.
+- **diskd (6.2)**: asks for the client's bytes it touches (`DISK_OPEN`'s name by `peer_str`, the buffer of
+  `DISK_READ`/`DISK_WRITE`, `DISK_INFO`'s struct); reads and writes the RAM disk through `SYS_blk_ram`'s copy form
+  (a2 sectors from a1, bit 31 a write, buffer a3; with protection on only), never in place: the RAM disk follows the
+  kernel's image in one load, so its ends share pages with the image and it is never put into a view (3.1 item 6
+  changed: no RAM-disk grant). With protection on `SYS_blk_read`/`write`, `SYS_fd_rw` and `SYS_atapi` check their
+  buffer as the caller's memory or a window (and sync its copy pages: 5.7), no longer the disk server's trust.
+- **displayd (5.5)**: reads a client's ring tail with `SYS_post` `POST_READ` (3: up to 16 bytes of the window the
+  client opened, into the poster's own memory) when protection is full; a title asked for to its page's end before
+  byte by byte. An old displayd reads the tail in place between requests: when a client opens its window for a
+  poster whose port is not `PEER_EXACT` and that could debug it, the window's pages are granted to the poster read
+  only (what its old lend would show), and taken back when the window changes (5.8; read from the code, not run: no
+  old displayd in the tests).
+- **The shared tables are not a user's to fill**: a server that is not a service holds at most 8 windows, and 12 of
+  the 32 windows and 16 of the 64 bounce pages are kept for services (the kernel's own requests to fsd never fail for a
+  user's server that holds its clients); shares and grants as above.
+- **`SYS_meminfo`'s fifth word** (size 20): 2 with protection on, 0 without (1, D41's, comes with `MMU=D41`, stage 5).
+- **Not done here (later stages)**: `DRV_AUDIO`, `DRV_PARXFER`, `CON_GRAB` for the display service only, the boot
+  tables copied (stage 4; until then a root process can still grab the console, and through the chips write the
+  hardware table at 0x1100 that the claims trust: root keeps a way to kernel RAM in stage 3); zup's bundle, `priotest`/`pure-test` on `SYS_shm`, ZINE's checks, `MMU=STRICT`,
+  `MMU=D41`, the update-path test (stage 5). An old (pre-D60) network driver or diskd does not work with full
+  protection (neither shares the frame pool nor copies the RAM disk through the kernel); 5.8's "old frame lending" is
+  not built, so a kernel-first update over the network would leave the machine without its network until the new
+  drivers are in: for stage 5's update-path list, beside `MMU=D41`. An old display, sound or USB server works through the old lend.
+- **Diagnostics**: `DIAG=-DMMU_PROF` prints, every 400 receives, the E-clock ticks spent giving and ending requests,
+  in switches, flushes, window makes and drops and descriptor pushes (how the costs below were found).
+
+### 20.2 The figures (emulator figures: ratios only)
+
+`tools/mmubench-test.sh`, protection off -> on, the same build; FS-UAE 3.2.35 in warp mode, Amiberry 8.5.0 (the
+machines of 18.3). Stage 2's ratios (19.2, fsd and diskd then system processes, no windows) in brackets.
+
+| Figure (budget) | FS-UAE 030 | FS-UAE 040 | FS-UAE 060 | Amiberry 030 | Amiberry 040 | Amiberry 060 |
+|---|---|---|---|---|---|---|
+| `msgcall` (x1.5 target, x2 limit) | x1.53 (x1.75) | x1.72 (x2.00) | x1.72 (x2.00) | x1.53 (x1.58) | x1.54 (x1.99) | x1.54 (x1.99) |
+| `pipetrip` (x1.5, x2) | x1.07 | x1.07 | x1.08 | x1.08 | x1.06 | x1.06 |
+| `stat` (+10%) | +11% (+10%) | +14% (+13%) | +14% (+13%) | +13% (+12%) | +9% (+8%) | +9% (+8%) |
+| `read4k` (+10%) | +36% (+10%) | +41% (+12%) | +41% (+12%) | +41% (+11%) | +35% (+9%) | +35% (+9%) |
+| `bigread` (+10%) | +25% | +24% | +23% | +11% | +7% | +7% |
+| `pipe` (+15%) | +7% | +7% | +7% | +10% | +4% | +4% |
+| `lsr` (+10%) | +10% | +12% | +11% | +10% | +8% | +8% |
+| the null call (+0) | +1% | the same | the same | +3% | the same | the same |
+
+- **What confining fsd and diskd costs**: a file request now switches roots twice (the client's tree, fsd's; 55 us
+  in FS-UAE's 040 model, a flush of 24 us included), and every buffer the kernel lends is a window made and dropped
+  (about 190 and 250 us there for a part-page window, the descriptor writes, their pushes and the flush); a disk read
+  adds diskd's ask and its window. `stat` lends nothing (its path and `ustat` are copies), so it stays at stage 2's
+  cost; `read4k` and `bigread` pay the windows. Before the speed work of 20.1 ("Cheaper windows", the part pages of a
+  service) `read4k` was x4.1 and `bigread` x2.1 in FS-UAE. `msgcall` is lower than stage 2's (the slot copies by
+  MOVEM, a window count kept): a call to a protected server with no buffer.
+- **Over the budget in the emulators**: `read4k` (+35-41%), `bigread` in FS-UAE (+24%), `stat` by 1-4 points (as in
+  stage 2). Neither emulator models the real ATC or the cost of an instruction; FS-UAE's 040/060 model charges about
+  18 us for a null system call. The judge stays the 1260 (9.4); stage 6's speed pass has what is left: keeping a
+  window across a client's next request at the same server (5.3 takes it down at the reply), `PEER_DECLARE`, the
+  record and slot copies.
+- **Protection off** (FS-UAE 040 against stage 2's kernel on the same machine): `msgcall` 259 -> 248 us, `stat` and
+  `read4k` the same, the null call 18.2 us; the resident gates added here (`SYS_callv`'s, `SYS_shm`'s stub, the
+  raw-disk checks behind `mmu_on`, `POST_READ`) are a few instructions on a path a call takes.
+- **Size**: kernel.bin 216,700 -> 223,576 bytes (+6,876): `mmu` 15,196 -> 19,520 bytes (in the span, given back after
+  the boot when protection is off), `syscall` + 490, `drv` + 578, `ipc` + 316 and bss + 56 (`struct port`'s mark),
+  `gcon` + 134, `embed` + 1,016 (diskd's and fsd's built-in images: the peer helpers, the port mark), `proc`, `vfs` and
+  `dbg` a little smaller (the system marks gone). Section 10 estimated 2.5-3 KB for stage 3. The mount tests' RAM disk
+  666 -> 658 KB (65 of its blocks free; the floppy keeps 2,728 bytes); the demo floppy keeps 12 KB.
+
+### 20.3 Reviews and tests
+
+Two independent reviews of the code (2026-11-23). **The MMU mechanics**: no must-fix; every encoding, the grants'
+cache modes, the rebuild, the flushes, the bounce pool's clearing and the MOVEM routines checked fine. Fixed: a merge
+of a request's windows could take in a gap between them that is not the client's (a kernel page under two kernel
+buffers) and write it: the union is checked as the client's memory first, and refused otherwise; two windows on one
+bounce page cleared each other's bytes at the first one's end and copied the client's bytes over an answer not yet
+sent: a page keeps its bytes until its last window ends, and a window made on a shared bounce page copies in only
+what no other window there covers; `SHM_DROP` by the holder a driver's claim memory was handed to freed it: claim
+memory is drv.c's to free (at the driver's reap); a region freed early while an old server still had its owner's
+view lent stayed valid there: the lends go back first; the grant and share tables could be filled by a user (below);
+two grants of one page (a Paula claim and a grab) are an entry each, the page out with the last. Written down: the
+register pages' reach (limits.md); a read-only then written buffer in one page at the receive (-EBUSY, 20.1).
+**The interface and security model**: fixed: an old displayd read its client's ring tail in place and would have
+been killed (the old-poster grant, 20.1); a user's servers could take every window and bounce page and stop the
+kernel's own requests (a server not a service holds at most 8 windows, 12 windows and 16 bounce pages are kept for
+services), and fill the share and grant tables (counted at the receiver too, 8 entries and 12 grants kept for the
+system's); a display server could offer its Copper list (refused as `SYS_memfree` refuses it); `struct ushm` could
+not grow (now fixed at 16 bytes, said so); `SYS_blk_ram`'s copy form missing from kernel.h; `SYS_peer` could lend the
+client's own message (refused). Written down: the containment of a service's identity part pages (to whoever shares
+the client's region, and an old-format program's code, 20.1); without protection the owner's `SYS_memfree` really
+frees (claims.md: holders drop first); a program's request to an old server is refused even with declarations (5.8
+as built); root's way to kernel RAM through `CON_GRAB` until stage 4; old network drivers and the update path (stage
+5). And from the main session: zine-emu-test's zlean failed after stage 2; not lost memory but a relocation at the
+wrong offset in `tools/mkbigtest.py` (zlean's bra.w), passing by luck while its hunk lay at 0x20xxxx (fixed, its
+own commit).
+
+Tests (all with protection where the machine has it unless said; FS-UAE in fast mode):
+- `mmu-test` FS-UAE 020 030 040 060 lc060 and Amiberry 030 040 060: pass, with the new checks: a write one byte past a
+  declared page ends the server (-104 to its client, the page untouched); a user's server asking for its client's
+  stack gets -EFAULT and is ended when it writes it without asking; a service (registered with `svctest reg`)
+  writing its client's stack without asking is ended, and the next call starts it again and its ask is served; an
+  old server (`msgpingd -old`) keeps stage 2's rewrite and -EACCES checks; `msgping shm`: offered, taken, the bytes
+  both ways, freed early by its owner and kept by the child, which owns it then, drops it and is ended by its next
+  read; an offer of a stack, to oneself and a take not offered refused (-22, -3, -2); a read-only share written ends
+  its taker. The confined filesystem server's checks of stage 2 (`+confine` then) are the default now.
+- `mmu-suite` (every server confined): FS-UAE 040 and 060 pass every test (cmds-test, memtest, mounttest, svc-test
+  with every part, svc-test's part f and sound-test at stock speed, lua-test, tcc-test, zdb-test after dbgcheck's
+  system-process check was changed: no process becomes one); FS-UAE 030 the same but tcc-test's `101_cleanup`
+  (below); Amiberry 040 the same but svc-test's "fsd is pid 3, at nice -10" (Amiberry's timing, as in 18.4).
+  Also on the 040: readdir-test, sock-test, netd-test (its part l; part s is the stock A1200's profile), eth-test
+  (the A2065 and the NE2000 through the frame pool), ne2000-test, plipbox-test, sound-test (after sndd was made to
+  read the beam after its claim).
+- The display tests on the 040 model (dpy-test, zdesk-test, gcon-test) fail the same checks with stage 2's kernel of
+  main on the same machine (their screenshots are made for the 68020 machine, d41 19.3 note 8); with stage 3 no
+  protection line comes from them (displayd read the hardware table at 0x1100 before it used DRV_HWINFO: found so).
+- Without an MMU (FS-UAE's 68020, `tools/check.sh`): cmds-test, svc-test (every part), bootmem-test, zdb-test,
+  readdir-test, sock-test, netd-test, pure-test, prio-test, mounttest, zine-emu-test (after the zlean fix): pass.
+- `mmubench-test` 030 040 060 in both emulators: pass (20.2).
+- **Memory**: on the 4 MB 68030 machine `free` after boot and one login says 3,384 KB, 24 KB less than stage 2 (9 KB
+  of it the larger kernel, the rest the trees of boot, diskd and fsd, which had none as system processes, the pages
+  their blocks are rounded to, and the windows' tables); 72,999 KB on the 040/060 with 72 MB. tcc-test's
+  `101_cleanup` is a 1.9 MB program with a 1 MB stack, 2.9 MB in one piece: on that machine it no longer finds it
+  (`out of memory`); with stage 2 it just did. The bounce pages kept went from 4 to 1 for this (4 KB); the rest is
+  the price of confining the servers there.
+- Not done: any real CPU; the desktop's and sound's rows of 9.4 (the 68020 machine's tests); an old displayd, old
+  drivers and the update path (stage 5); Amiberry's 030 and 060 suites (FS-UAE's ran).
