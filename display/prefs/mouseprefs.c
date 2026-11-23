@@ -327,7 +327,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--") && i + 1 == argc)
             break;
         else
-            zusage(USAGE);
+            zbadopt(argv[i], USAGE);
     int r = dpy_open("mouseprefs");
     if (r < 0) {
         dprintf(2, "mouseprefs: the desktop: %s\n", zstrerror(r) ? zstrerror(r) : "not reachable");
