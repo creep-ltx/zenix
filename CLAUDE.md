@@ -45,6 +45,7 @@ must **take little**: disk, RAM, floppy. Where the two pull apart, take the midd
   tight, so none for small changes the tests cover).
 - **Text console = Unix/Linux style (owner 2026-10-23):** ten virtual consoles on Amiga+F1..F10, each with its own login
   prompt; never desktop features in the text console.
+- **The demo floppies are left alone (the partner 2026-11-23: "Please ignore the demo floppies unless told to work on them."):** `make demo` is not part of the routine before a commit or merge, a demo floppy that outgrows its disk does not block anything, and no work is done to make room on them unless the partner asks.
 - **The demo floppy (D25):** the desktop edition is approved (owner 2026-11-04, D25 revision 3 Part 1, built in its
   section 10's order); the text edition (Part 2) stays postponed (owner 2026-10-28).
 
