@@ -1,7 +1,8 @@
 # Zenix design decisions
 
-The numbered decisions, D1-D13. D1-D9 were proposed on 2026-10-22; D1-D10 are decided and most are built ("Where
-the decisions stand" below); D11 is designed, reviewed and approved by the owner (2026-10-24); its core (steps 0-5) is built and merged, steps 6-9 (mounts as services, `/etc/svctab`, the servers' output in the kernel log, the documents) are built on branch d11 (the note's section 15); D12 is built; D13 is approved, its design note awaiting review. Last checked against the code: 2026-10-23.
+The numbered decisions, D1-D60. Each heading names the decision's design note and when it was approved; what is
+built and verified is in features.md (one fact in one place), the headings' build notes are of their day. Checked
+against the decisions: 2026-11-23 (audit 2026-11-23 OS-41).
 
 ## Goal
 A Unix-like system (processes, `/` filesystem, pipes, signals, a shell) for the Amiga that is fast and uses
@@ -242,7 +243,7 @@ keys and filter shared) instead of a Dropbear port; randomness only from `/dev/r
 `.sig` files over D15's header digest, verified by zenixboot (once per bundle) and `zpkg`; root certificates as a compact
 anchors file, the time from the battery clock, SNTP and a floor. No kernel change. The full design:
 [d21-crypto-ssh-https.md](d21-crypto-ssh-https.md).
-## D22. `zpkg`, the package manager (the owner's wish 2026-10-24; design note revision 2 after two reviews, nothing built)
+## D22. `zpkg`, the package manager (the owner's wish 2026-10-24; design note revision 2 after two reviews; built, features.md "zpkg")
 **Why.** Installing and updating programs and Zenix itself the way Arch's `pacman` does (`-S`, `-Ss`, `-Syu`, `-R`,
 `-Rns`, which package owns which file), as **one mechanism with the self-updates** (D15). **How.** A static
 repository (plain files: the owner's NAS for testing over HTTP, GitHub Pages for stable over HTTPS): immutable package
@@ -281,7 +282,7 @@ network first, encryption a later step. Five small root-only kernel interfaces (
 `KLOG_TOTAL`, replaced by the existing `KLOG_OLDEST`; `/dev/kmsg`). **A D11 decision:** servers nobody calls (network listeners) are kept alive by init, the
 lines of `/etc/daemons` with D11's numbers (amends D11 1 and 4.4, D19 2.3; closes D20 7.2's open point). The full
 design: [d24-remote.md](d24-remote.md).
-## D25. The demo floppy (design note revision 3, 2026-11-04: the desktop edition first; measured, nothing built)
+## D25. The demo floppy (design note revision 3, 2026-11-04: the desktop edition first; built: `make demo`, features.md)
 **Why.** The owner (2026-11-04): "We have a desktop. Now can we have a demo disk that boots into the desktop? ONE adf.
 With ahiru, Sumi, ctop, preferably." One DD floppy (880 KB ADF) that boots an Amiga with a 68020+ and 4 MB of fast RAM
 (the minimum) straight into Zenix Desktop, logged in as `guest`, with Ahiru, Sumi, ctop, 65 small tools in one

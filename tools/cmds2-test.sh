@@ -43,5 +43,9 @@ want "... and a precision over it too" "awkrc2=2"
 debugfs -R "cat /tmp/be.out" $BD/zenix.hdf > $OUT/batch-e.txt 2>/dev/null
 if diff tools/tests/batch-e.expected $OUT/batch-e.txt > $OUT/batch-e.diff; then echo "PASS batch E script: $(wc -l < tools/tests/batch-e.expected) lines as expected"
 else echo "FAIL batch E script (expected, then got):"; head -40 $OUT/batch-e.diff; pass=0; fi
+# the one-system conventions (audit 2026-11-23 section 3): usage lines, unknown options, error texts, statuses
+debugfs -R "cat /tmp/conv.out" $BD/zenix.hdf > $OUT/conv.txt 2>/dev/null
+if diff tools/tests/conv.expected $OUT/conv.txt > $OUT/conv.diff; then echo "PASS conventions script: $(wc -l < tools/tests/conv.expected) lines as expected"
+else echo "FAIL conventions script (expected, then got):"; head -40 $OUT/conv.diff; pass=0; fi
 if e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck.log 2>&1; then echo "PASS host e2fsck -fn clean after the run"; else echo "FAIL e2fsck finds errors (see $OUT/e2fsck.log)"; pass=0; fi
 exit $((1 - pass))

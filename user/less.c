@@ -191,29 +191,29 @@ static void on_cont(int sig)
 }
 int main(int argc, char **argv)
 {
-    int i = 1;
+    int i = 1, bad = 0;                                            /* a file that could not be read: status 1 */
     { int ti = sys_ttyinfo(); ROWS = ti > 0 ? ti >> 16 : 25; if (ROWS < 3) ROWS = 3; }    /* 32 on PAL, 25 on NTSC */
     while (i < argc && argv[i][0] == '-' && argv[i][1]) i++;         /* options are accepted and ignored */
     int tty_out = sys_isatty(1);
     if (i >= argc) {
-        if (sys_isatty(0)) { dprintf(2, "usage: less file...   (or: command | less)\n"); return 1; }
+        if (sys_isatty(0)) { dprintf(2, "usage: less file...   (or: command | less)\n"); return 2; }
         char b[1024]; int n; while ((n = sys_read(0, b, sizeof b)) > 0) append(b, (u32)n);
     } else {
         for (; i < argc; i++) {
             int fd = sys_open(argv[i], O_RDONLY);
-            if (fd < 0) { dprintf(2, "less: %s: %s\n", argv[i], zwhy("cannot open")); continue; }
+            if (fd < 0) { dprintf(2, "less: %s: %s\n", argv[i], zwhy("cannot open")); bad = 1; continue; }
             name = argv[i];
             char b[1024]; int n; while ((n = sys_read(fd, b, sizeof b)) > 0) append(b, (u32)n);
             sys_close(fd);
         }
     }
-    if (!tlen) return 0;
-    if (!tty_out) { oputn(text, tlen); oflush(); return 0; }       /* not a terminal: as cat, every byte unchanged */
+    if (!tlen) return bad;
+    if (!tty_out) { oputn(text, tlen); oflush(); return bad; }       /* not a terminal: as cat, every byte unchanged */
     layout();
     if (nrows <= (u32)(ROWS - 1)) {                                 /* it all fits: just print it */
         for (u32 r = 0; r < nrows; r++) { put_row(&rows[r]); oputc('\n'); }
         oflush();
-        return 0;
+        return bad;
     }
     tty_fd = sys_open("/dev/tty", O_RDONLY);
     if (tty_fd < 0) { dprintf(2, "less: no terminal\n"); return 1; }
@@ -252,5 +252,5 @@ int main(int argc, char **argv)
 done:
     signal(SIGTSTP, SIG_DFL); signal(SIGCONT, SIG_DFL);
     leave_screen();
-    return 0;
+    return bad;
 }

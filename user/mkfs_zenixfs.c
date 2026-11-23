@@ -18,7 +18,7 @@ int main(int argc, char **argv)
         else dev = argv[i];
     }
     if (!dev || (bs && (bs < 10 || bs > 12))) {
-        dprintf(1, "usage: mkfs.zenixfs [-b 10|11|12] [-l label] [-c latin1|utf8] device\n");
+        dprintf(2, "usage: mkfs.zenixfs [-b 10|11|12] [-l label] [-c latin1|utf8] device\n");
         return 2;
     }
     if (zdisk_open(dev, DISK_RAW) < 0) { dprintf(1, "mkfs.zenixfs: cannot open %s (mounted, or no such device)\n", dev); return 1; }

@@ -124,7 +124,7 @@ FILES
 EXIT STATUS
     0 when there was nothing to do or everything worked, 1 when a bundle
     or a package was refused or an install was rolled back, 2 for a wrong
-    argument.
+    argument. The usage line goes to the error stream.
 
 NOTES
     zup ignores SIGPIPE: zup | less, and quitting less early, never ends

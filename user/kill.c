@@ -25,7 +25,7 @@ int main(int argc, char **argv)
         i++;
     }
     if (i < argc && !strcmp(argv[i], "--")) i++;
-    if (i >= argc) { dprintf(2, "usage: kill [-s SIGNAL | -SIGNAL] pid...\n"); return 2; }
+    if (i >= argc) { dprintf(2, "usage: kill [-s SIGNAL | -SIGNAL] pid...\n       kill -l [N]\n"); return 2; }
     for (; i < argc; i++) {
         char *e;
         int pid = (int)strtol(argv[i], &e, 10);

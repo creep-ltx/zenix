@@ -1544,7 +1544,7 @@ static int cmd_query(char **names, int n, char what)
 
 static int usage(void)
 {
-    dprintf(1, "usage: zpkg -Sy | -Syu | -Syuu | -S NAME... | -Sw NAME... | -Ss WORD... | -Si NAME... | -Sl[n] | -Sc\n"
+    dprintf(2, "usage: zpkg -Sy | -Syu | -Syuu | -S NAME... | -Sw NAME... | -Ss WORD... | -Si NAME... | -Sl[n] | -Sc\n"
            "       zpkg -Q [NAME...] | -Qi NAME... | -Ql NAME... | -Qo PATH... | -Qu\n"
            "       zpkg -R[s][n] NAME... | -U FILE... | --back NAME\n"
            "       zpkg --fetch DIR [--zfs]\n"

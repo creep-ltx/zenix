@@ -33,7 +33,8 @@ NOTES
     there".
 
 EXIT STATUS
-    0, 1 on any failure, 2 usage error.
+    0, 1 on any failure, 2 usage error. Errors read "rm: FILE: REASON"
+    with the system's reason ("no such file or directory").
 
 SEE ALSO
     rmdir(1), mv(1), cp(1)

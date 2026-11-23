@@ -32,6 +32,8 @@ NOTES
 
 EXIT STATUS
     0, 1 if a file is not found or cannot be changed, 2 invalid mode.
+    Errors read "chmod: FILE: REASON" with the system's reason ("no such
+    file or directory", "operation not permitted").
 
 SEE ALSO
     ls(1), stat(1)

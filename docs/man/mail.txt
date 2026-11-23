@@ -113,7 +113,7 @@ KEYS
                          folder again (sync)
     h                    every header, or the usual ones (headers)
     n, p                 the next, previous message (next, prev)
-    ?, Help              the keys (help)
+    ?, F1, Help          the keys (help)
     Ctrl-L               draw the screen again (redraw)
 
     Deleted messages are removed from the server by $ or when you quit
@@ -161,7 +161,7 @@ EXIT STATUS
     0 at the end (mail -s: the message was taken); 1 when mail -s could
     not send; 2 for a wrong option or setting, a settings file others may
     read or change, no server, or when the keys or the screen are not a
-    terminal.
+    terminal. Help is on ?, F1 and Help.
 
 NOTES
     Not done: attachments in what you send (only text), a local mailbox

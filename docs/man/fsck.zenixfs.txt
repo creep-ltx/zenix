@@ -32,7 +32,8 @@ DESCRIPTION
     older files may have been overwritten since: look at what matters.
 
 EXIT STATUS
-    0 clean (or repaired), 1 problems found or not a ZenixFS volume, 2 usage.
+    0 clean (or repaired), 1 problems found or not a ZenixFS volume, 2
+    usage. The usage line goes to the error stream.
 
 NOTES
     A repair keeps tables in memory: 28 bytes per leaf of the tree, one

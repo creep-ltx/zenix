@@ -642,7 +642,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-n")) want_fix = 0;
         else dev = argv[i];
     }
-    if (!dev) { dprintf(1, "usage: fsck.ext2 [-y] device\n"); return 2; }
+    if (!dev) { dprintf(2, "usage: fsck.ext2 [-y] [-n] device\n"); return 2; }
     port = sys_port_find("disk");
     if (port < 0) { dprintf(1, "fsck.ext2: no disk server\n"); return 8; }
     struct umsg m;

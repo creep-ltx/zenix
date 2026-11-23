@@ -41,7 +41,8 @@ DESCRIPTION
 
 EXIT STATUS
     0, 1 if a process does not exist or may not be signalled, 2 for a
-    wrong signal or no pid.
+    wrong signal or no pid. No pid prints the usage, with kill -l, and
+    gives 2.
 
 NOTES
     Programs built before signals (DESIGN D16) use the old form of the

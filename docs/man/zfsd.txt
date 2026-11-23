@@ -1,0 +1,37 @@
+ZFSD(8)			Zenix manual
+
+NAME
+    zfsd - the server of a ZenixFS volume
+
+SYNOPSIS
+    /sbin/zfsd device [port] [-root | -fsck] [-id id]
+
+DESCRIPTION
+    Not a command: mount -t zenixfs registers it as the service
+    fs.DEVICE and the kernel starts it at the mount's first use (DESIGN
+    D19 step 1, D34, docs/zenixfs.md); on a ZenixFS root it is built
+    into the kernel-zfs.bin kernel and boot registers it as fs. It
+    speaks the same protocol as the ext2 server and keeps the same
+    permission rules. It comes with the base package.
+
+    Changes are kept in memory and committed atomically: 3 seconds after
+    the first change, at sync(8) and at umount. A power cut loses at
+    most the last few seconds, never the volume.
+
+OPTIONS
+    port     the port to serve on (fs.DEVICE when not given)
+    -root    serve the root
+    -fsck    serve read-only without taking the device, while
+             fsck.zenixfs repairs it
+    -id id   the volume by its place and identity (as mount writes it)
+
+EXIT STATUS
+    It does not end while the mount lives; 1 when the volume cannot
+    be found or served, 2 for a wrong command line.
+
+NOTES
+    Everything a user sets is mount's: see mount(8). Its lines in
+    dmesg start with zfsd.
+
+SEE ALSO
+    mount(8), umount(8), fsck.zenixfs(8), mkfs.zenixfs(8)

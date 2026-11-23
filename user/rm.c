@@ -6,7 +6,7 @@ static void rmtree(const char *path, int top)
 {
     struct ustat st;
     int le = sys_lstat(path, &st);
-    if (le == -ENOENT) { if (!o_f) { dprintf(2, "rm: %s: not found\n", path); rc = 1; } return; }
+    if (le == -ENOENT) { if (!o_f) { dprintf(2, "rm: %s: %s\n", path, zstrerror(le)); rc = 1; } return; }
     if (le < 0) { dprintf(2, "rm: %s: %s\n", path, zstrerror(le)); rc = 1; return; }  /* there but out of reach: -f hides only "not there" */
     if ((st.mode & S_IFMT) == S_IFDIR) {
         if (!o_r) { dprintf(2, "rm: %s: is a directory (use -r)\n", path); rc = 1; return; }

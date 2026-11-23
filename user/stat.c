@@ -6,7 +6,7 @@ int main(int argc, char **argv)
     int rc = 0;
     for (int i = 1; i < argc; i++) {
         struct ustat st;
-        { int e = sys_stat(argv[i], &st); if (e < 0) { dprintf(2, "stat: %s: %s\n", argv[i], e == -ENAMETOOLONG ? "file name too long" : "not found"); rc = 1; continue; } }
+        { int e = sys_stat(argv[i], &st); if (e < 0) { dprintf(2, "stat: %s: %s\n", argv[i], zstrerror(e) ? zstrerror(e) : "cannot stat"); rc = 1; continue; } }
         const char *t = (st.mode & S_IFMT) == S_IFDIR ? "directory" : (st.mode & S_IFMT) == S_IFLNK ? "symbolic link" : "regular file";
         dprintf(1, "  File: %s\n  Size: %u  Type: %s\n Inode: %u  Links: %u  Mode: %04o  Uid: %u  Gid: %u\nModify: %u (seconds since the filesystem's epoch)\n",
                argv[i], st.size, t, st.ino, st.links, st.mode & 07777, st.uid, st.gid, st.mtime);

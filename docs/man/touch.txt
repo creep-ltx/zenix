@@ -14,8 +14,8 @@ OPTIONS
     -c    do not create files that do not exist
 
 EXIT STATUS
-    0, 1 if a file could not be created or its time could not be set
-    (a read-only filesystem: "read-only file system").
+    0; 1 when a file cannot be made or its time set (a read-only
+    filesystem: "read-only file system"); 2 for an unknown option.
 
 NOTES
     An access the user is not allowed is reported as "permission denied".

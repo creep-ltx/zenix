@@ -11,7 +11,7 @@ int main(int argc, char **argv)
     for (; i < argc; i++) {
         static char out[ZPATH_MAX]; struct ustat st;
         if (zrealpath(argv[i], out, sizeof out) < 0) { dprintf(2, "realpath: %s: cannot resolve\n", argv[i]); rc = 1; continue; }
-        if (must && sys_stat(out, &st) < 0) { dprintf(2, "realpath: %s: not found\n", argv[i]); rc = 1; continue; }
+        if (must) { int e = sys_stat(out, &st); if (e < 0) { dprintf(2, "realpath: %s: %s\n", argv[i], zstrerror(e)); rc = 1; continue; } }
         dprintf(1, "%s\n", out);
     }
     return rc;

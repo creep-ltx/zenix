@@ -25,7 +25,7 @@ int main(int argc, char **argv)
         else if (o == 's') only = 1;
         else { dprintf(2, "cut: unknown option -%c\n", o); return 2; }
     }
-    if (!mode) { dprintf(2, "usage: cut -f LIST [-d C] [-s] | -c LIST [file...]\n"); return 2; }
+    if (!mode) { dprintf(2, "usage: cut -f LIST [-d C] [-s] | -c LIST | -b LIST [file...]\n"); return 2; }
     int rc = 0, nfiles = argc - i;
     for (int f = 0; f < (nfiles ? nfiles : 1); f++) {
         int fd = 0;

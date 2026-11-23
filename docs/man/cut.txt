@@ -27,7 +27,8 @@ EXAMPLES
     echo a,b,c | cut -d, -f2,3
 
 EXIT STATUS
-    0, 1 if a file cannot be opened, 2 usage error.
+    0, 1 if a file cannot be opened, 2 usage error. The usage line names
+    -f, -c and -b.
 
 NOTES
     An access the user is not allowed is reported as "permission denied".

@@ -26,7 +26,8 @@ EXAMPLES
     mount ide0p2 /mnt
 
 EXIT STATUS
-    0, 1 on an error (cannot open the device, too small), 2 usage.
+    0, 1 on an error (cannot open the device, too small), 2 usage. The
+    usage line goes to the error stream.
 
 NOTES
     The device must be at least a few hundred blocks. Formatting a whole disk

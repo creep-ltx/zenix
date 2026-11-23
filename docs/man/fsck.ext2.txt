@@ -41,9 +41,10 @@ OPTIONS
     -n    report only (default)
 
 EXIT STATUS
-    0 clean, 1 repaired, 4 errors remain, 8 operational error (cannot open,
-    not ext2, out of memory, a repair write or the final mark failed),
-    2 usage error.
+    0 clean, 1 repaired, 4 errors remain, 8 operational error (cannot
+    open, not ext2, out of memory, a repair write or the final mark
+    failed), 2 usage error. The usage line (with -y and -n) goes to the
+    error stream.
 
 NOTES
     Block sizes up to 4096 are supported, and the features of a modern

@@ -58,7 +58,7 @@ int main(int argc, char **argv)
         else dev = argv[i];
     }
     if (!dev || (bsize != 1024 && bsize != 2048 && bsize != 4096) || bpi < 1024) {
-        dprintf(1, "usage: mkfs.ext2 [-b 1024|2048|4096] [-i bytes-per-inode] device\n");
+        dprintf(2, "usage: mkfs.ext2 [-b 1024|2048|4096] [-i bytes-per-inode] device\n");
         return 2;
     }
     port = sys_port_find("disk");

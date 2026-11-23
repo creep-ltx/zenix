@@ -11,7 +11,7 @@ DESCRIPTION
     the pipe or the user presses Ctrl+C. When the reader is gone yes ends
     with status 141.
 
-EXAMPLE
+EXAMPLES
     yes | head -n 3
 
 SEE ALSO

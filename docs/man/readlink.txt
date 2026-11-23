@@ -12,7 +12,7 @@ DESCRIPTION
     target over 4095 bytes is reported). Says nothing and returns 1 for
     names that are not symbolic links. There are no options.
 
-EXAMPLE
+EXAMPLES
     readlink /bin/more         prints less
 
 SEE ALSO

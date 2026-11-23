@@ -11,7 +11,7 @@ DESCRIPTION
     hundredths of a second (the system clock ticks 100 times a second):
     "sleep 0.5". Suffixes like "m" or "h" are not understood.
 
-EXAMPLE
+EXAMPLES
     sleep 2; echo done
 
 SEE ALSO

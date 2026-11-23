@@ -21,6 +21,10 @@ for p in $progs; do
     [ -f "docs/man/$n.txt" ] || bad "no manual page docs/man/$n.txt for program $p"
     grep -q "man/$n.txt" docs/commands.md || bad "docs/commands.md does not list $n"
 done
+# the servers in /sbin (SBINAPPS) too: each has its page (audit 2026-11-23 OS-40: zfsd had none)
+for p in $(sed -n 's/^SBINAPPS *:= *//p' Makefile); do
+    [ -f "docs/man/$p.txt" ] || bad "no manual page docs/man/$p.txt for the server $p"
+done
 for f in docs/man/*.txt; do
     n=$(basename "$f" .txt)
     grep -q "man/$n.txt" docs/commands.md || bad "docs/commands.md does not link $f"

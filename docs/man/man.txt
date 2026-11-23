@@ -29,7 +29,8 @@ NOTES
     with a non-zero status; nothing is cut short silently.
 
 EXIT STATUS
-    0, 1 if there is no page for a name.
+    0, 1 if there is no page for a name, 2 for a wrong command line
+    (no name, or -k without a word).
 
 SEE ALSO
     less(1), sh(1)

@@ -1542,7 +1542,7 @@ static int list(void)
 
 static int usage(void)
 {
-    dprintf(1, "usage: zup [-l]          (boot runs zup at every start; see man zup)\n"
+    dprintf(2, "usage: zup [-l]          (boot runs zup at every start; see man zup)\n"
            "       zup -f FILE [-d]  install one package file (zpkg runs this)\n"
            "       zup -r NAME [-n]  remove one package\n");
     return 2;

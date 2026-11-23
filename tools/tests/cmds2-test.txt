@@ -44,3 +44,5 @@ wait delA 30
 sleep 1
 send sh /tests/batch-e.sh > /tmp/be.out 2>&1; sync; echo finished-be\r
 sleep 330
+send sh /tests/conv.sh > /tmp/conv.out 2>&1; sync; echo finished-conv\r
+wait (?m)^finished-conv$ 120

@@ -10,7 +10,7 @@ DESCRIPTION
     With a name, prints that variable's value (status 1 if it is not set).
     Without, prints the whole environment like env.
 
-EXAMPLE
+EXAMPLES
     printenv PATH
 
 SEE ALSO

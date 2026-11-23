@@ -46,7 +46,7 @@ for bits in "$@"; do
     has "... and found in other case" '^svenska$'
     has "a program copied byte for byte" '^(.*# )?same-copy$'
     has "ln -s is refused" 'ln: .*(not permitted)'
-    has "chmod 777 is refused" 'chmod: /mnt/ls\.bin: cannot change'
+    has "chmod 777 is refused" 'chmod: /mnt/ls\.bin: operation not permitted'
     has "chown is refused" 'chown: /mnt/ls\.bin: cannot change owner'
     has "a name FAT cannot hold is refused" 'a:b.*(invalid argument)'
     has "a file without x does not run" 'mnt/ls\.bin: .*permission denied|permission denied.*ls\.bin'

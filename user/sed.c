@@ -225,7 +225,7 @@ int main(int argc, char **argv)
         }
         for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'n') o_n = 1; else if (*p == 'E' || *p == 'r') o_E = 1; else if (*p == 'i') o_i = 1; else if (*p == 's') ; else die("unknown option", argv[i]); }
     }
-    if (!have_script) { if (i >= argc) { dprintf(2, "usage: sed [-nEi] [-e script] [-f file] [script] [file...]\n"); return 2; } script = argv[i++]; }
+    if (!have_script) { if (i >= argc) { dprintf(2, "usage: sed [-nEri] [-e script] [-f file] [script] [file...]\n"); return 2; } script = argv[i++]; }
     parse_script(script);
     if (i >= argc) { run_stream(0, 1); oflush(); return 0; }
     int rc = 0;

@@ -225,8 +225,8 @@ FAMILIES = [
     ("markdown", "Markdown, a viewer and editor for Markdown files", "markdown"),
     ("ahiru", "Ahiru, a file manager: three columns, previews, archives, copy, move", "ahiru"),
     ("ctop", "ctop, a monitor in the way of btop: memory, disks, network, processes", "ctop"),
-    ("lua", "Lua 5.4, the scripting language (DESIGN D52)", "lua"),
-    ("make", "make, the POSIX make (pdpmake, public domain; DESIGN D52)", "make"),
+    ("lua", "Lua 5.4, the scripting language", "lua"),
+    ("make", "make, the POSIX make (pdpmake, public domain)", "make"),
     ("devel", "tcc, zld, zas, zdb: compiler, linker, assembler, debugger, C library", "zld zas tcc zdb"),
     ("games", "games: Frotz, the BSD games, Lua games (gridrun), the Zenix intro",
               "frotz adventure arithmetic banner fortune hangman number rain robots tetris worm worms wump zintro"),
@@ -358,12 +358,14 @@ def std_packages(build, uapps):
     names = ["base"]
     if "zup" in progs:
         make_package(out, "zup", vnum, vstr, [("d", 0o755, 0, 0, None, "/sbin"),
-                                              ("f", 0o755, 0, 0, zx("zup"), "/sbin/zup")], group="base")
+                                              ("f", 0o755, 0, 0, zx("zup"), "/sbin/zup")], group="base",
+                     desc="the installer of packages and system updates (zpkg runs it)")
         names.insert(0, "zup")
     if "zpkg" in progs:
         make_package(out, "zpkg", vnum, vstr, [("f", 0o755, 0, 0, zx("zpkg"), "/bin/zpkg"),
                                                ("c", 0o644, 0, 0, os.path.join(ROOT, "rootfs", "etc", "zpkg.conf"), "/etc/zpkg.conf")],
-                     group="base", deps=[("zup", vnum)] if "zup" in progs else [])
+                     group="base", deps=[("zup", vnum)] if "zup" in progs else [],
+                     desc="the package manager: install, update, remove, search")
     base = dirs + [("d", 0o700, 0, 0, None, "/root")] + [("f", 0o755, 0, 0, zx(p), "/bin/" + p) for p in BASE_PROGS]
     # the servers that live on the disk (DESIGN D19: /sbin/zfsd, which mount starts for a ZenixFS volume; /sbin/netd,
     # which the kernel starts at the first socket call)
@@ -385,7 +387,8 @@ def std_packages(build, uapps):
         with open(rel, "w") as f:
             f.write(release_passwd())
         base = [e[:4] + (rel, e[5]) if e[5] == "/etc/passwd" else e for e in base]
-    make_package(out, "base", vnum, vstr, base, group="base", deps=[("zup", vnum)] if "zup" in names else [])
+    make_package(out, "base", vnum, vstr, base, group="base", deps=[("zup", vnum)] if "zup" in names else [],
+                 desc="the base system: init, login, the shell, mount, the servers, /etc")
     if "zpkg" in progs:
         names.append("zpkg")
     # the manual pages, as mkroot.sh installs them: docs/man, and a generated page for a program without one
@@ -497,6 +500,9 @@ def std_packages(build, uapps):
         n, ext = os.path.splitext(f)
         if ext in (".manifest", ".tgz") and n not in names:
             os.unlink(os.path.join(out, f))
+    for n in names:                     # every package says what it is in zpkg -Ss (audit 2026-11-23 OS-39)
+        if not any(ln.startswith("desc ") for ln in open(os.path.join(out, n + ".manifest"))):
+            die("%s: no desc (every package of the system has one)" % n)
     open(os.path.join(out, "list"), "w").write(" ".join(names) + "\n")
     print("%s: packages %s, version %d (%s)" % (out, " ".join(names), vnum, vstr))
 
