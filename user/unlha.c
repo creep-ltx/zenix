@@ -33,6 +33,22 @@ static int sys_fstat(int fd, struct ustat *u) { struct stat s; return fromst(fst
 static int sys_lstat(const char *p, struct ustat *u) { struct stat s; return fromst(lstat(p, &s), &s, u); }
 static int sys_utimes(const char *p, u32 t) { struct timeval v[2] = { { t, 0 }, { t, 0 } }; return utimes(p, v); }
 #define _zexit exit
+/* libz's date conversion (its own source) and command line, as the PC test needs them */
+struct zdt { int year, mon, day, hour, min, sec, wday, yday; };
+static long zdays(int y, int m, int d);
+#define ZDATE_LINK static __attribute__((unused))
+#include "zdate.h"
+static const char *zprog = "unlha";
+static __attribute__((noreturn)) void zusage(const char *u) { fputs(u, stderr); exit(2); }
+static __attribute__((noreturn)) void zbadopt(const char *o, const char *u)
+{ fprintf(stderr, "%s: unknown option %s\n", zprog, o); zusage(u); }
+static void zopt(int argc, char **argv, const char *u)
+{
+    const char *sl = strrchr(argv[0], '/');
+    zprog = sl ? sl + 1 : argv[0];
+    if (argc > 1 && !strcmp(argv[1], "--help")) { fputs(u, stdout); exit(0); }
+    if (argc > 1 && !strcmp(argv[1], "--version")) { printf("%s 0.2\n", zprog); exit(0); }
+}
 #else
 #include "libz.h"
 #endif

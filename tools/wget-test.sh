@@ -190,7 +190,10 @@ w = part_of("s2"); lf = answered("liar-future")
 check(st("s2") == 0 and lf and date_after("s2") and abs(date_after("s2") - lf) <= 20 and clock_after("s2") == clock_after("s1")
       and "the floor stays at" in w, "sntp: a liar 500 days ahead sets the clock, the floor stays", (w, lf))
 w = part_of("s3")
-check(st("s3") == 1 and "before the floor" in w and date_after("s3") and abs(date_after("s3") - lf) <= 60 and
+# (measured from s2's date, not the liar's answer: t2's HTTPS fetch in between takes up to a minute at stock speed,
+# the TLS helper started and its handshake done for each run)
+check(st("s3") == 1 and "before the floor" in w and date_after("s3") and date_after("s2") and
+      0 <= date_after("s3") - date_after("s2") <= 120 and
       clock_after("s3") == clock_after("s1"), "sntp: an answer 20 years back (before the floor) refused, nothing moved", w)
 w = part_of("s4")
 check(st("s4") == 1 and "kiss of death DENY" in w, "sntp: a kiss of death obeyed (exit 1)", w)

@@ -68,3 +68,13 @@ struct zdt { int year, mon, day, hour, min, sec, wday, yday; };
 static long zdays(int y, int m, int d);
 #define ZDATE_LINK static __attribute__((unused))
 #include "../../user/zdate.h"
+
+/* libz's command line (user/zhelp.c): --help, --version, the usage (status 2), an unknown option */
+static __attribute__((unused, noreturn)) void zusage(const char *usage) { fputs(usage, stderr); exit(2); }
+static __attribute__((unused, noreturn)) void zbadopt(const char *opt, const char *usage)
+{ fprintf(stderr, "unknown option %s\n", opt); zusage(usage); }
+static __attribute__((unused)) void zopt(int argc, char **argv, const char *usage)
+{
+    if (argc > 1 && !strcmp(argv[1], "--help")) { fputs(usage, stdout); exit(0); }
+    if (argc > 1 && !strcmp(argv[1], "--version")) { puts("0.2"); exit(0); }
+}

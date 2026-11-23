@@ -28,14 +28,40 @@ static int py = -1, px = -1;            /* the terminal's cursor (-1: not known)
 static chtype pattr;                    /* the attributes the terminal draws with */
 static int pushed = -1;                 /* ungetch */
 
-/* ---- output: the screen layer's buffer (zenix.h oputn, oflush), written when full and at the end of a refresh */
-static void oput(const char *s, int n) { oputn(s, (unsigned)n); }
+/* ---- output: one buffer, written when full and at the end of a refresh (its own, not zenix.h's oputn: that one
+ * links the error texts, 1.3 KB more in every game) */
+static char obuf[1024];
+static int on;
+static void cflush(void)
+{
+    int k = 0;
+    while (k < on) {
+        int r = (int)write(1, obuf + k, (size_t)(on - k));
+        if (r <= 0)
+            break;
+        k += r;
+    }
+    on = 0;
+}
+static void oput(const char *s, int n)
+{
+    while (n > 0) {
+        if (on == (int)sizeof obuf)
+            cflush();
+        int k = (int)sizeof obuf - on < n ? (int)sizeof obuf - on : n;
+        memcpy(obuf + on, s, (size_t)k);
+        on += k;
+        s += k;
+        n -= k;
+    }
+}
 static void ostr(const char *s) { oput(s, (int)strlen(s)); }
 static void omove(int y, int x)
 {
     if (y == py && x == px)
         return;
-    zscr_at(y + 1, x + 1);
+    char b[24];
+    oput(b, zscr_move(b, y + 1, x + 1));       /* the screen layer's escape */
     py = y;
     px = x;
 }
@@ -143,7 +169,7 @@ int endwin(void)
     if (!cursor_vis)
         ostr("\033[?25h");
     ostr("\r\n");
-    oflush();
+    cflush();
     py = px = -1;
     if (have_saved)
         tcsetattr(0, TCSANOW, &saved);
@@ -360,7 +386,7 @@ int wnoutrefresh(WINDOW *w)
 int doupdate(void)
 {
     oattr(0);
-    oflush();
+    cflush();
     return OK;
 }
 int wrefresh(WINDOW *w)                 /* SIGALRM held off meanwhile: worm and robots -r refresh from its handler */
@@ -381,10 +407,10 @@ int curs_set(int v)
     int old = cursor_vis;
     cursor_vis = v != 0;
     ostr(cursor_vis ? "\033[?25h" : "\033[?25l");
-    oflush();
+    cflush();
     return old;
 }
-int beep(void) { oput("\a", 1); oflush(); return OK; }
+int beep(void) { oput("\a", 1); cflush(); return OK; }
 int flash(void) { return beep(); }
 int baudrate(void) { return 38400; }
 int has_colors(void) { return 0; }
@@ -409,7 +435,7 @@ int mvcur(int oy, int ox, int ny, int nx)
         return ERR;
     py = px = -1;
     omove(ny, nx);
-    oflush();
+    cflush();
     return OK;
 }
 int napms(int ms)
