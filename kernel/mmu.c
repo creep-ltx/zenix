@@ -638,7 +638,8 @@ KMMU static void lendin(struct tree *t, struct proc *c)
 #define WIN_BNC  8                      /* bounce pages a window holds */
 #define NBNC     64                     /* bounce pages in use at once */
 #define BNC_SRV  32                     /* a server's bounce pages (5.3: 128 KB) */
-#define NBPOOL   4                      /* zeroed bounce pages kept (5.3) */
+#define NBPOOL   1                      /* bounce pages kept (5.3 says 4; stage 3: services map their clients' part pages
+                                         * as they are, so few are made, and every page kept is RAM a 4 MB machine misses) */
 #define KHOT     __attribute__((optimize("O2")))    /* every request runs these */
 
 _Static_assert(__builtin_offsetof(struct krec, g) == sizeof(struct umsg), "the groups follow the record's message");

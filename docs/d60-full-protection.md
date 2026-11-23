@@ -1140,11 +1140,11 @@ machines of 18.3). Stage 2's ratios (19.2, fsd and diskd then system processes, 
 - **Protection off** (FS-UAE 040 against stage 2's kernel on the same machine): `msgcall` 259 -> 248 us, `stat` and
   `read4k` the same, the null call 18.2 us; the resident gates added here (`SYS_callv`'s, `SYS_shm`'s stub, the
   raw-disk checks behind `mmu_on`, `POST_READ`) are a few instructions on a path a call takes.
-- **Size**: kernel.bin 216,700 -> 223,592 bytes (+6,892): `mmu` 15,196 -> 19,520 bytes (in the span, given back after
+- **Size**: kernel.bin 216,700 -> 223,576 bytes (+6,876): `mmu` 15,196 -> 19,520 bytes (in the span, given back after
   the boot when protection is off), `syscall` + 490, `drv` + 578, `ipc` + 316 and bss + 56 (`struct port`'s mark),
   `gcon` + 134, `embed` + 1,016 (diskd's and fsd's built-in images: the peer helpers, the port mark), `proc`, `vfs` and
   `dbg` a little smaller (the system marks gone). Section 10 estimated 2.5-3 KB for stage 3. The mount tests' RAM disk
-  666 -> 658 KB (65 of its blocks free; the floppy keeps more than 800 bytes); the demo floppy keeps 12 KB.
+  666 -> 658 KB (65 of its blocks free; the floppy keeps 2,728 bytes); the demo floppy keeps 12 KB.
 
 ### 20.3 Reviews and tests
 
@@ -1172,3 +1172,34 @@ as built); root's way to kernel RAM through `CON_GRAB` until stage 4; old networ
 5). And from the main session: zine-emu-test's zlean failed after stage 2; not lost memory but a relocation at the
 wrong offset in `tools/mkbigtest.py` (zlean's bra.w), passing by luck while its hunk lay at 0x20xxxx (fixed, its
 own commit).
+
+Tests (all with protection where the machine has it unless said; FS-UAE in fast mode):
+- `mmu-test` FS-UAE 020 030 040 060 lc060 and Amiberry 030 040 060: pass, with the new checks: a write one byte past a
+  declared page ends the server (-104 to its client, the page untouched); a user's server asking for its client's
+  stack gets -EFAULT and is ended when it writes it without asking; a service (registered with `svctest reg`)
+  writing its client's stack without asking is ended, and the next call starts it again and its ask is served; an
+  old server (`msgpingd -old`) keeps stage 2's rewrite and -EACCES checks; `msgping shm`: offered, taken, the bytes
+  both ways, freed early by its owner and kept by the child, which owns it then, drops it and is ended by its next
+  read; an offer of a stack, to oneself and a take not offered refused (-22, -3, -2); a read-only share written ends
+  its taker. The confined filesystem server's checks of stage 2 (`+confine` then) are the default now.
+- `mmu-suite` (every server confined): FS-UAE 040 and 060 pass every test (cmds-test, memtest, mounttest, svc-test
+  with every part, svc-test's part f and sound-test at stock speed, lua-test, tcc-test, zdb-test after dbgcheck's
+  system-process check was changed: no process becomes one); FS-UAE 030 the same but tcc-test's `101_cleanup`
+  (below); Amiberry 040 the same but svc-test's "fsd is pid 3, at nice -10" (Amiberry's timing, as in 18.4).
+  Also on the 040: readdir-test, sock-test, netd-test (its part l; part s is the stock A1200's profile), eth-test
+  (the A2065 and the NE2000 through the frame pool), ne2000-test, plipbox-test, sound-test (after sndd was made to
+  read the beam after its claim).
+- The display tests on the 040 model (dpy-test, zdesk-test, gcon-test) fail the same checks with stage 2's kernel of
+  main on the same machine (their screenshots are made for the 68020 machine, d41 19.3 note 8); with stage 3 no
+  protection line comes from them (displayd read the hardware table at 0x1100 before it used DRV_HWINFO: found so).
+- Without an MMU (FS-UAE's 68020, `tools/check.sh`): cmds-test, svc-test (every part), bootmem-test, zdb-test,
+  readdir-test, sock-test, netd-test, pure-test, prio-test, mounttest, zine-emu-test (after the zlean fix): pass.
+- `mmubench-test` 030 040 060 in both emulators: pass (20.2).
+- **Memory**: on the 4 MB 68030 machine `free` after boot and one login says 3,384 KB, 24 KB less than stage 2 (9 KB
+  of it the larger kernel, the rest the trees of boot, diskd and fsd, which had none as system processes, the pages
+  their blocks are rounded to, and the windows' tables); 72,999 KB on the 040/060 with 72 MB. tcc-test's
+  `101_cleanup` is a 1.9 MB program with a 1 MB stack, 2.9 MB in one piece: on that machine it no longer finds it
+  (`out of memory`); with stage 2 it just did. The bounce pages kept went from 4 to 1 for this (4 KB); the rest is
+  the price of confining the servers there.
+- Not done: any real CPU; the desktop's and sound's rows of 9.4 (the 68020 machine's tests); an old displayd, old
+  drivers and the update path (stage 5); Amiberry's 030 and 060 suites (FS-UAE's ran).
