@@ -90,7 +90,8 @@ STACK_init := 4096
 # -O2. About a quarter of their code (audit 2026-11-23: the room the one-system command line takes on the demo floppy)
 COLDAPPS := mkdir rmdir ln echo pwd ps free uname uptime date clear kill dmesg sleep true false env hostname id whoami \
             touch umount reboot ifconfig route ping host netstat df chmod stat which printf basename dirname readlink \
-            expr pgrep tree cal time seq du find man mount login su passwd sync useradd userdel gpasswd conmirror lsusb
+            expr pgrep tree cal time seq du find man mount login su passwd sync useradd userdel gpasswd conmirror lsusb \
+            fdisk mkfs_zenixfs zinstall zup ssh-keygen conprefs input beep zdb
 $(COLDAPPS:%=$(BUILD)/%.uo) $(COLDAPPS:%=$(BUILD)/%.po): UCFLAGS += -Os
 # init is cold code (it waits for its children all its life): -Os, which also pays for /etc/daemons (DESIGN D24 7)
 $(BUILD)/init.uo: UCFLAGS += -Os
