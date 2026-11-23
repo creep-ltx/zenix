@@ -343,6 +343,57 @@ void zbadch(int c, const char *usage)
     zbadopt(o, usage);
 }
 
+/* a program that takes no arguments at all: zopt, then any argument refused (an option: unknown; a word: the usage) */
+void znoargs(int argc, char **argv, const char *usage)
+{
+    zopt(argc, argv, usage);
+    if (argc > 1) {
+        if (argv[1][0] == '-' && argv[1][1]) zbadopt(argv[1], usage);
+        zusage(usage);
+    }
+}
+
+/* the options' letters, one at a time, as POSIX's getopt (opts: the letters, a ':' after one that takes a value):
+ * the letter, or -1 at the first operand (zoptind) or after "--". An unknown letter or long option ends the program
+ * through zbadopt, a missing value through "NAME: option -x needs a value" and the usage: the caller never sees them. */
+int zoptind = 1;
+char *zoptarg;
+static int zo_pos;
+int zgetopt(int argc, char **argv, const char *opts, const char *usage)
+{
+    zoptarg = 0;
+    if (!zo_pos) {
+        if (zoptind >= argc) return -1;
+        const char *a = argv[zoptind];
+        if (a[0] != '-' || !a[1]) return -1;
+        if (a[1] == '-') {
+            if (!a[2]) { zoptind++; return -1; }
+            zbadopt(a, usage);
+        }
+        zo_pos = 1;
+    }
+    char *a = argv[zoptind];
+    int c = (unsigned char)a[zo_pos++];
+    const char *o = c == ':' ? 0 : strchr(opts, c);
+    if (!o) zbadch(c, usage);
+    if (o[1] == ':') {
+        if (a[zo_pos]) zoptarg = a + zo_pos;
+        else if (zoptind + 1 < argc) zoptarg = argv[++zoptind];
+        else {
+            char m[3] = { '-', (char)c, 0 };
+            if (zout_at_exit) zout_at_exit();
+            zo_put(2, zo_name); zo_put(2, ": option "); zo_put(2, m); zo_put(2, " needs a value\n");
+            zusage(usage);
+        }
+        zoptind++;
+        zo_pos = 0;
+    } else if (!a[zo_pos]) {
+        zoptind++;
+        zo_pos = 0;
+    }
+    return c;
+}
+
 /* dates: seconds since 1970 (UTC, to 2106) as a calendar date, and back (the civil-from-days formula, one for all) */
 void zdate(u32 t, struct zdt *d)
 {

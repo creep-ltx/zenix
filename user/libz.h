@@ -59,6 +59,12 @@ void zopt(int argc, char **argv, const char *usage);   /* first in main: --help 
 void zusage(const char *usage) __attribute__((noreturn));   /* the usage to the error stream, status 2 */
 void zbadopt(const char *opt, const char *usage) __attribute__((noreturn));  /* "NAME: unknown option OPT", the usage, 2 */
 void zbadch(int c, const char *usage) __attribute__((noreturn));      /* the same for the letter c: "unknown option -c" */
+void znoargs(int argc, char **argv, const char *usage);   /* zopt, then any argument refused (status 2) */
+/* POSIX's getopt over opts ("ab:": b takes a value, zoptarg), -1 at the first operand (argv[zoptind]) or after "--";
+ * an unknown option or a missing value ends the program with the message and the usage (status 2) */
+int zgetopt(int argc, char **argv, const char *opts, const char *usage);
+extern int zoptind;
+extern char *zoptarg;
 const char *zprogname(void);                          /* argv[0]'s last part, as zopt saw it */
 struct zdt { int year, mon, day, hour, min, sec, wday, yday; };  /* mon 1-12, day 1-31, wday 0 = Sunday, yday 0-365 */
 void zdate(u32 t, struct zdt *d);                     /* seconds since 1970 (UTC, to 2106) as a date */

@@ -39,6 +39,10 @@ void zopt(int argc, char **argv, const char *usage);   /* --help, --version: ans
 void zusage(const char *usage) __attribute__((noreturn));
 void zbadopt(const char *opt, const char *usage) __attribute__((noreturn));
 void zbadch(int c, const char *usage) __attribute__((noreturn));
+void znoargs(int argc, char **argv, const char *usage);
+int zgetopt(int argc, char **argv, const char *opts, const char *usage);
+extern int zoptind;
+extern char *zoptarg;
 const char *zprogname(void);
 struct zdt { int year, mon, day, hour, min, sec, wday, yday; };
 void zdate(unsigned int t, struct zdt *d);
