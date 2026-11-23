@@ -9,38 +9,44 @@ send cat /tmp/c/f & p=$!\r
 wait svctest serve: type 1 held 30
 send kill -INT $p; wait $p; s=$?\r
 wait svctest serve: POLLPRI, 1 held cancelled 30
-send echo c1-status=$s\r
-wait c1-status 20
+wait zenix:/# 20
+send echo c1-$(echo status)=$s\r
+wait c1-status=[0-9]+\n 20
 send cat /tmp/c/f & p=$!\r
 wait svctest serve: type 1 held 30
 send kill -9 $p; wait $p; s=$?\r
 wait svctest serve: POLLPRI, 1 held cancelled 30
-send echo c2-status=$s\r
-wait c2-status 20
+wait zenix:/# 20
+send echo c2-$(echo status)=$s\r
+wait c2-status=[0-9]+\n 20
 send svctest catch /tmp/c/g & p=$!\r
 wait svctest serve: type 1 held 30
 send kill -INT $p; sleep 2; echo c3-$(echo mark); kill -9 $p; wait $p; s=$?\r
 wait svctest serve: POLLPRI, 1 held cancelled 30
-send echo c3-status=$s\r
-wait c3-status 20
+wait zenix:/# 20
+send echo c3-$(echo status)=$s\r
+wait c3-status=[0-9]+\n 20
 send svctest unlink /tmp/c/u & p=$!\r
 wait svctest serve: type 19 held 30
 send kill -INT $p; wait $p; s=$?\r
 wait svctest serve: type 9 came cancelled 30
-send echo c4-status=$s\r
-wait c4-status 20
+wait zenix:/# 20
+send echo c4-$(echo status)=$s\r
+wait c4-status=[0-9]+\n 20
 send svctest trunc /tmp/c/t & p=$!\r
 wait svctest serve: type 4 held 30
 send kill -INT $p; wait $p; s=$?\r
 wait svctest serve: type 1 came cancelled 30
-send echo c5-status=$s\r
-wait c5-status 20
+wait zenix:/# 20
+send echo c5-$(echo status)=$s\r
+wait c5-status=[0-9]+\n 20
 send cat /tmp/c/o & p=$!\r
 wait svctest serve: type 2 held 30
 send kill -INT $p; wait $p; s=$?\r
 wait svctest serve: close 5 30
-send echo c8-status=$s\r
-wait c8-status 20
+wait zenix:/# 20
+send echo c8-$(echo status)=$s\r
+wait c8-status=[0-9]+\n 20
 send sleep 2; echo c6-$(echo quiet); sync; echo c7-$(echo synced)\r
 wait c7-synced 20
 send reboot\r
