@@ -276,9 +276,10 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   service manager's servers, a reserved port's creator, a mount's server, a driver after `SYS_drv`, the display
   server after `CON_GRAB` used to see all memory); what a server sees of a client is the kernel's declared buffers,
   what the client declared and what a server trusted to ask asked for. `SYS_shm` 101 (`SHM_OFFER` 1, `SHM_TAKE` 2,
-  `SHM_DROP` 3, `SHM_INFO` 4, `SHMF_RO` 0x80000000 in the pid argument, `struct ushm` first size 16; at most 8 offers
-  and 8 holds a process; the owner's `SYS_memfree` of a region someone holds, or its end, hands the memory to a holder;
-  without protection ops 1-3 answer 0 and change nothing, `SHM_INFO` -EINVAL). `SYS_callv` 102 (port, message,
+  `SHM_DROP` 3, `SHM_INFO` 4, `SHMF_RO` 0x80000000 in the pid argument, `struct ushm` 16 bytes, fixed (SHM_INFO takes no size: a
+  bigger struct needs a new op); at most 8 offers made, 8 received and 8 holds a process; the owner's `SYS_memfree` of a region someone holds, or its end, hands the memory to a holder;
+  without protection ops 1-3 answer 0 and change nothing, `SHM_INFO` -EINVAL, and the owner's `SYS_memfree` frees: a
+  program that runs everywhere has its holders drop first). `SYS_callv` 102 (port, message,
   `struct ucalldecl` {n 0-4, `struct ucallbuf` {addr, len, flags `CALLB_RD` 1 | `CALLB_WR` 2}}; each buffer the
   caller's memory or a window it holds, never its message: -EINVAL, -EFAULT; without protection `SYS_call`, the list
   not read). `SYS_peer` `PEER_EXACT` 5 (msg 0, arg a port the caller owns, else -EPERM; a port's mark is cleared when

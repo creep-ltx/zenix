@@ -926,7 +926,9 @@ void tty_proc_gone(struct proc *p);     /* p is a zombie: its leadership ends, a
 #define SYS_fd_rw       77   /* lba | drive << 28 | write << 27, count, buffer -> 0 or -1 (disk server only) */
 #define SYS_input       74   /* s32[4] <- mouse dx, dy (since the last call), mouse buttons, joystick bits */
 #define SYS_klog        73   /* offset, buffer, length -> characters of the kernel log copied (0 = nothing more) */
-#define SYS_blk_ram     42   /* where the boot ramdisk is: u32[2] = address, size (disk server only) */
+#define SYS_blk_ram     42   /* where the boot ramdisk is: u32[2] = address, size (disk server only); D60 stage 3, a2 not 0:
+                              * a2 sectors from sector a1 (bit 31: write) to or from buffer a3, copied by the kernel (with
+                              * memory protection on only, else -EINVAL) */
 #define SYS_blk_size    41   /* sectors on the disk (disk server only) */
 #define SYS_jobctl      75   /* pid, op: 0 = stop, 1 = continue (own processes, or root) */
 #define SYS_mount       69   /* struct umountreq*: put a running filesystem server on a directory */
@@ -1162,11 +1164,11 @@ struct upost { u32 off, src, len; };
 #define SHM_OFFER       1    /* addr a region of the caller's (SYS_memalloc, or its claim's DMA memory), arg a pid | SHMF_RO */
 #define SHM_TAKE        2    /* addr in a region offered to the caller: part of its view from now on, at the same address */
 #define SHM_DROP        3    /* addr in a region: a holder lets go; its owner withdraws the offers not taken */
-#define SHM_INFO        4    /* addr in a region the caller owns or holds, arg struct ushm * (first size USHM_FIRST) */
+#define SHM_INFO        4    /* addr in a region the caller owns or holds, arg struct ushm * (16 bytes, fixed: a bigger one
+                              * would come with an op of its own) */
 #define SHMF_RO         0x80000000u     /* in SHM_OFFER's arg: read only for the receiver */
 #define NSHM            8    /* regions a process may hold of others' (and offers it may make) */
 struct ushm { u32 size, owner, holders, flags; };
-#define USHM_FIRST     16
 /* D60 5.5: SYS_call with the buffers of the request declared (lent to the server at its receive, exactly those bytes) */
 #define SYS_callv      102   /* port, message, struct ucalldecl * */
 #define NCALLB          4
