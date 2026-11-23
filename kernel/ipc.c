@@ -228,6 +228,8 @@ KCOLD long ipc_post(u32 op, u32 port, u32 arg)
         const struct upostbuf *b = (const struct upostbuf *)arg;
         if (b->size && !user_ok_wr(current, b->addr, b->size))
             return -EFAULT;
+        if (mmu_on)                     /* D60 5.8: an old poster reads the window in place (an old displayd's ring tail) */
+            mmu_ops->postbuf(port_of(p->pfrom), p->pbuf, port_of(b->from), b->size ? b->addr : 0, b->size);
         p->pbuf = b->size ? b->addr : 0;
         p->psize = b->size;
         p->pfrom = b->from;

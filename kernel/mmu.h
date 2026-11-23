@@ -86,6 +86,7 @@ struct mmu_ops {
     int (*shmfree)(u32);
     long (*callv)(u32, u32, u32);
     long (*ramdisk)(u32, u32, u32);
+    void (*postbuf)(struct port *, u32, struct port *, u32, u32);
 };
 /* D60 stage 3, SYS_callv: the declaration of the call being made (syscall.c sets it, mmu_rec takes it; resident) */
 extern const struct ucalldecl *mmu_decl;

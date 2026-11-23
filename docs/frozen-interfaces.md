@@ -286,7 +286,7 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   a service's port goes back to held); `PEER_RD`/`PEER_WR` answer as before, and with protection on also lend the
   range until the reply to a server trusted to ask (a process the service manager started for a service, or one that
   could debug the client), while any other server gets 0 only within what the client declared and -EFAULT otherwise
-  (also -ENOMEM when no window can be made). A program's request to a port without the mark (an old server) gets D41's
+  (also -ENOMEM when no window can be made, and -EFAULT for a range overlapping the client's own message). A program's request to a port without the mark (an old server) gets D41's
   lend of the whole client by `SYS_debug`'s rule, else -EACCES, as in stage 2. `SYS_post` `POST_READ` 3 (`struct
   upost`: at most 16 bytes from the window at `off` into `src`, the poster's own memory; -EINVAL past 16). `SYS_meminfo`
   size 20 gives a fifth word (0 no protection, 1 D41's, 2 full; a smaller buffer gets the four as before).

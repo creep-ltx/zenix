@@ -22,7 +22,7 @@
 # service manager started it: trusted to ask) touching memory it was not given ends too, and is started again by the
 # next call, which its asking then serves. An old server (msgpingd -old: its port not marked) gets D41's lend by
 # SYS_debug's rule. SYS_shm: an offer taken by a child, the bytes shared both ways, the owner's early free (the child
-# keeps the memory, then owns it), a drop.
+# keeps the memory, then owns it), a drop (the child's next read ends it), the refusals, a read-only share written.
 # usage: tools/mmu-test.sh [MODEL ...]           (default: 020 030 040 lc040 060 lc060)
 #   MODEL: 020 030 ec030 040 lc040 ec040 060 lc060 ec060, each also with +on (lc060+on: forced with MMU=ON)
 #   MMU_TEST_OFF=1: the kernel made MMU=OFF (the figures to compare with); every model then expects "off"

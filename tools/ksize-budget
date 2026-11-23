@@ -154,19 +154,19 @@ gfx       9050   2450
 term     14500    256
 confont   3100     32
 kbd       4300    180
-ipc       4700   2200
+ipc       4800   2200
 svc       5600   1420
 seg       1300    272
 event      700      0
 signal    2150      0
 random    3800    280
 sock      4700   1060
-drv       3600    640
+drv       3700    640
 zine      1850     16
 cache     1800     32
 gcon      4350     16
 dbg       4100     20
-mmu      18800    240
+mmu      19800    240
 embed    51000      0
-TOTAL   222700
+TOTAL   223600
 ROOM       800

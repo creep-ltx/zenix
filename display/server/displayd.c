@@ -14,6 +14,7 @@
 #include "../screenfile.h"
 #include "fb.h"
 #include "../../kernel/hwinfo.h"
+#include "../../kernel/netproto.h"          /* DRV_HWINFO (D60 stage 3) */
 
 int aga;
 int wm_cl = -1;
@@ -441,14 +442,25 @@ static void fb_scale(int *x, int *y)
     *x = (int)((u32)*x * card.w / (u32)base_w);
     *y = (int)((u32)*y * card.h / (u32)base_h);
 }
-/* the record in the boot's hardware table (read as a system process, after the grab: D41 7), checked; 1: the screen
+/* the record in the boot's hardware table (with full protection the kernel's copy, DRV_HWINFO), checked; 1: the screen
  * is the card's from now on (scr the pens' bitmap in fast RAM) */
+static struct hwinfo hwcopy;
 static int card_take(void)
 {
     const struct hwinfo *h = (const struct hwinfo *)HWINFO_ADDR;
+    if (prot_full()) {                  /* D60 stage 3: low chip RAM is not ours to read: the kernel's copy */
+        if (sys_drv(DRV_HWINFO, (u32)&hwcopy, sizeof hwcopy) < (int)sizeof hwcopy)
+            return 0;
+        h = &hwcopy;
+    }
     if (h->magic != HWINFO_MAGIC || h->fb.magic != HWFB_MAGIC)
         return 0;
     struct hwfb *f = (struct hwfb *)&h->fb;
+    if (prot_full() && !(f->flags & HWFB_TEST)) {
+        dprintf(2, "displayd: a graphics card's memory is not granted under full memory protection yet (D60 stage 4): "
+                "the chipset's screen\n");
+        return 0;
+    }
     if ((f->flags & HWFB_TEST) && !f->base && fb_size_ok(f->width, f->height, f->bpp, f->bpr) &&
         (f->base = (u32)sys_memalloc(f->bpr * f->height)) != 0) {
         memset((void *)f->base, 0x5A, f->bpr * f->height);     /* a test's pretend card (dpytest -fb): ours, so it

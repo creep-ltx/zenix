@@ -68,7 +68,18 @@ static int shm_child(u32 a)
     int still = r[0] == 0 && r[3] == 9;
     int d = sys_shm(SHM_DROP, (void *)a, 0);
     dprintf(1, "msgping: shmchild: owner now %s, bytes %s, drop %d\n", me ? "me" : "not me", still ? "kept" : "LOST", d);
-    return me && still && d == 0 ? 0 : 4;
+    if (!(me && still && d == 0))
+        return 4;
+    return r[0] + 5;                                    /* dropped and freed: this read must end us (139) */
+}
+static int shm_rochild(u32 a)                           /* msgping shmro ADDR: a read-only share, then a write */
+{
+    volatile unsigned char *r = (volatile unsigned char *)a;
+    int t = -1;
+    for (int i = 0; i < 200 && (t = sys_shm(SHM_TAKE, (void *)a, 0)) < 0; i++) sys_sleep(1);
+    if (t < 0 || r[1] != 3) return 1;
+    r[1] = 0;                                           /* read only: this write must end us (139) */
+    return 2;
 }
 static int shm_test(void)
 {
@@ -87,9 +98,25 @@ static int shm_test(void)
     r[5001] = 0x77;
     int f = sys_memfree((void *)r);                     /* early: the child holds it */
     int st = sys_wait(pid);
-    int ok = o == 0 && (o2 == -17 || o2 == 0) && seen && f == 0 && st == 0;
-    dprintf(1, "msgping: shm %s (offer %d %d, child's byte %s, free %d, child %d)\n", ok ? "ok" : "FAILED", o, o2,
-            seen ? "seen" : "not seen", f, st);
+    /* what may not be: an offer of what is not a region of ours, to ourselves; a take of what was not offered to us;
+     * a read-only share written */
+    char stk[16];
+    int bad1 = sys_shm(SHM_OFFER, stk, (u32)pid), bad2 = -1, bad3 = -1, st2 = -1;
+    volatile unsigned char *q = sys_memalloc(4096);
+    if (q) {
+        q[1] = 3;
+        bad2 = sys_shm(SHM_OFFER, (void *)q, (u32)sys_getpid());
+        bad3 = sys_shm(SHM_TAKE, (void *)q, 0);
+        snprintf(hex, sizeof hex, "%x", (u32)q);
+        av[1] = "shmro";
+        int p2 = sys_spawn("/bin/msgping", av, 0);
+        if (p2 >= 0 && sys_shm(SHM_OFFER, (void *)q, (u32)p2 | SHMF_RO) == 0)
+            st2 = sys_wait(p2);
+    }
+    int ok = o == 0 && o2 == -17 && seen && f == 0 && st == 139 && bad1 == -22 && bad2 == -3 && bad3 == -2 &&
+             st2 == 139 && q && q[1] == 3;
+    dprintf(1, "msgping: shm %s (offer %d %d, child's byte %s, free %d, child %d after its drop; refused %d %d %d; "
+            "read-only child %d)\n", ok ? "ok" : "FAILED", o, o2, seen ? "seen" : "not seen", f, st, bad1, bad2, bad3, st2);
     return !ok;
 }
 int main(int argc, char **argv)
@@ -98,6 +125,8 @@ int main(int argc, char **argv)
         return shm_test();
     if (argc > 2 && !strcmp(argv[1], "shmchild"))
         return shm_child((u32)strtoul(argv[2], 0, 16));
+    if (argc > 2 && !strcmp(argv[1], "shmro"))
+        return shm_rochild((u32)strtoul(argv[2], 0, 16));
     if (argc > 2 && !strcmp(argv[1], "winread"))
         return winread(argv[2], argc > 3 ? atoi(argv[3]) : 0);
     if (argc > 2 && (!strcmp(argv[1], "past") || !strcmp(argv[1], "peer") || !strcmp(argv[1], "wild"))) {

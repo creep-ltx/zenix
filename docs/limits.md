@@ -42,12 +42,16 @@ handed to a system call is refused (-EFAULT).
 Since D60 stage 3 (2026-11-23) there are no system processes: the servers, drivers, `init` and the services are
 confined too. What stays: the display server and the sound server hold the custom chips' page, so through the blitter,
 the Copper and Paula's DMA they can read (the display server also write) any chip RAM, never fast RAM (stage 4's
-`DRV_AUDIO`, stage 7's checked blitter close it); the parallel port's driver holds CIA-A's and CIA-B's pages (the
-keyboard's, the timers' and the floppy's bits too, until stage 4's `DRV_PARXFER`); a service may ask for any range of
+`DRV_AUDIO`, stage 7's checked blitter close it), and the chips' page also holds `INTENA`, `DMACON`, the Copper and
+the blitter, so either server can stop the machine; the parallel port's driver holds CIA-A's and CIA-B's pages (the
+keyboard, the timers, the ROM overlay bit and the floppy's lines too: it could stop the kernel's clock or hang the
+machine, until stage 4's `DRV_PARXFER`); with 8 KB pages (`DIAG=-DMMU_PAGE8`) a PC Card driver gets none of Gayle's
+card pages (they share 8 KB with the IDE's interrupt latch), so it cannot run; a service may ask for any range of
 its client (it is the system's own code), a server any user runs only for what its client declared; a network driver
 or a disk server built before D60 does not work with full protection (it neither shares the frame pool nor uses the
 RAM disk's copy form; an old filesystem, display, sound or USB server does, through the old lend). The tables:
-grants 32 in all, `SYS_shm` 8 offers and 8 holds a process and 24 in all, `SYS_callv` 4 buffers, a request's
+grants 32 in all (shared regions taken may use 20 of them: 12 stay for claims and the display's grab), `SYS_shm` 8
+offers and 8 holds a process and 24 in all, `SYS_callv` 4 buffers, a request's
 windows 8 (those of a request that share a page become one).
 Never run on a real 68030/040/060 yet; not on the stock A1200 (a 68EC020 has no MMU) nor under Emu68.
 

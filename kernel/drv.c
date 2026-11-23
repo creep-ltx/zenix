@@ -327,7 +327,10 @@ long drv_sys(u32 opw, u32 a, u32 b)
     u32 op = opw & 0xFF;
     const struct hwinfo *h = hw();
     int usb = svc_pid("usb") == current->pid;
-    if (usb) {                          /* D46: the USB server: its claim (the xHCI's, below) and that claim's ops only */
+    int dpy = op == DRV_HWINFO && svc_is("display");  /* D60 stage 3: the display server reads the whole table (D43's
+                                         * fb after the drivers' part) through the kernel, not at 0x1100 */
+    if (dpy) {
+    } else if (usb) {                   /* D46: the USB server: its claim (the xHCI's, below) and that claim's ops only */
         if (op - 1 > DRV_CACHE - 1)
             return -EPERM;
     } else if (op == DRV_CLAIM && a == DRV_PAULA) {
@@ -347,8 +350,8 @@ long drv_sys(u32 opw, u32 a, u32 b)
             return -ENODEV;
         if (n < HWINFO_FIRST)
             return -EINVAL;
-        if (n > HWINFO_FIRST)
-            n = HWINFO_FIRST;           /* the drivers' part (D43's fb after it is the display server's) */
+        if (n > (dpy ? sizeof *h : HWINFO_FIRST))
+            n = dpy ? sizeof *h : HWINFO_FIRST;     /* the drivers' part (D43's fb after it is the display server's) */
         if (!user_ok_wr(current, a, n))
             return -EFAULT;
         memcpy((void *)a, h, n);
