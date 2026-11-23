@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-only
-# Host test of the plipbox driver's line protocol (net/drv/plipbox-core.c) against the model of the box on the
+# Host test of the plipbox driver's line protocol (net/drv/plipbox-line.c, the kernel's DRV_PARXFER, and
+# net/drv/plipbox-core.c above it) against the model of the box on the
 # parallel port (tools/plipbox-model.h), DESIGN D39, and a download through it (tools/plipbox-flow.c):
 # tools/plipbox-test.sh   (TRACE=1 shows the driver's log)
 set -e

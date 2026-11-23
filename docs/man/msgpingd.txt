@@ -4,7 +4,7 @@ NAME
     msgpingd - test message server
 
 SYNOPSIS
-    msgpingd [-port NAME] [-call NAME] [-uid N] [-old]
+    msgpingd [-port NAME] [-call NAME] [-uid N] [-old] [-paula]
              [-fs | -fsstall | -fsbad | -fslinked | -fsdir | -fswin]
              [count]
 
@@ -34,6 +34,14 @@ DESCRIPTION
                 client, and refuses the request with -13 when it could not
                 (with -uid N and a root client). Without it, it sees only
                 what its clients declare.
+    -paula      (registered as the service "audio": svctest reg audio 0
+                /bin/msgpingd -port audio -paula) claim Paula and try the
+                kernel's checks of DRV_AUDIO (DESIGN D60 6.2): a channel in
+                the kernel's memory, past its own chip RAM, in its fast RAM,
+                DMAEN, an AUDxLCH alone, a channel playing from a block it
+                then frees; one line "msgpingd: paula ..." with the
+                answers, then it writes Paula itself, which with memory
+                protection on ends it (tools/mmu-test.sh).
     -call NAME  call port NAME once before opening its own port (a server
                 whose start needs another service; D11's tests use it to
                 make a cycle).

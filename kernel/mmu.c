@@ -2148,7 +2148,7 @@ KINIT static int off_why(const char *why)
 
 KINIT void mmu_setup(const struct bootinfo *bi)
 {
-    const struct hwinfo *hw = (const struct hwinfo *)HWINFO_ADDR;
+    const struct hwinfo *hw = HWINFO_K;
     u32 k = bi->kopts;
     u32 d = kopt_default[2];
     /* 0 not asked; 1 asked (MMU=ON, or a kernel file made so): every part tried; 2 the default: known MMUs only */
@@ -2389,7 +2389,7 @@ KMMU static int mmu_fault_(const u8 *f, u32 pc)
         w = "its own code (read only)";
     else if (o == MEM_NOT_POOL) {      /* RAM the pools leave out is the kernel's (low memory, its image, the klog
                                          * area, the RAM disk); anything else is the chips, a board or nothing */
-        const struct bootinfo *bi = (const struct bootinfo *)0x1000;
+        const struct bootinfo *bi = BOOTINFO_K;
         w = "no memory (the hardware, or nothing)";
         for (int i = 0; i < bi->nregions && i < 8; i++)
             if ((bi->r[i].attrs & (MEMF_CHIP | MEMF_FAST)) && a >= bi->r[i].lower && a < bi->r[i].upper)
@@ -2434,9 +2434,10 @@ static long nop_sh(u32 op, u32 a, u32 b) { (void)a; (void)b; return op - 1 < 3 ?
 static int nop_sf(u32 a) { (void)a; return 0; }
 static long nop_cv(u32 a, u32 b, u32 c) { (void)a; (void)b; (void)c; return -ENOSYS; }
 static void nop_pb(struct port *a, u32 b, struct port *c, u32 d, u32 e) { (void)a; (void)b; (void)c; (void)d; (void)e; }
+static long nop_dv(u32 op, void *c, u32 a) { (void)op; (void)c; (void)a; return -EOPNOTSUPP; }
 static const struct mmu_ops mmu_ops_off = { nop_p, nop_p, nop_p, nop_b, nop_v, nop_3, nop_i, nop_v, nop_f,
                                             nop_r, nop_m, nop_g, nop_k, nop_k, nop_c, nop_v, nop_h,
-                                            nop_gr, nop_ug, nop_pe, nop_sh, nop_sf, nop_cv, nop_cv, nop_pb };
+                                            nop_gr, nop_ug, nop_pe, nop_sh, nop_sf, nop_cv, nop_cv, nop_pb, nop_dv };
 const struct mmu_ops *mmu_ops = &mmu_ops_off;
 
 /* the live table: read-only data in the span (.zhwmmu.rodata), the only place that holds span functions' addresses;
@@ -2446,7 +2447,7 @@ __attribute__((section(".zhwmmu.rodata"))) static const struct mmu_ops mmu_ops_o
     mmu_hand_, mmu_before_reset_, mmu_fault_,
     mmu_rec_, mmu_unrec_, mmu_give_, mmu_take_, mmu_end_, mmu_callok_, mmu_unsync_, mmu_held_,
     mmu_grant_, mmu_ungrant_, mmu_peer_, mmu_shm_, mmu_shmfree_, mmu_callv_, mmu_ramdisk_,
-    mmu_postbuf_ };
+    mmu_postbuf_, drv_span_ };
 
 /* the only writer of mmu_on besides mmu_before_reset_ (tools/check-init.py): armed exactly while it is set */
 KMMU __attribute__((noinline)) static void mmu_arm(u8 f)

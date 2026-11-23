@@ -54,6 +54,11 @@ DESCRIPTION
     screen in the emulator too (tools/drag-test.sh).
 
 NOTES
+    With full memory protection (DESIGN D60 6.3) only the display
+    service's process may grab a console: gcontest run from a shell is
+    refused (-1, EPERM; "is not the display service" in the kernel
+    log, once), as tools/mmu-test.sh checks. tools/gcon-test.sh runs
+    on the 68020 machine, without an MMU, where root may still grab.
     Root only. A second gcontest while one has the console is refused
     (EBUSY). Its output is meant for a file: the console it writes to is in
     graphics mode while it runs.

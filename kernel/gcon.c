@@ -71,9 +71,9 @@ static struct gcon *gc;
 static u8 redraw_to;            /* a close with interrupts off (proc_exit): kwork shows this console as text */
 
 /* A pointer must lie in chip RAM (the Copper and the sprite DMA reach only that): one of the bootinfo's chip regions */
-static int chip_ok(u32 a, u32 n)
+int chip_ok(u32 a, u32 n)
 {
-    const struct bootinfo *bi = (const struct bootinfo *)0x1000;
+    const struct bootinfo *bi = BOOTINFO_K;
     for (int i = 0; i < bi->nregions && i < 8; i++)
         if ((bi->r[i].attrs & MEMF_CHIP) && a >= (bi->r[i].lower & ~0x3Fu) && a + n <= bi->r[i].upper && a + n > a)
             return 1;
@@ -181,6 +181,14 @@ long gcon_grab(int con, u32 a2)
 {
     if (current->uid != 0)
         return -EPERM;                  /* the Copper list can write the chips' registers: root's, as the kernel's */
+    if (mmu_on && !svc_is("display")) { /* D60 6.3: with full memory protection the chips (whose blitter writes any
+                                         * chip RAM) are the display service's alone, never root's for being root */
+        static u8 said;
+        if (!said++)
+            kprintf("display: pid %d (%s) is not the display service: the console is not handed over (said once)\n",
+                    current->pid, current->name);
+        return -EPERM;
+    }
     if (!gfx_up() && !gc)
         return -ENODEV;
     if (gc)

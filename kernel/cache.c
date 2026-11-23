@@ -36,7 +36,7 @@ KINIT static void mark(unsigned *map, u32 lo, u32 hi)  /* the 16 MB units [lo, h
  * boards that are not RAM (io[]: those units, which D41 reads too); the caller has checked the hardware table */
 KINIT int cache_block(const struct bootinfo *bi, int is060, unsigned *base, unsigned *mask, unsigned *io)
 {
-    const struct hwinfo *hw = (const struct hwinfo *)HWINFO_ADDR;
+    const struct hwinfo *hw = HWINFO_K;
     unsigned fast[8] = { 0 }, bad;
     memset(io, 0, 32);
     for (int i = 0; i < bi->nregions && i < 8; i++)
@@ -61,7 +61,7 @@ KINIT void cache_setup(const struct bootinfo *bi)
 {
     static const char *const why[] = { 0, "no fast RAM above 16 MB", "a board in fast RAM's block",
                                        "68040, a board above 16 MB" };
-    const struct hwinfo *hw = (const struct hwinfo *)HWINFO_ADDR;
+    const struct hwinfo *hw = HWINFO_K;
     int hwok = hw->magic == HWINFO_MAGIC;
     if (!(bi->attn & 0x88))
         return off("68020/68030", 0);

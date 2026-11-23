@@ -87,7 +87,9 @@ struct mmu_ops {
     long (*callv)(u32, u32, u32);
     long (*ramdisk)(u32, u32, u32);
     void (*postbuf)(struct port *, u32, struct port *, u32, u32);
+    long (*drv)(u32, void *, u32);      /* D60 stage 4: drv.c's DRV_AUDIO and DRV_PARXFER (op, the caller's claim, b) */
 };
+long drv_span_(u32 op, void *claim, u32 a);
 /* D60 stage 3, SYS_callv: the declaration of the call being made (syscall.c sets it, mmu_rec takes it; resident) */
 extern const struct ucalldecl *mmu_decl;
 extern const struct mmu_ops *mmu_ops;

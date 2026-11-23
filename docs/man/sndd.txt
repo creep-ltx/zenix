@@ -32,10 +32,12 @@ FILES
     /etc/svctab   its line: audio -10 /sbin/sndd
 
 NOTES
-    With full memory protection (DESIGN D60 stage 3) sndd sees the
-    custom chips' page only once it holds Paula's claim, so it reads the
-    beam (PAL or NTSC) after the claim; through Paula's DMA it can still
-    read any chip RAM (a checked door, DRV_AUDIO, is D60's stage 4).
+    With full memory protection (DESIGN D60 stage 4) sndd holds no
+    register page: it hands the kernel its writes to Paula in batches
+    (SYS_drv DRV_AUDIO), and the kernel checks that every channel plays
+    only sndd's own chip RAM. Without protection (no MMU: the stock
+    A1200) it writes the registers itself, as before, with no system
+    call a buffer. play -S then shows DMACONR's audio bits only.
     Not done: mixing several sounds on one pair, priorities between
     programs, the bell played through sndd, 14-bit sound. sndd does
     not run while the kernel is busy for another program (a floppy

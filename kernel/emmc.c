@@ -240,7 +240,7 @@ KINIT int emmc_init(void)
 #ifdef EMMC_HOST_TEST
     const struct hwinfo *hw = fake_hw();
 #else
-    const struct hwinfo *hw = (const struct hwinfo *)HWINFO_ADDR;
+    const struct hwinfo *hw = HWINFO_K;
 #endif
     up = 0;
     if (hw->magic != HWINFO_MAGIC || !hw->emmc || !hw->mailbox || !hw->soc_base)
