@@ -41,6 +41,13 @@ struct bootinfo {
     u32 upd_flags;              /* +0x80: UPD_F_*; an older loader leaves all three 0 (the table is cleared) */
     u32 kopts;                  /* +0x84: KOPT_* boot options (DESIGN D37, zenixboot DCACHE=); 0 from an older loader */
 };
+/* D60 6.3: the bootinfo and the hardware table (0x1000, 0x1100 in low chip RAM, which a DMA engine in a process's
+ * hands can write) copied into the kernel's own memory first thing in kmain; nothing reads the low ones after that */
+extern struct bootinfo kboot;
+struct hwinfo;
+extern struct hwinfo khw;
+#define BOOTINFO_K ((const struct bootinfo *)&kboot)
+#define HWINFO_K ((const struct hwinfo *)&khw)
 #define KOPT_DCACHE_OFF 1u              /* the 040/060 data cache stays off (and its store buffer, branch cache, PCR) */
 #define KOPT_DCACHE_WT  2u              /* the 040/060 data cache write-through instead of copyback */
 #define KOPT_MMU_ON     4u              /* DESIGN D41: memory protection on (a 68030/040/060 with a working MMU) */
@@ -751,6 +758,10 @@ extern u32 net_epoch;
 /* drv.c: the network's drivers (DESIGN D19 2.3, 2.4; DRV_* in netproto.h) */
 long drv_sys(u32 op, u32 a, u32 b);
 void drv_exit(struct proc *p);          /* p is dying: its claims end (the network server's end ends them all) */
+extern u8 aud_valid;                    /* D60 6.2: DRV_AUDIO's channels whose pointer the kernel checked */
+void drv_freed(u32 lo, u32 hi);         /* mem.c, when aud_valid: a block freed; a channel playing from it stops */
+int port_exact_of(int pid, const char *name);   /* ipc.c: pid holds port name, marked PEER_EXACT */
+int chip_ok(u32 a, u32 n);              /* gcon.c: [a, a + n) lies in chip RAM */
 
 /* vfs.c */
 struct file *file_new(int type);
