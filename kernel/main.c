@@ -435,8 +435,14 @@ KINIT static const char *cpu_name(u16 attn)
     return "68000/68010";
 }
 
-KINIT void kmain(struct bootinfo *bi)
+struct bootinfo kboot;
+struct hwinfo khw;
+
+KINIT void kmain(struct bootinfo *low)
 {
+    memcpy(&kboot, low, sizeof kboot);          /* D60 6.3: the kernel's copies, before anything reads them */
+    memcpy(&khw, (const void *)HWINFO_ADDR, sizeof khw);
+    struct bootinfo *bi = &kboot;
 #ifdef DIAG_TICKS0
     ticks = DIAG_TICKS0;                /* test builds (tools/time-test.sh): the tick count starts near its wrap */
     wclock.secs = DIAG_TICKS0 / WCLOCK_HZ;      /* and the seconds since boot with it: a machine up that long (F9) */
@@ -455,7 +461,7 @@ KINIT void kmain(struct bootinfo *bi)
                 (r->attrs & MEMF_CHIP) ? "chip" : "?");
     }
 
-    const struct hwinfo *hwi = (const struct hwinfo *)HWINFO_ADDR;
+    const struct hwinfo *hwi = HWINFO_K;
     if (hwi->magic != HWINFO_MAGIC)
         kprintf("pi: no hardware table (old bootblock)\n");
     else if (!(hwi->flags & HW_DT))
@@ -485,6 +491,7 @@ KINIT void kmain(struct bootinfo *bi)
     mem_selftest();
     diag_stage(8, DIAG_PINK);
     cache_setup(bi);                            /* D37: the data cache on a real 68040/68060, the line says what */
+    low->attn = bi->attn;                       /* (its AFF_68060 for ZINE's blob, which reads the low table) */
     mmu_setup(bi);                              /* D41: memory protection, when asked for and the MMU works */
     diag_stage(9, DIAG_WHITE);
     eclock_init();                              /* hr_time() from here on (gfx_init measures the frame with it) */
