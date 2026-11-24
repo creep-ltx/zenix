@@ -562,6 +562,8 @@ struct proc {                   /* start.S relies on the first three: */
     s8 nice;                    /* base priority, NICE_MIN .. NICE_MAX: inherited, lowered by anyone, raised by root */
     u8 blevel;                  /* NICE_LEVEL(nice), kept so that no path divides */
     u8 prio;                    /* effective level (0 highest): blevel, or a better client's while serving it */
+    u8 slot;                    /* its index in procs[] (proc.c sets it with the slot; D60 stage 6: mmu.c's lookups
+                                 * by slot need no division), in the gap before wait_msg */
     struct umsg *wait_msg;      /* P_MSG as a client: the request in flight */
     u8 ctty;                    /* controlling tty (1..NTTYS-1: a console or a pty): the tty of fd 0 at spawn, else the parent's */
     u8 wait_con;                /* in wait with WAIT_CONSOLE: a console switch posts it EV_CON */
