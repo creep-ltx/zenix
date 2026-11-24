@@ -4,15 +4,23 @@ NAME
     df - show free disk space
 
 SYNOPSIS
-    df
+    df [FILE...]
 
 DESCRIPTION
     Prints, for every mounted filesystem (the root first, then the others
     in the order mount lists them), the device, the size, used and
     available space in 1 KB blocks, the percentage used, the number of
-    inodes (free inodes in brackets) and where it is mounted. There are no
-    options. A filesystem whose server does not answer is listed with
-    "cannot read the filesystem".
+    inodes (free inodes in brackets) and where it is mounted. A
+    filesystem whose server does not answer is listed with "cannot read
+    the filesystem".
+
+    With FILEs, only the filesystem each FILE is on (the mount whose path
+    is the longest leading part of the FILE's real path), one line each,
+    as POSIX df does.
+
+EXIT STATUS
+    0, 1 if no filesystem could be read or a FILE could not be resolved,
+    2 for a usage error.
 
 NOTES
     An NFS mount (DESIGN D23) shows at most 4 TB (its counts are capped
