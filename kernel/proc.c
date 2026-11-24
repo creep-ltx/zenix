@@ -266,6 +266,7 @@ KINIT void proc_init(void)         /* the boot: once, size first */
         procs[i].slot = (u8)i;          /* (kernel.h: never changes) */
     procs[0].state = P_READY;           /* pid 0: idle, runs on the boot stack */
     procs[0].pid = 0;
+    procs[0].cwd = cwd_root;            /* OS-6: never 0 */
     memcpy(procs[0].name, "idle", 5);
     procs[0].prio = procs[0].blevel = PRI_IDLE;     /* below every level: anything ready is better */
     procs[0].kstk = (u32)kstack_bottom;
@@ -653,10 +654,8 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
         p->env = env;
         p->envlen = (u16)envlen;
     }
-    if (parent)
-        memcpy(p->cwd, parent->cwd, sizeof p->cwd);
-    else
-        p->cwd[0] = '/';
+    p->cwd = parent ? parent->cwd : cwd_root;       /* shared, counted (OS-6) */
+    cwd_hold(p->cwd);
     set_name(p, name);                 /* (a script's interpreter: the script's, D53 3.8) */
 
     /* file descriptors and the controlling tty */
@@ -1009,6 +1008,8 @@ void proc_exit(int code)
     }
     kfree(p->sig_mask);                 /* D16: the handlers' masks (no handler runs once exiting) */
     p->sig_mask = 0;
+    cwd_drop(p->cwd);                   /* OS-6: a zombie's working directory is "/" (umount's busy check) */
+    p->cwd = cwd_root;
     for (int i = 1; i < NPROC; i++) {   /* rule 12: its stopped children go on, and SIGHUP ends them by default */
         struct proc *c = &procs[i];
         if (c->ppid == p->pid && (c->state == P_STOP || c->stop_req)) {
@@ -1063,7 +1064,7 @@ int proc_wait(int pid, int flags)
         if (con && kbd_reset_state == KRS_HELD)
             kbd_reset_flush();          /* Ctrl+Amiga+Amiga: init syncs the disks before the reset (kbd.c) */
         if (con && con_want) {
-            for (int n = 1; n <= NCONS; n++)
+            for (int n = 0; n <= NCONS; n++)            /* (bit 0: the Unicode font wanted, CONUF_LAZY) */
                 if (con_want & (1u << n)) {
                     con_want &= (u16)~(1u << n);
                     return ST_CONSOLE + n;

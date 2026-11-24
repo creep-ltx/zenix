@@ -553,3 +553,7 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   file `~/.config/mail/keys` (files' format, D48) with the action names of docs/man/mail.txt; the command's options
   (`-c -f -s -K`) and `mail -s SUBJECT ADDRESS...` reading the text from standard input; the package `tls` owning
   `/lib/tls/tlspipe`; `keys_tty` in display/keys.h (a key from a terminal: the codes of the shared parser).
+- **Audit 2026-11-23 OS-5 (the Unicode font on demand, branch wins, 2026-11-24):** `CON_UFONT` with a2 0 and a3
+  `CONUF_LAZY` (1): no font now (one loaded stays), init asked at the first cell above U+00FF to be drawn (a2 0 with any
+  other a3 still drops the font); `SYS_wait`'s `WAIT_CONSOLE` result `ST_CONSOLE` + 0 (0x200): init loads the font
+  (given only after a `CONUF_LAZY`, so an older init never sees it).

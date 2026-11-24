@@ -31,7 +31,8 @@
  * half (tail) of a wide character. Widths are the kernel's (confont.c, the C library's own tables). In 8-bit mode (a
  * CON_FONT, or the rule CONR_8BIT) nothing is decoded and a cell above U+00FF draws as '?'. */
 
-#define HLINES 200                      /* scrollback lines per console */
+#define HLINES 200                      /* scrollback lines per console with fast RAM; without, half (hlines) */
+static int hlines = HLINES;             /* audit OS-4: 100 lines (16 KB a console) on a machine with chip RAM only */
 
 /* the escape parser's states (ECMA-48): after ESC; inside CSI; inside a control string (OSC, DCS, APC, PM, SOS:
  * swallowed up to BEL or ESC); after ESC and an intermediate byte (ESC ( B: swallowed up to the final byte) */
@@ -67,8 +68,8 @@ struct term {
     u8 nparam;                          /* parameters seen (up to NPAR are kept) */
     u16 sub;                            /* bit i: parameter i came after ':' (a sub-parameter, 38:5:196) */
     u16 param[NPAR];
-    u8 (*hist)[COLS];                   /* scrollback: the oldest line is hist[(hhead - hn) mod HLINES]; its colours */
-    int hn, hhead;                      /* are hist[HLINES + the same index] (inverse folded in) */
+    u8 (*hist)[COLS];                   /* scrollback: the oldest line is hist[(hhead - hn) mod hlines]; its colours */
+    int hn, hhead;                      /* are hist[hlines + the same index] (inverse folded in) */
     int back;                           /* lines scrolled back (0 = live) */
     u8 con;                             /* its console's number: where its answers (ESC[6n) go */
     u8 rules;                           /* CONR_* (D20 4.3) */
@@ -167,6 +168,18 @@ static u8 bce(struct term *t) { return (u8)(((t->colour | t->cor) & 0xF0) | (CO_
 /* D28: a cell above 0xFF, drawn from the stored cells (never from today's widths, so a font change cannot orphan a
  * half): a tail is its lead's right half (if the lead is a cell above 0xFF), else blank; a lead whose next cell is a
  * tail is the left half; in 8-bit mode '?' (a tail blank) */
+/* audit OS-5: CON_UFONT's a3 CONUF_LAZY: no font yet, and init loads it when a character first needs one (here): init's
+ * wait (WAIT_CONSOLE) returns ST_CONSOLE + 0, as con_switch asks for a login (the same wake-up rule) */
+static u8 uf_lazy;
+static void init_ask(int bit);
+static __attribute__((noinline)) void ufont_ask(void)
+{
+    if (panicked)
+        return;
+    uf_lazy = 0;
+    init_ask(0);
+}
+
 static void udraw(int row, int x, u32 v, u32 prev, u32 next, u8 a, u8 co, int eb)
 {
     a &= (u8)~A_HI;
@@ -177,8 +190,11 @@ static void udraw(int row, int x, u32 v, u32 prev, u32 next, u8 a, u8 co, int eb
             gfx_ucell(row, x, (u16)prev, a, co, 2);
         else
             gfx_cell(row, x, ' ', a, co);
-    } else
+    } else {
+        if (uf_lazy)                                    /* (a lead: its tail follows it; cleared when a font is set) */
+            ufont_ask();
         gfx_ucell(row, x, (u16)v, a, co, next == V_TAIL);
+    }
 }
 
 static inline u32 cellv(const struct term *t, u32 o)       /* a cell's value */
@@ -399,12 +415,15 @@ static void hist_push(struct term *t, int y)
     if (!t->hist) {
         if (panicked)
             return;                                     /* nothing allocated while a panic prints */
-        t->hist = kmalloc(2 * HLINES * COLS);
+        u32 chip, fast;
+        mem_totals(&chip, &fast);
+        hlines = fast ? HLINES : HLINES / 2;            /* (the same for every console: the machine's) */
+        t->hist = kmalloc(2 * (u32)hlines * COLS);
         if (!t->hist)
             return;
         t->hn = t->hhead = 0;
     }
-    u8 *c = t->hist[HLINES + t->hhead];
+    u8 *c = t->hist[hlines + t->hhead];
     u8 *l = t->hist[t->hhead];
     memcpy(l, ROW(t, ch, y), COLS);
     u32 any = 0;                                        /* D28 21: a row without attributes: its colours as they are */
@@ -425,8 +444,8 @@ static void hist_push(struct term *t, int y)
     if (t->hp || high)
         hist_high(t, y, l, high);
 pushed:
-    t->hhead = (t->hhead + 1) % HLINES;
-    if (t->hn < HLINES)
+    t->hhead = (t->hhead + 1) % hlines;
+    if (t->hn < hlines)
         t->hn++;
 }
 
@@ -448,8 +467,8 @@ static void show_back(struct term *t)
             }
             continue;
         }
-        int h = (t->hhead - t->hn + k + HLINES * 2) % HLINES;
-        const u8 *l = t->hist[h], *c = t->hist[HLINES + h], *hr = hrow(t->hp, h);
+        int h = (t->hhead - t->hn + k + hlines * 2) % hlines;
+        const u8 *l = t->hist[h], *c = t->hist[hlines + h], *hr = hrow(t->hp, h);
         for (int x = 0; x < WCOLS; x++) {
             if (hr && hr[x]) {                          /* D28: a high cell (its row byte is never 0) */
                 u32 v = (u32)hr[x] << 8 | l[x];
@@ -1306,6 +1325,15 @@ int con_in_use(int w)
     return 0;
 }
 
+/* bit w of con_want, init's wait woken (D16: WAIT_CONSOLE): console w wants a login, bit 0 the Unicode font */
+static void init_ask(int bit)
+{
+    con_want |= (u16)(1u << bit);
+    for (int i = 1; i < NPROC; i++)
+        if (procs[i].wait_con)
+            ev_post(&procs[i], EV_CON);
+}
+
 /* Amiga+Fn or the serial hook: show console w. A console nobody is on asks init for a login there (init waits for
  * that in SYS_wait with WAIT_CONSOLE) - like Linux's autovt. Called in process context only: from kwork, or from
  * SYS_console's CON_INPUT raw keys in their caller's system call (D24 6.3). Neither can run between init's check and
@@ -1315,12 +1343,8 @@ void con_switch(int w)
 {
     if (w < 1 || w > NCONS)
         return;
-    if (!con_in_use(w)) {
-        con_want |= (u16)(1u << w);
-        for (int i = 1; i < NPROC; i++)
-            if (procs[i].wait_con)
-                ev_post(&procs[i], EV_CON);     /* D16: init's wait (WAIT_CONSOLE) */
-    }
+    if (!con_in_use(w))
+        init_ask(w);
     if (w == con_cur)
         return;
     if (gcon_away(w))
@@ -1550,7 +1574,8 @@ void term_panic(void)
 /* DESIGN D28 7: SYS_console CON_UFONT, the console's Unicode font for every console (no descriptor; root). The size is
  * bounded before anything is allocated; the checks run on the kernel's own copy (confont.c); one pointer store
  * switches to it; then the old copy is freed, every console's pending character cleared and the shown console drawn
- * again. a2 0 drops the font (every character above U+00FF the box; widths do not change). Kept when its setter
+ * again. a2 0 drops the font (every character above U+00FF the box; widths do not change); a2 0 and a3 CONUF_LAZY
+ * instead asks init for it at the first such character (audit OS-5: the stock A1200's 10 KB). Kept when its setter
  * ends: it is the system's (term_release leaves it). */
 long term_ufont(u32 a2, u32 a3)
 {
@@ -1559,6 +1584,10 @@ long term_ufont(u32 a2, u32 a3)
     if (!gfx_up())
         return -ENODEV;
     u8 *c = 0;
+    if (!a2 && a3 == CONUF_LAZY) {
+        uf_lazy = !cf_index;
+        return 0;
+    }
     if (a2) {
         if (a3 > CONF_MAXSIZE || a3 < CONF_HDR + CONF_INDEX)
             return -EINVAL;
@@ -1572,6 +1601,8 @@ long term_ufont(u32 a2, u32 a3)
             return -EINVAL;
         }
     }
+    uf_lazy = 0;                                        /* a font set or dropped: nothing more to ask for (OS-5) */
+    con_want &= (u16)~1u;
     kfree(confont_set(c));
     for (int i = 1; i <= NCONS; i++)
         if (wsp[i]) {

@@ -187,7 +187,7 @@ pointers.
   `realpath`; -ELOOP beyond; with only the root mounted the server's own rule: 8 nested), link targets of at most 255
   bytes (-ENAMETOOLONG), pipes of 4 KB, 10 virtual consoles, 8 pseudo-terminals (`NPTY`; -EAGAIN when all are in
   use; a 2 KB output ring each, a window size of at most 32767 x 32767), 80 columns x 32 text rows on PAL (25 on
-  NTSC; interlaced, `mode hires-lace`: 64 and 50, `TROWS_MAX` 64), 200 scrollback lines per console (32 KB each: a character and a colour byte per cell, allocated when the
+  NTSC; interlaced, `mode hires-lace`: 64 and 50, `TROWS_MAX` 64), 200 scrollback lines per console (100 without fast RAM; 32 KB and 16 KB each: a character and a colour byte per cell, allocated when the
   console first scrolls), a cooked tty line of 511 characters (bytes: a Swedish letter is two, DESIGN D28; a key past that rings the bell, and at its end the whole line is refused with
   "tty: the line was too long": nothing of it is handed on, also when the shell's editor took over halfway).
 - UTF-8 in the console (DESIGN D28, architecture.md section 11): the font draws box lines, blocks, braille, CP437's

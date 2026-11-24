@@ -34,5 +34,12 @@ n=$(tr -d '\r' < $L | grep -ac '^ghost-abc-def$')
 if [ "$n" = 2 ]; then echo "PASS sh: the grey suggestion from history, taken with Right"; else echo "FAIL sh suggestion: ghost-abc-def $n times"; pass=0; fi
 if echo "$hx" | grep -qx '61 62 20 78 63 64 0a'; then echo "PASS sh: Ctrl, Alt and Shift with the arrows (a word left, nothing typed from the codes)"; else echo "FAIL sh modifier arrows: $hx"; pass=0; fi
 if echo "$hx" | grep -qx '61 63 62 c3 a5 0a'; then echo "PASS sh: the cursor moves by characters (left over a Swedish letter)"; else echo "FAIL sh cursor: $hx"; pass=0; fi
+# audit OS-5: without fast RAM the Unicode font comes when a character first needs it: its 10 KB taken then (13 KB
+# measured: with the scrollback's high rows that line takes), a plain line before it took nothing
+uf=$(tr -d '\r' < $L | grep -ao '^ufont-lazy:[-0-9]*:[-0-9]*:end' | head -1)
+d1=$(echo "$uf" | cut -d: -f2) d0=$(echo "$uf" | cut -d: -f3)
+if [ -n "$d1" ] && [ "$d1" -ge 9 ] && [ "$d1" -le 15 ] && [ "${d0:-9}" -ge -1 ] && [ "${d0:-9}" -le 1 ]; then
+    echo "PASS the Unicode font loaded at the first character above U+00FF (${d1} KB then, ${d0} before)"
+else echo "FAIL the Unicode font on demand: $uf"; pass=0; fi
 grep -aq 'con-test-done' $L || { echo "FAIL the script did not reach its end"; pass=0; }
 exit $((1 - pass))

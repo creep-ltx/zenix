@@ -127,10 +127,13 @@ static void console_setup(void)
  * holds it): auto loads /usr/share/consolefonts/zenix-8x8.zcf if it is there (the RAM floppy has none: silent), NAME
  * that font's NAME.zcf, none nothing (11 KB of memory saved; the widths stay right). The file is read into a memory
  * region of its own (sys_memalloc: not malloc, whose code init does not otherwise need), given back after the call
- * (init never ends). What fails is said on the console; the console then shows the box for what it cannot draw. */
-static void font_setup(void)
+ * (init never ends). What fails is said on the console; the console then shows the box for what it cannot draw.
+ * Audit OS-5: at BOOT on a machine without fast RAM the font is only found; the kernel asks for it at the first
+ * character that needs it (CONUF_LAZY: sys_waitcon's ST_CONSOLE + 0), and this loads it then (10 KB saved until). */
+static void font_setup(int boot)
 {
-    sys_unlink("/var/run/console");                    /* the last boot's Use (conprefs, D28 22): gone */
+    if (boot)
+        sys_unlink("/var/run/console");                /* the last boot's Use (conprefs, D28 22): gone */
     if (!strcmp(ufont, "none"))
         return;
     int a = !strcmp(ufont, "auto");
@@ -145,11 +148,14 @@ static void font_setup(void)
         return;
     }
     int r = sys_conufont(0, 0);                         /* a kernel before D28 refuses the op itself */
+    u32 mi[4];
     char *b = 0;
     if (r == -EINVAL)
         dprintf(1, "init: this kernel has no Unicode font: %s not loaded\n", path);
     else if (r == -ENODEV)
         ;                                               /* no display */
+    else if (boot && sys_meminfo(mi) == 0 && !mi[1])
+        sys_conufont(0, CONUF_LAZY);                    /* chip RAM only: when a character needs it */
     else if (sys_fstat(fd, &st) < 0 || st.size > 98848 || st.size < 544)
         dprintf(1, "init: %s: not a console font (ZCF1)\n", path);
     else if (!(b = sys_memalloc(st.size)))
@@ -370,7 +376,7 @@ int main(void)
         int mp = sys_spawn("/bin/mount", ma, 0);
         if (mp >= 0) sys_wait(mp);
     }
-    font_setup();                                       /* D28: after mount -a, before the first login */
+    font_setup(1);                                      /* D28: after mount -a, before the first login */
     if (auto_iface()) {                                 /* the network (DESIGN D19 6.3): started, never waited for */
         char *ia[] = { "/bin/ifup", "-a", "--boot", 0 };
         sys_spawn("/bin/ifup", ia, 0);
@@ -398,6 +404,10 @@ int main(void)
                                                          * child's own exit(-4) also reads -4) */
         alarm_wanted = 0;
         sys_alarm(0);                                   /* always: its handler may have armed it again */
+        if (r == ST_CONSOLE) {                          /* the console needs its Unicode font now (OS-5) */
+            font_setup(0);
+            continue;
+        }
         if (r >= ST_CONSOLE + 1 && r <= ST_CONSOLE + NCON) {
             int n = r - ST_CONSOLE;
             if (!pid[n]) start(n, 0);

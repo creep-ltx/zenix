@@ -1,5 +1,9 @@
 wait zenix:/# 120
 sleep 1
+send f() { free | sed -n 's/^chip RAM free: \\([0-9]*\\) KB/\\1/p'; }; a=$(f); echo ab; sleep 1; b=$(f); echo uf-ab\r
+wait (?m)^uf-ab 30
+send echo \xe2\x94\x80; sleep 2; c=$(f); echo ufont-lazy:$(expr $b - $c):$(expr $a - $b):end\r
+wait (?m)^ufont-lazy:[-0-9]*:[-0-9]*:end 60
 send termtest conops\r
 wait (?m)^conops: [0-9]+ failed 60
 send termtest utf8\r

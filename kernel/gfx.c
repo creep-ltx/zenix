@@ -638,7 +638,7 @@ void gfx_vblank(void)
  * vertical blank); the drawing (dbase) may run ahead of it by up to the spare rows (nring - trows). gfx_jump moves the
  * drawing k rows on: within the spare rows nothing waits; beyond them, with fast RAM (as many spare rows as the
  * screen's) the whole screen is drawn afresh in the half not on show, so nothing ever waits either; without fast RAM
- * (half as many) it waits for the vertical blank, and a jump of more rows than the spare ones draws the whole screen
+ * (CHIP_SPARE) it waits for the vertical blank, and a jump of more rows than the spare ones draws the whole screen
  * as far on as the spare rows allow (the rows it shares with the shown picture are drawn while on show, until the
  * next frame). What is drawn is shown once the caller says it is done (gfx_done): the vertical blank never shows a
  * row half drawn. No waiting with the interrupts masked (a panic, a kprintf inside a masked part: no vertical blank
@@ -721,8 +721,10 @@ static int lisa(void)
 }
 
 /* DESIGN D28 20: the ring's chip RAM at ls bytes a line. Its spare rows (gfx_init): as many as the screen's with fast
- * RAM (a whole screen drawn out of sight: no scroll ever waits, D28 21), half as many on a machine with chip RAM only
- * (whose CPU draws far fewer lines than 800 a second) */
+ * RAM (a whole screen drawn out of sight: no scroll ever waits, D28 21), CHIP_SPARE on a machine with chip RAM only
+ * (audit OS-3: 8, 400 lines a second before a scroll waits, about what its CPU draws; measured in FS-UAE on the stock
+ * A1200: 16 -> 8 rows cost ls -laR / 8% on the screen and nothing else; 4 rows doubled it, none made it 2.6 times) */
+#define CHIP_SPARE 8
 static u32 ring_bytes(u32 ls) { return (u32)nring * 8 * ls; }
 
 /* the depth for this machine (D14's default, section 11): AGA with fast RAM: 4; fast RAM on OCS/ECS, or 2 MB of chip
@@ -878,7 +880,7 @@ KINIT int gfx_init(void)
     if (!cop)
         return -1;
     int d = pick_depth();
-    nring = trows + (fast ? trows : trows / 2);         /* D28 20: the spare rows */
+    nring = trows + (fast ? trows : CHIP_SPARE);        /* D28 20: the spare rows */
     for (gfx_depth = d; ; gfx_depth = gfx_depth == 4 ? 3 : 1) {      /* too little chip RAM: fewer planes */
         lstride = (u32)STRIDE * (u32)gfx_depth;
         tbuf = mem_alloc(ring_bytes(lstride), MEM_CHIP, 0);     /* 16-byte aligned: FMODE 3 needs 8 */
@@ -931,7 +933,7 @@ static int screen(int d, int lc)
         return -EBUSY;                  /* D38: a display server has the screen; its Copper list stays */
     if (d == gfx_depth && lc == lace)
         return 0;
-    int rows = (vlines >> 3) << lc, nr = rows + (fast ? rows : rows / 2);
+    int rows = (vlines >> 3) << lc, nr = rows + (fast ? rows : CHIP_SPARE);
     u32 ls = (u32)STRIDE * (u32)d, rb = (u32)nr * 8 * ls;
     blit_wait();                        /* first: its timeout's kprintf draws (nothing may draw between the grids' steps) */
     volatile u16 *nc = mem_alloc(4 * COP_WORDS, MEM_CHIP, 0);

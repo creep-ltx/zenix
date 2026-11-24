@@ -53,6 +53,7 @@ void gfx_font_free(struct gfont *f) { (void)f; }
 long gfx_conline(u32 line, struct uconline *d) { (void)line; (void)d; return -ENODEV; }
 void *kmalloc(u32 n) { return m_alloc(n); }
 void kfree(void *p) { m_free(p); }
+void mem_totals(u32 *c, u32 *f) { *c = 0; *f = 1; }   /* a window keeps term.c's 200 lines of scrollback */
 void kprintf(const char *f, ...) { (void)f; }
 void panic(const char *why) { (void)why; for (;;) ; }
 void beep(u32 hz, u32 ms) { (void)hz; (void)ms; m_bell(); }

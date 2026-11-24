@@ -901,6 +901,23 @@ long vfs_fstat(struct file *f, struct ustat *st, u32 n)
     return fs_call_on(f->fs, FS_FSTAT, f->ino, (u32)st, 0, 0);
 }
 
+/* audit OS-6: the working directory's text on the heap, shared by the processes that inherited it: its count in the
+ * u16 before it (0: the built-in "/", never freed). A process holds one count; at most NPROC share one */
+static struct { u16 n; char s[2]; } cwd_root_ = { 0, "/" };     /* the count 0: never counted */
+char *const cwd_root = cwd_root_.s;
+void cwd_hold(char *s)
+{
+    u16 *c = (u16 *)(void *)s - 1;
+    if (*c)
+        ++*c;
+}
+void cwd_drop(char *s)
+{
+    u16 *c = (u16 *)(void *)s - 1;
+    if (*c && !--*c)
+        kfree(c);
+}
+
 /* D26 5.6: always normalised and resolved, with only the root mounted too: the working directory's text is the
  * link-free one (Linux's getcwd), so a later ".." is the physical one and umount's busy check sees it */
 long vfs_chdir(char *path)
@@ -915,8 +932,19 @@ long vfs_chdir(char *path)
         return ino;
     if ((e = walk_text(&w, text)))
         return e;                       /* the new working directory's text must fit: else refused */
+    char *s = cwd_root;
+    if (text[1]) {                      /* not "/": a counted copy (OS-6) */
+        u32 n = (u32)strlen_(text) + 1;
+        u16 *c = kmalloc(2 + n);
+        if (!c)
+            return -ENOMEM;
+        *c = 1;
+        s = (char *)(c + 1);
+        memcpy(s, text, n);
+    }
+    cwd_drop(current->cwd);
     current->cwd_ino = (u32)ino;
-    strcpy_(current->cwd, text);
+    current->cwd = s;
     return 0;
 }
 

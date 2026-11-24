@@ -1019,7 +1019,8 @@ next return from `schedule()` it turns itself into `P_STOP`, tells a waiting par
 end a stop, DESIGN D16 rule 2), so a server stopped while it waited in receive does not answer a message that arrives
 meanwhile. `SYS_wait` with flag 2 (`WAIT_UNTRACED`) reports a stopped child once, as `ST_STOPPED` (0x114); flag 4
 (`WAIT_CONSOLE`, root only: init) also returns `ST_CONSOLE` + n (0x200 + n) when console n was shown with nobody on it,
-so init starts a login there (section 11). A client
+so init starts a login there (section 11), and `ST_CONSOLE` + 0 when the console needs its Unicode font (`CONUF_LAZY`,
+section 11). A client
 inside a call to a server is never stopped until the reply arrives (the server holds pointers into its memory). A stop
 the process asks for itself (a SIGTSTP handler raising SIGTSTP) is acted on at the end of that system call.
 `sleep` loops until its time, so a stop and continue does not cut it short (a handler does: -EINTR).
@@ -1032,7 +1033,9 @@ Longer is -ENAMETOOLONG, never cut. With only the root mounted a relative path g
 the working directory does not count; with anything mounted it does.
 
 **Why it was two limits.** Until 2026-10-31 a system call copied its path into `char path[64]` on the kernel stack,
-and the absolute limit was 160 (`cwd[160]` in each process slot). Nothing but those arrays made it 63: the walks,
+and the absolute limit was 160 (`cwd[160]` in each process slot; since 2026-11-24 the working directory's text is a
+counted heap string shared by the processes that inherited it, `"/"` a built-in one: audit 2026-11-23 OS-6, 8 KB of
+process table less). Nothing but those arrays made it 63: the walks,
 messages and servers already took whatever fitted in `FS_PATHMAX`. Real AmigaOS volumes are deeper (of the owner's card
 57,102 names, 34,855 were over 63 bytes from `/mnt`, 5 over 159), so `cp -r` and `find` stopped halfway.
 
@@ -1912,8 +1915,8 @@ name); `ls` 5.66 -> 1.05 s, `ls -l` 6.83 -> 2.19 s, the file view 6.6 -> 1.7 s.
   rows with one blitter fill (before, the CPU redrew every row of the region); whole erased rows (`ESC[2J`, `ESC[J`,
   `ESC[2K`) are blitter fills too. `ESC 7`/`ESC 8` save and restore the colours and attributes with the cursor (as
   xterm). **The scrollback** keeps each line's characters and one colour byte per cell, inverse folded in (foreground
-  and background swapped when the line is pushed): 200 lines x 80 x 2 = 32 KB per console, allocated when the console
-  first scrolls; bold and underline are not kept there. **Cursor-key mode** (DECCKM, `ESC[?1h`/`ESC[?1l`, per console,
+  and background swapped when the line is pushed): 200 lines x 80 x 2 = 32 KB per console (100 lines, 16 KB, on a
+  machine without fast RAM: audit 2026-11-23 OS-4), allocated when the console first scrolls; bold and underline are not kept there. **Cursor-key mode** (DECCKM, `ESC[?1h`/`ESC[?1l`, per console,
   reset by `ESC c`): `kbd.c` sends the unmodified arrows as `ESC O A`..`ESC O D` while it is set (programs on another
   computer over `cu` switch it on). The cursor is the cell drawn inverse; where foreground and background are the same
   it uses the default colours so it stays visible. `term.c` is built `-Os`, its per-character path `-O2`. Verified on
@@ -1959,7 +1962,8 @@ name); `ls` 5.66 -> 1.05 s, `ls -l` 6.83 -> 2.19 s, the file view 6.6 -> 1.7 s.
   colour-index XOR survives a warm reset), `BPLCON0`-`2`, the modulos, the fetch window and the 2/4/8/16 colours (12
   bits) every frame, then WAITs for line `$20` (before the picture on the `$2C` and `$38` builds, PAL and NTSC) and
   moves the plane pointers. **The buffer is a ring of text rows** (DESIGN D28 20): the screen's rows and as many
-  spare ones with fast RAM, half as many without; display row r is ring row (base + r) mod the ring's size. The
+  spare ones with fast RAM, 8 without (`CHIP_SPARE`; 16 until audit 2026-11-23 OS-3: 15 KB of chip RAM, `ls -laR /` 8%
+  slower on the screen there, the other console figures unchanged, FS-UAE); display row r is ring row (base + r) mod the ring's size. The
   Copper list has two sets of plane pointers: the first at the ring's row `base`, the second at its row 0 after a
   WAIT for the line where the ring wraps on the screen (lines from 256 on: line 255's end `$FFDF` first). A
   full-screen scroll moves base, never copies; the pointers and WAITs are written at vertical blank, only while the
@@ -2048,7 +2052,9 @@ name); `ls` 5.66 -> 1.05 s, `ls -l` 6.83 -> 2.19 s, the file view 6.6 -> 1.7 s.
   stand-in (through `gfx_cell`), else the font's 8 bytes drawn byte-wise (each plane's byte `(b & m) ^ n`, one loop per
   depth, the masks kept opaque to gcc so no `muls.w` appears), or the box built into `gfx.c` (24 bytes) without a font.
   The default font `zenix-8x8.zcf` (10,424 bytes: 531 glyphs, 584 stand-ins) is loaded by init at boot
-  (`/etc/console`'s `font` line, man/init.txt). **8-bit mode:** a `CON_FONT`, or the rule **`CONR_8BIT`** (128; telnet's
+  (`/etc/console`'s `font` line, man/init.txt); without fast RAM init only finds it and gives `CON_UFONT` a2 0, a3
+  `CONUF_LAZY` (1): the first cell above U+00FF to be drawn (the box meanwhile) asks init for it (`ST_CONSOLE` + 0 from
+  its wait), which loads it then; the console is drawn again (audit 2026-11-23 OS-5: 10 KB until then). **8-bit mode:** a `CON_FONT`, or the rule **`CONR_8BIT`** (128; telnet's
   Amiga mode): nothing is decoded, the keys are Latin-1, a cell above 0xFF draws as `?` (unchanged; it shows again
   when the mode ends); setting or clearing it redraws the shown console. **`CON_READ`'s a3 1** gives 4-byte cells
   (the 16-bit value big-endian, the attributes, the colour); a3 0 the 3-byte cells as before (the low byte).

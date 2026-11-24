@@ -139,6 +139,8 @@ void ready(struct proc *p) { (void)p; }
 void ev_post(struct proc *p, u32 bits) { (void)p; (void)bits; }
 static int kmalloc_fail, kmallocs;    /* D28: the next allocations fail (the high plane, the pool, CON_UFONT) */
 void *kmalloc(u32 n) { kmallocs++; return kmalloc_fail ? 0 : malloc(n); }
+static u32 tt_fast = 1;               /* audit OS-4: the machine's fast RAM (0: 100 lines of scrollback) */
+void mem_totals(u32 *c, u32 *f) { *c = 2u << 20; *f = tt_fast; }
 void kfree(void *p) { free(p); }
 static char klog[256];
 void kprintf(const char *f, ...) { strncat(klog, f, sizeof klog - strlen(klog) - 1); }
@@ -1083,6 +1085,28 @@ int main(void)
                 "64 -> 32 with the cursor at row 60: the 28 rows above that do not fit into the scrollback, its row the last");
     reset(); out("x\033[32;1Hy\n");
     EXPECT_TRUE(!strcmp(row(0), "") && !strcmp(row(30), "y") && screen_is_grid(), "... and the console goes on at 32 rows");
+
+    /* audit OS-4: a machine without fast RAM keeps 100 lines of scrollback (a console's first push decides) */
+    { struct term *t = T();
+      free(t->hist); t->hist = 0; t->hn = t->hhead = 0;
+      if (t->hp) { for (int i = 0; i < t->hp->nch; i++) free(t->hp->ch[i]); free(t->hp); t->hp = 0; }
+      tt_fast = 0; reset();
+      for (int i = 0; i < 150; i++) out("line\n");
+      EXPECT_TRUE(hlines == 100 && t->hn == 100, "without fast RAM: 100 lines of scrollback (audit OS-4)");
+      free(t->hist); t->hist = 0; t->hn = t->hhead = 0; tt_fast = 1;
+      for (int i = 0; i < 250; i++) out("line\n");
+      EXPECT_TRUE(hlines == 200 && t->hn == 200, "... with fast RAM 200, as before"); }
+    /* audit OS-5: CON_UFONT's lazy load: no font, then init asked (con_want bit 0) at the first character above U+00FF */
+    {
+      long r1 = term_ufont(0, 0), r2 = term_ufont(0, CONUF_LAZY);
+      con_want = 0; reset(); out("plain \xc3\xa5\n");
+      int before = con_want & 1;
+      out("\xe2\x94\x80\n");
+      int after = con_want & 1; con_want = 0;
+      out("\xe2\x94\x82\n");
+      EXPECT_TRUE(r1 == 0 && r2 == 0 && !cf_index && !before && after && !(con_want & 1),
+                  "CONUF_LAZY: nothing asked for Latin-1, init asked once at the first box character (audit OS-5)");
+    }
 
     if (bad) { printf("term-test: %d FAILED\n", bad); return 1; }
     printf("term-test: all passed\n");

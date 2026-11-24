@@ -154,6 +154,10 @@ start     4850   8200
 # KB (Makefile).
 # 2026-11-24 (audit 2026-11-23 OS-13, the pipes' bulk copy): vfs 11,800 -> 11,850 (the ring copied by memcpy in two
 # pieces, a short run byte by byte; the -O2 attribute gone); kernel.bin 234,624 -> 234,656.
+# The same audit's memory wins (OS-3 to OS-6): vfs 11,850 -> 12,000 (the working directory's counted text), term
+# 14,500 -> 14,700 (100 lines of scrollback without fast RAM, the Unicode font asked for when needed), proc bss
+# 21,500 -> 13,500 (cwd out of the 32 slots); kernel.bin 234,656 -> 235,008, TOTAL 234,800 -> 235,200; the mount
+# tests' RAM disk 649 -> 648 KB.
 main      5950   1700
 serial    6200   6500
 mem       4750    248
@@ -165,12 +169,12 @@ audio      620     32
 a3000     2400    100
 blk        460     16
 rtc       1550      4
-proc     10900  21500
+proc     10900  13500
 syscall  11100      0
-vfs      11850   1600
+vfs      12000   1600
 tty       5900    100
 gfx       9050   2450
-term     14500    256
+term     14700    256
 confont   3100     32
 kbd       4300    180
 ipc       5000   2200
@@ -187,5 +191,5 @@ gcon      5000     16
 dbg       4100     20
 mmu      24700    300
 embed    51000      0
-TOTAL   234800
+TOTAL   235200
 ROOM       800
