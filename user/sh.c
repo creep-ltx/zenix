@@ -20,7 +20,27 @@ typedef unsigned char u8;
 
 /* ---------------------------------------------------------------- output */
 static int outfail;                     /* a write of outs failed (a full disk): its error number, -1 for a short write */
-static void outs(const char *s) { u32 n = strlen(s); int r = sys_write(1, s, n); if (r != (int)n && !outfail) outfail = r < 0 ? -r : -1; }
+/* audit OS-14: while a builtin runs for $(...) inside the shell (run_capture), what outs writes is gathered here */
+struct capture { char *b; u32 n, cap; int full; };
+static struct capture *capt;
+static void cap_add(const char *s, u32 n)
+{
+    struct capture *c = capt;
+    if (c->n + n + 1 > c->cap) {
+        u32 nc = c->cap ? c->cap : 256;
+        while (c->n + n + 1 > nc) nc *= 2;
+        char *nb = realloc(c->b, nc);
+        if (!nb) { c->full = 1; return; }
+        c->b = nb; c->cap = nc;
+    }
+    memcpy(c->b + c->n, s, n); c->n += n;
+}
+static void outs(const char *s)
+{
+    u32 n = strlen(s);
+    if (capt) { cap_add(s, n); return; }
+    int r = sys_write(1, s, n); if (r != (int)n && !outfail) outfail = r < 0 ? -r : -1;
+}
 static void errs(const char *s) { sys_write(2, s, strlen(s)); }
 static void errm(const char *a, const char *b) { errs("sh: "); errs(a); if (b) { errs(": "); errs(b); } errs("\n"); }
 
@@ -2398,10 +2418,55 @@ static int exec_node(struct node *n)
 }
 
 /* ---- command substitution and scripts ---- */
+/* audit OS-14: $(...) whose text is one builtin that changes nothing in the shell (echo, pwd, true, false, :, test, [;
+ * not inside a case pattern;
+ * not a function or alias of that name), without a pipe, list, redirection, backquote, $(( or an assigning ${, runs here: its output taken
+ * from outs, no /bin/sh started (91 ms on the stock A1200 + 4 MB). Its expansions run here too, as they would in the
+ * child (the same variables); $? is left as it was, as after the child. -> 1 done (*out set), 0 not such a command */
+static int capture_inline(const char *cmd, char **out)
+{
+    static const char *const ok[] = { "echo", "pwd", "true", "false", ":", "test", "[", 0 };
+    const char *p = cmd, *e;
+    while (is_space(*p)) p++;
+    for (e = p; *e && !is_space(*e); e++) ;
+    int i = 0;
+    for (; ok[i]; i++) if (strlen(ok[i]) == (u32)(e - p) && !memcmp(ok[i], p, (u32)(e - p))) break;
+    if (!ok[i] || no_glob_exp || func_find(ok[i]) || alias_find(ok[i])) return 0;
+    for (const char *q = cmd; *q; q++)
+        if (strchr("|&;<>`\n", *q)) return 0;
+    if (strstr(cmd, "$((")) return 0;                   /* (an assignment there would change our variables) */
+    for (const char *q = cmd; (q = strstr(q, "${")); q++) {     /* ${x:=v}, ${x=v} likewise */
+        const char *r = strchr(q, '}');
+        if (!r) return 0;
+        for (const char *x = q; x < r; x++) if (*x == '=') return 0;
+    }
+    /* the word being expanded around us is the expander's (fixed buffers): kept aside while the command runs */
+    char *keep = fn ? malloc(fn * 2) : 0;
+    if (fn && !keep) return 0;
+    if (keep) { memcpy(keep, fbuf, fn); memcpy(keep + fn, fq, fn); }
+    u32 kn = fn; int kh = fhas, kp = fhas_pre_quote, ke = ex_error; struct words *kw = ex_w; const char *ka = ar_p;
+    struct capture c = { 0, 0, 0, 0 }, *outer = capt;
+    int st = last_status, of = outfail;
+    capt = &c;
+    fn = 0; fhas = 0; ex_error = 0;
+    run_string(cmd);
+    capt = outer;
+    last_status = st; outfail = of;
+    fn = kn; fhas = kh; fhas_pre_quote = kp; ex_error = ke; ex_w = kw; ar_p = ka;
+    if (keep) { memcpy(fbuf, keep, kn); memcpy(fq, keep + kn, kn); free(keep); }
+    if (c.full) { free(c.b); fatal("out of memory"); }
+    u32 n = c.n;
+    while (n && c.b[n - 1] == '\n') n--;
+    *out = adupn(c.b ? c.b : "", n);
+    free(c.b);
+    return 1;
+}
+
 static int run_capture(const char *cmd, char **out)
 {
     int pp[2];
     *out = 0;
+    if (capture_inline(cmd, out)) return 0;
     if (sys_pipe(pp) < 0) return 1;
     struct rsave rs; rs_init(&rs);
     rs_save(&rs, 1);

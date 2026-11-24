@@ -228,6 +228,12 @@ NOTES
     memory serves every shell (each console's, each sh -c, each command
     substitution); each shell has only its own data, stack and work area
     (ps shows the code as SHR, free as shared code).
+    A command substitution that is one of the builtins echo, pwd, true,
+    false, :, test or [ (not a function or alias of that name), with no
+    pipe, list, redirection, backquote, $(( or assigning ${...=...}, runs
+    inside the shell instead of a new sh -c: the same output, a few
+    milliseconds instead of about 90 (FS-UAE, the A1200 with 4 MB of fast
+    RAM).
 
 SEE ALSO
     edit(1), less(1), man(1)

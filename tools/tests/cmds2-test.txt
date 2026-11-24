@@ -44,6 +44,8 @@ wait delA 30
 sleep 1
 send a=$(sha256sum < /bin/sh); b=$(cat /bin/sh | cat | tr x x | cat | sha256sum); c=$(printf 'ab\\n' | cat | cat); r=differ; [ "$a" = "$b" ] && r=same$c; echo pipesum=$r\r
 wait pipesum=[a-z] 120
+send v=; x=$(echo a  b); y=$(cd /tmp; pwd); z=$(pwd); w=$(echo ${v:=set}); n=$(echo $(echo in) b); q=`echo bq`; t=$(test -d / && echo yes); f() { echo fn; }; g=$(f); echo "sub""st=[$x][$y][$z][$v][$w][$n][$q][$t][$g]"\r
+wait subst=. 60
 sleep 1
 send sh /tests/batch-e.sh > /tmp/be.out 2>&1; sync; echo finished-be\r
 sleep 330
