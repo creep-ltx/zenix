@@ -1624,6 +1624,6 @@ Tests (FS-UAE 3.2.35 in fast mode, Amiberry 8.5.0; protection on where the CPU h
 - Without an MMU (FS-UAE's 68020, `tools/check.sh`, fast mode): cmds-test, svc-test (every part), bootmem-test,
   zdb-test, readdir-test, sock-test, netd-test, pure-test, prio-test, mounttest (the 649 KB RAM disk), zine-emu-test
   (its 030/040/060 sessions with protection and zpoke's damage found too), sound-test, eth-test, gcon-test, lua-test,
-  memtest: pass.
+  memtest, update-test (every part): pass.
 - At stock speed on FS-UAE's 040: sound-test (sndd on `DRV_AUDIO`) and svc-test's part f: pass.
 - Not done: any real CPU; the desktop tests under protection (their screenshots are made for the 68020 machine, 20.3).
