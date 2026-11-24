@@ -857,7 +857,10 @@ pattern (section 6).
   with the small buffers the kernel declares for its own requests (a static table per `FS_*` type, `struct netreq`'s
   pointers by `sock_dirs`) copied after it and the arguments rewritten to them; every other buffer of such a request
   is a **window**: its whole pages mapped as they are, its part pages and pages of the client's code onto bounce pages
-  holding exactly its bytes, taken down at the end (the written bytes back to the client at a reply). A program's
+  holding exactly its bytes, taken down at the end (the written bytes back to the client at a reply; D60 stage 6: a
+  service's window whose pages are all mapped as they are stays mapped while the service waits in the
+  `SYS_replyrecv` that answered, taken over by the same client's next request, the rest invalidated before the
+  service runs again, d60 section 23). A program's
   request (stage 3) lends the buffers its client declared with `SYS_callv` (102: at most 4, each the client's memory
   or a window it holds, never its message) as windows at `ipc_recv`, and a range a server asks for with `SYS_peer`
   `PEER_RD`/`PEER_WR` until the reply, but only to a server trusted to ask (a process the service manager started for
@@ -872,7 +875,9 @@ pattern (section 6).
   disk through `SYS_blk_ram`'s copy form (a2 sectors from a1, bit 31 write, buffer a3), and every buffer `blk_*`,
   `fd_rw` and `SYS_atapi` get is checked as the caller's memory or a window. A pointer into a window is
   accepted for the time of a system call (`user_ok_call_*`); the bounce bytes are then the client's page's again until
-  the call returns (`mmu_unsync`), so the kernel and any server the call reaches work on the client's address. ZINE: translation off around the session (`mmu_hand`); a
+  the call returns (`mmu_unsync`), so the kernel and any server the call reaches work on the client's address. A
+  service lending on a service's window maps the pages that window maps as they are the same way (stage 6), and the
+  filesystem servers declare their disk calls' buffers (`SYS_callv`, `user/diskcall.h`). ZINE: translation off around the session (`mmu_hand`); a
   software reset: off before `RESET` (`mmu_before_reset`).
 - **No `fork`.** Without an MMU a copy of a process cannot be given the same addresses. The only way to make a
   process is `spawn(path, argv, stdio)` (a script by its `#!` line and an AmigaOS program through ZINE: section 4): load a ZEXE, give it the parent's cwd and environment, and pass only file

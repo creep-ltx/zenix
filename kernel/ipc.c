@@ -538,7 +538,19 @@ KCOLD void ipc_proc_exit(int pid)
 /* reply to m (if any), then wait for the next message: one trap instead of two */
 struct umsg *ipc_replyrecv(struct umsg *m, s32 result, int port)
 {
-    if (m)
+    if (!__builtin_expect(mmu_on, 0)) {
+        if (m)
+            ipc_reply(m, result);
+        return ipc_recv(port, 1);
+    }
+    /* D60 stage 6 (docs/d60-full-protection.md 23): a service's windows may stay mapped across this receive for the
+     * same client's next request (mmu.c's lg_*); whatever no request took is out before the call returns */
+    if (m) {
+        mmu_rr = 1;
         ipc_reply(m, result);
-    return ipc_recv(port, 1);
+        mmu_rr = 0;
+    }
+    struct umsg *r = ipc_recv(port, 1);
+    mmu_ops->unkeep();
+    return r;
 }

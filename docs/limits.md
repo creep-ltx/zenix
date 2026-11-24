@@ -69,6 +69,14 @@ into another consistent state passes), and on the damaged path the kernel's own 
 `MMU=D41` is the way back, not a mode to keep: its system processes see all memory and may hand any process's memory
 to a system call. A process that sets its uid away from root keeps the update bundle's pages (read only) until its
 next switch.
+Since stage 6 (2026-11-24, the speed pass, d60 section 23): a service that answers by `SYS_replyrecv` keeps the
+pages of a window it mapped as they are while it waits in that call (2 windows a service, 32 pages each; a bigger one
+is taken down as before); its next request takes them over only when it is the same client's, so the service never
+runs with a page it was not given for the request it holds. A service lending on another service's window maps the
+part pages that window maps whole as they are: the inner one sees the whole part page of its client's client. A
+slot of a server's inbox past a request's copies holds bytes of the earlier requests that server served (no longer
+zero; a refused request's copies are cleared). Measured in the emulators against section 9.4's budget the cost of a
+request stays over it (d60 23.2): the judge is the 1260.
 Never run on a real 68030/040/060 yet; not on the stock A1200 (a 68EC020 has no MMU) nor under Emu68.
 
 What the permissions do cover (audit D): a user cannot kill, stop or take over the terminal of another user's or a

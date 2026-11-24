@@ -469,7 +469,7 @@ static int handle(struct umsg *m)
     case DISK_READ: case DISK_WRITE: {
         u32 h = m->a[0], lba = m->a[1], n = m->a[2];
         if (h >= MAXDEV || !used[h]) return -EBADF;
-        if (n == 0 || n > 0x800000) return -EINVAL;
+        if (n == 0 || n >= 0x800000) return -EINVAL;           /* (n * 512 fits 32 bits) */
         if (!(m->type == DISK_READ ? peer_wr(m, m->a[3], n * 512) : peer_rd(m, m->a[3], n * 512)))
             return -EFAULT;                                         /* D60: the client's buffer, asked for */
         if (phys[h] == PH_CD && dev[h].mounted == (u32)m->from && sgen[h] != cd_gen) return -ESTALE;  /* mounted on another disc */

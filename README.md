@@ -25,12 +25,14 @@ hello from Zenix
 
 - 🧠 **No MMU needed.** Any Amiga with a 68020 or better can run it, a stock A1200 included. Programs are relocated as they
   load, and a crashing program is killed and its memory freed while the rest keep running.
-- 🛡️ **Memory protection, on by default where there is an MMU.** On a 68030, 68040 or 68060 with a working MMU,
-  every program a user runs sees only its own memory, its code read-only: a stray write ends that program with a
-  message naming whose memory it hit, and the kernel, the hardware and other programs stay safe. The system's own
-  servers keep the whole view. `zenixboot MMU=OFF` (or the left mouse button held at boot) turns it off; an LC or EC
-  68040/68060, which only its MMU's own instructions tell apart, gets it with `MMU=ON`
-  ([docs/d41-memory-protection.md](docs/d41-memory-protection.md)). A 68020, a CPU without an MMU or the PiStorm runs
+- 🛡️ **Full memory protection where there is an MMU, on by default.** On a 68030, 68040 or 68060 with a working MMU,
+  every process sees only its own memory, its code read-only, and what it is given on purpose: the system's servers
+  and drivers too, each seeing only the exact bytes of the requests it is serving, the device it claimed and memory
+  shared with it. A stray read or write ends that process with a message naming whose memory it hit, and the kernel
+  and other programs stay safe (the display server still reaches chip RAM through the blitter). `zenixboot MMU=OFF`
+  (or the left mouse button held at boot) turns it off; an LC or EC 68040/68060, which only its MMU's own
+  instructions tell apart, gets it with `MMU=ON` ([docs/d60-full-protection.md](docs/d60-full-protection.md),
+  [docs/d41-memory-protection.md](docs/d41-memory-protection.md)). A 68020, a CPU without an MMU or the PiStorm runs
   exactly as before.
 - ✉️ **Built on messages, like Exec and QNX.** The disk and the filesystems are separate servers. A call to one passes
   a pointer, not a copy, so reading a file copies the data exactly once.

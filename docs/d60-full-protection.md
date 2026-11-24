@@ -106,7 +106,8 @@ more**: D41's system mode, its mask `mmu_sys` and its five marking rules (D41 se
   (the kernel no longer reads its own fields from the client's memory, 5.1).
 - **Not in**: a DMA engine in a process's hands (no IOMMU on any Amiga: section 6.3); ZINE's take-over (section 7.3);
   a service of the system asking for more of its client than the request needs (it may, 5.5: it is the system's own
-  code, as a Unix kernel driver is; a bug of that kind is contained to its clients' memory, never the kernel or other
+  code, as a Unix kernel driver is; a bug of that kind is contained to its clients' memory (since stage 6 also the
+  part pages of its client's client that its client, a service too, maps whole: section 23), never the kernel or other
   processes); root replacing the system's files on disk (a signed system is D15's and D22's business); using up CPU
   time or memory; timing side channels; the hardware itself (a Zorro card can write anything).
 - The documents keep D8's honesty: until stage 7 is built, "the display server is trusted with chip RAM" is written
@@ -249,6 +250,9 @@ server's tree:
 - **Limits** (charged to the server): at most 8 windows a request, 32 bounce pages a server (128 KB), and a pool of 4
   zeroed pages kept; past a limit the lend fails with -ENOMEM (the request is answered as the server chooses). nfscd
   can hold 40 requests: its reads are into the kernel's declared buffers, whose whole pages cost no bounce page.
+- **Stage 6 changes the end, on purpose** (section 23): a service's window whose pages are all mapped as they are
+  stays mapped while the service waits in the `SYS_replyrecv` that answered, and is taken over by the same client's
+  next request; whatever that request does not cover goes before the service runs again.
 - The window stays mapped for as long as the request is held, across every switch: D41 section 9's second later step,
   "keep the client flipped in", now exact.
 
@@ -1467,3 +1471,159 @@ Tests (FS-UAE 3.2.35 in fast mode unless said; Amiberry 8.5.0; protection on whe
 - Not done: the update path with `MMU=STRICT` (13 asks it: the update tests build their new kernels from source, so the
   kernel file's default cannot be set; zenixboot `MMU=STRICT` on the test's boot partition would do it, as the next
   step); any real CPU; the records' checks after ZINE run against a deliberate damage (only the code's).
+
+## 23. As built: stage 6, the speed pass (2026-11-24, branch d60s6)
+
+Section 14's stage 6: the speed pass against 9.4 and the documents. The shared segment page table (9.2 item 4) and
+`PEER_DECLARE` were not built (below: what the figures say they would buy); the 1260's run is prepared, not made.
+
+### 23.1 What was built
+
+`kernel/mmu.c` (the block "D60 stage 6 (section 23)"), `kernel/ipc.c` (`ipc_replyrecv`), `kernel/kernel.h` and
+`kernel/proc.c` (`struct proc`'s `slot`), `kernel/svc.c`, `user/diskcall.h`, `user/diskd.c`; `tools/mmu-test.sh`.
+
+- **A service's window kept across its client's next request: a deliberate change of 5.3** (the main session's
+  decision of 2026-11-24: "you may keep a service's window mapped across the same client's next request to the same
+  server. That relaxes 'the window is gone at the reply' only for a client that is already calling that server again,
+  so it widens nothing beyond what that client gives that server anyway"). As built it is narrower than that: when a
+  service (`svc_any`) answers by `SYS_replyrecv`, a window it was given at that request's receive whose every page it
+  mapped as it is (the client's own pages, never a bounce page, no page shared with another request's window) keeps
+  its descriptors while the service waits in that call's receive (at most 2 windows a service, 32 pages each). The
+  receive takes the pages over for the new request's windows when the request is the same client's (the descriptor a
+  new window would write is there: nothing written, pushed or flushed; a page now to be bounced, or no longer the
+  client's, is handled as a new window would); every page the new request does not cover is invalidated before the
+  receive returns, and all of them when the call returns without a request (a signal, a time-out, a kill, the port
+  gone: `mmu_unkeep_`). So the service never runs in user mode with a page it was not given for the request it holds;
+  between the reply and the next receive nobody runs in its tree. `SYS_reply`, `NETSRV_REPLY`, a window asked for with
+  `SYS_peer` (made in user mode: a receive cannot take it over) and every server any user runs end as before.
+- **A forwarded window mapped as its client maps it** (5.6, stage 2's deviation narrowed): a service lending on a
+  window of its client, also a service, maps a part page as it is when the client's own window maps that page as it is
+  (stage 3's deviation), instead of a bounce page. `fsd` forwarding a read to `diskd` then costs no copy at the ends.
+  **What this widens, written down**: the inner service sees, and writes where its client may, the whole part page of
+  its client's client (the program that called `fsd`), beyond the forwarded range: what its client sees, one step
+  further down the chain of services (3.2's "contained to its clients' memory" now says so). A user's server is never
+  given this.
+- **The disk calls declare their buffer**: `user/diskcall.h` sends `DISK_READ` and `DISK_WRITE` with `SYS_callv` (a3
+  for a2 sectors), so the disk server is shown the buffer at its receive (where its window can be the kept one) and
+  its own `PEER_RD`/`PEER_WR` finds it declared; without protection `SYS_callv` is `SYS_call`. A buffer the
+  declaration check refuses now fails with -EFAULT before the call (diskd's own ask answered the same).
+- **Cheaper paths, nothing they check left out**: a program's request to a `PEER_EXACT` port with nothing declared is
+  given without taking the tables' lock (no tree changes; every case the full path treats differently, MMU=D41, a
+  lend, no tree, kept pages, takes the full path); the arguments' old values are kept only for the kernel's requests
+  (only those are rewritten); a slot's copies are cleared only for a request the server never saw (a refused one), a
+  served request's bytes being the server's already; the inbox counts its pages; the loops over the windows stop at
+  the server's (or the request's) count; `svc_any` once a receive, and svc.c's `mine` looks at the last entry found
+  first; `struct proc` carries its slot number (in a padding byte: no BSS), so no lookup divides by the struct's size;
+  the smallest helpers inlined (300 bytes).
+- **The profile** (`DIAG=-DMMU_PROF`): its clock CIA-B's timer A alone (two bytes, the high one read again: the E-clock
+  read of `hr_time` took most of what it measured), the cost of 400 empty spans printed with every report, and the
+  record, the answer, the look-up of a reply, the take, `callok`, `SYS_peer` and `SYS_callv` timed too.
+- **Tried, measured, not kept**: the hot functions at -O2 (1.3 KB of span for 1.6% of read4k in FS-UAE); a kernel
+  without the switch's `PFLUSHAN` (a measurement only: no figure moved in FS-UAE, which charges nothing for a flush or
+  a table walk: its costs are the instructions); every window kept per page in one list of 24 (the list's own loops
+  cost more than the windows saved).
+- **Review fixes** (23.5): a kept window's client id an `int` (a 16-bit one made pid 65535 the "every one" value),
+  never kept beside another request's window on its pages, a page handed to another window rewritten with that
+  window's W, `fwd_id` only through a page the client's window itself maps, ZINE's check of every slot number,
+  diskd's sector count refused from 0x800000 up.
+
+### 23.2 The figures (emulator figures: ratios only)
+
+`tools/mmubench-test.sh`, protection off -> on, the same build; FS-UAE 3.2.35 in warp mode, Amiberry 8.5.0 (the
+machines of 18.3). Before: main at a2ce0c8 (stage 5; FS-UAE and Amiberry 040 measured again, the 030 and 060 from
+21.2: no request's path changed since); after: this branch.
+
+| Figure (budget) | FS-UAE 030 | FS-UAE 040 | FS-UAE 060 | Amiberry 030 | Amiberry 040 | Amiberry 060 |
+|---|---|---|---|---|---|---|
+| `read4k` (+10%) | x1.37 -> x1.27 | x1.41 -> x1.32 | x1.41 -> x1.32 | x1.43 -> x1.32 | x1.35 -> x1.24 | x1.35 -> x1.24 |
+| `bigread` (+10%) | x1.24 -> x1.20 | x1.27 -> x1.24 | x1.27 -> x1.24 | x1.12 -> x1.11 | x1.06 -> x1.05 | x1.07 -> x1.06 |
+| `stat` (+10%) | x1.11 -> x1.11 | x1.14 -> x1.14 | x1.14 -> x1.14 | x1.13 -> x1.14 | x1.09 -> x1.09 | x1.09 -> x1.09 |
+| `msgcall` (x1.5 target, x2 limit) | x1.56 -> x1.53 | x1.77 -> x1.68 | x1.77 -> x1.68 | x1.57 -> x1.53 | x1.57 -> x1.52 | x1.57 -> x1.52 |
+| `lsr` (+10%) | x1.10 -> x1.10 | x1.11 -> x1.10 | x1.12 -> x1.13 | x1.11 -> x1.11 | x1.07 -> x1.08 | x1.08 -> x1.08 |
+| `pipetrip` (x1.5, x2) | x1.10 -> x1.09 | x1.09 -> x1.08 | x1.09 -> x1.08 | x1.10 -> x1.09 | x1.07 -> x1.07 | x1.07 -> x1.07 |
+| `pipe` (+15%) | x1.12 -> x1.12 | x1.12 -> x1.13 | x1.12 -> x1.13 | x1.22 -> x1.23 | x1.09 -> x1.09 | x1.09 -> x1.09 |
+| the null call (+0) | the same | the same | the same | the same | the same | the same |
+
+- **Absolute** (us, protection on, before -> after): FS-UAE 040/060 `read4k` 1,175 -> 1,094 (off 831), `msgcall` 449 ->
+  428 (off 254), `bigread` 1,133 -> 1,161 KB/s (off 1,440); Amiberry 040/060 `read4k` 315 -> 289 (off 233), `msgcall`
+  109 -> 106 (off 69.5). Protection off is as before (the gates added are in the span or behind `mmu_on`).
+- **Where the rest goes** (the profile, Amiberry 040, a `msgcall` round trip, empty spans subtracted): giving the
+  request (slot, copy) about 10 us, the two root switches 9 us, the record, the take, the end 3-4 us each, the look-up
+  of the reply and the answer 1.5 us each: some 36 us over the 69.5 of a round trip without protection, and a kernel
+  request adds its copies and windows (`read4k` 56 us over 233). FS-UAE's 040/060 model, which charges each
+  instruction about three times Amiberry's, puts the same paths at some 175 us. Neither emulator charges a flush or a
+  table walk (23.1: a kernel without `PFLUSHAN` gave the same figures), and user code runs as fast with translation
+  on, so what the ratios measure is the kernel's own work per request: the records, the copies, the bookkeeping.
+- `pipe` on Amiberry's 030 was x1.22 on main already (20.2's +10% was another run).
+
+### 23.3 Size
+
+kernel.bin 231,748 (main at a2ce0c8, with D61) -> 234,624 bytes (+2,876): `mmu` 22,066 -> 24,591 bytes of code and
+data (in the protection span, given back after the boot when protection is off), bss 276 -> 285, `ipc` + 82, `proc` +
+74, `svc` + 56, `embed` + 80 (fsd's and diskd's built-in images: the declared disk calls), `syscall` - 12; `struct
+proc` no bigger. The mount tests' RAM disk 652 -> 649 KB, its floppy keeps 896 bytes (above the 800 kept; main's D61
+had left it 700). RAM with protection on: the kept windows' table 1 KB (32 x 2 x 16 bytes), nothing else; without
+protection nothing.
+
+### 23.4 What is left, and what the 1260 must judge
+
+- **Within the budget in both emulators**: `pipetrip`, `pipe` (but Amiberry's 030, x1.23 before and after), the null
+  call; in Amiberry also `stat`, `bigread` and `lsr` on the 040 and 060.
+- **Over it**: `read4k` (+24-32%, budget +10%), `msgcall` (x1.52-1.68, target x1.5, limit x2: within the limit
+  everywhere), `bigread` in FS-UAE (+20-24%) and on Amiberry's 030 (+11%), `stat` in FS-UAE's 040/060 and Amiberry's
+  030 (+14%), `lsr` by a point in places. Why: what is left is the cost every request pays once protection is full
+  (5.1's record and inbox copy, two root switches, a window for each buffer), a few hundred instructions per request,
+  which the emulators charge in full and which a small request (a cached 4 KB read, a bare message) cannot hide. The
+  further steps 9.2 names would not change that much: the shared segment page table (9.2 item 4) only saves table
+  walks, which neither emulator charges; `PEER_DECLARE` (5.5) only helps a server that asks with `SYS_peer`, and the
+  disk server's buffers are declared now; a direct hand-off in `call()` would save a pass of the scheduler, not the
+  copies. A smaller record path (one copy of a kernel request's message fewer) is the next step if the 1260 asks for
+  one.
+- **What the 1260 must judge** (9.4: the emulators give ratios, the real 68060 the truth): the real cost of the root
+  switch's `PFLUSHAN` and of the ATC refills after it, which no emulator charges, against the instruction counts the
+  emulators do charge; whether `read4k` and `stat` meet +10% and `msgcall` x1.5 there; 4 KB against 8 KB pages
+  (`DIAG=-DMMU_PAGE8`) and `PFLUSH` of single pages (`DIAG=-DMMU_PFLUSH_PAGES`, which both emulators make cost
+  milliseconds). The run, as 18.4 has it: `bench mmu` with the kernel as built and made `MMU=OFF` (`tools/kopts.py`),
+  the two variants, and the profile (`DIAG=-DMMU_PROF`, its empty spans subtracted) to see where a real 060 spends
+  it. No 68030 among the test machines: its figures stay the emulators'.
+
+### 23.5 Reviews and tests
+
+Two independent reviews of the code (2026-11-24). **The MMU mechanics**: must-fix: a kept window's client id was a
+16-bit `short`, so pid 65535 (and every 65536 later) read as -1, "drop every one", and its pages would never have been
+dropped (now an `int`, and -1 drops all whatever the id); a page handed to another live window at its drop kept the
+kept window's W where the other window was read only, and a new writable window could take over a page another held
+request mapped read only (a window is now kept only when no other request's window shares a page with it, and a
+page handed over is rewritten with the new owner's W). Should-fix done: ZINE's check looks at every slot number (all
+lookups trust it). Checked fine: every flush (all changes in enter/leave with the server's tree loaded, or flushed at
+the next root load), every way out of `ipc_recv` (a kill, the port gone, a signal, a time-out, a refused request),
+the freed-table, lend, grant, rebuild and MMU=D41 paths, the counts the bounded loops trust, the `took` arithmetic,
+the slot field in a padding byte, the inbox's `seen`, the fast path's conditions, the profile compiling away.
+**The security model**: no hole found in the kept windows (the service never reaches user mode with one; a reused pid,
+a freed or handed-over buffer gains nothing: a page is taken over only through the new window's own checks). Fixed:
+`fwd_id` accepted any identity descriptor in the client's tree that some window of the client overlapped (an old
+server's lend of another client, a grant, could then have given the inner service a page with a third process's
+bytes): only a page the client's window itself maps counts now; diskd's sector count refused from 0x800000 up (n *
+512 was 0 there; the kernel refused it anyway); a test of the kept window (below). Written down: the forwarding
+widening (23.1, 3.2); a slot past a request's copies holds earlier requests' bytes (limits.md), only bytes that
+server was given.
+
+Tests (FS-UAE 3.2.35 in fast mode, Amiberry 8.5.0; protection on where the CPU has an MMU):
+- `mmu-test` FS-UAE 020 030 lc040 040 060 lc060 030+d41 040+strict 060+d41 060+strict, Amiberry 030 040 060 040+strict
+  060+d41 lc060+on ec060: pass, with the hostile checks of stages 2-5 (stray writes past and before windows, writes
+  after the reply, forged and second replies, a user's server asking for its client's stack, a service writing
+  without asking, the old servers, MMU=STRICT and MMU=D41) and the new ones: the same filesystem server as a service
+  (`svctest reg ws ... -fswin`, mounted on /tmp/ws) reads through the root's server into its client's buffers at nine
+  alignments (a window passed on, its part pages mapped as its client maps them: the bytes right, those around them
+  untouched), and writing the buffer of its last read, kept across the reply, at its client's next request (the close,
+  which does not cover it) ends it with the protection line naming the client.
+- `mmu-suite` 030, 040 and 060 in both emulators, each in two runs (cmds-test, memtest, mounttest, svc-test but its
+  part f; lua-test, tcc-test, zdb-test, prio-test, pure-test): every test passes in all six, svc-test's "fsd is pid 3"
+  and "no msgpingd before the first call" included.
+- `mmubench-test` 030 040 060 in both emulators (23.2), main's kernel measured again beside it.
+- Without an MMU (FS-UAE's 68020, `tools/check.sh`, fast mode): cmds-test, svc-test (every part), bootmem-test,
+  zdb-test, readdir-test, sock-test, netd-test, pure-test, prio-test, mounttest (the 649 KB RAM disk), zine-emu-test
+  (its 030/040/060 sessions with protection and zpoke's damage found too), sound-test, eth-test, gcon-test, lua-test,
+  memtest: pass.
+- At stock speed on FS-UAE's 040: sound-test (sndd on `DRV_AUDIO`) and svc-test's part f: pass.
+- Not done: any real CPU; the desktop tests under protection (their screenshots are made for the 68020 machine, 20.3).

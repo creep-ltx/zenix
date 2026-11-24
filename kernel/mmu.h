@@ -46,6 +46,7 @@ struct krec {
     u8 ex;                      /* D60 stage 3: the port is PEER_EXACT (its server asks for what it touches, 5.8): set
                                  * by ipc_recv as the port is when the server takes the request */
     u8 ndv, dvw;                /* SYS_callv: the client's declared buffers (dva/dvn), bit i: buffer i written */
+    u8 seen, pad2[3];           /* D60 stage 6: given to the server (its slot's copies need no clearing after) */
     struct kcopy c[NKCOPY];
     u32 dva[NCALLB], dvn[NCALLB];
 };
@@ -61,6 +62,7 @@ extern u32 mmu_winners;         /* bit n: procs[n] holds a window of a request (
 /* D60 stage 5 (resident): the boot options MMU=STRICT (old servers get no lend, 5.8) and MMU=D41 (D41's system
  * processes, section 12), set by mmu_setup */
 extern u8 mmu_strict, mmu_d41;
+extern u8 mmu_rr;               /* D60 stage 6 (resident): ipc_replyrecv's reply, its service's windows may be kept */
 extern u32 mmu_syncing;         /* bit n: procs[n] is in a system call with a window's copy page given back to its
                                  * client (D60 5.7); resident, tested at every system call's end */
 
@@ -92,6 +94,7 @@ struct mmu_ops {
     void (*postbuf)(struct port *, u32, struct port *, u32, u32);
     long (*drv)(u32, void *, u32);      /* D60 stage 4: drv.c's DRV_AUDIO and DRV_PARXFER (op, the caller's claim, b) */
     void (*mark)(struct proc *, int);   /* D60 stage 5: 0 MMU=D41's system process (D41 7), 1 the bundle asked for */
+    void (*unkeep)(void);               /* D60 stage 6: ipc_replyrecv returns: the pages kept at its reply out */
 };
 long drv_span_(u32 op, void *claim, u32 a);
 /* D60 stage 3, SYS_callv: the declaration of the call being made (syscall.c sets it, mmu_rec takes it; resident) */
