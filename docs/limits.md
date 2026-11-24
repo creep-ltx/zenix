@@ -185,7 +185,7 @@ pointers.
   most 47,
   40 symbolic links followed in one path once anything but the root is mounted (and always by `chdir`, `mount` and
   `realpath`; -ELOOP beyond; with only the root mounted the server's own rule: 8 nested), link targets of at most 255
-  bytes (-ENAMETOOLONG), pipes of 2 KB, 10 virtual consoles, 8 pseudo-terminals (`NPTY`; -EAGAIN when all are in
+  bytes (-ENAMETOOLONG), pipes of 4 KB, 10 virtual consoles, 8 pseudo-terminals (`NPTY`; -EAGAIN when all are in
   use; a 2 KB output ring each, a window size of at most 32767 x 32767), 80 columns x 32 text rows on PAL (25 on
   NTSC; interlaced, `mode hires-lace`: 64 and 50, `TROWS_MAX` 64), 200 scrollback lines per console (32 KB each: a character and a colour byte per cell, allocated when the
   console first scrolls), a cooked tty line of 511 characters (bytes: a Swedish letter is two, DESIGN D28; a key past that rings the bell, and at its end the whole line is refused with

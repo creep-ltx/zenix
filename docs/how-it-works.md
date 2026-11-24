@@ -73,7 +73,7 @@ Read architecture.md first for the parts. Everything here is *read* from the sou
 
 The shell parses the line and builds a pipeline:
 
-1. `pipe(fds)` - the kernel allocates a 2 KB ring buffer and two entries in the open-file table.
+1. `pipe(fds)` - the kernel allocates a 4 KB ring buffer and two entries in the open-file table.
 2. `spawn("/bin/cat", argv, stdio={0, pipe_w, 2})` - the syscall copies the path and argv into kernel buffers,
    asks the filesystem server (message `FS_OPEN`, then repeated `FS_READ` into a kernel buffer) for the file,
    then `proc_load`: allocate **one block** for image+BSS+stack+arguments (owner = new pid), copy the image,

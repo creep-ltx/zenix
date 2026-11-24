@@ -30,7 +30,11 @@ void *memcpy(void *d, const void *s, unsigned long n)
 {
     u8 *p = d;
     const u8 *q = s;
-    if (n >= 8 && !(((u32)p | (u32)q) & 3)) {
+    if (n >= 8) {
+        while ((u32)p & 3) {            /* the destination aligned; the source may stay unaligned: the 68020-68060 */
+            *p++ = *q++;                /* read a long at any address (OS-13: a pipe's ring against a user's buffer) */
+            n--;
+        }
         u32 *pl = (u32 *)p;
         const u32 *ql = (const u32 *)q;
         for (unsigned long k = n >> 2; k; k--)

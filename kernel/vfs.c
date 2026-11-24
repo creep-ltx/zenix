@@ -83,23 +83,50 @@ int fd_install(struct proc *p, struct file *f)
     return -EMFILE;
 }
 
+/* OS-13: K bytes between the ring and LIN (TO: into the ring), at most two pieces; moves the index and the count.
+ * The copies are memcpy's (main.c, -O2); the caller has checked that K fits (the count, or the room) */
+static void pipe_copy(struct pipe *p, u8 *lin, u32 k, int to)
+{
+    u32 at = to ? p->wr : p->rd, a = PIPE_SIZE - at, end = (at + k) & (PIPE_SIZE - 1);
+    u8 *r = p->buf;
+    if (k < 16) {                           /* a few bytes (a key, a round trip): no calls */
+        for (u32 i = 0; i < k; i++, at = (at + 1) & (PIPE_SIZE - 1))
+            if (to)
+                r[at] = lin[i];
+            else
+                lin[i] = r[at];
+    } else {
+        if (a > k)
+            a = k;
+        if (to) {
+            memcpy(r + at, lin, a);
+            memcpy(r, lin + a, k - a);
+        } else {
+            memcpy(lin, r + at, a);
+            memcpy(lin + a, r, k - a);
+        }
+    }
+    if (to) {
+        p->wr = (u16)end;
+        p->count = (u16)(p->count + k);
+    } else {
+        p->rd = (u16)end;
+        p->count = (u16)(p->count - k);
+    }
+}
+
 /* D16: a blocked reader or writer waits on the pipe's slot mask (event.c's order); a handler interrupts the wait
  * (-EINTR, restarted with SA_RESTART), a write that already moved bytes returns their count */
-__attribute__((optimize("O2"))) static long pipe_read(struct file *f, void *buf, u32 n)
+static long pipe_read(struct file *f, void *buf, u32 n)
 {
     struct pipe *p = f->pipe;
-    u8 *d = buf;
     for (;;) {
         if (current->killed)
             return -EINTR;
         ev_arm(&p->rwait);
         if (p->count) {
-            u32 got = 0;
-            while (got < n && p->count) {
-                d[got++] = p->buf[p->rd];
-                p->rd = (u16)((p->rd + 1) % sizeof p->buf);
-                p->count--;
-            }
+            u32 got = n < p->count ? n : p->count;
+            pipe_copy(p, buf, got, 0);
             ev_wake(&p->wwait);
             return (long)got;
         }
@@ -113,7 +140,7 @@ __attribute__((optimize("O2"))) static long pipe_read(struct file *f, void *buf,
     }
 }
 
-__attribute__((optimize("O2"))) static long pipe_write(struct file *f, const void *buf, u32 n)
+static long pipe_write(struct file *f, const void *buf, u32 n)
 {
     struct pipe *p = f->pipe;
     const u8 *s = buf;
@@ -125,17 +152,19 @@ __attribute__((optimize("O2"))) static long pipe_write(struct file *f, const voi
             sig_send(current, SIGPIPE);     /* broken pipe: by default the writer ends (141); ignored: -EPIPE */
             return -EPIPE;
         }
-        if (p->count < sizeof p->buf) {
-            p->buf[p->wr] = s[put++];
-            p->wr = (u16)((p->wr + 1) % sizeof p->buf);
-            p->count++;
+        if (p->count < PIPE_SIZE) {
+            u32 k = PIPE_SIZE - p->count;
+            if (k > n - put)
+                k = n - put;
+            pipe_copy(p, (u8 *)s + put, k, 1);
+            put += k;
             continue;
         }
         ev_wake(&p->rwait);
         if (f->flags & O_NONBLOCK)
             return put ? (long)put : -EAGAIN;   /* what fitted, or nothing (SYS_pipe's O_NONBLOCK) */
         ev_arm(&p->wwait);
-        if (p->count < sizeof p->buf || !p->readers)
+        if (p->count < PIPE_SIZE || !p->readers)
             continue;
         long e = ev_block(EV_IO, 0, 0, !put);
         if (e)
@@ -164,7 +193,7 @@ u16 vfs_poll(struct file *f)
         return p->count ? POLLIN : !p->writers ? POLLIN | POLLHUP : 0;
     case FT_PIPE_W:
         ev_arm(&p->wwait);
-        return !p->readers ? POLLERR : p->count < sizeof p->buf ? POLLOUT : 0;
+        return !p->readers ? POLLERR : p->count < PIPE_SIZE ? POLLOUT : 0;
     case FT_RANDOM:
         return rnd_poll((int)f->off);
     case FT_SOCK:

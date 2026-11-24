@@ -1593,7 +1593,8 @@ name); `ls` 5.66 -> 1.05 s, `ls -l` 6.83 -> 2.19 s, the file view 6.6 -> 1.7 s.
 
 ## 11. Pipes, tty, terminal, display
 
-- **Pipes** (`vfs.c`): 2 KB ring buffer in the kernel; EOF when all writers close; a write to a pipe with no
+- **Pipes** (`vfs.c`): a 4 KB ring buffer in the kernel (`PIPE_SIZE`), copied in at most two pieces by `memcpy` (a
+  run under 16 bytes byte by byte; audit 2026-11-23 OS-13); EOF when all writers close; a write to a pipe with no
   readers sends the writer SIGPIPE, which by default ends it with status 141 (ignored: the write gives -EPIPE; DESIGN
   D16). A blocked reader or writer waits on the pipe's slot mask (section 6). Special files `/dev/tty` (the process's controlling
   tty), `/dev/tty1` .. `/dev/tty10` (the consoles; another console than one's own: root only, -EACCES), `/dev/console`
@@ -2276,7 +2277,7 @@ outputs (`tools/cmds-test.sh`).
 - **Optimisation: hot paths `-O2`, cold code `-Os`** (the golden path). Whole files at `-Os` (`KOPT_*` in the
   Makefile): the cold drivers `floppy`, `emmc`, `a3000`, `rtc`, `kbd` (every wait in them timed by the E-clock or a
   timer; DESIGN D13 step 0), `gfx` and `term` (set-up code; the glyph drawing and the per-character path `-O2` by a
-  function attribute), `tty`, `vfs` (the pipes' copy loops `-O2`), `event`, `signal`, `random`, `sock`, `drv`, `svc`
+  function attribute), `tty`, `vfs` (the pipes' copies are `memcpy`'s, `-O2` in `main.c`), `event`, `signal`, `random`, `sock`, `drv`, `svc`
   (a pragma); the floppy's MFM coding (`mfm.h`) `-O2` by a pragma. **Cold parts of the `-O2` files at `-Os`** (the
   kernel's shrink, audit 2026-10-29 block 2: a `#pragma GCC optimize("Os")` region or `KCOLD` in `kernel/kernel.h`):
   `main.c`'s boot (`vectors_init` to `kmain`) and panic; `serial.c`'s kernel log, boot notes and `kprintf`;

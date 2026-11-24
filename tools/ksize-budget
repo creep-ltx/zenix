@@ -152,6 +152,8 @@ start     4850   8200
 # kept out of chip RAM, big blocks' last fit with protection), serial + 106 (the log's indices kept by the kernel),
 # gcon + 169, ipc + 58; kernel.bin 223,576 -> 227,824, TOTAL 223,600 -> 229,000; the mount tests' RAM disk 658 -> 655
 # KB (Makefile).
+# 2026-11-24 (audit 2026-11-23 OS-13, the pipes' bulk copy): vfs 11,800 -> 11,850 (the ring copied by memcpy in two
+# pieces, a short run byte by byte; the -O2 attribute gone); kernel.bin 234,624 -> 234,656.
 main      5950   1700
 serial    6200   6500
 mem       4750    248
@@ -165,7 +167,7 @@ blk        460     16
 rtc       1550      4
 proc     10900  21500
 syscall  11100      0
-vfs      11800   1600
+vfs      11850   1600
 tty       5900    100
 gfx       9050   2450
 term     14500    256

@@ -33,6 +33,7 @@ want "Ctrl-C ends watch" "after-watch"
 want "tac (last line first)" "zine::11:"
 want "rev" "toor:0::toor"
 want "paste -s -d+" "x+y"
+want "pipes: /bin/sh through four pipes (bulk copies, the ring wrapping; audit OS-13) is the file, a short line too" "pipesum=sameab"
 tr -d '\r' < $OUT/run.log | grep -aqxE 'msgping: 500 round trips in [0-9]+ us, [0-9]+\.[0-9] us each' && echo "PASS msgping times round trips in microseconds" || { echo "FAIL msgping times round trips in microseconds"; pass=0; }
 want "bench: failed creates are reported, not timed; a writable /tmp gives no failures" "bench f1=2 f2=0"
 want "... the line names the count and the first error" "create + write 50 small files      FAILED: 50 of 50 calls (first: open /tmp/bench/f00:"
