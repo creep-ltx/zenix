@@ -282,8 +282,9 @@ RAMDISK_K := 640
 # two reviews' fixes (2026-11-23). 655 since D60 stage 4 (2026-11-23, DRV_AUDIO, DRV_PARXFER with the plipbox's line,
 # the boot tables' copies, the chip RAM checks: 4.2 KB of kernel.bin, 2.6 KB of it in the protection span). 652 since
 # D60 stage 5 (2026-11-23, zup's bundle copies, ZINE's checks and rebuild, MMU=STRICT and MMU=D41: about 3 KB, most of
-# it in the protection span).
-RAMDISK_MOUNT_K := 651
+# it in the protection span). 649 since D60 stage 6 (2026-11-24, the speed pass: 2.6 KB of kernel.bin, 2.2 KB of it in
+# the protection span; with D61's CON_MOUSE the floppy had 700 bytes left, under the 800 kept).
+RAMDISK_MOUNT_K := 649
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/check-init.py tools/ksize-check.sh tools/ksize-budget tools/uok-check.py

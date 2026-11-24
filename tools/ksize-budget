@@ -138,6 +138,13 @@
 # 22,300 and bss 240 -> 300 (most of it the protection span), mem 4,600 -> 4,750 (mem_sane, in the span), zine 1,850 ->
 # 2,050, syscall 11,000 -> 11,100, ipc 4,800 -> 4,900; kernel.bin 227,824 -> 231,248, TOTAL 229,000 -> 231,600; the mount
 # tests' RAM disk 655 -> 652 KB (Makefile).
+# 2026-11-24 (D60 stage 6, the speed pass, d60 section 23): mmu 22,066 -> 24,591 (in the span: a service's windows
+# kept across its client's next request, a forwarded window's pages mapped as its client maps them, a program's plain
+# request given without the tables' lock, the small helpers inlined), ipc 4,841 -> 4,923 (ipc_replyrecv's keep), proc
+# + 74 (struct proc's slot number set), svc + 56 (the service's entry looked at first), embed + 80 (fsd's and diskd's
+# images: the disk calls declare their buffer); kernel.bin 231,748 (main, with D61) -> 234,624, TOTAL 231,600 ->
+# 234,800, mmu 22,300 -> 24,700, ipc 4,900 -> 5,000, proc 10,850 -> 10,900; the mount tests' RAM disk 652 -> 649 KB
+# (Makefile; main's D61 had left the floppy 700 bytes, under the 800 kept).
 start     4850   8200
 # 2026-11-23 (D60 stage 4): drv 3,606 -> 6,856 and bss + 85 (DRV_AUDIO and DRV_PARXFER with the plipbox's line,
 # net/drv/plipbox-line.c, 2.6 KB of it in the protection span, given back when protection is off), main + 104 and bss
@@ -156,7 +163,7 @@ audio      620     32
 a3000     2400    100
 blk        460     16
 rtc       1550      4
-proc     10850  21500
+proc     10900  21500
 syscall  11100      0
 vfs      11800   1600
 tty       5900    100
@@ -164,7 +171,7 @@ gfx       9050   2450
 term     14500    256
 confont   3100     32
 kbd       4300    180
-ipc       4900   2200
+ipc       5000   2200
 svc       5600   1420
 seg       1300    272
 event      700      0
@@ -176,8 +183,7 @@ zine      2050     16
 cache     1800     32
 gcon      5000     16
 dbg       4100     20
-mmu      22300    300
+mmu      24700    300
 embed    51000      0
-# merged 2026-11-24 (D60 stage 5 + D61 the mouse): kernel.bin 231,748, TOTAL 231,600 -> 231,800; the mount tests' RAM disk 652 -> 651 KB.
-TOTAL   231800
+TOTAL   234800
 ROOM       800

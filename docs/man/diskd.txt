@@ -75,8 +75,8 @@ PARTITION TABLES
 NOTES
     Not done: extended partitions, GPT.
     Errors are negative errno numbers (kernel/errno.h): an unknown device
-    -ENODEV, a bad handle -EBADF, a range outside the device -EINVAL, an
-    overlapping mount -EBUSY.
+    -ENODEV, a bad handle -EBADF, a range outside the device or a count of
+    0 or 0x800000 sectors and more -EINVAL, an overlapping mount -EBUSY.
     A device's details (struct diskinfo) go into the caller's buffer:
     DISK_INFO and DISK_LIST write its first 80 bytes (their callers never
     set a[2], so it cannot carry a size); DISK_INFOSZ (9) and DISK_LISTSZ
@@ -91,7 +91,9 @@ NOTES
     client's), and reads and writes the RAM disk through the kernel's copy
     (SYS_blk_ram with a count), never in place. A diskd built before D60
     reads the RAM disk in place and stops at its first access there with
-    full protection.
+    full protection. The filesystem servers declare the buffer of their
+    DISK_READ and DISK_WRITE (SYS_callv, D60 stage 6), so diskd is shown it
+    when it takes the request and its own ask finds it declared.
 
 SEE ALSO
     fdisk(1), mkfs.ext2(1), fsck.ext2(1), usbd(8), docs/architecture.md

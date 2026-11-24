@@ -418,9 +418,13 @@ void svc_exit(struct proc *p)
 
 static int mine(void)                   /* the entry whose started (or running) server current is, -1 if none */
 {
+    static u8 hint;                     /* the last entry found (D60 stage 6: asked at every request a service takes):
+                                         * looked at first, always checked */
+    if ((svcs[hint].state == SV_STARTING || svcs[hint].state == SV_RUNNING) && svcs[hint].pid == current->pid)
+        return hint;
     for (int i = 0; i < NSVC; i++)
         if ((svcs[i].state == SV_STARTING || svcs[i].state == SV_RUNNING) && svcs[i].pid == current->pid)
-            return i;
+            return hint = (u8)i, i;
     return -1;
 }
 

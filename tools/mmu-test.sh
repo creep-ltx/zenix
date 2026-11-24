@@ -15,7 +15,10 @@
 # a filesystem server (msgpingd -fswin on /tmp/w) read into guarded buffers at every alignment, also through itself
 # into the root's server (fwd: a window passed on, the copy pages synced); a read past the end of one's memory is
 # -EFAULT. The filesystem server's windows are exact: a write one byte past the buffer, one before it, or into it after
-# the reply ends it with the protection line naming the client.
+# the reply ends it with the protection line naming the client. D60 stage 6 (d60 section 23): the same server as a
+# service (/tmp/ws), whose windows are kept across its client's next request: a read passed on to the root's server
+# (its client's pages mapped as its client maps them), and the buffer of its last read written at the client's next
+# request (the close), which does not cover it: ended with the protection line.
 # DESIGN D60 stage 3 (docs/d60-full-protection.md 3.1, 5.5, 7.4, 13): no process is a system one. A server whose port
 # is PEER_EXACT (msgpingd as built) sees only what its client declared: a write one byte past a declared page ends it;
 # a user's server asking for its client's stack gets -EFAULT, and touching it without asking ends it; a service (the
@@ -139,6 +142,10 @@ wait $P 30
 send msgping winread /tmp/w/under 12; sleep 1; msgpingd -port w -fswin & sleep 1\r
 wait $P 30
 send cat /tmp/w/after > /dev/null; ls /tmp/w > /dev/null; sleep 1; echo win-confine-done\r
+wait $P 30
+send svctest reg ws 0 /bin/msgpingd -port ws -fswin; mkdir -p /tmp/ws; svctest mount ws /tmp/ws; msgping winread /tmp/ws/fwd\r
+wait $P 60
+send cat /tmp/ws/after > /dev/null; sleep 1; echo win-kept-done\r
 wait $P 30
 EOF
 
@@ -315,6 +322,14 @@ for cpu in $CPUS; do
             echo "  ok   confined: past, before and after the reply: three ends" ||
             { echo "  FAIL confined: past, before and after the reply: three ends"; ok=0; }
         chk "... and the system goes on" '^win-confine-done'
+        chk "D60 stage 6: a service reads through the root's server into its client's buffer (its window passed on)" \
+            'msgping: winread /tmp/ws/fwd ok 9'
+        chk "... and writing the buffer of its last read, kept across the reply, at its client's next request ends it" \
+            'pid [0-9]+ \(msgpingd\): memory protection: a write to 0x[0-9a-f]+ \(the memory of pid [0-9]+ \(cat\)\)'
+        [ "$(grep -caE '\(msgpingd\): memory protection: a write to 0x[0-9a-f]+ \(the memory of pid [0-9]+ \(cat\)\)' "$L")" -ge 2 ] &&
+            echo "  ok   ... two such ends (the user's server's and the service's)" ||
+            { echo "  FAIL ... two such ends (the user's server's and the service's)"; ok=0; }
+        chk "... and the system goes on" '^win-kept-done'
         if grep -qa 'winread.*BAD' "$L"; then echo "  FAIL a winread case:"; grep -a 'winread.*BAD' "$L" | head -3; ok=0; fi
     fi
     chk "... and answers 200 calls" 'msgping: 200 round trips'

@@ -376,7 +376,7 @@ void syscall_c(u32 *rb)
     case SYS_call:
         r = -EFAULT;
         if (user_ok_wr(current, a2, sizeof(struct umsg))) {    /* (own: the server answers into it) */
-            if (__builtin_expect(mmu_winners, 0) && (mmu_winners & (1u << (current - procs))))
+            if (__builtin_expect(mmu_winners, 0) && (mmu_winners & (1u << current->slot)))
                 mmu_ops->callok(current, 0, 0, 2);   /* D60 5.6: the caller's windows' copy pages are their clients'
                                                      * again for the call (its message may name them) */
             r = (s32)ipc_call((int)a1, (struct umsg *)a2);

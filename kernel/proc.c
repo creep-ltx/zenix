@@ -262,6 +262,8 @@ void stack_fail(struct proc *p, int which)
 KINIT void proc_init(void)         /* the boot: once, size first */
 {
     memset(procs, 0, sizeof procs);
+    for (int i = 0; i < NPROC; i++)
+        procs[i].slot = (u8)i;          /* (kernel.h: never changes) */
     procs[0].state = P_READY;           /* pid 0: idle, runs on the boot stack */
     procs[0].pid = 0;
     memcpy(procs[0].name, "idle", 5);
@@ -610,7 +612,9 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
     if (v2)
         kt[9] = (u32)base;
 
+    u8 slot = p->slot;
     memset(p, 0, sizeof *p);
+    p->slot = slot;
     mmu_slot_new(p);                                /* D41: nothing of the slot's last tree */
     p->ksp = kt;
     p->usp = (u32)usp;
