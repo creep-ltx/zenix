@@ -283,7 +283,7 @@ RAMDISK_K := 640
 # the boot tables' copies, the chip RAM checks: 4.2 KB of kernel.bin, 2.6 KB of it in the protection span). 652 since
 # D60 stage 5 (2026-11-23, zup's bundle copies, ZINE's checks and rebuild, MMU=STRICT and MMU=D41: about 3 KB, most of
 # it in the protection span).
-RAMDISK_MOUNT_K := 652
+RAMDISK_MOUNT_K := 651
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/check-init.py tools/ksize-check.sh tools/ksize-budget tools/uok-check.py

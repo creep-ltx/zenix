@@ -178,5 +178,6 @@ gcon      5000     16
 dbg       4100     20
 mmu      22300    300
 embed    51000      0
-TOTAL   231600
+# merged 2026-11-24 (D60 stage 5 + D61 the mouse): kernel.bin 231,748, TOTAL 231,600 -> 231,800; the mount tests' RAM disk 652 -> 651 KB.
+TOTAL   231800
 ROOM       800
