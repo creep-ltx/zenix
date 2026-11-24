@@ -231,8 +231,7 @@ $(BUILD)/conwidth.h: tools/mkconfont.py libc/picolibc/newlib/libc/string/combini
 	python3 tools/mkconfont.py widths $@
 # DESIGN D16 rule 14 (room for events and signals, measured 2026-10-26): tty.c (line discipline at typing speed) and
 # vfs.c (dispatch and path routing; the time goes to the servers) at -Os save 4048 bytes of the RAM floppy's kernel; the
-# pipes' copy loops (pipe_read, pipe_write) keep -O2 through an attribute (136 bytes). The scheduler, ipc.c and the
-# interrupt entries stay -O2.
+# pipes copy with main.c's memcpy (-O2; audit 2026-11-23 OS-13). The scheduler, ipc.c and the interrupt entries stay -O2.
 KOPT_tty := -Os
 KOPT_vfs := -Os
 # DESIGN D16's own files (rule 14): events and signals at -Os; only the one-word test on the return paths is inline

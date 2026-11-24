@@ -371,8 +371,9 @@ union zhdr { struct zexe v1; struct zex2 v2; };
 #define NFILE 64
 enum { FT_NONE = 0, FT_INODE, FT_TTY, FT_PIPE_R, FT_PIPE_W, FT_NULL, FT_ZERO, FT_SERIAL, FT_KLOG, FT_RANDOM, FT_SOCK, FT_PTM, FT_GCON };   /* FT_PTM: a pty's master (off: its tty number), D20 7.2; FT_GCON: a console
                                          * in graphics mode's input ring (D38 step 2, gcon.c); FT_KLOG: a service's output, into the kernel log (D11); FT_RANDOM: /dev/urandom (off 0) and /dev/random (off 1), D19; FT_SOCK: a socket (ino: its ksock), D19 */
+#define PIPE_SIZE 4096u              /* a pipe's ring (a power of two: the index wraps by a mask; counts fit a u16) */
 struct pipe {
-    u8 buf[2048];
+    u8 buf[PIPE_SIZE];
     u16 rd, wr, count;
     u8 readers, writers;
     u32 rwait, wwait;           /* D16: the slots waiting to read, to write (event.c) */
