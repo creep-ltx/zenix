@@ -545,7 +545,8 @@ struct proc {                   /* start.S relies on the first three: */
                                  * (0: none, pid 0); a guard pattern lies at each bottom */
     struct { u32 base, size; } reg[NREG];   /* memalloc'd blocks */
     u32 cwd_ino;
-    char cwd[FS_PATHMAX];       /* the working directory as text (fsproto.h): a longer one is refused */
+    char *cwd;                  /* the working directory as text (fsproto.h; a longer one is refused): a copy shared with
+                                 * the processes that inherited it, counted (vfs.c cwd_hold, cwd_drop; audit OS-6) */
     struct file *fd[NFD];
     int killed;
     u8 exiting;                 /* in proc_exit: its own calls (FS_CLOSE) must not end it a second time */
@@ -613,7 +614,7 @@ void proc_handover(int pid);           /* SYS_exit's second argument: the caller
 #define ST_STOPPED    0x114   /* proc_wait result for a stopped child (0x100 + 20, the SIGTSTP number) */
 #define WAIT_CONSOLE  4       /* proc_wait flag, root only (init): also return ST_CONSOLE + n when console n was shown
                                * with nobody on it (it wants a login) */
-#define ST_CONSOLE    0x200   /* ST_CONSOLE + n: see WAIT_CONSOLE */
+#define ST_CONSOLE    0x200   /* ST_CONSOLE + n: see WAIT_CONSOLE; ST_CONSOLE + 0: load the Unicode font (CONUF_LAZY) */
 int proc_wait(int pid, int flags);
 void proc_stop(struct proc *p);       /* Ctrl-Z / jobctl: stop it when it next runs */
 void proc_cont(struct proc *p);
@@ -839,6 +840,9 @@ long vfs_rename(char *from, char *to);
 long vfs_readdir(struct file *f, struct udirent *out);
 long vfs_readdirs(struct file *f, u32 buf, u32 size);    /* D49: SYS_readdirs */
 long vfs_pipe(int fds[2], u32 flags);   /* flags: 0 or O_NONBLOCK (both ends) */
+extern char *const cwd_root;            /* audit OS-6: the built-in "/" (never counted, never freed) */
+void cwd_hold(char *s);                 /* one more process shares the working directory's text s */
+void cwd_drop(char *s);                 /* one fewer: the last frees it */
 
 /* tty.c */
 void tty_init(void);
@@ -986,6 +990,7 @@ void tty_proc_gone(struct proc *p);     /* p is a zombie: its leadership ends, a
 #define CONR_8BIT       128  /* DESIGN D28: 8-bit mode with Topaz (no UTF-8; the keys Latin-1), as a CON_FONT implies */
 #define CONR_ALL        255
 #define CON_UFONT       4    /* DESIGN D28 7: no descriptor; root; a2 ZCF1 data, a3 its size; a2 0 drops it -> 0 */
+#define CONUF_LAZY      1    /* CON_UFONT a2 0, a3 this: none now, init asked for it at the first character (OS-5) */
 /* DESIGN D24 6.1-6.3 (the remote control; frozen): root only (-EPERM), named by any console's descriptor. CON_READ,
  * CON_LINE and CON_INPUT's text: a console never used is -ENXIO (nothing is allocated); raw keys act as the real
  * keyboard does (Amiga+Fn to an unused console allocates it and asks init for a login). Op 4 is D28's CON_UFONT. */

@@ -280,6 +280,7 @@ static inline int sys_console(int op, int v) { return sys3(89, (u32)op, (u32)v, 
 #define CONM_LACE 1
 #define CONM_ASK 0xFF
 static inline int sys_conufont(const void *zcf, u32 n) { return sys3(89, CON_UFONT, (u32)zcf, n); }
+#define CONUF_LAZY 1            /* sys_conufont(0, CONUF_LAZY): no font now; init's sys_waitcon gives ST_CONSOLE when one is needed (audit OS-5) */
 static inline int sys_confont(int fd, const void *psf, u32 n) { return sys3(89, CON_FONT | (u32)(fd + 1) << 8, (u32)psf, n); }
 static inline int sys_conrules(int fd, u32 bits, u32 mask) { return sys3(89, CON_RULES | (u32)(fd + 1) << 8, bits, mask); }
 /* DESIGN D24 6.1-6.3, the remote control's console ops: root only (-EPERM), any console's descriptor; a console never
