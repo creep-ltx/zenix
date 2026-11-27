@@ -54,6 +54,12 @@
 #define DPYM_RTG        2   /* (D43) a graphics card's screen, the size AmigaOS gave it (zenixboot RTG): only answered;
                              * asked for hires or interlace there, the answer is still DPYM_RTG and nothing changes */
 #define DPYM_ASK        0xFF
+/* D62 (docs/d62-screen-modes.md 5): super-hires, AGA only (-EINVAL elsewhere), 3 or 4 planes at the 64-bit fetch;
+ * DPY_MODE's a[1]: the depth (0 as it is; 3, or 4 on AGA; -EINVAL another), and with a[1] not 0 the answer is the
+ * mode | the depth << 8; a[1] DPYMD_ASK only asks for both */
+#define DPYM_SHRES      3   /* 1280 x 256 (PAL), 1280 x 200 (NTSC) */
+#define DPYM_SHRES_LACE 4   /* 1280 x 512, 1280 x 400 */
+#define DPYMD_ASK       0xFF
 #define DPY_FONT_INFO   16  /* a[0] a font (0 the 8 x 8, DPYF_UI the desktop's), a[1] struct dpyfont * (the client's
                              * memory) -> 0, its metrics and widths written there; -EINVAL another number. The
                              * desktop's font is /etc/zdesk/screen's "font NAME SIZE" (an AmigaOS bitmap font in
@@ -314,7 +320,8 @@ struct dpyev {
 #define EV_MINIMISED    8
 #define EV_MENU         9   /* a menu item was picked: code the menu, arg the item */
 #define EV_SCREEN       10  /* the screen's mode changed (DPY_MODE): w x h its size now, arg the mode (DPYM_*); code
-                             * DPYS_FONT: the desktop's font changed (DPY_FONT_SET; ask DPY_FONT_INFO again) */
+                             * DPYS_FONT: the desktop's font changed (DPY_FONT_SET; ask DPY_FONT_INFO again); x (D62)
+                             * the screen's depth (0 from an older server) */
 #define DPYS_FONT       1
 /* to the window manager */
 #define EV_WM_NEW       32  /* a window wants to appear: win, w, h its wanted inside, x, y its wanted place, arg kind */

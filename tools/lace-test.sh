@@ -78,7 +78,7 @@ python3 tools/colour-test.py columns "$OUT/l-columns.png" > "$OUT/geom"; rc=$?; 
 awk '{ t = $3 - 7.5 * $4; h = $4 / 2; print $1, $2, t + 7.5 * h, h }' "$OUT/geom" > "$OUT/geom2"
 px() { s=$1 g=$2; shift 2; python3 tools/dpy-test.py px "$OUT/l-$s.png" "$OUT/$g" "$@"; }
 grep -a -q "^dpytest: open 0 screen 640x$H2 depth 4" "$L"; check "/etc/zdesk/screen's hires-lace: the screen is 640 x $H2" $?
-grep -a -q "displayd: screen 640x$H\$" "$L" && grep -a -q "displayd: screen 640x$H2 interlaced" "$L"
+grep -a -q "displayd: screen 640x$H, [34] planes$" "$L" && grep -a -q "displayd: screen 640x$H2 interlaced" "$L"
 check "DPY_MODE at run time: hires (640 x $H), then interlaced (640 x $H2) again" $?
 grep -a -q "^dpytest: mode 0 screen 640x$H" "$L" && grep -a -q "^dpytest: mode 1 screen 640x$H2" "$L"
 check "... each client told the new size (EV_SCREEN: dpy_w x dpy_h follows)" $?

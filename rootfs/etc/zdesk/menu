@@ -3,5 +3,5 @@ Shell = term
 Files = files
 Editor = term -e sumi
 Monitor = term -e ctop
-Preferences = deskprefs
+Screen = screenprefs -W
 Mouse = mouseprefs

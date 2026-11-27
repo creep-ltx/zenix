@@ -189,7 +189,7 @@ for c in $SETS; do
     check "colours $c: without fast RAM the kernel starts with 3 planes (8 colours)" $?
     case $c in 4) d=2;; 16) d=4;; *) d=3;; esac
     if [ $d = 3 ]; then
-        echo "$log" | grep -q "init: /etc/console: colours 7: 2, 4, 8 or 16 (or auto)" && ! echo "$log" | grep -q "display: AGA chips, [124] bitplane"
+        echo "$log" | grep -q "init: /etc/console: colours 7: not understood" && ! echo "$log" | grep -q "display: AGA chips, [124] bitplane"
         check "colours $c: init says the value is wrong, the 3 planes stay" $?
         continue
     fi

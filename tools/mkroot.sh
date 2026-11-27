@@ -176,6 +176,7 @@ alias_of gzip gunzip; alias_of gzip zcat; alias_of chown chgrp; alias_of pgrep p
 alias_of ifconfig ifup; alias_of ifconfig ifdown                   # ifup and ifdown are ifconfig (DESIGN D19 6.4)
 alias_of rz sz                                                     # sz is rz (DESIGN D20 5)
 alias_of unlha unlzx                                               # one program, by its name (DESIGN D33)
+alias_of screenprefs conprefs; alias_of screenprefs deskprefs     # the screen's settings before D62: other names of screenprefs
 # the package database (DESIGN D15): the manifest of every package of this build (make packages) whose files this
 # image holds exactly as the manifest says, so the first update knows what is installed (tools/mkzup.py installdb).
 # PKGDB=1: the full images only (the Makefile sets it for zenix.hdf and root-card.img)
@@ -203,8 +204,8 @@ if [ -n "$DEMO" ]; then
         done
     fi
     [ -e "$T/bin/wget" ] || rm -rf "$T/etc/ssl" "$T/usr/share/licenses/certdata"
-    # the Zenix menu without the programs this disk lacks (deskprefs, D38 "Preferences")
-    [ -e "$T/bin/deskprefs" ] || sed -i '/= *deskprefs *$/d' "$T/etc/zdesk/menu"
+    # the Zenix menu without the programs this disk lacks (screenprefs, D62; mouseprefs, D61)
+    [ -e "$T/bin/screenprefs" ] || sed -i '/= *screenprefs/d' "$T/etc/zdesk/menu"
     [ -e "$T/bin/mouseprefs" ] || sed -i '/= *mouseprefs *$/d' "$T/etc/zdesk/menu"
     [ -e "$T/bin/files" ] || sed -i 's/= *files *$/= term -e ahiru/' "$T/etc/zdesk/menu" "$T/etc/zdesk/icons"
 fi

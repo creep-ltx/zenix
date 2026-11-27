@@ -73,13 +73,14 @@ DAEMONS
     root removes a #.
 
 THE CONSOLE'S COLOURS, MODE AND FONT
-    /etc/console holds the text console's settings, one per line (# starts
-    a comment):
+    /etc/screen holds the screen's settings (screenprefs(1) FILES), one per
+    line (# starts a comment); init applies the console's at every start:
 
-    colours N   2, 4, 8 or 16 colours ("colors" is the same; "auto", or no
-                line, lets the machine decide: 16 with fast RAM on an AGA
-                Amiga, 8 with fast RAM on OCS/ECS and on any machine with
-                2 MB of chip RAM and no fast RAM, 2 below that).
+    console-colours N
+                2, 4, 8 or 16 colours ("auto", or no line, lets the machine
+                decide: 16 with fast RAM on an AGA Amiga, 8 with fast RAM
+                on OCS/ECS and on any machine with 2 MB of chip RAM and no
+                fast RAM, 2 below that).
 
     Fewer colours leave more chip RAM free: the screen takes 40, 80, 120 or
     160 KB for 2, 4, 8 or 16 colours, and on a machine without fast RAM
@@ -88,31 +89,40 @@ THE CONSOLE'S COLOURS, MODE AND FONT
     for red, yellow and magenta, cyan for green, blue and cyan); with 8 a
     bright colour is shown bold; with 2, grey on black. init reads the file
     once when it starts, so a change counts from the next boot (as
-    Workbench's; conprefs(8) changes it at once). A value it cannot use
-    is said on console 1: "init: /etc/console: colours 7: 2, 4, 8 or 16
-    (or auto)", only the first such line (a broken file is one line);
+    Workbench's; screenprefs(1) changes it at once). A line it cannot use
+    is said on console 1: "init: /etc/screen: console-colours 7: not
+    understood", only the first such line (a broken file is one line);
     16 on an OCS or ECS Amiga gives 8; without the chip RAM for the new
     screen the console stays as it was and init says so. The kernel says
     the new depth in its log (dmesg): "display: AGA chips, 2 bitplanes ...".
 
-    mode hires  the console's mode: 80 x 32 (NTSC 80 x 25); also "auto",
-                no line or no /etc/console.
-    mode hires-lace
+    console hires
+                the console's mode: 80 x 32 (NTSC 80 x 25); also "auto"
+                or no line.
+    console hires-lace
                 interlaced: 80 x 64 (NTSC 80 x 50), twice the screen's
                 chip RAM; it flickers on a TV or a 15 kHz monitor, steady
                 through a flicker fixer or scandoubler. Applied after the
                 colours. Without the memory, or on a kernel without the
-                mode switch, init says so ("init: /etc/console: mode
-                hires-lace: ..., staying hires") and the console stays
-                hires.
+                mode switch, init says so and the console stays hires.
+    video auto|pal|ntsc
+                the video standard (ECS and AGA switch; auto, or no line:
+                the machine's own), applied with the mode.
 
-    font auto   the console's Unicode font (the default; also with no line
+    /etc/console holds "login text|graphical" (below) and, from before
+    screenprefs, may hold "colours N", "font NAME" and "mode
+    hires|hires-lace": each counts while /etc/screen has no line of its
+    kind (an older system's settings keep working).
+
+    console-font auto
+                the console's Unicode font (the default; also with no line
                 or no /etc/console): /usr/share/consolefonts/zenix-8x8.zcf,
                 if it is there, for box lines, blocks, braille, symbols and
                 Western letters above Latin-1. 11 KB of memory, once. On a
                 machine without fast RAM it is loaded when a character
                 first needs it (shown as a box until then).
-    font none   no font: every character above U+00FF shows as a small box
+    console-font none
+                no font: every character above U+00FF shows as a small box
                 (the columns stay right).
     font NAME   /usr/share/consolefonts/NAME.zcf (a plain name, at most 23
                 letters).
@@ -146,8 +156,8 @@ NOTES
 
 FILES
     /etc/console, /etc/motd, /etc/fstab, /etc/daemons; removes
-    /var/run/console (conprefs)
+    /var/run/console (screenprefs)
 
 SEE ALSO
     boot(8), login(1), dlogin(8), mount(8), ifconfig(8), wasabid(8),
-    conprefs(8)
+    screenprefs(1)

@@ -1763,9 +1763,10 @@ name); `ls` 5.66 -> 1.05 s, `ls -l` 6.83 -> 2.19 s, the file view 6.6 -> 1.7 s.
 - **The display server** (`/sbin/displayd`, `display/server/`, DESIGN D38 step 3, docs/man/displayd.txt): the
   service `display` (`/etc/svctab`, nice -5), started by the desktop's first program, whose console (`PEER_CTTY`; a
   console, never a pty) it grabs. Its screen: 640 x 256 (200 on NTSC), or interlaced 640 x 512 (400) by
-  `/etc/zdesk/screen` and `DPY_MODE` at run time (D38 "Screen modes": two field lists that keep their order by a wait
-  for the long field's last line, the kernel's pointer doubled), 4 interleaved planes at FMODE 3 on AGA, 3
-  on OCS/ECS, in its own chip RAM; its Copper list sets the palette, the sprites (BPLCON2 puts them in front) and
+  `/etc/screen` (D62; else `/etc/zdesk/screen`) and `DPY_MODE` at run time (D38 "Screen modes": two field lists that
+  keep their order by a wait for the long field's last line, the kernel's pointer doubled), on AGA also super-hires
+  1280 across, laced or not (D62: BPLCON0's SHRES, the pointer in its pixels), 4 interleaved planes (or 3, D62's
+  depth: `DPY_MODE`'s a[1], `EV_SCREEN`'s x) at FMODE 3 on AGA, 3 on OCS/ECS, in its own chip RAM; its Copper list sets the palette, the sprites (BPLCON2 puts them in front) and
   the planes. The protocol, version 1, is `display/proto.h` (frozen): synchronous requests on port `display`, each
   answered at once; every pointer checked with `SYS_peer`; drawing orders in batches (one `DPY_DRAW` per window
   and buffer: fill, invert, text, copy, image, clip), each order's length and places checked, an unknown one
@@ -1787,7 +1788,7 @@ name); `ls` 5.66 -> 1.05 s, `ls -l` 6.83 -> 2.19 s, the file view 6.6 -> 1.7 s.
   hunk file checked and its glyphs converted into fast RAM) for titles and what clients draw with `DPYF_UI`; a run
   of it is built in a fast-RAM mask and written a byte a plane; clients get its widths with `DPY_FONT_INFO`; it is
   changed while the desktop runs by `DPY_FONT_SET` (D38 "Preferences": every client told, `EV_SCREEN` with
-  `DPYS_FONT`, everything drawn again; `deskprefs`, the preferences, uses it and `DPY_MODE`). Drags run in the server: an outline (XOR) or the whole window, until the button is let go; on AGA a move lifts the
+  `DPYS_FONT`, everything drawn again; `screenprefs`, the preferences (D62), uses it and `DPY_MODE`). Drags run in the server: an outline (XOR) or the whole window, until the button is let go; on AGA a move lifts the
   window into playfield 2 (dual playfield) and moves it with the Copper alone (D38 "Dragging with the chips").
   Without a window manager windows are placed one below the other, a click raises and focuses, the title bar drags
   the outline, the close gadget sends EV_CLOSE. It ends when its last client has gone (`-persist`: never), and the
@@ -1947,12 +1948,17 @@ name); `ls` 5.66 -> 1.05 s, `ls -l` 6.83 -> 2.19 s, the file view 6.6 -> 1.7 s.
   buffer and Copper list are allocated first (no chip RAM: -ENOMEM, nothing changes), the new list is pointed at with
   interrupts masked, the Copper takes it at the next vertical blank, a frame later (100 ms timeout) the old ones are
   freed and the console shown is drawn again from its grid; the log says the new depth. **The mode** (D28 22,
-  2026-11-12): `/etc/console`'s `mode hires|hires-lace|auto` (init, after the colours) and conprefs switch with
+  2026-11-12): `/etc/console`'s `mode hires|hires-lace|auto` (init, after the colours) and conprefs (now screenprefs) switch with
   `CON_MODE` (op 11, no descriptor, root; `CONM_HIRES` 0, `CONM_LACE` 1, `CONM_ASK` 0xFF): the same switch (one
   routine for depth and mode), interlaced with two Copper lists that keep the fields right by themselves (the line-312
   wait, as displayd's), 64 rows (50 NTSC, `TROWS_MAX` 64); every used console's grids are allocated for the new rows
   before (-ENOMEM: nothing changes), its text moved into them from the top (rows above the cursor that do not fit
-  into the scrollback), its scroll region the whole screen, its foreground told by `SIGWINCH`. At FMODE 3 the fetch window
+  into the scrollback), its scroll region the whole screen, its foreground told by `SIGWINCH`. **The video
+  standard** (D62, 2026-11-27): `CON_MODE`'s a2 may add `CONM_PAL` 0x10 or `CONM_NTSC` 0x20 (root; an ECS/AGA Agnus
+  only, -ENODEV the other standard on OCS): the same switch, `BEAMCON0` written (bit 5) with the new lists while the
+  beam is above line 240, 256 or 200 lines a field, 312 or 262 the long field's last; `CONM_INFO` 0xFE (any process)
+  answers the mode, the standard and `CONMI_AGA`, `CONMI_SHRES`, `CONMI_BEAM`, `CONMI_NTSCX` (what the chips are).
+  ZINE's way back sets the standard shown again. The settings are `/etc/screen`'s (screenprefs, init). At FMODE 3 the fetch window
   is `DDFSTRT` `$38`, `DDFSTOP` `$C0`, `BPLCON1` 0 at every depth (one plane at the old fetch uses `$3C`/`$D4`): found
   by the screenshot test of `termtest columns` (all 80 columns, the edges exactly where one plane puts them, nothing
   repeated; knowledge base `amiga/zenix-colour-console.md`), not yet seen on the A1200.

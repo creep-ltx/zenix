@@ -43,83 +43,106 @@ static void start(int n, int again)
     sys_close(fd);
 }
 
-/* /etc/console (D14 section 11): "colours N" (2, 4, 8 or 16; "colors" too) sets the text console's colours, read
- * once here, before anything else takes chip RAM; no file, no such line or "auto": the machine's default. Read at
- * every start of init, so a change counts from the next boot. DESIGN D28 7: "font auto|none|NAME", the console's
- * Unicode font, kept here and loaded after mount -a (font_setup); no file or no such line is "font auto". D28 22:
- * "mode hires|hires-lace|auto" (auto, no line: hires), applied after the colours. */
+/* The console's settings (D14 section 11, D28 7 and 22; DESIGN D62: docs/d62-screen-modes.md 6), read once here,
+ * before anything else takes chip RAM, at every start of init (a change counts from the next boot):
+ * /etc/console (its "login text|graphical", and before D62 "colours N", "font NAME", "mode hires|hires-lace|auto"),
+ * then /etc/screen, whose "console-colours", "console-font", "console" and "video auto|pal|ntsc" win over the old
+ * lines (its desktop's and the card's lines are displayd's and screenprefs'). No file, no line, auto: the machine's
+ * default. The colours are applied first, then the mode and the video standard in one CON_MODE; the font after
+ * mount -a (font_setup). */
 static char ufont[24] = "auto";
-static int lace;                        /* D28 22: "mode hires-lace" */
+static int lace, video, colours;        /* D28 22: hires-lace; D62: 1 PAL, 2 NTSC (0 as it is); 0 auto */
 /* a line not understood: the first said (at the end, with how many more), so a broken file is one line (D28 22) */
-static const char *bad_fmt, *bad_v;     /* the first's message and word (in console_setup's buffer) */
+static char bad_l[48];                  /* the first: "FILE: the line's words" */
 static int nbad;
-static void bad(const char *fmt, const char *v)
+static void bad(const char *f, const char *w, const char *v)
 {
-    if (!nbad++) {
-        bad_fmt = fmt;
-        bad_v = v;
+    if (nbad++)
+        return;
+    const char *part[4] = { f, ": ", w, *v ? " " : "" };   /* "FILE: WORD VALUE", cut to the room */
+    bad_l[0] = 0;
+    for (int i = 0; i < 5; i++) {
+        const char *t = i < 4 ? part[i] : v;
+        u32 l = strlen(bad_l), k = strlen(t);
+        if (l + k >= sizeof bad_l) k = sizeof bad_l - 1 - l;
+        memcpy(bad_l + l, t, k);
+        bad_l[l + k] = 0;
     }
 }
-
-static void console_setup(void)
+static void setting(const char *f, int scr, char *w, char *v)
 {
-    char b[1024];                       /* the whole file (its comments too: 757 bytes in 2026-11) */
-    int fd = sys_open("/etc/console", O_RDONLY), n = fd < 0 ? 0 : sys_read(fd, b, sizeof b - 1);
-    if (fd >= 0) sys_close(fd);
-    if (n <= 0) return;
-    if (n == (int)sizeof b - 1)
-        dprintf(1, "init: /etc/console: only its first %d bytes are read\n", n);
-    b[n] = 0;
-    for (char *l = b, *e; *l; l = e) {
-        for (e = l; *e && *e != '\n'; e++)
-            ;
-        if (*e) *e++ = 0;
-        char *w = l, *v;
+    char *x = v;
+    while (*x && *x != ' ' && *x != '\t' && *x != '\r') x++;
+    *x = 0;
+    if (!strcmp(w, scr ? "console-font" : "font")) {    /* D28: one word, a plain name (no path) */
+        if (!*v || strchr(v, '/') || x - v > (int)sizeof ufont - 1) bad(f, w, v);
+        else strcpy(ufont, v);
+    } else if (!scr && !strcmp(w, "login")) {           /* D38 revision 3: text (the default) or graphical */
+        if (!strcmp(v, "graphical")) graphical = 1;
+        else if (strcmp(v, "text")) bad(f, w, v);
+    } else if (!strcmp(w, scr ? "console" : "mode")) {  /* D28 22: hires (the default, auto) or hires-lace */
+        if (!strcmp(v, "hires-lace")) lace = 1;
+        else if (strcmp(v, "hires") && strcmp(v, "auto")) bad(f, w, v);
+        else lace = 0;
+    } else if (scr && !strcmp(w, "video")) {            /* D62: the video standard (ECS/AGA) */
+        if (!strcmp(v, "pal")) video = 1;
+        else if (!strcmp(v, "ntsc")) video = 2;
+        else if (strcmp(v, "auto")) bad(f, w, v);
+        else video = 0;
+    } else if (scr ? !strcmp(w, "console-colours") : !strcmp(w, "colours") || !strcmp(w, "colors")) {
+        int c = atoi(v);
+        if (c == 2 || c == 4 || c == 8 || c == 16 || !strcmp(v, "auto")) colours = c;
+        else bad(f, w, v);
+    } else if (!scr || (strncmp(w, "desktop", 7) && strcmp(w, "rtg")))
+        bad(f, w, "");
+}
+static void settings(const char *f, int scr)
+{
+    char b[257];                        /* a line at a time (init's stack is 4 KB): a longer line is skipped */
+    int fd = sys_open(f, O_RDONLY), n = 0, r, skip = 0;
+    if (fd < 0) return;
+    while ((r = sys_read(fd, b + n, (u32)(sizeof b - 1 - n))) > 0 || n) {
+        n += r > 0 ? r : 0;
+        b[n] = 0;
+        char *e = strchr(b, '\n');
+        if (!e && r > 0 && n < (int)sizeof b - 1) continue;
+        if (!e && n == (int)sizeof b - 1) { skip = 1; n = 0; continue; }
+        if (e) *e = 0;
+        char *w = b, *v;
         while (*w == ' ' || *w == '\t') w++;
-        if (!*w || *w == '#') continue;
         for (v = w; *v && *v != ' ' && *v != '\t'; v++)
             ;
         if (*v) *v++ = 0;
         while (*v == ' ' || *v == '\t') v++;
-        if (!strcmp(w, "font")) {                       /* D28: one word, a plain name (no path) */
-            char *x = v;
-            while (*x && *x != ' ' && *x != '\t' && *x != '\r') x++;
-            *x = 0;
-            if (!*v || strchr(v, '/') || x - v > (int)sizeof ufont - 1)
-                bad("font %s: auto, none or a font's name (at most 23 letters)", v);
-            else
-                strcpy(ufont, v);
-            continue;
-        }
-        if (!strcmp(w, "login")) {                      /* D38 revision 3: text (the default) or graphical */
-            if (!strncmp(v, "graphical", 9)) graphical = 1;
-            else if (strncmp(v, "text", 4)) bad("login %s: text or graphical", v);
-            continue;
-        }
-        if (!strcmp(w, "mode")) {                       /* D28 22: hires (the default, auto) or hires-lace */
-            if (!strncmp(v, "hires-lace", 10)) lace = 1;
-            else if (strncmp(v, "hires", 5) && strncmp(v, "auto", 4)) bad("mode %s: hires, hires-lace or auto", v);
-            else lace = 0;
-            continue;
-        }
-        if (strcmp(w, "colours") && strcmp(w, "colors")) { bad("unknown setting %s", w); continue; }
-        if (!strncmp(v, "auto", 4)) continue;
-        int c = atoi(v), r = c ? sys_console(CON_COLOURS, c) : -EINVAL;
-        if (r == -EINVAL) bad("colours %s: 2, 4, 8 or 16 (or auto)", v);
-        else if (r < 0) dprintf(1, "init: /etc/console: colours %d: %s, staying at %d\n", c, zstrerror(r), sys_console(CON_COLOURS, 0));
-        else if (r != c) dprintf(1, "init: /etc/console: colours %d: this machine shows %d\n", c, r);
+        if (!skip && *w && *w != '#' && *w != '\r') setting(f, scr, w, v);
+        skip = 0;
+        int used = e ? (int)(e - b) + 1 : n;
+        memmove(b, b + used, (u32)(n - used));
+        n -= used;
+        if (r <= 0 && !e) n = 0;
     }
-    if (lace) {                         /* after the colours: the screen made once more, for the mode */
-        int r = sys_console(CON_MODE, CONM_LACE);
-        if (r < 0)
-            dprintf(1, "init: /etc/console: mode hires-lace: %s, staying hires\n",
-                    r == -EINVAL ? "this kernel has no interlaced console" : zstrerror(r));
+    sys_close(fd);
+}
+static void console_setup(void)
+{
+    settings("/etc/console", 0);
+    settings("/etc/screen", 1);
+    if (colours) {
+        int r = sys_console(CON_COLOURS, colours);
+        if (r < 0) dprintf(1, "init: the console's colours %d: %s, staying at %d\n", colours, zstrerror(r), sys_console(CON_COLOURS, 0));
+        else if (r != colours) dprintf(1, "init: the console's colours %d: this machine shows %d\n", colours, r);
     }
-    if (nbad) {
-        dprintf(1, "init: /etc/console: ");
-        dprintf(1, bad_fmt, bad_v);
-        dprintf(1, "%s\n", nbad > 1 ? " (and more lines not understood)" : "");
+    if (lace || video) {                /* after the colours: the screen made once more, for the mode */
+        int r = sys_console(CON_MODE, lace | (video == 1 ? CONM_PAL : video == 2 ? CONM_NTSC : 0));
+        if (r == -EINVAL && !video)
+            dprintf(1, "init: the console's mode hires-lace: this kernel has no interlaced console, staying hires\n");
+        else if (r < 0)
+            dprintf(1, "init: the console's mode %s%s: %s, staying as it is\n", video == 2 ? "ntsc " : video ? "pal " : "",
+                    lace ? "hires-lace" : "hires", r == -EINVAL ? "this kernel cannot switch the video standard"
+                    : r == -ENODEV ? "this Agnus shows only its own standard" : zstrerror(r));
     }
+    if (nbad)
+        dprintf(1, "init: %s: not understood%s\n", bad_l, nbad > 1 ? " (and more lines)" : "");
     oflush();
 }
 

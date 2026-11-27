@@ -83,4 +83,4 @@ EXAMPLES
     mouseprefs &        open the window from a terminal
 
 SEE ALSO
-    deskprefs(1), zdesk(1), displayd(8), docs/d61-mouse.md
+    screenprefs(1), zdesk(1), displayd(8), docs/d61-mouse.md

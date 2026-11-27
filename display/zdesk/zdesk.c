@@ -425,29 +425,34 @@ static void restyle(void)
 static void screen_changed(int font)
 {
     menu_close();
-    if (font)
+    if (font || dpy_depth != depth) {   /* D62: a new depth: the pens and the gadgets' pictures again */
+        depth = dpy_depth;
         restyle();
+    }
     dpy_call(DPY_WM_PLACE, (u32)bar_id, 0, (u32)dpy_w << 16 | (u32)bar_h, 0);
     bar_draw();
     desk_draw(0, 0, dpy_w, dpy_h);
     dprintf(1, "zdesk: screen %dx%d, font %s (%d lines: bar %d, title bar %d)\n", dpy_w, dpy_h,
             uf.name[0] ? uf.name : "8x8", fh, bar_h, th.st.title);
 }
-/* a session's screen (docs/d38-desktop.md "Preferences"): the mode and the font displayd shows when zdesk starts are
- * kept, and put back when it leaves, so a Use lasts for the session (under dlogin displayd outlives it); the user's
- * own ~/.config/zdesk/screen is applied at the start (/etc/zdesk/screen is displayd's own, read when it started) */
-static int mode0 = -1, size0;
+/* a session's screen (docs/d38-desktop.md "Preferences", D62): the mode, the depth and the font displayd shows when
+ * zdesk starts are kept, and put back when it leaves, so a Use lasts for the session (under dlogin displayd outlives
+ * it); the user's own ~/.config/screen/screen (or the older ~/.config/zdesk/screen) is applied at the start (/etc/screen
+ * is displayd's own, read when it started) */
+static int mode0 = -1, depth0, size0;
 static char font0[DPY_FONTNAME];
-static void screen_set(const char *path, int mode, const char *font, int size)
+static void screen_set(const char *path, int mode, int dep, const char *font, int size)
 {
     char want[40];
     struct dpyfont f;
-    int m = dpy_mode(DPYM_ASK), r = 0;
+    int m = dpy_mode2(DPYM_ASK, DPYMD_ASK), r = 0;
     want[0] = 0;
     if (*font)
         snprintf(want, sizeof want, "%s %d", font, size);
-    if (m >= 0 && m != mode)
-        r = dpy_mode(mode);
+    if (m < 0)                          /* an older server: the mode alone */
+        m = dpy_mode(DPYM_ASK) | (dep ? dep : depth) << 8;
+    if (m >= 0 && ((m & 0xFF) != mode || (dep && (m >> 8) != dep)))
+        r = dep ? dpy_mode2(mode, dep) : dpy_mode(mode);
     if (dpy_font(DPYF_UI, &f) == 0 && strcmp(f.name, want) && (m = dpy_fontset(font, size)) < 0)
         r = m;
     if (r < 0)                          /* displayd said what it could not do */
@@ -456,9 +461,11 @@ static void screen_set(const char *path, int mode, const char *font, int size)
 static void apply_saved(void)
 {
     char path[ZPATH_MAX], font[DPY_FONTNAME];
-    int mode, size;
+    int mode, dep, size;
     struct dpyfont f;
-    mode0 = dpy_mode(DPYM_ASK);
+    int m = dpy_mode2(DPYM_ASK, DPYMD_ASK);
+    mode0 = m >= 0 ? m & 0xFF : dpy_mode(DPYM_ASK);
+    depth0 = m >= 0 ? m >> 8 : 0;
     if (dpy_font(DPYF_UI, &f) == 0 && f.name[0] && strlen(f.name) < sizeof font0) {
         strcpy(font0, f.name);          /* "NAME SIZE" */
         char *sp = strrchr(font0, ' ');
@@ -467,8 +474,8 @@ static void apply_saved(void)
             size0 = atoi(sp + 1);
         }
     }
-    if (conf_screen(path, &mode, font, &size) == 0 && strncmp(path, "/etc/", 5))
-        screen_set(path, mode, font, size);
+    if (conf_screen(path, &mode, &dep, font, &size) == 0)
+        screen_set(path, mode, dep, font, size);
 }
 /* D61 (docs/d61-mouse.md 6): the mouse file (the user's, else the system's) and its pointer applied when the session
  * starts; what displayd had is put back when it ends, as the screen's mode and font are */
@@ -533,7 +540,7 @@ static void end_session(void)
 {
     menu_close();
     if (mode0 >= 0)                     /* the screen as the session found it */
-        screen_set("the session's start", mode0, font0, size0);
+        screen_set("the session's start", mode0, depth0, font0, size0);
     if (mouse0_ok)                      /* and the mouse */
         dpy_call(DPY_MOUSE, (u32)&mouse0, DPYMO_SET, 0, 0);
     for (int i = 0; i < NZW; i++)       /* every program on the desktop is asked to end */

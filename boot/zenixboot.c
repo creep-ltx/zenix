@@ -132,6 +132,18 @@ static void *IntuitionBase, *P96Base;
 #define P96BMA_BYTESPERPIXEL 5
 #define P96BMA_RGBFORMAT 7
 #define P96BMA_ISP96 8
+/* DESIGN D62 (docs/d62-screen-modes.md 7): RTGMODE=WxH[xBITS], a screen of that size opened first */
+#define p96BestModeIDTagList(t)  ((u32)zb_os(P96Base, -60, 0, 0, 0, 0, (long)(t), 0))
+#define p96OpenScreenTagList(t)  ((void *)zb_os(P96Base, -90, 0, 0, 0, 0, (long)(t), 0))
+#define P96BIDTAG_NominalWidth (0x80000000u + 96 + 3)
+#define P96BIDTAG_NominalHeight (0x80000000u + 96 + 4)
+#define P96BIDTAG_Depth (0x80000000u + 96 + 5)
+#define P96SA_Width (0x80020000u + 96 + 3)
+#define P96SA_Height (0x80020000u + 96 + 4)
+#define P96SA_Depth (0x80020000u + 96 + 5)
+#define P96SA_DisplayID (0x80020000u + 96 + 0x12)
+#define P96SA_ShowTitle (0x80020000u + 96 + 0x14)
+#define P96SA_Quiet (0x80020000u + 96 + 0x16)
 #define WA_Dummy (0x80000000u + 99)
 
 /* the stage colours of boot/handoff.S and kernel/diag.h */
@@ -815,6 +827,52 @@ static void rtg_close(void)             /* back to AmigaOS (CHECK, a refusal): t
     P96Base = IntuitionBase = 0;
 }
 static void *rtg_bm;                    /* the screen's bitmap rtg_take found, for rtg_lock */
+static u32 rtg_w, rtg_h, rtg_bits;      /* D62: RTGMODE=WxH[xBITS] (0: the front screen as it is) */
+/* "WxH" or "WxHxBITS" (BITS 16, 24 or 32; 16 when left out) into rtg_w, rtg_h, rtg_bits -> 0, or -1 */
+static int rtg_mode_arg(const char *a)
+{
+    u32 v[3] = { 0, 0, 16 };
+    int k = 0, digits = 0;
+    for (; *a && k < 3; a++) {
+        if (*a == 'x' || *a == 'X') {
+            if (!digits) return -1;
+            k++, digits = 0;
+            if (k < 3) v[k] = 0;
+        } else if (*a >= '0' && *a <= '9' && v[k] < 100000) {
+            v[k] = v[k] * 10 + (u32)(*a - '0');
+            digits++;
+        } else
+            return -1;
+    }
+    if (*a || !digits || k < 1 || v[0] < 320 || v[0] > 4096 || v[1] < 200 || v[1] > 4096 ||
+        (v[2] != 16 && v[2] != 24 && v[2] != 32))
+        return -1;
+    rtg_w = v[0], rtg_h = v[1], rtg_bits = v[2];
+    return 0;
+}
+/* D62: a Picasso96 screen of the size asked, opened in front (take; CHECK only says which mode it would be): the
+ * card's best mode for it (Picasso96 picks the nearest it has); none or a refusal is said, and the front screen is
+ * taken as it is */
+static void rtg_open(int take)
+{
+    u32 bt[] = { P96BIDTAG_NominalWidth, rtg_w, P96BIDTAG_NominalHeight, rtg_h, P96BIDTAG_Depth, rtg_bits, 0 };
+    u32 id = p96BestModeIDTagList(bt);
+    if (id == 0xFFFFFFFFu || !id) {
+        say("zenixboot: RTG: the card has no mode near %ldx%ld", (long)rtg_w, (long)rtg_h, 0);
+        say(" with %ld bits: the front screen as it is\n", (long)rtg_bits, 0, 0);
+        return;
+    }
+    if (!take) {
+        say("zenixboot: RTG: RTGMODE=%ldx%ld: the card's mode 0x%lx would be opened\n", (long)rtg_w, (long)rtg_h,
+            (long)id);
+        return;
+    }
+    u32 st[] = { P96SA_DisplayID, id, P96SA_Width, rtg_w, P96SA_Height, rtg_h, P96SA_Depth, rtg_bits,
+                 P96SA_Quiet, 1, P96SA_ShowTitle, 0, 0 };
+    if (!p96OpenScreenTagList(st))
+        say("zenixboot: RTG: a %ldx%ld screen could not be opened: the front screen as it is\n", (long)rtg_w,
+            (long)rtg_h, 0);
+}
 /* the picture's memory, locked after the window, the pointer and the Pi's switch (Picasso96 switches no screen while
  * a bitmap is locked); never unlocked: AmigaOS ends here. -> 0, or -1 (the desktop stays on the chipset) */
 static int rtg_lock(struct hwfb_rec *r)
@@ -838,6 +896,8 @@ static struct hwfb_rec *rtg_take(struct hwfb_rec *r, const u8 *hw, int take)
         rtg_close();
         return 0;
     }
+    if (rtg_w)
+        rtg_open(take);
     Forbid();
     u8 *scr = *(u8 **)((u8 *)IntuitionBase + 60);       /* IntuitionBase->FirstScreen: the front one */
     void *bm = scr ? *(void **)(scr + 84 + 4) : 0;      /* its RastPort's BitMap */
@@ -893,8 +953,8 @@ static struct hwfb_rec *rtg_take(struct hwfb_rec *r, const u8 *hw, int take)
 
 int zb_main(void)
 {
-    static const char tmpl[] = "KERNEL,RAM/K,CHECK/S,PREVIOUS/S,UNSIGNED_OK/S,DCACHE/K,MMU/K,RTG/S";
-    long args[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+    static const char tmpl[] = "KERNEL,RAM/K,CHECK/S,PREVIOUS/S,UNSIGNED_OK/S,DCACHE/K,MMU/K,RTG/S,RTGMODE/K";
+    long args[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
     long rda, kfh = 0, rfh = 0, ksize = 0, rsize = 0;
     u8 *table = 0, *buf = 0, hdr[32];
     u32 k512, r512, total = 0, home;
@@ -939,6 +999,14 @@ int zb_main(void)
             say("zenixboot: MMU=%s: say ON, OFF, STRICT or D41 (memory protection)\n", args[6], 0, 0);
             goto out;
         }
+    }
+    if (args[8]) {                      /* DESIGN D62: RTGMODE=WxH[xBITS] (it implies RTG) */
+        if (rtg_mode_arg((const char *)args[8]) < 0) {
+            say("zenixboot: RTGMODE=%s: say WIDTHxHEIGHT or WIDTHxHEIGHTxBITS (BITS 16, 24 or 32), e.g. 1280x960x16\n",
+                args[8], 0, 0);
+            goto out;
+        }
+        args[7] = 1;
     }
     if (args[4]) {                      /* DESIGN D21 6.4: unsigned bundles only in test builds, and only when asked */
         if (KEY_RELEASE) say("zenixboot: UNSIGNED_OK is for test builds: ignored (unsigned bundles are refused)\n", 0, 0, 0);
