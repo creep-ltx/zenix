@@ -39,6 +39,15 @@
  * B bytes (2: R5G6B5, 3: R8G8B8, 4: A8R8G8B8) in fast RAM, its record written into the boot's hardware table as
  * zenixboot RTG writes one, so the display server it starts draws there (it allocates the card itself, so the card
  * lives as long as it draws, and clears the record when it ends).
+ * -pi WxH (root, before the connection; DESIGN D63, docs/d63-pistorm-gfx.md 11): a pretend Raspberry Pi whose HDMI is
+ * W x H: its record (HWFB_TEST | HWFB_PI) written so that the display server it starts, when /etc/screen has a pi line,
+ * makes the HVS's window and the picture memory in fast RAM and draws there; the record stays for the next desktop
+ * (-pi off clears it, with no display server running). With it:
+ *   reg                the pretend HVS's list register (SCALER_DISPLIST1): "dpytest: reg 0xN"
+ *   dl N               nine words of its list memory from word N: "dpytest: dl 0xN W0 .. W8"
+ *   card               DPY_CARD's GET: "dpytest: card R WxHxBITS flags F out OWxOH screen WxH"
+ *   cardset WxHxBITS   DPY_CARD's SET, the same line ("cardset R ...")
+ *   peek X Y           the picture's pixel, its bytes in memory order
  * EV_EXPOSE is answered by drawing the window again (its fill and name); every event is kept for "events". */
 #include "libz.h"
 #include "../display.h"
@@ -84,6 +93,8 @@ static void paint(int i, int x, int y, int w, int h)
 static struct hwfb *fbrec;
 static void fb_end(void)
 {
+    if (fbrec && (fbrec->flags & HWFB_PI))
+        return;                         /* D63: a pretend Pi's record stays for the next desktop (the test clears it) */
     if (fbrec && !fbrec->base)
         fbrec->magic = 0;               /* never taken: the server clears a record it took when it ends */
     fbrec = 0;
@@ -114,6 +125,48 @@ static int fb_make(const char *spec)
     fbrec->hvs = fbrec->dl_rtg = fbrec->dl_chip = 0;
     fbrec->magic = HWFB_MAGIC;
     return 0;
+}
+
+/* D63: a pretend Pi (-pi OWxOH): the record says the output and its picture memory's size (dl_rtg); the display server
+ * makes the HVS's window (hvs) and the memory, and writes where the picture is (base, bpr, bpp) */
+static int pi_make(const char *spec)
+{
+    char *e;
+    u32 w = (u32)strtol(spec, &e, 10), h = *e == 'x' ? (u32)strtol(e + 1, &e, 10) : 0;
+    struct hwinfo *hw = (struct hwinfo *)HWINFO_ADDR;
+    if (!strcmp(spec, "off") && sys_getuid() == 0 && hw->magic == HWINFO_MAGIC) {
+        if (hw->fb.flags & HWFB_PI)
+            hw->fb.magic = 0;           /* the pretend Pi gone (no display server may be running) */
+        sys_exit(0);
+    }
+    if (*e || w < 320 || w > 2048 || h < 256 || h > 2048) {
+        dprintf(2, "dpytest: -pi %s: WxH, 320-2048 x 256-2048 (the pretend HDMI)\n", spec);
+        return -1;
+    }
+    if (sys_getuid() != 0 || hw->magic != HWINFO_MAGIC) {
+        dprintf(2, "dpytest: -pi: root's, on a machine whose boot left its hardware table\n");
+        return -1;
+    }
+    if (hw->fb.magic == HWFB_MAGIC && !(hw->fb.flags & HWFB_TEST)) {
+        dprintf(2, "dpytest: -pi: the boot's own card record (zenixboot RTG) is there: not overwritten\n");
+        return -1;
+    }
+    fbrec = &hw->fb;
+    fbrec->magic = 0;
+    fbrec->base = fbrec->hvs = fbrec->bpr = 0;
+    fbrec->width = (u16)w;
+    fbrec->height = (u16)h;
+    fbrec->bpp = 0;
+    fbrec->format = 0;
+    fbrec->dl_rtg = (2u << 20) + 4096;  /* the pretend vc4-mem: 2 MB and the 4 KB left free */
+    fbrec->dl_chip = 0;
+    fbrec->flags = HWFB_TEST | HWFB_PI;
+    fbrec->magic = HWFB_MAGIC;
+    return 0;
+}
+static u32 pi_word(u32 off)             /* a pretend HVS window's word, little-endian as the Pi's */
+{
+    return fbrec && fbrec->hvs ? __builtin_bswap32(*(volatile u32 *)(fbrec->hvs + off)) : 0xFFFFFFFFu;
 }
 
 static void events(void)
@@ -347,8 +400,47 @@ static void command(char *line)
         return;
     }
     if (!strcmp(w[0], "quit")) { dpy_close(); fb_end(); say("dpytest: quit\n"); sys_exit(0); }
+    if (!strcmp(w[0], "reg")) {         /* D63: the pretend HVS's list register */
+        say("dpytest: reg 0x%x\n", pi_word(0x24));
+        return;
+    }
+    if (!strcmp(w[0], "dl") && n >= 2) { /* D63: words of its list memory from N */
+        u32 k = (u32)strtoul(w[1], 0, 0);
+        say("dpytest: dl 0x%x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n", k, pi_word(0x4000 + 4 * k),
+            pi_word(0x4004 + 4 * k), pi_word(0x4008 + 4 * k), pi_word(0x400C + 4 * k), pi_word(0x4010 + 4 * k),
+            pi_word(0x4014 + 4 * k), pi_word(0x4018 + 4 * k), pi_word(0x401C + 4 * k), pi_word(0x4020 + 4 * k));
+        return;
+    }
+    if (!strcmp(w[0], "card") || (!strcmp(w[0], "cardset") && n >= 2)) {     /* D63: DPY_CARD */
+        static struct dpycard c;
+        memset(&c, 0, sizeof c);
+        c.size = sizeof c;
+        int set = w[0][4] == 's';
+        if (set) {
+            char *e;
+            c.w = (u16)strtol(w[1], &e, 10);
+            c.h = (u16)(*e == 'x' ? strtol(e + 1, &e, 10) : 0);
+            c.bits = (u8)(*e == 'x' ? strtol(e + 1, &e, 10) : 0);
+        }
+        int r = dpy_card(&c, set);
+        say("dpytest: %s %d %ux%ux%u flags %u out %ux%u screen %ux%u\n", w[0], r, c.w, c.h, c.bits, c.flags, c.ow,
+            c.oh, dpy_w, dpy_h);
+        return;
+    }
     if (!strcmp(w[0], "peek") && n >= 3) {
         u32 x = (u32)atoi(w[1]), y = (u32)atoi(w[2]);
+        if (fbrec && (fbrec->flags & HWFB_PI)) {   /* D63: the Pi's picture is the screen's size */
+            if (!fbrec->base || !fbrec->bpp || x >= dpy_w || y >= dpy_h) {
+                say("dpytest: peek: no card, or outside it\n");
+                return;
+            }
+            const u8 *p = (const u8 *)fbrec->base + y * fbrec->bpr + x * fbrec->bpp;
+            char hx[9];
+            for (u32 k = 0; k < fbrec->bpp; k++)
+                snprintf(hx + 2 * k, 3, "%02X", p[k]);
+            say("dpytest: peek %u %u %s\n", x, y, hx);
+            return;
+        }
         if (!fbrec || !fbrec->base || x >= fbrec->width || y >= fbrec->height) {
             say("dpytest: peek: no card, or outside it\n");
             return;
@@ -475,7 +567,7 @@ static void command(char *line)
     say("dpytest: %s %s %d\n", w[0], w[1], r);
 }
 
-static const char USAGE[] = "usage: dpytest [-fb WxHxB] [-f FILE]\n";
+static const char USAGE[] = "usage: dpytest [-fb WxHxB | -pi WxH] [-f FILE]\n";
 int main(int argc, char **argv)
 {
     zopt(argc, argv, USAGE);
@@ -483,6 +575,10 @@ int main(int argc, char **argv)
     int a = 1;
     if (argc > a + 1 && !strcmp(argv[a], "-fb")) {
         if (fb_make(argv[a + 1]) < 0)
+            return 2;
+        a += 2;
+    } else if (argc > a + 1 && !strcmp(argv[a], "-pi")) {
+        if (pi_make(argv[a + 1]) < 0)
             return 2;
         a += 2;
     }
@@ -494,7 +590,7 @@ int main(int argc, char **argv)
     }
     int r = dpy_open("dpytest");
     say("dpytest: open %d screen %ux%u depth %u\n", r, dpy_w, dpy_h, dpy_depth);
-    if (fbrec)
+    if (fbrec && !(fbrec->flags & HWFB_PI))
         say("dpytest: card %ux%ux%u at 0x%x\n", fbrec->width, fbrec->height, fbrec->bpp, fbrec->base);
     if (r < 0) {
         fb_end();

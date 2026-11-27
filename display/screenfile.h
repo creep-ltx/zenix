@@ -16,6 +16,7 @@
 #define SF_CONSOLE 2                /* a console line (console, console-colours, console-font) */
 #define SF_VIDEO 4                  /* video */
 #define SF_RTG 8                    /* rtg */
+#define SF_PI 16                    /* pi (D63) */
 struct dpyscreen {
     int mode;                   /* DPYM_HIRES, DPYM_LACE, DPYM_SHRES, DPYM_SHRES_LACE ("auto" and no line: hires) */
     char font[32];              /* "font NAME SIZE": NAME; "" the 8 x 8 ("font builtin", "font topaz 8", no line) */
@@ -28,6 +29,7 @@ struct dpyscreen {
     int colours;                /* console-colours: 0 auto, 2, 4, 8, 16 */
     char cfont[24];             /* console-font: auto, none or NAME ("auto": no line) */
     int rw, rh, rbits;          /* rtg WxH[xBITS]: 0 0 0 "rtg front" or no line (the front screen as it is) */
+    int pw, ph, pbits;          /* (D63) pi WxHxBITS: the Pi's picture (BITS 8, 16, 32); 0 0 0 "pi off" or no line */
 };
 /* path read into s -> 0; -ENOENT (no file: s the defaults). A line not understood is skipped; the first is said on
  * standard error ("WHO: PATH line N: not understood (...): LINE", with how many more there were): one line however

@@ -13,6 +13,7 @@ SYNOPSIS
     screenprefs [-s] [-y] desktop [MODE] [auto|3|4]
                 [font NAME SIZE|builtin]
     screenprefs -s rtg front|WIDTHxHEIGHT[xBITS]
+    screenprefs [-s] [-y] pi off|WIDTHxHEIGHTxBITS
 
 DESCRIPTION
     One program for every setting of the screen, with three faces. In a
@@ -39,10 +40,17 @@ DESCRIPTION
     Card size        shown when a graphics card is in use: the size and
                      bits a pixel zenixboot asks Picasso96 for at the
                      next start (zenixboot RTG RTGMODE=WxHxBITS).
+    Pi screen        shown on a PiStorm with a Raspberry Pi 4 or CM4:
+                     off, or the desktop on the Pi's own picture of a
+                     size and depth (8, 16, 32 bits) the HDMI takes,
+                     scaled to it (pidisplay(1)). Changed at once while
+                     the desktop is on it, else from the desktop's next
+                     start; off always from the next start.
 
     The console's settings, the video standard and the card's size are
-    the system's: only root changes them. A user's desktop settings are
-    their own.
+    the system's: only root changes them. The Pi screen is the system's
+    too: any user of the desktop may Test and Use it, only root Saves.
+    A user's desktop settings are their own.
 
     Each face changes its own screen at once: the form the console's,
     the window the desktop's. The other screen's settings are shown and
@@ -62,7 +70,9 @@ DESCRIPTION
     The command: video, console and desktop change those settings now,
     where that screen is free (the console's while the console is shown,
     the desktop's while it runs); -s saves them too. At a terminal a new
-    mode asks to be kept as above. rtg only saves (-s).
+    mode asks to be kept as above. rtg only saves (-s). pi changes the
+    Pi's picture now when the desktop is on it (any size from 320 x 256
+    up to the HDMI's, not only those listed), else -s saves it.
 
 KEYS
     Up and Down (or Tab) a setting, Left and Right (or Space) change it;
@@ -98,7 +108,8 @@ FILES
         console-colours auto|2|4|8|16, console-font auto|none|NAME,
         desktop hires|hires-lace|superhires|superhires-lace,
         desktop-depth auto|3|4, desktop-font NAME SIZE|builtin,
-        rtg front|WIDTHxHEIGHT[xBITS]; # starts a comment. init reads it
+        rtg front|WIDTHxHEIGHT[xBITS], pi off|WIDTHxHEIGHTxBITS;
+        # starts a comment. init reads it
         at every start, displayd when it starts.
     ~/.config/screen/screen   a user's desktop lines, applied by zdesk
                               when the session starts
@@ -119,6 +130,7 @@ EXAMPLES
     screenprefs -s -y console hires-lace colours 8
     screenprefs desktop superhires 4
     screenprefs -s rtg 1280x960x16
+    screenprefs pi 1920x1080x8
 
 SEE ALSO
-    mouseprefs(1), zdesk(1), init(8), zenixboot(8)
+    mouseprefs(1), pidisplay(1), zdesk(1), init(8), zenixboot(8)

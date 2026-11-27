@@ -1,0 +1,78 @@
+PIDISPLAY(1)		Zenix manual
+
+NAME
+    pidisplay - the PiStorm's Raspberry Pi video: modes, list, test
+
+SYNOPSIS
+    pidisplay -l | --list
+    pidisplay -d | --dump [WORD]
+    pidisplay test WIDTHxHEIGHTxBITS
+    pidisplay console
+
+DESCRIPTION
+    On a PiStorm with a Raspberry Pi 4 or CM4 under Emu68 the HDMI
+    signal is fixed when Emu68 starts. As AmigaOS's VideoCore.card,
+    Zenix gives the Pi's hardware video scaler (HVS) a picture of the
+    size and depth chosen and lets it scale that to the HDMI: square
+    pixels, centred, black bars where it does not fill the screen
+    (DESIGN D63, docs/d63-pistorm-gfx.md). The desktop's display server
+    does it (the "pi" line of /etc/screen, screenprefs(1)'s "Pi screen"
+    row); pidisplay shows what the Pi offers and checks the path by
+    hand. The HDMI's size and the monitor's EDID are the kernel's, asked
+    of the Pi's firmware once at boot.
+
+OPTIONS
+    -l, --list
+        Any user. The HDMI, the monitor and the modes, a line each:
+            output 1920x1080 60       the HDMI's size and frame rate
+            monitor DELL U2412M       the monitor's name (its EDID)
+            preferred 1920x1200       the monitor's own size, when the
+                                      HDMI's is another (config.txt)
+            memory 0x3e000000 16777216   Emu68's picture memory
+            mode 1280x720 8 16 32     a size and the depths that fit
+        A mode line ends with "native" for the HDMI's own size and
+        "preferred" for the monitor's. The sizes: 320x256, 640x480,
+        640x512, 800x600, 1024x768, 1280x720, 1280x960, 1280x1024,
+        1440x900, 1600x1200, 1920x1080, 1920x1200, 2560x1440, the HDMI's
+        and the monitor's own, each if it fits the HDMI.
+    -d, --dump [WORD]
+        Any user. The display list the HDMI shows (or the one at WORD
+        of the HVS's list memory, 0-4095), a word a line, with the
+        console's list Zenix kept. After zenixboot RTG it is the list
+        AmigaOS's VideoCore.card made.
+    test WIDTHxHEIGHTxBITS
+        Root, from a text console while no desktop runs: colour bands
+        in a white frame on the HDMI for 5 seconds (any size from
+        320 x 256 up to the HDMI's; BITS 8, 16 or 32), then the HDMI as
+        it was.
+    console
+        Root: the HDMI back to the console's picture (the C790's
+        capture), after a display server was killed while the desktop
+        was shown.
+
+EXIT STATUS
+    0 done; 1 not a Raspberry Pi 4 under Emu68, a size the HDMI does
+    not take, the list memory refused what was written, the desktop
+    runs (test), no console's list kept (console); 2 usage.
+
+FILES
+    /etc/screen    the "pi off|WIDTHxHEIGHTxBITS" line: the desktop's
+                   picture on the Pi (screenprefs(1) sets it)
+
+NOTES
+    The text consoles stay on the Amiga's chipset. The desktop keeps
+    its 16 pens at every depth: 8 bits is the lightest, 16 and 32 look
+    the same. Zenix uses the HVS's list memory words 0x800-0x9FF only,
+    so what AmigaOS left there (the capture's list) stays. Not with
+    full memory protection (no Emu68 has a 68k MMU). The monitor's EDID
+    extension blocks are not read. Nothing here has run on a real Pi
+    yet: docs/d63-pistorm-gfx.md section "On the A1200" is the first
+    trial.
+
+EXAMPLES
+    pidisplay --list
+    sudo pidisplay test 1280x720x16
+    sudo screenprefs -s pi 1280x720x16
+
+SEE ALSO
+    screenprefs(1), displayd(8), zenixboot(8)

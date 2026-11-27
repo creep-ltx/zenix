@@ -260,6 +260,11 @@ HVS's display-list register (`SCALER_DISPLIST1`, the peripheral base + 0x400024)
 picture and the one AmigaOS showed after `LoadView(NULL)` (the chipset's, through the C790's capture on the owner's
 machine). zenixboot writes it after stage0 has cleared the table; stage0 and the kernel never write it, and
 `DRV_HWINFO` gives drivers only the first 408 bytes. The display server reads it (below).
+Right after the table (0x1100 + 440, `HWDISP_ADDR`, in the same cleared 1 KB the boot hands over) the kernel leaves
+**`struct hwdisp`** (DESIGN D63): on a Pi, the HDMI's size and the monitor's EDID block 0, asked once at boot through
+the firmware's mailbox in `kernel/emmc.c` (`mbox_display`, boot-only: only the kernel can clean and drop the cache
+lines a mailbox message needs). It is not part of `struct hwinfo` (the kernel keeps no copy; `DRV_HWINFO` unchanged);
+the display server, screenprefs and pidisplay read it there.
 
 ### Random numbers (`kernel/random.c`, DESIGN D19 9.3)
 
@@ -1812,6 +1817,16 @@ name); `ls` 5.66 -> 1.05 s, `ls -l` 6.83 -> 2.19 s, the file view 6.6 -> 1.7 s.
   never on a real card (docs/d43-rtg.md 11). The demo floppies carry a second build of the same files,
   `displayd-nortg` (`-DNO_RTG`: `rtg` the constant 0, no `fb.c`, every card branch gone; installed there as
   `/sbin/displayd`): their bootblock never writes a card record (D43 section 3). Every other image has the full one.
+  **On the Pi's own picture** (DESIGN D63, docs/d63-pistorm-gfx.md, `display/server/hvslist.c`): with a `pi WxHxBITS`
+  line in `/etc/screen` on a Pi 4 under Emu68 (`hvs_find`: the hardware table and `struct hwdisp`) the card is a
+  picture of that size and depth (8 bits: the pens themselves, the palette in the HVS's list memory; 16: R5G6B5PC; 32:
+  B8G8R8A8) at the start of Emu68's `vc4-mem`, which the server describes to the HVS by one plane's display list
+  (words 0x800-0x9FF of the list memory, two lists A and B used in turn, the scaling kernel, the blank list, the
+  console's list kept at 0x801), scaled to the HDMI by one factor, centred. A new list is shown only after the
+  picture is drawn; a list is rewritten only after the HVS has taken the blank list (its frame count moved).
+  `DPY_CARD` (22) asks a card's size and, on the Pi's picture, changes it live (a new pens' bitmap, every client
+  told, the windows kept on the screen). Verified in FS-UAE by `tools/rtg-test.sh pi` (a pretend Pi in fast RAM,
+  `dpytest -pi`) and on the PC by `tools/hvs-host-test.sh`; never on a real Pi (d63 section 12).
 - **The window manager and the terminal** (DESIGN D38 steps 5-6): `zdesk` (`display/zdesk/`, docs/man/zdesk.txt)
   is an ordinary program, the display server's window manager (`DPY_WM_HELLO`): it gives the server its theme's
   frame style and palette, places and shows new windows, answers clicks on frames (drags run in the server: an

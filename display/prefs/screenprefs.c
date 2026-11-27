@@ -24,6 +24,8 @@
 #include "../keys.h"
 #include "../server/amifont.h"
 #include "cfgfile.h"
+#include "../../kernel/hwinfo.h"
+#include "../server/hvslist.h"
 typedef unsigned char u8;
 
 #define FONTDIR "/usr/share/fonts/amiga"
@@ -33,11 +35,12 @@ typedef unsigned char u8;
 #define KEEP_S 10                       /* the fall-back: seconds to keep a new mode */
 
 /* ---- the rows ---- */
-enum { R_VIDEO, R_CMODE, R_CCOL, R_CFONT, R_DMODE, R_DDEPTH, R_DFONT, R_THEME, R_RTG, NR };
+enum { R_VIDEO, R_CMODE, R_CCOL, R_CFONT, R_DMODE, R_DDEPTH, R_DFONT, R_THEME, R_RTG, R_PI, NR };
 static const char *const rlabel[NR] = { "Video", "Console mode", "Console colours", "Console font", "Desktop mode",
-                                        "Desktop depth", "Desktop font", "Desktop colours", "Card size" };
+                                        "Desktop depth", "Desktop font", "Desktop colours", "Card size",
+                                        "Pi screen" };
 static const char *const ckey[NR] = { "video", "console", "console-colours", "console-font", "desktop",
-                                      "desktop-depth", "desktop-font", 0, "rtg" };
+                                      "desktop-depth", "desktop-font", 0, "rtg", "pi" };
 static int rows[NR], nrows;             /* the rows shown, in order */
 static int verbose, text_face, quiet_old;
 
@@ -57,6 +60,80 @@ static const short rtgs[][3] = { { 0, 0, 0 }, { 640, 480, 16 }, { 800, 600, 16 }
     { 1280, 720, 16 }, { 1280, 960, 16 }, { 1280, 1024, 16 }, { 1920, 1080, 16 }, { 640, 480, 32 }, { 800, 600, 32 },
     { 1024, 768, 32 }, { 1280, 720, 32 }, { 1280, 960, 32 }, { 1280, 1024, 32 }, { 1920, 1080, 32 } };
 #define NRTG (int)(sizeof rtgs / sizeof rtgs[0])
+/* D63 (docs/d63-pistorm-gfx.md 10): the Pi's own picture's sizes and depths (hvslist.c's list), 0 "off" */
+#define NPI 104
+static short pis[NPI][3];
+static int npi = 1, pi_ok, on_pi;       /* entries; the machine is a Pi (or a test's pretend one); the desktop is on it */
+static struct hvspi pip;
+/* the Pi's modes: /bin/pidisplay --list's lines (docs/man/pidisplay.txt, frozen), run only on a Pi (the hardware
+ * table's flags, or a test's pretend Pi): the EDID reader and the mode list stay in that program, loaded when asked */
+static void pi_scan(void)
+{
+    const struct hwinfo *h = (const struct hwinfo *)HWINFO_ADDR;
+    if (prot_full() || h->magic != HWINFO_MAGIC)
+        return;                         /* (no Pi has a 68k MMU) */
+    if ((h->flags & (HW_DT | HW_BCM2711)) != (HW_DT | HW_BCM2711) &&
+        !(h->fb.magic == HWFB_MAGIC && (h->fb.flags & (HWFB_TEST | HWFB_PI)) == (HWFB_TEST | HWFB_PI)))
+        return;
+    char *argv[3] = { "/bin/pidisplay", "--list", 0 }, *out = malloc(2048);
+    int fd[2], n = 0, r;
+    if (!out || sys_pipe(fd) < 0) {
+        free(out);
+        return;
+    }
+    int io[3] = { -1, fd[1], 2 };       /* (its error line, "not a Raspberry Pi...", on ours) */
+    int pid = sys_spawn(argv[0], argv, io);
+    sys_close(fd[1]);
+    while (pid >= 0 && n < 2047 && (r = sys_read(fd[0], out + n, 2047 - (u32)n)) > 0)
+        n += r;
+    sys_close(fd[0]);
+    out[n] = 0;
+    if (pid < 0 || sys_wait(pid) != 0) {
+        free(out);
+        return;
+    }
+    memset(&pip, 0, sizeof pip);
+    for (char *l = out, *e; *l; l = e) {
+        e = strchr(l, '\n');
+        e = e ? (*e = 0, e + 1) : l + strlen(l);
+        unsigned w, hh, b;
+        char sz[24], *sp = strchr(l, ' ');
+        if (!sp || sp - l > 8)
+            continue;
+        int k = 0;
+        for (const char *q = sp + 1; *q && *q != ' ' && k < 23; )
+            sz[k++] = *q++;
+        sz[k] = 0;
+        if (!strncmp(l, "output ", 7) && hvs_parse_size(sz, &w, &hh, &b) == 0)
+            pip.ow = w, pip.oh = hh;
+        else if (!strncmp(l, "memory ", 7)) {
+            const char *q = strchr(sp + 1, ' ');
+            pip.vc4size = q ? (unsigned)strtoul(q + 1, 0, 10) : 0;
+        } else if (!strncmp(l, "mode ", 5) && hvs_parse_size(sz, &w, &hh, &b) == 0 && !b)
+            for (const char *q = sp + 1 + k; *q == ' ' && npi < NPI; ) {
+                int bits = (int)strtoul(q + 1, (char **)&q, 10);
+                if (bits != 8 && bits != 16 && bits != 32)
+                    break;              /* ("native", "preferred") */
+                pis[npi][0] = (short)w, pis[npi][1] = (short)hh, pis[npi][2] = (short)bits;
+                npi++;
+            }
+    }
+    free(out);
+    pi_ok = pip.ow && pip.oh && pip.vc4size;
+}
+/* the entry of w x h x b (one of one's own added when the HDMI takes it) -> its index, 0 for none ("off"), -1 */
+static int pi_find(int w, int h, int b)
+{
+    if (!w)
+        return 0;
+    for (int i = 1; i < npi; i++)
+        if (pis[i][0] == w && pis[i][1] == h && pis[i][2] == b)
+            return i;
+    if (!pi_ok || npi >= NPI || !hvs_size_ok((unsigned)w, (unsigned)h, (unsigned)b, pip.ow, pip.oh, pip.vc4size))
+        return -1;
+    pis[npi][0] = (short)w, pis[npi][1] = (short)h, pis[npi][2] = (short)b;
+    return npi++;
+}
 
 /* the machine (CON_MODE's CONM_INFO; 0 from an older kernel: hires and interlace only, the standard not known) */
 static int info = -1, has_info;
@@ -376,6 +453,10 @@ static void line_of(int r, const struct choice *c, char *b, int n)
         if (v) snprintf(b, (u32)n, "rtg %dx%dx%d", rtgs[v][0], rtgs[v][1], rtgs[v][2]);
         else snprintf(b, (u32)n, "rtg front");
         break;
+    case R_PI:
+        if (v > 0) snprintf(b, (u32)n, "pi %dx%dx%d", pis[v][0], pis[v][1], pis[v][2]);
+        else snprintf(b, (u32)n, "pi off");
+        break;
     default: b[0] = 0;
     }
 }
@@ -424,7 +505,7 @@ static int save(const struct choice *c)
     for (int i = 0; i < nrows; i++) {
         int k = rows[i];
         theme |= k == R_THEME;
-        if (!ckey[k] || (!root() && is_console(k)) || (on_card && (k == R_DMODE || k == R_DDEPTH)))
+        if (!ckey[k] || (!root() && (is_console(k) || k == R_PI)) || (on_card && (k == R_DMODE || k == R_DDEPTH)))
             continue;                   /* (a card's desktop: the file's chipset mode stays) */
         con += k == R_CMODE || k == R_CCOL || k == R_CFONT;
         desk += k == R_DMODE || k == R_DFONT;
@@ -433,6 +514,9 @@ static int save(const struct choice *c)
         lines[n] = l[n];
         n++;
     }
+    for (int i = 0; i < nrows && !root(); i++)
+        if (rows[i] == R_PI && c->v[R_PI] != was.v[R_PI])
+            say("The Pi screen is root's to save (sudo screenprefs): the rest saved");
     if (root())
         r = cfg_set(SCREEN_SYS, keys, lines, n);
     else
@@ -589,6 +673,24 @@ static int apply(const struct choice *c)
             now.v[R_DMODE] = c->v[R_DMODE];
             now.v[R_DDEPTH] = c->v[R_DDEPTH];
         }
+        if (on_pi && c->v[R_PI] != now.v[R_PI]) {    /* D63: the Pi's picture's size, live (DPY_CARD) */
+            int v = c->v[R_PI];
+            struct dpycard d;
+            memset(&d, 0, sizeof d);
+            d.size = sizeof d;
+            if (v > 0) {
+                d.w = (unsigned short)pis[v][0], d.h = (unsigned short)pis[v][1], d.bits = (u8)pis[v][2];
+                for (int t = 0; (r = dpy_card(&d, 1)) == -EBUSY && t < 50; t++)
+                    sys_sleep(10);      /* (a drag under way: a fall-back must still get back, so it waits up to 5 s) */
+                if (r < 0) {
+                    say(r == -ENOMEM ? "Not enough fast RAM for that size" : r == -EBUSY ? "The screen is busy: try again"
+                        : r == -E2BIG ? "Too big for this HDMI" : "The size was refused");
+                    return -1;
+                }
+                now.v[R_PI] = v;
+            } else
+                say("The Pi's picture off: from the desktop's next start (Save)");
+        }
         int f = c->v[R_DFONT];
         if (f != now.v[R_DFONT]) {
             if ((r = dpy_fontset(f ? fonts[f].name : 0, fonts[f].size)) < 0) {
@@ -610,7 +712,8 @@ static int apply(const struct choice *c)
 static int mode_changed(const struct choice *a, const struct choice *b)
 {
     return live_console() ? a->v[R_VIDEO] != b->v[R_VIDEO] || a->v[R_CMODE] != b->v[R_CMODE]
-                          : a->v[R_DMODE] != b->v[R_DMODE] || a->v[R_DDEPTH] != b->v[R_DDEPTH];
+                          : a->v[R_DMODE] != b->v[R_DMODE] || a->v[R_DDEPTH] != b->v[R_DDEPTH] ||
+                            (on_pi && a->v[R_PI] != b->v[R_PI] && a->v[R_PI] > 0 && b->v[R_PI] > 0);
 }
 
 /* ---- mode providers (docs/d62-screen-modes.md 8.1) ----
@@ -663,9 +766,23 @@ static int card_modes(struct smode *m, int max)
     }
     return n;
 }
+static int pi_here(void) { return pi_ok; }
+static int pi_modes(struct smode *m, int max)
+{
+    int n = 0;
+    for (int i = 1; i < npi && n < max; i++, n++) {
+        m[n].id = i;
+        m[n].name = 0;
+        m[n].w = pis[i][0], m[n].h = pis[i][1], m[n].bits = pis[i][2];
+        m[n].dmin = m[n].dmax = 0;
+        m[n].next = (unsigned char)!on_pi;
+    }
+    return n;
+}
 static const struct provider providers[] = {
     { "desktop", chip_here, chip_modes },
     { "rtg", card_here, card_modes },
+    { "pi", pi_here, pi_modes },        /* D63 */
 };
 #define NPROV (int)(sizeof providers / sizeof providers[0])
 /* the desktop modes this machine shows, in cycle order */
@@ -726,6 +843,10 @@ static void value(int i, char *b, int n)
         if (v) snprintf(b, (u32)n, "%d x %d, %d bits (next start)", rtgs[v][0], rtgs[v][1], rtgs[v][2]);
         else snprintf(b, (u32)n, "as zenixboot finds it");
         break;
+    case R_PI:
+        if (v > 0) snprintf(b, (u32)n, "%d x %d, %d bits%s", pis[v][0], pis[v][1], pis[v][2], on_pi ? "" : " (next start)");
+        else snprintf(b, (u32)n, "off%s", on_pi ? " (next start)" : "");
+        break;
     }
 }
 static void cycle(int i, int d)
@@ -761,6 +882,7 @@ static void cycle(int i, int d)
     case R_DFONT: *v = (*v + d + nfonts) % nfonts; break;
     case R_THEME: *v = (*v + d + nthemes) % nthemes; break;
     case R_RTG: *v = (*v + d + NRTG) % NRTG; break;
+    case R_PI: *v = ((*v < 0 ? 0 : *v) + d + npi) % npi; break;
     }
     row = i;
 }
@@ -1016,6 +1138,7 @@ static int press(int b)
         apply(&back);
         sel.v[R_VIDEO] = now.v[R_VIDEO], sel.v[R_CMODE] = now.v[R_CMODE];
         sel.v[R_DMODE] = now.v[R_DMODE], sel.v[R_DDEPTH] = now.v[R_DDEPTH];
+        sel.v[R_PI] = now.v[R_PI];      /* (D63) */
         say(m[0] ? m : "Not kept: back to the mode before");
         report("reverted");
         draw();
@@ -1046,7 +1169,7 @@ static int press(int b)
         int other = 0;
         for (int i = 0; i < nrows; i++)
             other |= sel.v[rows[i]] != was.v[rows[i]] && (live_console() ? !is_console(rows[i]) || rows[i] == R_RTG
-                                                                            : is_console(rows[i]));
+                                                          : is_console(rows[i]) || (rows[i] == R_PI && !on_pi));
         if (other)
             say(b == 2 ? "Saved; the other screen's settings count from its next start"
                        : "The other screen's settings: only Save keeps them");
@@ -1154,6 +1277,14 @@ static void in_effect(void)
         if (md < 0)
             md = dpy_mode(DPYM_ASK) | dpy_depth << 8;
         on_card = (md & 0xFF) == DPYM_RTG;
+        struct dpycard dc;
+        memset(&dc, 0, sizeof dc);
+        dc.size = sizeof dc;
+        if (on_card && dpy_card(&dc, 0) == 0 && (dc.flags & DPYCF_LIVE)) {   /* D63: the desktop is on the Pi */
+            on_pi = 1;
+            if ((was.v[R_PI] = pi_find(dc.w, dc.h, dc.bits)) < 0)
+                was.v[R_PI] = 0;
+        }
         was.v[R_DMODE] = md & 0xFF;
         if (md >> 8 != (was.v[R_DDEPTH] ? was.v[R_DDEPTH] : aga() ? 4 : 3))
             was.v[R_DDEPTH] = md >> 8;  /* (a session's Use: the depth shown, not the file's) */
@@ -1186,6 +1317,8 @@ static void in_effect(void)
     }
     was.v[R_THEME] = theme_find(th);
     was.v[R_RTG] = rtg_find(sys_f.rw, sys_f.rh, sys_f.rbits);
+    if (!on_pi && (was.v[R_PI] = pi_find(sys_f.pw, sys_f.ph, sys_f.pbits)) < 0)
+        was.v[R_PI] = 0;                /* (a saved size this HDMI does not take: off, said by Save) */
     now = sel = was;
     /* the rows this machine has */
     nrows = 0;
@@ -1198,8 +1331,10 @@ static void in_effect(void)
         rows[nrows++] = R_DDEPTH;
     rows[nrows++] = R_DFONT;
     rows[nrows++] = R_THEME;
-    if (on_card || (sys_f.found & SF_RTG))
+    if ((on_card && !on_pi) || (sys_f.found & SF_RTG))
         rows[nrows++] = R_RTG;
+    if (pi_ok)
+        rows[nrows++] = R_PI;           /* D63 */
 }
 
 /* ---- the command line ---- */
@@ -1218,9 +1353,18 @@ static void list(void)
         struct smode md[NRTG];
         const struct provider *pv = &providers[p];
         int cur = !strcmp(pv->display, "rtg") ? was.v[R_RTG] : was.v[R_DMODE];
-        if (!pv->here()) {
-            if (!strcmp(pv->display, "rtg"))      /* no card in use, none asked for: the sizes left out */
+        if (!pv->here() || (!strcmp(pv->display, "rtg") && on_pi && !(sys_f.found & SF_RTG))) {
+            if (!strcmp(pv->display, "rtg") && !on_pi)    /* no card in use, none asked for: the sizes left out */
                 oprintf("rtg front * (no graphics card in use)\n");
+            continue;
+        }
+        if (!strcmp(pv->display, "pi")) {      /* D63: the Pi's own picture */
+            oprintf("pi off%s\n", was.v[R_PI] > 0 ? "" : " *");
+            struct smode pm[NPI];
+            int k = pi_modes(pm, NPI);
+            for (int i = 0; i < k; i++)
+                oprintf("pi %dx%dx%d (%s)%s\n", pm[i].w, pm[i].h, pm[i].bits, pm[i].next ? "next start" : "live",
+                        was.v[R_PI] == pm[i].id ? " *" : "");
             continue;
         }
         if (!strcmp(pv->display, "rtg"))
@@ -1252,10 +1396,15 @@ static void quiet(void)
     }
     int v = was.v[R_VIDEO], d = was.v[R_DMODE];
     line_of(R_DFONT, &was, m, sizeof m);
-    oprintf("screenprefs: video %s (%s shown), console %s, colours %s, font %s, desktop %s, depth %s%d, %s\n",
+    char pl[40] = "";
+    if (pi_ok) {                        /* D63: at the line's end, only on a Pi */
+        pl[0] = ',', pl[1] = ' ';
+        line_of(R_PI, &was, pl + 2, sizeof pl - 2);
+    }
+    oprintf("screenprefs: video %s (%s shown), console %s, colours %s, font %s, desktop %s, depth %s%d, %s%s\n",
             v == 1 ? "pal" : v == 2 ? "ntsc" : "auto", shown_ntsc() ? "ntsc" : "pal",
             was.v[R_CMODE] ? "hires-lace" : "hires", c + 16, f + 13, mname[d], was.v[R_DDEPTH] ? "" : "auto ",
-            was.v[R_DDEPTH] ? was.v[R_DDEPTH] : aga() ? 4 : 3, m);
+            was.v[R_DDEPTH] ? was.v[R_DDEPTH] : aga() ? 4 : 3, m, pl);
     oflush();
 }
 static const char USAGE[] =
@@ -1264,7 +1413,8 @@ static const char USAGE[] =
     "       screenprefs [-s] [-y] video pal|ntsc|auto\n"
     "       screenprefs [-s] [-y] console [hires|hires-lace] [colours auto|2|4|8|16] [font NAME]\n"
     "       screenprefs [-s] [-y] desktop [MODE] [auto|3|4] [font NAME SIZE|builtin]\n"
-    "       screenprefs -s rtg front|WIDTHxHEIGHT[xBITS]\n";
+    "       screenprefs -s rtg front|WIDTHxHEIGHT[xBITS]\n"
+    "       screenprefs [-s] [-y] pi off|WIDTHxHEIGHTxBITS\n";
 static int fail(const char *what, const char *why_)
 {
     dprintf(2, "screenprefs: %s: %s\n", what, why_);
@@ -1323,6 +1473,20 @@ static int words(int which, int argc, char **argv)
                 }
             }
         }
+        else if (which == R_PI && i == 0) {    /* D63: any size the HDMI takes, not only the listed */
+            unsigned a, h, bb;
+            if (!strcmp(w, "off"))
+                sel.v[R_PI] = 0, ok = 1;
+            else if (hvs_parse_size(w, &a, &h, &bb) == 0 && bb) {
+                sel.v[R_PI] = pi_find((int)a, (int)h, (int)bb);
+                if (sel.v[R_PI] < 0) {
+                    dprintf(2, "screenprefs: %s: not a picture this HDMI takes (%u x %u to %u x %u, 8, 16 or 32 bits)\n",
+                            w, HVS_MINW, HVS_MINH, pip.ow, pip.oh);
+                    sys_exit(1);
+                }
+                ok = 1;
+            }
+        }
         if (!ok) {
             dprintf(2, "screenprefs: %s: not understood here\n", argv[i]);
             zusage(USAGE);
@@ -1334,14 +1498,16 @@ static int command(int savef, int yes, int argc, char **argv)
 {
     const char *c = argv[0];
     int which = !strcmp(c, "video") ? R_VIDEO : !strcmp(c, "console") ? R_CMODE : !strcmp(c, "desktop") ? R_DMODE
-              : !strcmp(c, "rtg") ? R_RTG : -1;
+              : !strcmp(c, "rtg") ? R_RTG : !strcmp(c, "pi") ? R_PI : -1;
     if (which < 0 || (which != R_CMODE && which != R_DMODE && argc < 2) || (which == R_RTG && !savef)) {
         if (which == R_RTG && !savef)
             dprintf(2, "screenprefs: rtg: a card's size counts from the next start: -s saves it\n");
         zusage(USAGE);
     }
+    if (which == R_PI && !pi_ok)
+        return fail(c, "not a Raspberry Pi 4 under Emu68 (man pidisplay)");
     words(which, argc - 1, argv + 1);
-    if (which != R_DMODE && !root())
+    if (which != R_DMODE && (which != R_PI || savef) && !root())
         return fail(c, "the console's and the system's settings are root's (sudo screenprefs)");
     if (which == R_DMODE && on_card && (sel.v[R_DMODE] != now.v[R_DMODE] || sel.v[R_DDEPTH] != now.v[R_DDEPTH]))
         return fail(c, "the desktop is on a graphics card: its size counts from the next start (screenprefs -s rtg)");
@@ -1352,10 +1518,10 @@ static int command(int savef, int yes, int argc, char **argv)
     if (which == R_VIDEO && sel.v[R_VIDEO] && want_ntsc(sel.v[R_VIDEO]) != shown_ntsc() && !beam())
         return fail(argv[1], "this machine shows only its own video standard");
     /* applied where the screen is ours: the console's rows by CON_MODE etc., the desktop's when displayd runs */
-    text_face = which != R_DMODE;
+    text_face = which != R_DMODE && which != R_PI;
     struct choice before = now;
     int applied = 0;
-    if (which == R_DMODE ? live_desktop() : which != R_RTG) {
+    if (which == R_DMODE ? live_desktop() : which == R_PI ? live_desktop() && on_pi : which != R_RTG) {
         if (apply(&sel) < 0)
             return fail(c, msg);
         applied = 1;
@@ -1383,6 +1549,8 @@ static int command(int savef, int yes, int argc, char **argv)
         }
     } else if (!savef && which == R_DMODE)
         return fail(c, "the desktop is not running here: -s saves it for its next start");
+    else if (!savef && which == R_PI)
+        return fail(c, "the desktop is not on the Pi's picture: -s saves it for the desktop's next start");
     if (savef) {
         if (sel.v[R_RTG] < 0) {         /* a card size of one's own */
             char l[48];
@@ -1397,6 +1565,7 @@ static int command(int savef, int yes, int argc, char **argv)
             if (which == R_CMODE) rows[nrows++] = R_CMODE, rows[nrows++] = R_CCOL, rows[nrows++] = R_CFONT;
             if (which == R_DMODE) rows[nrows++] = R_DMODE, rows[nrows++] = R_DDEPTH, rows[nrows++] = R_DFONT;
             if (which == R_RTG) rows[nrows++] = R_RTG;
+            if (which == R_PI) rows[nrows++] = R_PI;
             int r = save(&sel);
             if (r < 0)
                 return fail(root() ? SCREEN_SYS : "~/" SCREEN_USER, why(r));
@@ -1406,6 +1575,8 @@ static int command(int savef, int yes, int argc, char **argv)
         dprintf(1, "screenprefs: the card's size counts from the next start, with zenixboot RTG RTGMODE=%dx%dx%d\n",
                 sel.v[R_RTG] > 0 ? rtgs[sel.v[R_RTG]][0] : sys_f.rw, sel.v[R_RTG] > 0 ? rtgs[sel.v[R_RTG]][1] :
                 sys_f.rh, sel.v[R_RTG] > 0 ? rtgs[sel.v[R_RTG]][2] : sys_f.rbits);
+    else if (which == R_PI && !applied)
+        dprintf(1, "screenprefs: the Pi's picture counts from the desktop's next start\n");
     else if (applied && msg[0])
         dprintf(1, "screenprefs: %s\n", msg);
     return 0;
@@ -1442,7 +1613,8 @@ int main(int argc, char **argv)
     if (!strcmp(me, "deskprefs") && !force)
         force = 2;
     int want_win = force == 2 || (!force && !on_con && displayd_runs());
-    if ((want_win || (i < argc && !strcmp(argv[i], "desktop")) || listf || quietf) && displayd_runs())
+    if ((want_win || (i < argc && (!strcmp(argv[i], "desktop") || !strcmp(argv[i], "pi"))) || listf || quietf) &&
+        displayd_runs())
         dpy_ok = dpy_open("screenprefs") == 0;
     if (force == 2 && !dpy_ok) {
         dprintf(2, "%s: the desktop: not reachable\n", me);
@@ -1452,6 +1624,7 @@ int main(int argc, char **argv)
     fonts_scan();
     cfonts_scan();
     themes_scan();
+    pi_scan();                          /* D63 */
     read_files();
     in_effect();
     if (listf) { list(); return 0; }

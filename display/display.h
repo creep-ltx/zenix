@@ -44,6 +44,8 @@ int dpy_mode(int mode);                  /* DPYM_HIRES, DPYM_LACE (DPYM_ASK: onl
                                          * every client gets EV_SCREEN and dpy_w, dpy_h follow (D38 "Screen modes") */
 int dpy_mode2(int mode, int depth);     /* D62: the mode and the depth (0 as it is; mode DPYM_ASK: the depth only;
                                          * depth DPYMD_ASK: only asked) -> mode | depth << 8, -errno; dpy_depth follows */
+struct dpycard;
+int dpy_card(struct dpycard *c, int set);    /* D63: DPY_CARD (DPYC_SET 0, DPYC_GET 1) -> 0, -errno */
 int dpy_fontset(const char *name, int size);    /* the desktop's font now: name in a buffer of DPY_FONTNAME bytes
                                          * (0 or "": the 8 x 8) -> 0, -errno;
                                          * every client gets EV_SCREEN with DPYS_FONT (D38 "Preferences") */

@@ -273,6 +273,7 @@ int dpy_next(struct dpyev *e, int ticks)
 
 int dpy_mode(int mode) { return dpy_call(DPY_MODE, (unsigned)mode, 0, 0, 0); }
 int dpy_mode2(int mode, int depth) { return dpy_call(DPY_MODE, (unsigned)mode, (unsigned)depth, 0, 0); }
+int dpy_card(struct dpycard *c, int set) { return dpy_call(DPY_CARD, (unsigned)c, set ? DPYC_SET : DPYC_GET, 0, 0); }
 int dpy_fontset(const char *name, int size)    /* name: DPY_FONTNAME bytes of the caller's (the server reads them all) */
 {
     return dpy_call(DPY_FONT_SET, name && *name ? (unsigned)name : 0, (unsigned)size, 0, 0);

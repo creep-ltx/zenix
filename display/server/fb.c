@@ -89,11 +89,13 @@ void fb_planar(const u8 *img, unsigned stride, unsigned bpr, int depth, const u8
 
 /* ---- the card ---- */
 /* Picasso96's RGBFormat numbers (its interface file, libraries/Picasso96.h: names and numbers only) */
-enum { RGBFB_R8G8B8 = 2, RGBFB_B8G8R8, RGBFB_R5G6B5PC, RGBFB_R5G5B5PC, RGBFB_A8R8G8B8, RGBFB_A8B8G8R8, RGBFB_R8G8B8A8,
+enum { RGBFB_CLUT = 1, RGBFB_R8G8B8 = 2, RGBFB_B8G8R8, RGBFB_R5G6B5PC, RGBFB_R5G5B5PC, RGBFB_A8R8G8B8, RGBFB_A8B8G8R8, RGBFB_R8G8B8A8,
        RGBFB_B8G8R8A8, RGBFB_R5G6B5, RGBFB_R5G5B5, RGBFB_B5G6R5PC, RGBFB_B5G5R5PC };
 
 int fb_format_ok(int format, int bpp)
 {
+    if (format == RGBFB_CLUT)
+        return bpp == 1;                /* D63: the Pi's 8-bit picture, whose palette its driver gives (d63 8) */
     if (format == RGBFB_R8G8B8 || format == RGBFB_B8G8R8)
         return bpp == 3;
     if (format >= RGBFB_A8R8G8B8 && format <= RGBFB_B8G8R8A8)
@@ -135,8 +137,11 @@ void fb_colour(int format, unsigned rgb12, u8 out[4])
 
 void fb_pens(struct fbcard *c, const unsigned short *pal, int n, const unsigned short ptrcol[3])
 {
-    for (int i = 0; i < FB_PENS + 3; i++)
+    for (int i = 0; i < FB_PENS + 3; i++) {
         fb_colour(c->format, i < FB_PENS ? (i < n ? pal[i] : 0) : ptrcol[i - FB_PENS], c->pix[i]);
+        if (c->format == RGBFB_CLUT)
+            c->pix[i][0] = (u8)i;       /* D63: a pen is its own byte, the pointer's colours entries 16-18 */
+    }
 }
 
 /* a row of pens into the card: n pixels from s to d (the card's bytes) */
@@ -170,6 +175,8 @@ static void put_row(const struct fbcard *c, u8 *d, const u8 *s, int n)
             memcpy(d, &t[*s++ & 15], 2);
             d += 2;
         }
+    } else if (c->bpp == 1) {
+        memcpy(d, s, (unsigned long)n);  /* D63: the pens are the picture's bytes (fb_fill and the rest keep them 0-15) */
     } else {
         while (n--) {
             const u8 *p = c->pix[*s++ & 15];

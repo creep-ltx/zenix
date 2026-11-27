@@ -144,7 +144,8 @@ static void formats(void)
         check(!fb_format_ok(want[i].format, want[i].bpp == 4 ? 2 : want[i].bpp + 1), "a format with the wrong size",
               want[i].format);
     }
-    check(!fb_format_ok(1, 1) && !fb_format_ok(0, 1) && !fb_format_ok(14, 2), "CLUT, planar and YUV refused", 0);
+    check(fb_format_ok(1, 1) && !fb_format_ok(1, 2) && !fb_format_ok(0, 1) && !fb_format_ok(14, 2),
+          "CLUT at 1 byte only (D63), planar and YUV refused", 0);
     /* audit A6-27: a pretend card's record was allocated as bpr * height before bpr was checked (a huge bpr wrapped) */
     check(fb_size_ok(640, 480, 4, 2560) && fb_size_ok(4096, 4096, 4, 65536), "card sizes in range taken", 0);
     check(!fb_size_ok(640, 480, 4, 0x80000000u) && !fb_size_ok(640, 480, 4, 65540), "a row over 65,536 bytes refused", 0);
@@ -193,6 +194,8 @@ static void put(int format, int bpp)
                         k = (pa[y - py] >> (15 - (x - px)) & 1) | (pb[y - py] >> (15 - (x - px)) & 1) << 1;
                     u8 v[4];
                     fb_colour(format, k ? ptr[k - 1] : pal[pens[y][x]], v);
+                    if (format == 1)            /* D63's 8 bits: the pen itself, the pointer's colours 16-18 */
+                        v[0] = (u8)(k ? 15 + k : pens[y][x]);
                     memcpy(e, v, (size_t)bpp);
                 }
                 ok &= !memcmp(p, e, (size_t)bpp);
@@ -211,6 +214,7 @@ int main(void)
     formats();
     for (unsigned i = 0; i < sizeof want / sizeof want[0]; i++)
         put(want[i].format, want[i].bpp);
+    put(1, 1);                                  /* D63: the Pi's 8-bit picture */
     printf("%s rtg-host-test: %d checks, %d failed\n", fails ? "FAIL" : "PASS", checks, fails);
     return fails != 0;
 }

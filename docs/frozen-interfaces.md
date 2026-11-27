@@ -572,3 +572,14 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `console MODE WxH CxR [*]`, `desktop MODE WxH depth 3[,4] [*]`, `rtg ...`), `-q`, `-K`, `[-s] [-y] video|console|
   desktop ...`, `-s rtg ...`; `conprefs` and `deskprefs` other names of it with their frozen options; the keys file
   `~/.config/screenprefs/keys`'s actions; zenixboot's `RTGMODE=WxH[xBITS]` (implies `RTG`).
+- **D63 (the PiStorm's own graphics, branch pigfx, 2026-11-28):** `struct hwdisp` (136 bytes: u16 width, height; u32
+  flags `HWD_SIZE` 1, `HWD_EDID` 2; the EDID's 128 bytes) at `HWDISP_ADDR` (0x1100 + 440, after the hardware table,
+  not in `struct hwinfo`), written by the kernel at boot on a Pi; `HWFB_PI` 4 (with `HWFB_TEST`: a test's pretend Pi,
+  its picture memory's size in `dl_rtg`); the HVS's list memory words Zenix uses (0x800 the blank list, 0x801 "ZCON"
+  0x5A434F4E and 0x802 the console's list, 0x808 the kernel, 0x820 and 0x840 lists A and B, 0x900 the palette);
+  `DPY_CARD` 22 (a[0] a `struct dpycard`, first size 16: size, flags (`DPYCF_LIVE` 1, `DPYCF_PI` 2), w, h, bits,
+  pad, ow, oh, pad2; a[1] `DPYC_SET` 0 or `DPYC_GET` 1; an older server answers -EINVAL: no card size of its own),
+  libdisplay's `dpy_card`; `/etc/screen`'s `pi off|WIDTHxHEIGHTxBITS` (BITS 8, 16, 32); screenprefs' `[-s] [-y] pi ...`,
+  its `-l` lines `pi off [*]` and `pi WxHxBITS (live|next start) [*]`, `-q`'s `, pi ...` at the line's end on a Pi
+  only; `pidisplay -l|--list` (its lines `output WxH HZ`, `monitor NAME`, `preferred WxH`, `memory ADDR BYTES`, `mode
+  WxH BITS... [native] [preferred]`: new words only at a line's end), `-d|--dump [WORD]`, `test WxHxBITS`, `console`.

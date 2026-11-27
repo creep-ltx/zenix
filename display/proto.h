@@ -105,6 +105,26 @@ struct dpymouse {
 };
 #define DPYMOUSE_FIRST  86
 #define DPYMF_SWAP      1   /* the left and right buttons swapped */
+/* DESIGN D63 (docs/d63-pistorm-gfx.md 8): a graphics card's picture, its size changed live where the server can (the
+ * Pi's own picture). Any client of the desktop's session, as DPY_MODE */
+#define DPY_CARD        22  /* a[0] struct dpycard * (the client's memory), a[1] DPYC_SET or DPYC_GET -> 0 (the struct
+                             * filled with what is in effect), -ENODEV (no card, or one whose size counts only from the
+                             * next start), -EINVAL, -E2BIG (too big for the output or the memory), -ENOMEM (no fast RAM
+                             * for the pens), -EBUSY (a drag), -EIO (the HVS's list memory refused it), -EFAULT; an
+                             * older server: -EINVAL */
+#define DPYC_SET        0
+#define DPYC_GET        1
+struct dpycard {
+    unsigned short size;        /* in: DPYCARD_FIRST or more */
+    unsigned short flags;       /* out: DPYCF_* */
+    unsigned short w, h;        /* DPYC_SET in: the size; out: the size in effect */
+    unsigned char bits, pad;    /* DPYC_SET in: 8, 16 or 32; out: the picture's bits */
+    unsigned short ow, oh;      /* out: the output's size (0: not known) */
+    unsigned short pad2;
+};
+#define DPYCARD_FIRST   16
+#define DPYCF_LIVE      1   /* DPYC_SET changes the size now */
+#define DPYCF_PI        2   /* the Pi's own picture (D63) */
 /* the window manager's (only after DPY_WM_HELLO; one window manager at a time) */
 #define DPY_WM_HELLO    32  /* become the window manager -> 0, -EBUSY (another one), -EPERM (not the session's user) */
 #define DPY_WM_STYLE    33  /* a[0] struct dpystyle *: frames from now on (and the screen's palette) */

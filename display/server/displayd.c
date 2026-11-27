@@ -13,6 +13,7 @@
 #include "dpyd.h"
 #include "../screenfile.h"
 #include "fb.h"
+#include "hvslist.h"
 #include "../../kernel/hwinfo.h"
 #include "../../kernel/netproto.h"          /* DRV_HWINFO (D60 stage 3) */
 
@@ -222,11 +223,17 @@ static void default_style(void)
 static int pf2_pen = -1;                /* a lifted window's stand-in for pen 0 (D38 "Dragging with the chips") */
 static int cop_ptr;                     /* the pointer's colours 17-19 in the Copper lists (D61) */
 static u16 ptrcol[3] = { 0x000, 0xFFF, 0x888 };         /* the pointer's: sprite 0's colours 17-19 (DPY_MOUSE) */
+#ifndef NO_RTG
+static void pi_palette(void);
+#endif
 static void set_palette(void)
 {
     if (rtg) {                          /* D43: the card's pens, all shown again; the chipset's colour 0 */
         copl[0][cop_col + 1] = style.palette[0] & 0xFFF;
         fb_pens(&card, style.palette, 16, ptrcol);
+#ifndef NO_RTG
+        pi_palette();                   /* D63: an 8-bit picture's colours are the HVS's palette words */
+#endif
         fb_all();
         return;
     }
@@ -518,10 +525,15 @@ static const struct ugevent *canon(const struct ugevent *e)
  * font_name and font_size (none: "", 0) */
 static char font_name[32];
 static int font_size, file_depth;
+static int file_pw, file_ph, file_pbits;
 static int mode_file(void)
 {
     struct dpyscreen sf;
-    if (dpy_screenfile(SCREEN_SYS, &sf, "displayd") < 0 || !(sf.found & SF_DESKTOP))
+    int r = dpy_screenfile(SCREEN_SYS, &sf, "displayd");
+    file_pw = sf.pw;                    /* D63: the pi line (/etc/screen's only) */
+    file_ph = sf.ph;
+    file_pbits = sf.pbits;
+    if (r < 0 || !(sf.found & SF_DESKTOP))
         dpy_screenfile(SCREEN_OLD_SYS, &sf, "displayd");
     strcpy(font_name, sf.font);
     font_size = sf.size;
@@ -558,9 +570,10 @@ static int mode_alloc(struct bm *b, int m, int depth)
 static struct hwfb *test_card;          /* a test's pretend card's record: cleared when we end (the card is ours) */
 #ifndef NO_RTG
 static u32 hvs_reg, hvs_on, hvs_off;    /* the Pi's SCALER_DISPLIST1 and its two values (HWFB_HVS), 0: none */
+static u8 hvs_noff;                     /* (D63) the console's list is not known: the HDMI stays on the desktop */
 static void hvs_show(int on)            /* the HDMI shows the card's picture (1) or the chipset's (0) */
 {
-    if (hvs_reg)
+    if (hvs_reg && (on || !hvs_noff))
         *(volatile u32 *)hvs_reg = __builtin_bswap32(on ? hvs_on : hvs_off);  /* the Pi's registers: little-endian */
 }
 /* the record in the boot's hardware table (with full protection the kernel's copy, DRV_HWINFO), checked; 1: the screen
@@ -577,6 +590,12 @@ static int card_take(void)
     if (h->magic != HWINFO_MAGIC || h->fb.magic != HWFB_MAGIC)
         return 0;
     struct hwfb *f = (struct hwfb *)&h->fb;
+    if (f->flags & HWFB_PI)
+        return 0;                       /* D63: a pretend Pi is no card of its own (pi_take's, with a pi line) */
+    if (f->format == 1) {               /* (CLUT: fb.c takes it for the Pi's own picture only, whose palette we write) */
+        dprintf(2, "displayd: the boot's RTG screen is a palette screen: the chipset's screen\n");
+        return 0;
+    }
     if (prot_full() && !(f->flags & HWFB_TEST)) {
         dprintf(2, "displayd: a graphics card's memory is not granted under full memory protection yet (D60 stage 4): "
                 "the chipset's screen\n");
@@ -618,9 +637,217 @@ static int card_take(void)
             f->flags & HWFB_TEST ? " (a test's pretend card)" : "");
     return 1;
 }
+
+/* ---- D63: the Pi's own picture (docs/d63-pistorm-gfx.md 8): its display list written here (hvslist.c), the picture
+ * drawn from the pens, then the list shown; its size changes live (DPY_CARD) ---- */
+static struct hvspi pi;                 /* the Pi (pi.hvs 0: none found yet) */
+static u32 pi_pal;                      /* the 8-bit palette's address, 0 none */
+static u8 pi_on, pi_bits, pi_show, pi_con, on_glass = 1;   /* the card is the Pi's; its depth; its list waits for
+                                         * the next show; the console's list is known; the desktop is in front */
+static u32 pt_size;                     /* a pretend Pi (HWFB_PI, the tests): its memory ours */
+static void *pt_mem;
+static struct hwfb *pt_rec;
+static const char *card_note(void);
+static void hvs_write(u32 v)
+{
+    if (hvs_reg)
+        *(volatile u32 *)hvs_reg = __builtin_bswap32(v);
+}
+/* the machine: 1 a Pi 4 under Emu68 (pi filled), 2 a test's pretend Pi, 0 neither (or full memory protection: no Pi
+ * has one) */
+static int pi_here(void)
+{
+    const struct hwinfo *h = (const struct hwinfo *)HWINFO_ADDR;
+    if (prot_full() || h->magic != HWINFO_MAGIC)
+        return 0;
+    if (h->fb.magic == HWFB_MAGIC && (h->fb.flags & (HWFB_TEST | HWFB_PI)) == (HWFB_TEST | HWFB_PI))
+        return 2;
+    struct hvspi p;
+    const char *no = hvs_find(h, (const void *)HWDISP_ADDR, &p);
+    if (no && (h->flags & (HW_DT | HW_BCM2711)) == (HW_DT | HW_BCM2711))
+        dprintf(2, "displayd: the Pi's screen: %s\n", no);
+    if (no)
+        return 0;
+    if (!pi.hvs)
+        pi = p;
+    return 1;
+}
+/* after a write of the list register: the HVS has taken it when its frame count moves (at most 60 ms; a pretend Pi's
+ * never moves), so the list it showed may be written again (vc6.c waits likewise) */
+static void pi_frame(void)
+{
+    if (!pi.soc)
+        return;
+    u32 f = hvs_frame(&pi), t0 = sys_ticks();
+    while (hvs_frame(&pi) == f)
+        if (sys_ticks() - t0 > 6) {
+            dprintf(2, "displayd: the HVS's frame count did not move in 60 ms\n");
+            return;
+        }
+}
+/* the Pi's picture of w x h x bits in place of the screen (nothing changed on a failure) -> 0, -errno */
+static int pi_set(unsigned w, unsigned h, unsigned bits)
+{
+    if (!hvs_size_ok(w, h, bits, pi.ow, pi.oh, pi.vc4size))
+        return -E2BIG;
+    if (pi.soc && !hvs_running(&pi)) {
+        dprintf(2, "displayd: the HVS's channel 1 (the HDMI) is not running: %s\n", card_note());
+        return -EIO;
+    }
+    struct bm nb, old = scr;
+    if (bm_alloc(&nb, (int)w, (int)h, CHUNKY) < 0)
+        return -ENOMEM;
+    u32 reg = (u32)pi.hvs + HVS_DISPLIST1, cur = __builtin_bswap32(*(volatile u32 *)reg), at;
+    if (!pi_on) {                       /* the first: what the HDMI shows now is the console's picture */
+        hvs_reg = reg;
+        if (!pi_con) {                  /* (D43's dl_chip, the C790's, when zenixboot RTG recorded it) */
+            hvs_con_keep(&pi, cur);
+            hvs_off = hvs_con(&pi);     /* (kept in the list memory: a later server, after a killed one, knows it) */
+            pi_con = hvs_off != 0;
+            hvs_noff = !pi_con;
+            if (!pi_con)
+                dprintf(2, "displayd: the console's picture on the HDMI is not known: the desktop stays on it\n");
+        }
+    }
+    int blank = !(pi_con && cur == hvs_off);    /* anything but the console's picture shown (Zenix's own, AmigaOS's
+                                         * RTG list): its memory is about to change, the background meanwhile */
+    if (blank) {
+        hvs_wr(hvs_dl(&pi, HVS_DL_BLANK), HVS_DL_END);
+        hvs_write(HVS_DL_BLANK);
+        pi_frame();                     /* (the HVS has taken it: no list it reads is rewritten) */
+    }
+    at = hvs_on == HVS_DL_A ? HVS_DL_B : HVS_DL_A;
+    struct hvsplane pl = { w, h, bits, hvs_bpr(w, bits), (u32)pi.vc4, pi.ow, pi.oh };
+    if (hvs_put(&pi, &pl, at) < 0) {
+        dprintf(2, "displayd: the HVS's list memory at 0x%x does not keep what is written: %s\n", (u32)hvs_dl(&pi, 0),
+                card_note());
+        if (blank)
+            hvs_write(cur);             /* the picture shown before (nothing of it was changed) */
+        bm_free(&nb);
+        return -EIO;
+    }
+    nb.kept = 0;
+    scr = nb;
+    if (rtg)
+        bm_free(&old);
+    card.base = (u8 *)pi.vc4;
+    card.bpr = pl.bpr;
+    card.w = (u16)w;
+    card.h = (u16)h;
+    card.format = (u8)hvs_format(bits);
+    card.bpp = (u8)(bits / 8);
+    hvs_on = at;
+    pi_pal = bits == 8 ? (u32)hvs_dl(&pi, HVS_DL_PAL) : 0;
+    pi_on = 1;
+    pi_bits = (u8)bits;
+    pi_show = 1;                        /* shown after the next show onto the card */
+    rtg = 1;
+    chip_budget = 2u << 20;
+    clear_damage();                     /* (rectangles of the old size) */
+    if (pt_rec) {                       /* the test's record says where the picture is (dpytest peek) */
+        pt_rec->base = (u32)pi.vc4;
+        pt_rec->bpr = pl.bpr;
+        pt_rec->bpp = card.bpp;
+        pt_rec->format = card.format;
+    }
+    dprintf(1, "displayd: the Pi's screen %ux%u, %u bits, on %ux%u, list 0x%x%s\n", w, h, bits, pi.ow, pi.oh, at,
+            pt_rec ? " (a test's pretend Pi)" : "");
+    return 0;
+}
+/* at the start: /etc/screen's pi line on a Pi -> 1, the screen is the Pi's picture */
+static int pi_take(int pw, int ph, int pbits)
+{
+    int k = pw ? pi_here() : 0;
+    if (!k)
+        return 0;
+    const struct hwinfo *h = (const struct hwinfo *)HWINFO_ADDR;
+    if (k == 2) {                       /* a pretend Pi: its memory ours, so it lives as long as we draw on it */
+        pt_rec = (struct hwfb *)&h->fb;
+        pt_size = pt_rec->dl_rtg >= (1u << 20) && pt_rec->dl_rtg <= (8u << 20) ? pt_rec->dl_rtg : (2u << 20) + HVS_VC4_SPARE;
+        u32 hv = (u32)sys_memalloc(HVS_WINDOW), v = (u32)(pt_mem = sys_memalloc(pt_size + 16));
+        if (!hv || !v) {
+            dprintf(2, "displayd: no fast RAM for a pretend Pi\n");
+            sys_memfree((void *)hv);
+            sys_memfree(pt_mem);
+            pt_rec = 0;
+            return 0;
+        }
+        memset((void *)hv, 0, HVS_WINDOW);
+        hvs_wr(hv + HVS_DISPLIST1, 0x2E8);     /* what AmigaOS left on the HDMI: the C790's list, as on the A1200 */
+        memset(pt_mem, 0x5A, pt_size + 16);
+        memset(&pi, 0, sizeof pi);
+        pi.hvs = hv;
+        pi.vc4 = (v + 15) & ~15u;
+        pi.vc4size = pt_size;
+        pi.ow = pt_rec->width;
+        pi.oh = pt_rec->height;
+        pt_rec->hvs = hv;
+    } else if (h->fb.magic == HWFB_MAGIC && (h->fb.flags & HWFB_HVS) && h->fb.hvs == pi.hvs + HVS_DISPLIST1) {
+        hvs_off = h->fb.dl_chip;        /* zenixboot RTG's record: the console's list (the C790's), D43 5 */
+        pi_con = 1;
+    }
+    int r = pi_set((unsigned)pw, (unsigned)ph, (unsigned)pbits);
+    if (r < 0) {
+        dprintf(2, "displayd: the Pi's screen %dx%dx%d: %s: %s\n", pw, ph, pbits, zstrerror(r) ? zstrerror(r) :
+                "refused", card_note());
+        hvs_reg = hvs_off = 0;
+        pi_con = hvs_noff = 0;
+        return 0;
+    }
+    return 1;
+}
+/* DPY_CARD's SET: the Pi's picture at another size, live (d63 8) -> 0, -errno */
+static int pi_switch(unsigned w, unsigned h, unsigned bits)
+{
+    if (!pi_on)
+        return -ENODEV;
+    if (!hvs_format(bits))
+        return -EINVAL;
+    if (w == card.w && h == card.h && bits == pi_bits)
+        return 0;
+    if (dragging || shadowing)
+        return -EBUSY;
+    kernel_events();                    /* (D61: the records in the ring are in the old size's units) */
+    if (dragging || shadowing)
+        return -EBUSY;
+    u32 ow = card.w, oh = card.h;
+    int r = pi_set(w, h, bits);
+    if (r < 0)
+        return r;
+    ptx = ptx * (int)w / (int)ow;
+    pty = pty * (int)h / (int)oh;
+    if (ptx >= (int)w) ptx = (int)w - 1;
+    if (pty >= (int)h) pty = (int)h - 1;
+    mouse_apply(ptx, pty);              /* the pointer in the new size's pixels, at the same place on the glass */
+    struct dpyev e;
+    memset(&e, 0, sizeof e);
+    e.type = EV_SCREEN;
+    e.arg = DPYM_RTG;
+    e.x = 4;
+    e.w = (u16)w;
+    e.h = (u16)h;
+    for (int i = 0; i < NCL; i++)
+        if (cls[i].used)
+            ev_to(i, &e);
+    set_palette();                      /* the pens' table for the new depth (and the palette words at 8 bits) */
+    win_screen();
+    fb_pointer(ptx - ms.hotx, pty - ms.hoty);
+    return 0;
+}
+static void pi_palette(void)
+{
+    for (u32 i = 0; pi_pal && i < FB_PENS + 3; i++)
+        hvs_wr(pi_pal + 4 * i, hvs_argb(i < FB_PENS ? style.palette[i] : ptrcol[i - FB_PENS]));
+}
+static const char *card_note(void)
+{
+    const struct hwinfo *h = (const struct hwinfo *)HWINFO_ADDR;
+    return h->fb.magic == HWFB_MAGIC && !(h->fb.flags & HWFB_PI) ? "the RTG screen, if it is one" : "the chipset's screen";
+}
 #else
 static void hvs_show(int on) { (void)on; }
 static int card_take(void) { return 0; }   /* the demo floppy's displayd: the chipset's screen always */
+static int pi_take(int pw, int ph, int pbits) { (void)pw; (void)ph; (void)pbits; return 0; }
 #endif
 
 static int screen_up(int con)
@@ -664,10 +891,12 @@ static int screen_up(int con)
     base_w = g.width;
     base_h = g.height;
     frame_l = base_h > 200 ? 312 : 262;
-    if (card_take()) {                  /* D43: the desktop on the card; the chipset shows colour 0, the sprite blank */
+    int file_mode = mode_file();        /* (D63: its pi line first) */
+    if (pi_take(file_pw, file_ph, file_pbits) || card_take()) {    /* D63: the Pi's own picture; D43: the card
+                                         * zenixboot RTG handed over; the chipset shows colour 0, the sprite blank */
         memset(spr + 2, 0, sizeof ms.image);
         mouse_image();
-        mode_file();                    /* (its font line: the mode line is the chipset's) */
+        /* (mode_file read above: its font line; the mode line is the chipset's) */
         chip_used = 0;
         grabbed = 1;
         font_init(topaz);
@@ -693,7 +922,7 @@ static int screen_up(int con)
         fb_pointer(ptx - ms.hotx, pty - ms.hoty);
         return 0;
     }
-    m = mode_file();
+    m = file_mode;
     if (m_shres(m) && !aga) {
         dprintf(2, "displayd: super-hires needs AGA: hires\n");
         m = m_lace(m);
@@ -1098,6 +1327,9 @@ static void kernel_events(void)
                 blit_idle();
                 use_blit = 0;
                 hvs_show(0);            /* D43: the Pi's HDMI shows the chipset's picture (the text console) */
+#ifndef NO_RTG
+                on_glass = 0;
+#endif
                 scr_focus(0);
                 sys_congack(gfd, (u16)e->x);
                 break;
@@ -1107,6 +1339,10 @@ static void kernel_events(void)
                 pty = e->y;
                 if (rtg)
                     fb_pointer(ptx - ms.hotx, pty - ms.hoty);
+#ifndef NO_RTG
+                on_glass = 1;
+                if (!pi_show)                   /* (D63: a list switched meanwhile is shown once its picture is) */
+#endif
                 hvs_show(1);
                 scr_focus(1);
                 break;
@@ -1493,6 +1729,37 @@ static int req(struct umsg *m)
             int r = mode_switch(a[0] == DPYM_ASK ? cur_mode() : (int)a[0], (int)a[1]);
             return r < 0 || !a[1] ? r : r | scr.depth << 8;
         }
+    case DPY_CARD: {                    /* D63: the same clients: a card's size, the Pi's changed live */
+        if (a[1] > DPYC_GET || peer(m, PEER_WR, a[0], DPYCARD_FIRST) < 0)
+            return a[1] > DPYC_GET ? -EINVAL : -EFAULT;
+        struct dpycard *u = (struct dpycard *)a[0];
+        if (u->size < DPYCARD_FIRST)
+            return -EINVAL;
+        if (!rtg)
+            return -ENODEV;
+#ifndef NO_RTG
+        if (a[1] == DPYC_SET) {
+            int r = pi_switch(u->w, u->h, u->bits);
+            if (r < 0)
+                return r;
+        }
+        u->flags = pi_on ? DPYCF_LIVE | DPYCF_PI : 0;
+        u->ow = (u16)(pi_on ? pi.ow : 0);
+        u->oh = (u16)(pi_on ? pi.oh : 0);
+#else
+        if (a[1] == DPYC_SET)
+            return -ENODEV;
+        u->flags = 0;
+        u->ow = u->oh = 0;
+#endif
+        u->size = DPYCARD_FIRST;
+        u->w = card.w;
+        u->h = card.h;
+        u->bits = (u8)(card.bpp * 8);
+        u->pad = 0;
+        u->pad2 = 0;
+        return 0;
+    }
     case DPY_FONT_SET: {                /* the same clients: a[0] 32 bytes, the name (0: the 8 x 8), a[1] the size */
         char nm[32];
         nm[0] = 0;
@@ -1725,6 +1992,12 @@ int main(int argc, char **argv)
                 ptr_show(1);            /* (the same show, counted for the pointer) */
             else
                 fb_show();              /* D43: what changed this pass onto the card */
+#ifndef NO_RTG
+            if (pi_show && on_glass && !(shadowing && expose_wait)) {
+                hvs_show(1);            /* D63: the Pi's new list, now that its picture is drawn */
+                pi_show = 0;
+            }
+#endif
         }
         if (has_clients())
             had = 1;
@@ -1733,6 +2006,13 @@ int main(int argc, char **argv)
     }
     blit_idle();
     hvs_show(0);
+#ifndef NO_RTG
+    if (pt_rec) {                       /* a pretend Pi's memory goes with us: the record kept for the next server */
+        pt_rec->base = pt_rec->hvs = 0;
+        sys_memfree((void *)pi.hvs);
+        sys_memfree(pt_mem);
+    }
+#endif
     if (test_card)
         test_card->magic = 0;           /* its memory goes with us: no later server may take it */
     if (gfd >= 0)

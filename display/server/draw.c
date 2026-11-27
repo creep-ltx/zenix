@@ -516,6 +516,7 @@ void fb_pointer(int x, int y)
     dirty_clip(x, y, x + FB_PTRW, y + FB_PTRW);
 }
 void fb_all(void) { dirty_clip(0, 0, scr.w, scr.h); }
+void clear_damage(void) { ndirty = 0; }   /* D63: the Pi's picture's size changed: rectangles of the old one go */
 void fb_ptr_show(void)
 {
     if (!rtg || !ptr_a)

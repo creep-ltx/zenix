@@ -35,7 +35,8 @@ struct fbcard {
     unsigned char format, bpp;          /* Picasso96's RGBFormat number, bytes a pixel */
     unsigned char pix[FB_PENS + 3][4];  /* the pens' bytes as the card stores them, then the pointer's three colours */
 };
-/* 1 if format is one the server draws (the hi- and true-colour ones; not CLUT, not YUV) with bpp bytes a pixel */
+/* 1 if format is one the server draws (the hi- and true-colour ones; CLUT (1) at 1 byte only for the Pi's picture,
+ * D63, whose palette the server writes itself; not YUV) with bpp bytes a pixel */
 int fb_format_ok(int format, int bpp);
 /* 1 if a card record's sizes are ones the server draws on: 320-4096 x 200-4096 pixels, bpp bytes a pixel, a row of
  * at least width * bpp and at most 65,536 bytes (so bpr * height fits in 32 bits: audit A6-27) */

@@ -3,7 +3,7 @@
  * docs/d38-desktop.md "Screen modes" and "Fonts"; frozen in docs/frozen-interfaces.md): "video auto|pal|ntsc",
  * "console hires|hires-lace|auto", "console-colours auto|2|4|8|16", "console-font auto|none|NAME",
  * "desktop hires|hires-lace|superhires|superhires-lace|auto", "desktop-depth auto|3|4", "desktop-font NAME SIZE|builtin",
- * "rtg front|WxH|WxHxBITS"; the older desktop file's "mode ..." and "font ..."; "# comments". Linked into displayd and
+ * "rtg front|WxH|WxHxBITS", "pi off|WxHxBITS" (D63: BITS 8, 16, 32); the older desktop file's "mode ..." and "font ..."; "# comments". Linked into displayd and
  * screenprefs. Cold code: -Os. */
 #include "libz.h"
 #include "../proto.h"
@@ -47,7 +47,7 @@ static int rtgsize(const char *w, int *rw, int *rh, int *rb)
     if (y)
         *y = 0;
     int a = num(t), b = num(x + 1), c = y ? num(y + 1) : 0;
-    if (a < 320 || a > 4096 || b < 200 || b > 4096 || (y && c != 16 && c != 24 && c != 32))
+    if (a < 320 || a > 4096 || b < 200 || b > 4096 || (y && c != 8 && c != 16 && c != 24 && c != 32))
         return -1;
     *rw = a, *rh = b, *rb = c;
     return 0;
@@ -83,6 +83,7 @@ int dpy_screenfile(const char *path, struct dpyscreen *s, const char *who)
         if (!k || *w[0] == '#')
             continue;
         int v = k == 3 ? num(w[2]) : -1, m = k == 2 ? dmode(w[1]) : -1, ok = 1;
+        int tw = 0, th = 0, tb = 0;
         const char *key = w[0];
         int font = !strcmp(key, "font") || !strcmp(key, "desktop-font");
         if (k == 2 && (!strcmp(key, "mode") || !strcmp(key, "desktop")) && m >= 0 &&
@@ -109,10 +110,17 @@ int dpy_screenfile(const char *path, struct dpyscreen *s, const char *who)
             strcpy(s->cfont, w[1]);
             s->found |= SF_CONSOLE;
         } else if (k == 2 && !strcmp(key, "rtg") && (!strcmp(w[1], "front") ||
-                                                    rtgsize(w[1], &s->rw, &s->rh, &s->rbits) == 0)) {
+                                                    (rtgsize(w[1], &tw, &th, &tb) == 0 && tb != 8))) {
             if (w[1][0] == 'f')
-                s->rw = s->rh = s->rbits = 0;
+                tw = th = tb = 0;
+            s->rw = tw, s->rh = th, s->rbits = tb;
             s->found |= SF_RTG;
+        } else if (k == 2 && !strcmp(key, "pi") && (!strcmp(w[1], "off") ||
+                                                   (rtgsize(w[1], &tw, &th, &tb) == 0 && th >= 256 && tb && tb != 24))) {
+            if (w[1][0] == 'o')
+                tw = th = tb = 0;
+            s->pw = tw, s->ph = th, s->pbits = tb;      /* (D63: 8, 16 or 32 bits, at least 320 x 256) */
+            s->found |= SF_PI;
         } else
             ok = 0;
         if (!ok && !bad++) {

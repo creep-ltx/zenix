@@ -1,6 +1,6 @@
 # Command reference
 
-Zenix has 177 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
+Zenix has 178 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
 page in `docs/man/NAME.txt`; a few more pages are for names that start the same program (`gunzip`, `zcat`, `chgrp`,
 `more`, `pkill`, `ifup`, `ifdown`, `unlzx`). The pages use the exact format that Zenix's own `man` reads (plain text of at most 78 columns, a
 `NAME(section)` header, `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`, `EXAMPLES`, `EXIT STATUS`, `SEE ALSO`); the
@@ -58,7 +58,8 @@ spot-checked against the code that day.
 | [zdesk](man/zdesk.txt), [term](man/term.txt) | Zenix Desktop (DESIGN D38): the floating window manager with its bar, workspaces and icons, typed after logging in as startx; the terminal window |
 | [files](man/files.txt) | Zenix Desktop's file view (DESIGN D48): a folder in a window, Ahiru's keys (configurable) and the mouse; opens files in a terminal window (pictures in `show`), copies, moves, renames and deletes after asking |
 | [show](man/show.txt) | Zenix Desktop's picture viewer (DESIGN D50): IFF ILBM (EHB, HAM6, HAM8, 24-bit, every resolution) and GIF in a window, dithered into the desktop's colours, shrunk to fit or at the real size, or (`-s`, `s`) on a screen of its own in its own mode and colours (D55); next and previous in the folder; keys configurable |
-| [screenprefs](man/screenprefs.txt), [conprefs](man/conprefs.txt), [deskprefs](man/deskprefs.txt) | the screen's settings with Test, Use, Save and Cancel and a 10-second fall-back (DESIGN D62): the video standard (PAL, NTSC), the console's mode, colours and Unicode font (root's), the desktop's mode (super-hires on AGA), depth, font and colours, a graphics card's size; a window on the desktop, a form on a console, or a command (`--list`, `console hires-lace`, `desktop superhires`); conprefs and deskprefs are other names of it |
+| [screenprefs](man/screenprefs.txt), [conprefs](man/conprefs.txt), [deskprefs](man/deskprefs.txt) | the screen's settings with Test, Use, Save and Cancel and a 10-second fall-back (DESIGN D62): the video standard (PAL, NTSC), the console's mode, colours and Unicode font (root's), the desktop's mode (super-hires on AGA), depth, font and colours, a graphics card's size, the Pi's own picture (D63); a window on the desktop, a form on a console, or a command (`--list`, `console hires-lace`, `desktop superhires`); conprefs and deskprefs are other names of it |
+| [pidisplay](man/pidisplay.txt) | the PiStorm's Raspberry Pi video (DESIGN D63): the HDMI's size and frame rate, the monitor, the modes the desktop can take (`--list`), the display list shown (`--dump`), a test picture for 5 seconds (`test WxHxBITS`), the console's picture back (`console`) |
 | [mouseprefs](man/mouseprefs.txt) | the mouse's preferences with Test, Use, Save and Cancel (a window): speed, acceleration, swapped buttons, the double-click time with a test, the pointer (files and a 16 x 16 editor) |
 | [ttf2font](man/ttf2font.txt) | a TrueType font drawn once a size into an AmigaOS bitmap font (the desktop runs it for a `.ttf` it has no size of), or the console's Unicode font |
 | [ahiru](man/ahiru.txt) | the owner's file manager in three columns: previews, marks, copy, move, delete, archives and disk images as folders, tabs, find (`ports/ahiru`) |
@@ -147,7 +148,7 @@ In the games package (`zpkg -S games`; roadmap block 7 item 7, "fun"; DESIGN D52
 
 ## Run on AmigaOS, not on Zenix
 [zenixboot](man/zenixboot.txt) starts Zenix from files on a hard disk, CF or SD card partition, so that no floppy is
-needed (not one of the 177 programs: it is an AmigaOS program on the AmigaDOS boot partition).
+needed (not one of the 178 programs: it is an AmigaOS program on the AmigaDOS boot partition).
 [bootmenu](man/bootmenu.txt) is the boot menu of a disk with AmigaOS and Zenix on it (the SD card of
 `tools/mkdualcard.sh`): it boots a chosen AmigaOS partition or runs zenixboot.
 

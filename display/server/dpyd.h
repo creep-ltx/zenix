@@ -48,6 +48,7 @@ extern void (*fb_band_hook)(void);      /* D61: called between fb_show's bands o
 #endif
 struct fbcard;
 extern struct fbcard card;      /* that card (fb.h) */
+void clear_damage(void);        /* (D63) the damage list emptied */
 extern int use_blit;            /* the blitter is ours (the console is shown): else the CPU draws */
 extern int aga;
 extern int lace;               /* the screen is interlaced (D38 "Screen modes"): line y on frame line y / 2 */
