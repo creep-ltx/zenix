@@ -141,3 +141,5 @@ root, then the desktop (ROADMAP phases).
 
 
 **Screen-mode settings, started (the partner 2026-11-27: "Start the screen modes prefs. It must work both in console and in desktop to set the screen mode and things."):** one program over one engine, three faces as Linux and AmigaOS do it (the engine under KMS/vconsole and xrandr/a Displays panel; AmigaOS's one ScreenMode prefs): a desktop window, a full-screen text form on the console, a command line for scripts; it takes over conprefs and deskprefs (their settings carried over). Design note first.
+
+**A native graphics driver for the PiStorm (the partner 2026-11-27: "We need to make graphics drivers for the PiStorm, so that I can list and select screen modes."):** Zenix's own driver for the Pi's VideoCore (the HVS display list, the firmware mailbox, the monitor's EDID), so screenprefs lists and sets the PiStorm's real screen modes without relying on the Picasso96 screen AmigaOS left (d43 §12's "later" item). An optional driver like genet (nothing in the base depends on the Pi); design note with two reviews first; built after screenprefs (D62), which offers its modes.
