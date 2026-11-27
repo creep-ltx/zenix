@@ -184,6 +184,7 @@ static long go(const struct uzine_go *g)
     /* 9.6: the blob put the chips' registers and the CIAs back (the E-clock counter where it stood); the kernel's
      * devices now, then DMA and the interrupts Zenix had, last */
     INTREQ = 0x7FFF;
+    gfx_zine_back();                    /* D62: the video standard shown before (the blob set the machine's own) */
     kbd_zine();                         /* held keys forgotten, one handshake */
     fd_zine();                          /* the head position unknown, the track cache dropped, the disks changed */
     ide_zine();                         /* Gayle's IDE interrupt enable and latch */
