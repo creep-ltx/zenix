@@ -48,7 +48,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet irc mail \
-          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror conprefs deskprefs mouseprefs files show ttf2font \
+          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror screenprefs mouseprefs files show ttf2font \
           play modplay lsusb lua make zld zas tcc zdb \
           frotz adventure arithmetic banner fortune hangman number rain robots tetris worm worms wump zintro
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
@@ -91,7 +91,7 @@ STACK_init := 4096
 COLDAPPS := mkdir rmdir ln echo pwd ps free uname uptime date clear kill dmesg sleep true false env hostname id whoami \
             touch umount reboot ifconfig route ping host netstat df chmod stat which printf basename dirname readlink \
             expr pgrep tree cal time seq du find man mount login su passwd sync useradd userdel gpasswd conmirror lsusb \
-            fdisk mkfs_zenixfs zinstall zup ssh-keygen conprefs input beep zdb
+            fdisk mkfs_zenixfs zinstall zup ssh-keygen screenprefs input beep zdb
 $(COLDAPPS:%=$(BUILD)/%.uo) $(COLDAPPS:%=$(BUILD)/%.po): UCFLAGS += -Os
 # init is cold code (it waits for its children all its life): -Os, which also pays for /etc/daemons (DESIGN D24 7)
 $(BUILD)/init.uo: UCFLAGS += -Os
@@ -617,15 +617,17 @@ $(BUILD)/zdesk.uelf: $(ZDESKOBJS) $(BUILD)/libdisplay.no $(BUILD)/mousefile.no $
 # the mouse's settings and pointer files (DESIGN D61, display/mousefile.h): zdesk's and mouseprefs'
 $(BUILD)/mousefile.no: display/lib/mousefile.c display/mousefile.h display/proto.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
-# the preference programs (D38 "Preferences", D28 section 22): settings files written by user/cfgfile.c; deskprefs
+# the preference programs (D38 "Preferences", D28 section 22, D62): settings files written by user/cfgfile.c; screenprefs
 # lists the Amiga fonts' sizes with the server's own contents reader (amifont.c), cold: -Os
 $(BUILD)/cfgfile.uo: user/cfgfile.c user/cfgfile.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
-$(BUILD)/deskprefs.uo: display/prefs/deskprefs.c display/prefswin.h display/display.h display/proto.h display/screenfile.h display/server/amifont.h user/cfgfile.h user/libz.h user/usys.h | $(BUILD)
+# screenprefs (DESIGN D62, docs/d62-screen-modes.md): the screen's settings, the console's and the desktop's (the
+# window, the text form, the command line); conprefs and deskprefs are other names of it (tools/mkroot.sh)
+$(BUILD)/screenprefs.uo: display/prefs/screenprefs.c display/prefswin.h display/display.h display/proto.h display/screenfile.h display/keys.h display/server/amifont.h user/cfgfile.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
-$(BUILD)/deskprefs.uelf: $(BUILD)/deskprefs.uo $(BUILD)/libdisplay.no $(BUILD)/prefswin.no $(BUILD)/dpyd-amifont.no $(BUILD)/cfgfile.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/deskprefs.uo $(BUILD)/libdisplay.no $(BUILD)/prefswin.no $(BUILD)/dpyd-amifont.no $(BUILD)/cfgfile.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
-# the preference programs' window (display/prefswin.h): deskprefs' and mouseprefs'
+$(BUILD)/screenprefs.uelf: $(BUILD)/screenprefs.uo $(BUILD)/libdisplay.no $(BUILD)/prefswin.no $(BUILD)/keys.no $(BUILD)/screenfile.no $(BUILD)/dpyd-amifont.no $(BUILD)/cfgfile.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/screenprefs.uo $(BUILD)/libdisplay.no $(BUILD)/prefswin.no $(BUILD)/keys.no $(BUILD)/screenfile.no $(BUILD)/dpyd-amifont.no $(BUILD)/cfgfile.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+# the preference programs' window (display/prefswin.h): screenprefs' and mouseprefs'
 $(BUILD)/prefswin.no: display/lib/prefswin.c display/prefswin.h display/display.h display/proto.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
 # mouseprefs (DESIGN D61, docs/d61-mouse.md 7): the mouse's settings
@@ -684,10 +686,6 @@ $(BUILD)/zintro.uo: display/intro/zintro.c $(BUILD)/zintro-data.h display/displa
 	$(CC) $(UCFLAGS) -Iuser -I$(BUILD) -c $< -o $@
 $(BUILD)/zintro.uelf: $(BUILD)/zintro.uo $(BUILD)/modrep.uo $(BUILD)/sndlib.uo $(BUILD)/libdisplay.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/zintro.uo $(BUILD)/modrep.uo $(BUILD)/sndlib.uo $(BUILD)/libdisplay.no $(BUILD)/libz.uo $(LIBGCC) -o $@
-$(BUILD)/conprefs.uo: user/conprefs.c user/cfgfile.h user/libz.h user/usys.h | $(BUILD)
-	$(CC) $(UCFLAGS) -Os -c $< -o $@
-$(BUILD)/conprefs.uelf: $(BUILD)/conprefs.uo $(BUILD)/cfgfile.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/conprefs.uo $(BUILD)/cfgfile.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 # dlogin (DESIGN D38 revision 3): the graphical login; zdesk's theme reader (conf.c) and login's password test
 # (pw_auth in sha.c) linked in, not copied
 $(BUILD)/dlogin.uo: display/dlogin/dlogin.c display/zdesk/zdesk.h display/display.h display/proto.h user/pw.h user/zpw.h user/libz.h user/usys.h | $(BUILD)

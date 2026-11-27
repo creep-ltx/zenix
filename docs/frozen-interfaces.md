@@ -557,3 +557,18 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `CONUF_LAZY` (1): no font now (one loaded stays), init asked at the first cell above U+00FF to be drawn (a2 0 with any
   other a3 still drops the font); `SYS_wait`'s `WAIT_CONSOLE` result `ST_CONSOLE` + 0 (0x200): init loads the font
   (given only after a `CONUF_LAZY`, so an older init never sees it).
+- **D62 (the screen's settings, branch screen, 2026-11-27):** `CON_MODE`'s a2 grown: a mode \| `CONM_PAL` 0x10 or \|
+  `CONM_NTSC` 0x20 (root; the answer the mode \| the standard's bit; -ENODEV the other standard on an OCS Agnus,
+  -EINVAL both bits), `CONM_INFO` 0xFE (any process: the mode \| the standard's bit \| `CONMI_AGA` 0x100,
+  `CONMI_SHRES` 0x200, `CONMI_BEAM` 0x400, `CONMI_NTSCX` 0x800; an older kernel answers -EINVAL to root, -EPERM to
+  others: how a program tells); `DPY_MODE`'s `DPYM_SHRES` 3, `DPYM_SHRES_LACE` 4 (AGA), a[1] the depth (0 as it is, 3,
+  4; with a[1] not 0 the answer is the mode \| the depth << 8; `DPYMD_ASK` 0xFF only asks), `EV_SCREEN`'s `x` the
+  depth (0 from an older server), libdisplay's `dpy_mode2`; `/etc/screen` and `~/.config/screen/screen` (`video
+  auto|pal|ntsc`, `console hires|hires-lace`, `console-colours auto|2|4|8|16`, `console-font auto|none|NAME`,
+  `desktop hires|hires-lace|superhires|superhires-lace`, `desktop-depth auto|3|4`, `desktop-font NAME SIZE|builtin`,
+  `rtg front|WIDTHxHEIGHT[xBITS]`, `#` comments; a line of a kind the file lacks falls back to the older files:
+  `/etc/console`'s `colours`, `font`, `mode`, `/etc/zdesk/screen` and `~/.config/zdesk/screen`'s `mode`, `font`);
+  `/var/run/console`'s `video` line (grown at its end); `screenprefs [-v] [-T|-W]`, `-l` (its lines: `video STD (...)`,
+  `console MODE WxH CxR [*]`, `desktop MODE WxH depth 3[,4] [*]`, `rtg ...`), `-q`, `-K`, `[-s] [-y] video|console|
+  desktop ...`, `-s rtg ...`; `conprefs` and `deskprefs` other names of it with their frozen options; the keys file
+  `~/.config/screenprefs/keys`'s actions; zenixboot's `RTGMODE=WxH[xBITS]` (implies `RTG`).

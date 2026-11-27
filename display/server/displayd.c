@@ -28,6 +28,7 @@ static int cop_col, cop_col2;           /* the index of COLOR00's value in them;
 static u16 *dyn[2][2], *cop_jmp[2];     /* the changing part: two buffers, each a list a field; COP2LCL's values */
 static int dyn_cur;                     /* the buffer the Copper is told to use */
 int lace;                               /* the screen is interlaced: a field shows every other line */
+int shres;                              /* D62: super-hires, 1280 pixels across (AGA): a hires pixel is two */
 int frame_l = 312;                      /* a frame's lines: 312 PAL, 262 NTSC (a long field one more) */
 int base_w, base_h;                     /* the console's size (640 x 256 PAL, 640 x 200 NTSC): a field's */
 u16 *scr_tramp;                         /* D55: the screens' trampolines (in the changing part's block) */
@@ -230,7 +231,7 @@ static void set_palette(void)
         return;
     }
     for (int f = 0; f < 2; f++) {
-        for (int i = 0; i < (1 << scr.depth); i++)
+        for (int i = 0; i < 16; i++)    /* (D62: all 16, so a deeper screen later finds its colours set) */
             copl[f][cop_col + 2 * i + 1] = style.palette[i] & 0xFFF;
         if (cop_col2)
             for (int i = 0; i < 16; i++)
@@ -252,13 +253,15 @@ static void dyn_build(u16 *c, int on, int f)    /* f: the field (0 long: lines 0
     u32 fo = lace && f ? scr.stride : 0;    /* the short field's planes start a line further in */
     u16 lm = (u16)(lace ? scr.stride : 0);  /* and each field passes over the other's lines */
     if (!on) {
-        MOVE(0x100, 0x8200 | depth << 12 | lace << 2);  /* BPLCON0: hires (LACE: interlaced) */
+        MOVE(0x100, (shres ? 0x0240 : 0x8200) | depth << 12 | lace << 2);  /* BPLCON0: hires or (D62) super-hires,
+                                                                             * LACE: interlaced */
         MOVE(0x102, 0);
         MOVE(0x104, 0x0024);                /* BPLCON2: the sprites in front of the planes */
         MOVE(0x108, scr.stride - scr.bpr + lm);
         MOVE(0x10A, scr.stride - scr.bpr + lm);
-        MOVE(0x092, f3 ? 0x38 : 0x3C);      /* the console's fetch window (kernel/gfx.c) */
-        MOVE(0x094, f3 ? 0xC0 : 0xD4);
+        MOVE(0x092, f3 ? 0x38 : 0x3C);      /* the console's fetch window (kernel/gfx.c); D62: super-hires fetches a
+                                             * unit of 64 pixels every 8 colour clocks, so 20 units to 0xD0 */
+        MOVE(0x094, shres ? 0xD0 : f3 ? 0xC0 : 0xD4);
         for (int k = 0; k < depth; k++) {
             u32 p = (u32)scr.p + (u32)k * scr.bpr + fo;
             MOVE(0x0E0 + 4 * k, p >> 16);
@@ -368,7 +371,7 @@ void cop_show(const u16 *t0, const u16 *t1)
     flip_mark();
 }
 void cop_settle(void) { dyn_settle(); }
-int hw_ok(void) { return aga && use_blit && cop_col2 && scr.depth == 4; }
+int hw_ok(void) { return aga && use_blit && cop_col2 && scr.depth == 4 && !shres; }    /* (D62: hires only) */
 void hw_show(const struct bm *b, const u8 *zero, int x, int y, int pen)
 {
     if (pen != pf2_pen) {
@@ -450,7 +453,7 @@ static void mouse_apply(int x, int y)
     struct umouse u;
     memset(&u, 0, sizeof u);
     u.size = sizeof u;
-    u32 W = rtg ? card.w : (u32)base_w, H = rtg ? card.h : (u32)base_h << lace;
+    u32 W = rtg ? card.w : (u32)base_w << shres, H = rtg ? card.h : (u32)base_h << lace;
     u32 gx = (u32)ms.speed * 256 / 100, gy = gx * H * (u32)base_w / (2 * W * (u32)base_h);  /* the same distance on
                                          * the glass down: a hires pixel is about half a line's height */
     u.gainx = (u16)(gx < 1 ? 1 : gx > 0x1000 ? 0x1000 : gx);
@@ -502,35 +505,49 @@ static const struct ugevent *canon(const struct ugevent *e)
 {
     static struct ugevent c;
     c = *e;
+    c.x = (short)(c.x >> shres);
     c.y = (short)(c.y >> lace);
     return &c;
 }
 
-/* ---- screen modes (D38 "Screen modes"): hires or hires interlaced, PAL or NTSC as the console is ---- */
-#define LACE_SPARE (512u << 10)         /* chip RAM left after an interlaced screen: drags, copies, sound, disks */
-/* /etc/zdesk/screen (display/lib/screenfile.c): its mode -> DPYM_LACE or DPYM_HIRES (no file, no line, auto: hires);
- * its "font NAME SIZE" (the desktop's font, docs/d38-desktop.md "Fonts") into font_name and font_size (none: "", 0) */
+/* ---- screen modes (D38 "Screen modes", D62): hires or super-hires, interlaced or not, PAL or NTSC as the console
+ * is (the video standard is the system's, CON_MODE) ---- */
+#define LACE_SPARE (512u << 10)         /* chip RAM left after a screen bigger than hires: drags, copies, sound, disks */
+/* the desktop's lines of /etc/screen (D62), else (none there) of the older /etc/zdesk/screen (display/lib/screenfile.c):
+ * its mode (no file, no line, auto: hires) and depth (0: the machine's); its font (docs/d38-desktop.md "Fonts") into
+ * font_name and font_size (none: "", 0) */
 static char font_name[32];
-static int font_size;
+static int font_size, file_depth;
 static int mode_file(void)
 {
     struct dpyscreen sf;
-    dpy_screenfile("/etc/zdesk/screen", &sf, "displayd");
+    if (dpy_screenfile(SCREEN_SYS, &sf, "displayd") < 0 || !(sf.found & SF_DESKTOP))
+        dpy_screenfile(SCREEN_OLD_SYS, &sf, "displayd");
     strcpy(font_name, sf.font);
     font_size = sf.size;
+    file_depth = sf.depth;
     return sf.mode;
 }
-/* the screen's bitmap for a mode: 0, -ENOMEM (no chip RAM; interlace also when less than LACE_SPARE would be left) */
-static int mode_alloc(struct bm *b, int want, int depth)
+/* a mode's facts: interlaced, super-hires */
+static int m_lace(int m) { return m == DPYM_LACE || m == DPYM_SHRES_LACE; }
+static int m_shres(int m) { return m == DPYM_SHRES || m == DPYM_SHRES_LACE; }
+static int cur_mode(void) { return shres ? DPYM_SHRES + lace : lace; }
+/* the depths the chips take in hires (D38 6.1): AGA 3 or 4 at the 64-bit fetch, OCS/ECS 3 (4 at the 16-bit fetch
+ * would take every bus slot of the picture's lines); super-hires (D62) is AGA's, 3 or 4 at the 64-bit fetch */
+static int depth_ok(int d) { return d == 3 || (d == 4 && aga); }
+/* the screen's bitmap for a mode: 0, -ENOMEM (no chip RAM; a screen bigger than hires also when less than LACE_SPARE
+ * would be left) */
+static int mode_alloc(struct bm *b, int m, int depth)
 {
-    u32 need = (u32)(base_h << want) * (u32)(base_w / 8) * (u32)depth, mi[4];
-    if (want && sys_meminfo(mi) == 0 && mi[0] < need + LACE_SPARE) {
-        dprintf(2, "displayd: interlace needs %u KB of chip RAM, %u KB free: hires\n", (need + LACE_SPARE) >> 10,
+    int w = base_w << m_shres(m), h = base_h << m_lace(m);
+    u32 need = (u32)h * (u32)(w / 8) * (u32)depth, mi[4];
+    if ((m_lace(m) || m_shres(m)) && sys_meminfo(mi) == 0 && mi[0] < need + LACE_SPARE) {
+        dprintf(2, "displayd: %ux%u needs %u KB of chip RAM, %u KB free: hires\n", w, h, (need + LACE_SPARE) >> 10,
                 mi[0] >> 10);
         return -ENOMEM;
     }
     u32 was = chip_used;
-    if (bm_alloc(b, base_w, base_h << want, depth) < 0)
+    if (bm_alloc(b, w, h, depth) < 0)
         return -ENOMEM;
     b->kept = 0;                        /* the screen is not a kept copy */
     chip_used = was;
@@ -643,7 +660,7 @@ static int screen_up(int con)
         return gfd;
     }
     aga = g.chips & GCHIP_AGA;
-    int depth = aga ? 4 : 3;
+    int depth = aga ? 4 : 3, m;
     base_w = g.width;
     base_h = g.height;
     frame_l = base_h > 200 ? 312 : 262;
@@ -676,10 +693,20 @@ static int screen_up(int con)
         fb_pointer(ptx - ms.hotx, pty - ms.hoty);
         return 0;
     }
-    lace = mode_file() == DPYM_LACE;
-    if (lace && mode_alloc(&scr, 1, depth) < 0)
-        lace = 0;
-    if (!lace && mode_alloc(&scr, 0, depth) < 0) {  /* no chip RAM: the console given back, nothing kept */
+    m = mode_file();
+    if (m_shres(m) && !aga) {
+        dprintf(2, "displayd: super-hires needs AGA: hires\n");
+        m = m_lace(m);
+    }
+    if (file_depth && depth_ok(file_depth))
+        depth = file_depth;
+    else if (file_depth)
+        dprintf(2, "displayd: a depth of %d is not one this machine's desktop takes: %d\n", file_depth, depth);
+    if (m != DPYM_HIRES && mode_alloc(&scr, m, depth) < 0)
+        m = DPYM_HIRES;
+    lace = m_lace(m);
+    shres = m_shres(m);
+    if (m == DPYM_HIRES && mode_alloc(&scr, m, depth) < 0) {  /* no chip RAM: the console given back, nothing kept */
         sys_close(gfd);
         gfd = -1;
         sys_close(confd);
@@ -732,7 +759,7 @@ static int screen_up(int con)
             MOVE(0x10C, 0x0011);        /* BPLCON4: the sprites' colours 16-31 */
         }
         cop_col = (int)(c - copl[f]);
-        for (int i = 0; i < (1 << depth); i++)
+        for (int i = 0; i < 16; i++)    /* D62: every depth's colours (a depth chosen later finds them) */
             MOVE(0x180 + 2 * i, 0);
         cop_ptr = (int)(c - copl[f]);
         MOVE(0x1A2, ptrcol[0]);         /* the pointer: black outline, white face (DPY_MOUSE's colours) */
@@ -759,7 +786,7 @@ static int screen_up(int con)
         dyn_build(dyn[0][f], 0, f);
     }
     set_palette();
-    ptx = g.width / 2;
+    ptx = scr.w / 2;
     pty = scr.h / 2;
     mouse_apply(ptx, pty);              /* D61: the kernel's pointer in the screen's own pixels */
     return 0;
@@ -769,28 +796,35 @@ static int screen_up(int con)
  * screen allocated, every window kept on it and drawn again there (the kept copies given up: the programs draw again,
  * EV_EXPOSE; the desktop's window the new size, EV_RESIZE), the Copper pointed at it, the old one freed, every
  * client told (EV_SCREEN) -> the mode now, or -EBUSY (a drag under way), -ENOMEM (no chip RAM for it: as it was) */
-static int mode_switch(int want)
+static int mode_switch(int want, int depth)
 {
-    if (want == lace)
+    if (!depth)
+        depth = scr.depth;
+    if (want == cur_mode() && depth == scr.depth)
         return want;
+    if ((m_shres(want) && !aga) || !depth_ok(depth))
+        return -EINVAL;
     if (dragging || shadowing || !use_blit)
         return -EBUSY;
     kernel_events();                    /* D61: the records still in the ring are in the old mode's units */
     if (dragging || shadowing || !use_blit)
         return -EBUSY;                  /* (one of them began a drag) */
     struct bm nb, old = scr;
-    if (mode_alloc(&nb, want, scr.depth) < 0)
+    if (mode_alloc(&nb, want, depth) < 0)
         return -ENOMEM;
     blit_idle();
-    int was = lace;
+    int was = lace, wass = shres;
     scr = nb;
-    lace = want;
+    lace = m_lace(want);
+    shres = m_shres(want);
     pty = pty >> was << lace;
+    ptx = ptx >> wass << shres;
     mouse_apply(ptx, pty);              /* the pointer in the new mode's lines, at the same place on the glass */
     struct dpyev e;                     /* told first: their resizes and exposes after it see the new size */
     memset(&e, 0, sizeof e);
     e.type = EV_SCREEN;
-    e.arg = (u16)lace;
+    e.arg = (u16)cur_mode();
+    e.x = (short)scr.depth;             /* D62: the depth (a client's dpy_depth follows it) */
     e.w = scr.w;
     e.h = scr.h;
     for (int i = 0; i < NCL; i++)
@@ -801,8 +835,8 @@ static int mode_switch(int want)
     dyn_flip(0);
     dyn_settle();                       /* the Copper shows the new one: the old may go */
     bm_free(&old);
-    dprintf(1, "displayd: screen %ux%u%s\n", scr.w, scr.h, lace ? " interlaced" : "");
-    return lace;
+    dprintf(1, "displayd: screen %ux%u%s, %d planes\n", scr.w, scr.h, lace ? " interlaced" : "", scr.depth);
+    return cur_mode();
 }
 
 /* DPY_FONT_SET: the desktop's font changed now (a preferences program's Test, Use and Cancel; D38 "Preferences"):
@@ -826,7 +860,8 @@ static int font_switch(const char *name, int size)
     memset(&e, 0, sizeof e);
     e.type = EV_SCREEN;
     e.code = DPYS_FONT;
-    e.arg = (u16)lace;
+    e.arg = (u16)cur_mode();
+    e.x = (short)(rtg ? 4 : scr.depth);
     e.w = scr.w;
     e.h = scr.h;
     for (int i = 0; i < NCL; i++)
@@ -1447,12 +1482,17 @@ static int req(struct umsg *m)
     }
     case DPY_MODE:                      /* any client of the desktop's session (a preferences program) */
         if (rtg)                        /* D43: a card's screen has the mode AmigaOS gave it; nothing changes */
-            return a[0] == DPYM_ASK || a[0] <= DPYM_RTG ? DPYM_RTG : -EINVAL;
-        if (a[0] == DPYM_ASK)
-            return lace;
-        if (a[0] > DPYM_LACE)
+            return a[1] == DPYMD_ASK ? DPYM_RTG | 4 << 8 : a[0] == DPYM_ASK || a[0] <= DPYM_RTG ? DPYM_RTG : -EINVAL;
+        if (a[1] == DPYMD_ASK)          /* D62: the mode and the depth */
+            return cur_mode() | scr.depth << 8;
+        if (a[0] == DPYM_ASK && !a[1])
+            return cur_mode();
+        if ((a[0] > DPYM_SHRES_LACE && a[0] != DPYM_ASK) || a[0] == DPYM_RTG || a[1] > 8) {
             return -EINVAL;
-        return mode_switch((int)a[0]);
+        } else {
+            int r = mode_switch(a[0] == DPYM_ASK ? cur_mode() : (int)a[0], (int)a[1]);
+            return r < 0 || !a[1] ? r : r | scr.depth << 8;
+        }
     case DPY_FONT_SET: {                /* the same clients: a[0] 32 bytes, the name (0: the 8 x 8), a[1] the size */
         char nm[32];
         nm[0] = 0;

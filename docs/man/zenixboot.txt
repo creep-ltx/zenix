@@ -6,6 +6,7 @@ NAME
 SYNOPSIS
     zenixboot [KERNEL] [RAM=FILE] [CHECK] [PREVIOUS] [UNSIGNED_OK]
               [DCACHE=OFF|WT|CB] [MMU=ON|OFF|STRICT|D41] [RTG]
+              [RTGMODE=WxH[xBITS]]
 
 DESCRIPTION
     zenixboot is an AmigaOS program, not a Zenix one. It boots Zenix on an
@@ -219,6 +220,15 @@ ARGUMENTS
                 front screen, or a palette (CLUT) screen: it says why and
                 Zenix starts as without RTG. With CHECK it only says what
                 it found
+    RTGMODE=WxH[xBITS]
+                (DESIGN D62) with RTG (which it implies): first open a
+                Picasso96 screen of WIDTH x HEIGHT and BITS a pixel (16,
+                24 or 32; 16 when left out), the card's mode nearest to
+                it, then hand that one over. No such mode, or a screen
+                that cannot be opened: said, and the front screen is
+                taken as it is. With CHECK it says which mode it would
+                open. screenprefs(1)'s "Card size" (/etc/screen's rtg line)
+                is the size to put here
 
 EXAMPLES
     SYS:zenixboot

@@ -72,23 +72,17 @@ FILES
                 (hundredths of a second), pointer NAME (a pointer file in
                 pointers/); applied when the session starts, and what
                 displayd had put back when it ends
-    screen      mode hires|hires-lace|auto (auto, or no file: hires):
-                the screen displayd(8) makes when it starts, 640 x 256
-                (NTSC 640 x 200) or interlaced 640 x 512 (640 x 400);
-                displayd reads /etc's at its start, zdesk applies the
-                user's own at its start and puts back what it found
-                when it leaves; deskprefs(1) changes it. Also
-                font NAME SIZE:
-                the desktop's font, an AmigaOS bitmap font copied as it
-                is into /usr/share/fonts/amiga (NAME.font and the NAME
-                folder): window titles, the bar, menus and labels (not
-                the terminals: 8 x 8). Taller than 8 lines, the bar and
-                the title bars grow as much. font builtin, or no line:
-                the 8 x 8. A font that cannot be read: the 8 x 8, and
-                displayd says why on its standard error
+    screen      (the older place, before screenprefs) mode
+                hires|hires-lace and font NAME SIZE: read when
+                ~/.config/screen/screen (screenprefs(1) FILES) is not
+                there. zdesk applies the user's desktop lines (desktop,
+                desktop-depth, desktop-font) when the session starts and
+                puts back the mode, depth and font displayd had when it
+                ends; displayd reads the system's /etc/screen itself.
+                A taller font makes the bar and the title bars taller
     themes/NAME.theme
                 a theme (THEMES)
-    theme.use   the session's theme (deskprefs), read before theme on
+    theme.use   the session's theme (screenprefs' Use), read before theme on
                 SIGHUP (the theme again); removed when zdesk starts and
                 ends
 
@@ -113,4 +107,4 @@ NOTES
     than their interval (at least 10 s).
 
 SEE ALSO
-    term(1), files(1), deskprefs(1), displayd(8)
+    term(1), files(1), screenprefs(1), displayd(8)

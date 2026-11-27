@@ -1,0 +1,124 @@
+SCREENPREFS(1)			Zenix manual
+
+NAME
+    screenprefs - the screen's settings: the video standard, the
+    console's and the desktop's modes, colours and fonts
+
+SYNOPSIS
+    screenprefs [-v] [-T | -W]
+    screenprefs -l | -q | -K
+    screenprefs [-s] [-y] video pal|ntsc|auto
+    screenprefs [-s] [-y] console [hires|hires-lace] [colours N]
+                [font NAME]
+    screenprefs [-s] [-y] desktop [MODE] [auto|3|4]
+                [font NAME SIZE|builtin]
+    screenprefs -s rtg front|WIDTHxHEIGHT[xBITS]
+
+DESCRIPTION
+    One program for every setting of the screen, with three faces. In a
+    terminal window of Zenix Desktop, or with -W (the Zenix menu's
+    Screen), it is a window; on a console it is a form that fills the
+    screen, worked with the keys; with words after it, it is a command
+    for scripts.
+
+    Video            PAL or NTSC, the console's and the desktop's (one
+                     beam shows both); auto is the machine's own. Only an
+                     ECS or AGA Amiga switches.
+    Console mode     hires (80 x 32, NTSC 80 x 25) or hires interlaced
+                     (80 x 64, NTSC 80 x 50).
+    Console colours  auto, 2, 4, 8 or 16.
+    Console font     the Unicode font: auto, none, or a font of
+                     /usr/share/consolefonts.
+    Desktop mode     hires 640 x 256 (NTSC 200), hires interlaced 640 x
+                     512, and on AGA super-hires 1280 x 256 and
+                     super-hires laced 1280 x 512. On a graphics card the
+                     card's size.
+    Desktop depth    auto, 8 or 16 colours (16: AGA).
+    Desktop font     topaz 8 or an Amiga or TrueType font.
+    Desktop colours  the desktop's theme.
+    Card size        shown when a graphics card is in use: the size and
+                     bits a pixel zenixboot asks Picasso96 for at the
+                     next start (zenixboot RTG RTGMODE=WxHxBITS).
+
+    The console's settings, the video standard and the card's size are
+    the system's: only root changes them. A user's desktop settings are
+    their own.
+
+    Each face changes its own screen at once: the form the console's,
+    the window the desktop's. The other screen's settings are shown and
+    kept by Save, and count from that screen's next start.
+
+    Test    the choice in effect now; Cancel can still go back.
+    Use     in effect, then the program ends: the console until the next
+            boot, the desktop until Log out. Nothing is saved.
+    Save    in effect and saved (FILES); the file's comments and other
+            lines are kept.
+    Cancel  everything back as it was when the program started.
+
+    After a new mode, depth or video standard the program asks to keep
+    it. Without an answer within 10 seconds (a monitor that cannot show
+    it stays dark) the mode before comes back by itself.
+
+    The command: video, console and desktop change those settings now,
+    where that screen is free (the console's while the console is shown,
+    the desktop's while it runs); -s saves them too. At a terminal a new
+    mode asks to be kept as above. rtg only saves (-s).
+
+KEYS
+    Up and Down (or Tab) a setting, Left and Right (or Space) change it;
+    t, u, s and c the buttons, Return Use, Esc and q Cancel; y or k keep
+    a new mode, n or r go back; ?, F1 or Help the keys; Ctrl-L draws
+    again. In the window a click changes a setting (Shift and a click:
+    back), the close gadget is Cancel, and while it asks the first
+    button keeps the mode and the last goes back. Every key can be
+    changed in ~/.config/screenprefs/keys; screenprefs -K prints the
+    defaults.
+
+OPTIONS
+    -T         the form, also in a terminal window
+    -W         the window, also from a console (status 1 when the
+               desktop is not running)
+    -v         say on standard output where the window's parts are
+    -l, --list the modes this machine shows, one a line ("console
+               hires-lace 640x512 80x64"), the one in effect marked *
+    -q         the settings in effect, in one line
+    -s         save the command's settings too
+    -y         no question after a new mode (scripts)
+    -K         the built-in keys
+    --help     the usage line on standard output
+    --version  "screenprefs 0.2"
+
+EXIT STATUS
+    0 done; 1 refused (not root, a mode this machine lacks, not kept, no
+    desktop for -W); 2 a wrong argument.
+
+FILES
+    /etc/screen               the system's: every setting, lines of
+        video auto|pal|ntsc, console hires|hires-lace,
+        console-colours auto|2|4|8|16, console-font auto|none|NAME,
+        desktop hires|hires-lace|superhires|superhires-lace,
+        desktop-depth auto|3|4, desktop-font NAME SIZE|builtin,
+        rtg front|WIDTHxHEIGHT[xBITS]; # starts a comment. init reads it
+        at every start, displayd when it starts.
+    ~/.config/screen/screen   a user's desktop lines, applied by zdesk
+                              when the session starts
+    /var/run/console          the console's Use until the next boot
+    ~/.config/zdesk/theme     the desktop's theme (/etc/zdesk/theme)
+
+NOTES
+    conprefs and deskprefs are other names of screenprefs. The settings
+    they wrote (/etc/console's colours, font and mode lines;
+    /etc/zdesk/screen and ~/.config/zdesk/screen) still count while the
+    new file has no such line; screenprefs says it read them, and its
+    first Save moves them over.
+    The console is 80 columns in every mode. Super-hires is AGA's only
+    here; the 31 kHz modes (DblPAL, Multiscan) are not offered yet.
+
+EXAMPLES
+    screenprefs -l
+    screenprefs -s -y console hires-lace colours 8
+    screenprefs desktop superhires 4
+    screenprefs -s rtg 1280x960x16
+
+SEE ALSO
+    mouseprefs(1), zdesk(1), init(8), zenixboot(8)

@@ -253,6 +253,8 @@ int dpy_next(struct dpyev *e, int ticks)
             if (e->type == EV_SCREEN) {         /* a new mode (DPY_MODE): dpy_w, dpy_h follow it */
                 dpy_w = e->w;
                 dpy_h = e->h;
+                if (e->x > 0)               /* D62: the depth (an older server: 0) */
+                    dpy_depth = (unsigned short)e->x;
             }
             if (h->flags & DPYR_LOST)
                 lost = 1;
@@ -270,6 +272,7 @@ int dpy_next(struct dpyev *e, int ticks)
 }
 
 int dpy_mode(int mode) { return dpy_call(DPY_MODE, (unsigned)mode, 0, 0, 0); }
+int dpy_mode2(int mode, int depth) { return dpy_call(DPY_MODE, (unsigned)mode, (unsigned)depth, 0, 0); }
 int dpy_fontset(const char *name, int size)    /* name: DPY_FONTNAME bytes of the caller's (the server reads them all) */
 {
     return dpy_call(DPY_FONT_SET, name && *name ? (unsigned)name : 0, (unsigned)size, 0, 0);

@@ -158,6 +158,9 @@ start     4850   8200
 # 14,500 -> 14,700 (100 lines of scrollback without fast RAM, the Unicode font asked for when needed), proc bss
 # 21,500 -> 13,500 (cwd out of the 32 slots); kernel.bin 234,656 -> 235,008, TOTAL 234,800 -> 235,200; the mount
 # tests' RAM disk 649 -> 648 KB.
+# 2026-11-27 (D62, the screen modes: CON_MODE's video standard and CONM_INFO): gfx 9,050 -> 9,500 (BEAMCON0 written above line 240
+# with the switch, the Copper lists built for either standard, the chips' answer, the standard again after ZINE); kernel.bin 235,008 -> 235,504,
+# TOTAL 235,200 -> 235,600.
 main      5950   1700
 serial    6200   6500
 mem       4750    248
@@ -173,7 +176,7 @@ proc     10900  13500
 syscall  11100      0
 vfs      12000   1600
 tty       5900    100
-gfx       9050   2450
+gfx       9500   2450
 term     14700    256
 confont   3100     32
 kbd       4300    180
@@ -191,5 +194,5 @@ gcon      5000     16
 dbg       4100     20
 mmu      24700    300
 embed    51000      0
-TOTAL   235200
+TOTAL   235600
 ROOM       800

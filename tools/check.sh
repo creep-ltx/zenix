@@ -25,7 +25,7 @@
 # tools/serial-tap.py; a `waitopt` may time out).
 # Needs for zinstall-test: e2fsck, sfdisk, debugfs, amitools' xdftool if installed, and part n the namespaces as zpkg-emu-test.
 # Not run, on purpose: stage0-68k-test when the Python module unicorn is missing (named as skipped), audio/klog/joystick (weak or
-# covered by diag-test). Needs ZENIX_KICKSTART_DIR (tools/fsuae_conf.py) and, for kbd-test, zine-input-test, cu-test, diag-test, colour-test, gcon-test, dpy-test, luagame-test, zdesk-test, zdesk-draw-test, drag-test, lace-test, font-test, ttf-test, prefs-test, files-test, show-test, screen-test, intro-test, dlogin-test and
+# covered by diag-test). Needs ZENIX_KICKSTART_DIR (tools/fsuae_conf.py) and, for kbd-test, zine-input-test, cu-test, diag-test, colour-test, gcon-test, dpy-test, luagame-test, zdesk-test, zdesk-draw-test, drag-test, lace-test, font-test, ttf-test, screenprefs-test, files-test, show-test, screen-test, intro-test, dlogin-test and
 # random-test and bbs-test, ZENIX_CAGE_RIG; net-test and slip-test need libslirp (GLib) and unprivileged user namespaces (eth-test
 # the namespaces too, and ctop-test's part n; ssh-test also OpenSSH's sshd and ssh-keygen, openssl, and unshare --map-auto; wget-test openssl and the namespaces;
 # zine-test's tables part ZENIX_MANUALS (the manuals as text; SKIPPED without it); zpkg-emu-test and remote-test the namespaces and libslirp; remote-test also runs the owner's Wasabi client when
@@ -36,7 +36,7 @@ cd "$(dirname "$0")/.." || exit 1
 MODE=""
 while :; do case "$1" in --fast) MODE=fast; shift ;; --stock) MODE=stock; shift ;; *) break ;; esac; done
 HOST="docs-check tap-test usize-test signal-host-test mkzexe-test zup-host-test ext2-host-test disk-host-test fat-host-test ffs-host-test pfs3-host-test iso9660-host-test exfat-host-test usb-host-test arc-host-test zenixfs-test mfm-test emmc-test genet-test ne2000-test plipbox-test serial-test term-test confont-test mem-test a3000-test stage0-test stage0-68k-test net-test random-host-test sock-host-test telnet-test irc-host-test mail-host-test crypto-test clock-host-test zpkg-test tls-test nfs-test wasabi-test libc-host-test libc-size zmalloc-test dos-host-test zine-test zinstall-host-test cache-host-test mouse-host-test demoload-host-test amifont-host-test ttf-host-test sound-host-test trk-host-test rtg-host-test show-host-test lua-host-test make-host-test shebang-host-test zld-host-test zas-host-test tcc-host-test games-host-test"
-EMU="matrix cmds-test cmds2-test users-test jobs-test signal-test pty-test gcon-test dpy-test zdesk-test zdesk-draw-test drag-test lace-test font-test ttf-test prefs-test mouse-test files-test show-test readdir-test dlogin-test prio-test kbd-test con-test cu-test diag-test colour-test memtest mounttest zenixfstest fat-test ffs-test pfs3-test cd-test exfat-test arc-test paths-test zroot-test zroot-card-test ide-speed-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test update-test useradd-test rootcheck-test random-test sock-test netd-test slip-test drv-test eth-test bbs-test irc-test mail-test time-test crypto68k-test ssh-test wget-test zpkg-emu-test sysupdate-test remote-test nfs-emu-test libc-test tui-test sumi-test maki-test markdown-test ahiru-test ctop-test zine-emu-test zine-input-test zinstall-test halt-test lineedit-test scroll-test conspeed-test box-test demo-test sound-test tracker-test mmu-test mmubench-test bootmem-test rtg-test usb-test lua-test make-test shebang-test zld-test zas-test tcc-test zdb-test games-test luagame-test screen-test intro-test mmu-suite"
+EMU="matrix cmds-test cmds2-test users-test jobs-test signal-test pty-test gcon-test dpy-test zdesk-test zdesk-draw-test drag-test lace-test font-test ttf-test screenprefs-test mouse-test files-test show-test readdir-test dlogin-test prio-test kbd-test con-test cu-test diag-test colour-test memtest mounttest zenixfstest fat-test ffs-test pfs3-test cd-test exfat-test arc-test paths-test zroot-test zroot-card-test ide-speed-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test update-test useradd-test rootcheck-test random-test sock-test netd-test slip-test drv-test eth-test bbs-test irc-test mail-test time-test crypto68k-test ssh-test wget-test zpkg-emu-test sysupdate-test remote-test nfs-emu-test libc-test tui-test sumi-test maki-test markdown-test ahiru-test ctop-test zine-emu-test zine-input-test zinstall-test halt-test lineedit-test scroll-test conspeed-test box-test demo-test sound-test tracker-test mmu-test mmubench-test bootmem-test rtg-test usb-test lua-test make-test shebang-test zld-test zas-test tcc-test zdb-test games-test luagame-test screen-test intro-test mmu-suite"
 DEFMODE=fast
 case "$1" in
 "") LIST="$HOST $EMU"; DEFMODE=stock ;;          # the full run (the nightly, before a merge): stock speed
@@ -63,8 +63,8 @@ STOCK[dlogin-test]="screenshots by the cage rig (shot.py) at the serial port's m
 STOCK[drag-test]="screenshots by the cage rig (shot.py) while the mouse's records move a window: the PC's clock against the drag's"
 STOCK[font-test]="screenshots by the cage rig (shot.py) at times on the PC's clock"
 STOCK[ttf-test]="screenshots by the cage rig (shot.py) at times on the PC's clock; ttf2font's times on the stock 68020 (D51)"
-STOCK[prefs-test]="screenshots by the cage rig (shot.py) at times on the PC's clock"
 STOCK[mouse-test]="screenshots by the cage rig (shot.py) at times on the PC's clock (D61)"
+STOCK[screenprefs-test]="screenshots by the cage rig (shot.py) at times on the PC's clock; the 10 s fall-back against the script's pace (D62)"
 STOCK[files-test]="screenshots by the cage rig (shot.py) at times on the PC's clock; a double click inside half a second"
 STOCK[show-test]="screenshots by the cage rig (shot.py) at times on the PC's clock"
 STOCK[luagame-test]="screenshots by the cage rig (shot.py) and keys typed while gridrun's round runs on the Amiga's clock"
@@ -136,7 +136,7 @@ SPLIT[mmu-test]="020 030 lc040|040 060 lc060|030+d41 040+strict 060+d41 060+stri
 SPLIT[mmubench-test]="030|040|060"                  # D60 9.4: the cost of protection, one job per CPU
 SPLIT[mmu-suite]="030|040|060"                      # D41 section 19: the core suites with protection on, one job per CPU
 SPLIT[lace-test]="pal|ntsc"                         # D38 "Screen modes": PAL and NTSC
-SPLIT[prefs-test]="desk|con"                        # D38 "Preferences" and D28 22: the desktop's, the console's
+SPLIT[screenprefs-test]="cli|con|desk|rtg"            # D62: the command line, the text form, the window, a card
 SPLIT[mouse-test]="k|d|l|p"                       # D61: the kernel, displayd, a card under load, mouseprefs
 SPLIT[drag-test]="hires|lace"                      # D38 "Screen modes": the drags on the interlaced screen too
 SPLIT[fat-test]="16|32"                             # the two rounds, FAT16 and FAT32

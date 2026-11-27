@@ -279,6 +279,13 @@ static inline int sys_console(int op, int v) { return sys3(89, (u32)op, (u32)v, 
 #define CONM_HIRES 0
 #define CONM_LACE 1
 #define CONM_ASK 0xFF
+#define CONM_PAL 0x10           /* D62: CON_MODE's video standard (ECS/AGA Agnus), added to the mode */
+#define CONM_NTSC 0x20
+#define CONM_INFO 0xFE          /* D62: -> the mode | CONM_PAL or CONM_NTSC | CONMI_* (any process) */
+#define CONMI_AGA 0x100
+#define CONMI_SHRES 0x200
+#define CONMI_BEAM 0x400
+#define CONMI_NTSCX 0x800
 static inline int sys_conufont(const void *zcf, u32 n) { return sys3(89, CON_UFONT, (u32)zcf, n); }
 #define CONUF_LAZY 1            /* sys_conufont(0, CONUF_LAZY): no font now; init's sys_waitcon gives ST_CONSOLE when one is needed (audit OS-5) */
 static inline int sys_confont(int fd, const void *psf, u32 n) { return sys3(89, CON_FONT | (u32)(fd + 1) << 8, (u32)psf, n); }

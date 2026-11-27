@@ -1,0 +1,25 @@
+# The screen's settings (man screenprefs): the system's, written by screenprefs' Save as root. Read by init at every
+# start (video, console...), by displayd when it starts (desktop...), by screenprefs. A user's own desktop lines are in
+# ~/.config/screen/screen. A setting left out is the machine's default (and, for the console, /etc/console's older
+# line if it has one; for the desktop, /etc/zdesk/screen's).
+# video auto|pal|ntsc: the video standard of the console and the desktop (one beam for both). auto: the machine's
+#   own. An ECS or AGA Amiga shows either (60 Hz NTSC flickers less interlaced; a PAL TV may not show NTSC).
+# console hires|hires-lace: 80 x 32 (NTSC 25); interlaced 80 x 64 (NTSC 50), twice the chip RAM, flickers without a
+#   flicker fixer.
+# console-colours auto|2|4|8|16: fewer colours leave more chip RAM (40, 80, 120 or 160 KB) and cost the processor
+#   less without fast RAM. auto: 16 with fast RAM (8 on OCS or ECS), 8 with chip RAM only.
+# console-font auto|none|NAME: the Unicode font, /usr/share/consolefonts/NAME.zcf (auto: zenix-8x8).
+# desktop hires|hires-lace|superhires|superhires-lace: 640 or 1280 (AGA) across, 256 lines (NTSC 200), twice that
+#   interlaced; a screen bigger than hires needs its chip RAM and 512 KB more free (else hires).
+# desktop-depth auto|3|4: 8 or 16 colours (4: AGA); auto: 16 on AGA, 8 on OCS and ECS.
+# desktop-font NAME SIZE|builtin: an AmigaOS bitmap font in /usr/share/fonts/amiga (or a TrueType font in
+#   /usr/share/fonts/truetype); builtin: Topaz 8. Terminals always use the 8 x 8.
+# rtg front|WIDTHxHEIGHT[xBITS]: on a graphics card (zenixboot RTG), the size the desktop asks Picasso96 for at the
+#   next start: zenixboot RTG RTGMODE=WIDTHxHEIGHTxBITS (BITS 16, 24 or 32); front: the front screen as it is.
+#video auto
+#console hires
+#console-colours auto
+#console-font auto
+#desktop hires
+#desktop-depth auto
+#desktop-font builtin

@@ -21,8 +21,10 @@ DESCRIPTION
     orders, sent in batches and checked one by one, and the pointer (the
     hardware's sprite 0, moved by the kernel). The screen is 640 x 256
     (640 x 200 on NTSC) in 16 colours on AGA, 8 on OCS and ECS, or
-    interlaced, 640 x 512 (640 x 400 on NTSC), when /etc/zdesk/screen says
-    "mode hires-lace" (zdesk(1) FILES) and the chip RAM free is at least
+    interlaced, 640 x 512 (640 x 400 on NTSC), or on AGA super-hires, 1280
+    across, laced or not, in 8 or 16 colours, as /etc/screen's desktop
+    lines say (screenprefs(1) FILES; without them the older
+    /etc/zdesk/screen's "mode") and the chip RAM free is at least
     the screen and 512 KB more (else hires, and it says why). A program
     may change the mode while it runs (DPY_MODE, a preferences program's
     Test, Use and Cancel): the windows are kept on the new screen and
@@ -30,7 +32,7 @@ DESCRIPTION
 
     Text is drawn in one of two fonts: the 8 x 8 (Topaz from the ROM and
     the Unicode supplement, the terminals' cells) and the desktop's font,
-    an AmigaOS bitmap font named by /etc/zdesk/screen's "font NAME SIZE"
+    an AmigaOS bitmap font named by /etc/screen's "desktop-font NAME SIZE"
     and read once from /usr/share/fonts/amiga when it starts (proportional
     fonts, kerning, Latin-1; a character the font lacks is drawn by the
     8 x 8; a colour font in one colour). A damaged or missing font is one
@@ -115,7 +117,8 @@ OPTIONS
 
 FILES
     /etc/svctab                       its service line
-    /etc/zdesk/screen                 the screen's mode at its start
+    /etc/screen                       the screen's mode at its start
+                                      (else /etc/zdesk/screen)
     /usr/share/consolefonts/zenix-8x8.zcf   the characters beyond Latin-1
 
 NOTES

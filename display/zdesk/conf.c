@@ -359,33 +359,61 @@ static void bar_file(void)
     }
 }
 
-/* the screen file (zdesk(1) FILES: ~/.config/zdesk/screen, else /etc/zdesk/screen; the format of
- * display/lib/screenfile.c, which displayd reads /etc's with): its mode (DPYM_*), its font's name ("" the 8 x 8) and
- * size -> 0, or -1 (no file). A line not understood is skipped (the first said) */
-int conf_screen(char *path, int *mode, char *font, int *size)
+/* the user's screen file (zdesk(1) FILES; DESIGN D62: ~/.config/screen/screen, else the older ~/.config/zdesk/screen;
+ * the system's /etc/screen is displayd's, read when it started): its desktop mode (DPYM_*), depth (0: as it is), its
+ * font's name ("" the 8 x 8) and size -> 0, or -1 (no file of the user's, or no desktop line in it). The words of
+ * display/lib/screenfile.c, which displayd and screenprefs read with; a line not understood is skipped (the first
+ * said), the system's other lines (video, console...) are not zdesk's and pass unsaid */
+static int screen_words(const char *path, char *b, int *mode, int *depth, char *font, int *size);
+int conf_screen(char *path, int *mode, int *depth, char *font, int *size)
 {
-    char *b = slurp(conf_file("screen", path)), *p = b, *l, *w[4];
-    int ln = 0, nbad = 0;
+    const char *h = getenv("HOME");
     *mode = DPYM_HIRES;
+    *depth = 0;
     *font = 0;
     *size = 0;
-    if (!b)
-        return -1;
+    int got = 0;
+    for (int k = 0; k < 2 && !got; k++) {     /* the new file, else (no desktop line in it) the older one */
+        char *b = 0;
+        if (h && strlen(h) + 24 < ZPATH_MAX) {
+            strcpy(path, h);
+            strcat(path, k ? "/.config/zdesk/screen" : "/.config/screen/screen");
+            b = slurp(path);
+        }
+        if (b)
+            got = screen_words(path, b, mode, depth, font, size);
+    }
+    return got ? 0 : -1;
+}
+static int screen_words(const char *path, char *b, int *mode, int *depth, char *font, int *size)
+{
+    static const char *const mn[5] = { "hires", "hires-lace", "", "superhires", "superhires-lace" };
+    char *p = b, *l, *w[4];
+    int ln = 0, nbad = 0, got = 0;
     while ((l = next_line(&p))) {
-        int n = words(l, w, 4), v = n == 3 ? atoi(w[2]) : 0;
+        int n = words(l, w, 4), v = n == 3 ? atoi(w[2]) : 0, m = -1, d = n && !strncmp(w[0], "desktop", 7);
         ln++;
-        if (n == 2 && !strcmp(w[0], "mode"))
-            *mode = !strcmp(w[1], "hires-lace") ? DPYM_LACE : DPYM_HIRES;
-        else if (n == 2 && !strcmp(w[0], "font"))
-            *font = 0, *size = 0;       /* font builtin */
-        else if (n == 3 && !strcmp(w[0], "font") && v > 0 && strlen(w[1]) < DPY_FONTNAME) {
+        if (n == 2)
+            for (int i = 0; i < 5; i++)
+                if (i != DPYM_RTG && !strcmp(w[1], mn[i]))
+                    m = i;
+        if (n == 2 && (!strcmp(w[0], "mode") || !strcmp(w[0], "desktop")) && (m >= 0 || !strcmp(w[1], "auto")))
+            *mode = m < 0 ? DPYM_HIRES : m, got = 1;
+        else if (n == 2 && !strcmp(w[0], "desktop-depth"))
+            *depth = w[1][0] == '3' || w[1][0] == '4' ? w[1][0] - '0' : 0, got = 1;
+        else if (n == 2 && (!strcmp(w[0], "font") || !strcmp(w[0], "desktop-font")))
+            *font = 0, *size = 0, got = 1;      /* font builtin */
+        else if (n == 3 && (!strcmp(w[0], "font") || !strcmp(w[0], "desktop-font")) && v > 0 &&
+                 strlen(w[1]) < DPY_FONTNAME) {
             strcpy(font, strcmp(w[1], "topaz") || v != 8 ? w[1] : "");
             *size = *font ? v : 0;
-        } else if (n && !nbad++)
+            got = 1;
+        } else if (n && !d && *w[0] != '#' && strcmp(w[0], "video") && strncmp(w[0], "console", 7) &&
+                   strcmp(w[0], "rtg") && !nbad++)
             bad(path, ln, w[0]);
     }
     free(b);
-    return 0;
+    return got;
 }
 
 int conf_theme(const char *theme)

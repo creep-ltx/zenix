@@ -64,6 +64,7 @@
 #define F3_MODADJ 0                     /* bytes added to the modulo (a fetch window wider than 640 pixels: negative) */
 #endif
 #define DENISEID REG16(0xDFF07C)        /* Lisa (AGA) reads 0xF8 in the low byte; OCS has no such register */
+#define BEAMCON0 REG16(0xDFF1DC)        /* D62: ECS/AGA Agnus: bit 5 PAL (the other bits 0: the standard beam) */
 #define COP_WAIT_LINE 0x20              /* the Copper waits for this line before it moves the plane pointers */
 #define STRIDE  80                      /* bytes per plane per line */
 
@@ -72,6 +73,7 @@ int gfx_depth;                          /* bitplanes: 1 to 4 (0: no display) */
 static int dlines = 256;                /* display lines: 8 * trows */
 static int vlines = 256;                /* the beam's lines of the picture: 256 PAL, 200 NTSC (dlines halved in lace) */
 static int lace;                        /* D28 22, CON_MODE: interlaced (two fields, two Copper lists) */
+static int ntsc;                        /* D62: the video standard shown is NTSC (200 lines; CON_MODE's CONM_NTSC) */
 static int lastl = 312;                 /* the line only a long field has: 312 PAL, 262 NTSC */
 static u32 lstride;                     /* bytes per display line: 80 per plane */
 static u32 rstride;                     /* bytes per text row: 8 lines */
@@ -710,14 +712,16 @@ static int frame_lines(void)
 }
 
 /* AGA: Lisa's id register reads 0xF8 in its low byte (ECS Denise 0xFC); OCS has no such register and the bus floats,
- * so every one of 16 reads must agree */
-static int lisa(void)
+ * so every one of 16 reads must agree. D62: an Agnus or Alice with bit 5 in its id (VPOSR bits 14-8: ECS $20/$30, AGA
+ * $22/$23/$32/$33; OCS $00/$10) has BEAMCON0 and switches between PAL and NTSC */
+static int agnus(void) { return (int)(VPOSR >> 8) & 0x7F; }
+static int denise(void)                 /* D62: 0xF8 Lisa, 0xFC ECS Denise (super-hires), 0 OCS */
 {
     u16 v = DENISEID & 0xFF;
     for (int i = 0; i < 16; i++)
         if ((DENISEID & 0xFF) != v)
             return 0;
-    return v == 0xF8;
+    return v == 0xF8 || v == 0xFC ? v : 0;
 }
 
 /* DESIGN D28 20: the ring's chip RAM at ls bytes a line. Its spare rows (gfx_init): as many as the screen's with fast
@@ -755,8 +759,10 @@ static int pick_depth(void)
  * Interlaced (D28 22, the same scheme as displayd's, docs/d38-desktop.md "Interlace on the chips"): each field's
  * list skips the other field's lines (the modulos one line more) and ends naming the long field's list for the next
  * field; only a long field reaches line lastl, and there names the short field's instead. */
-#define DIWSTOP_V ((((DIW_V + vlines) & 0xFF) << 8) | 0xC1)    /* the stop line's bit 8 is implied (not bit 7) */
-static void build_cop(volatile u16 *l, int depth, int lc, int *col, int *ptr, int *ptr2, int *end)
+#define DIWSTOP_OF(vl) ((((DIW_V + (vl)) & 0xFF) << 8) | 0xC1)   /* the stop line's bit 8 is implied (not bit 7) */
+#define DIWSTOP_V DIWSTOP_OF(vlines)
+/* (vl, ll: the picture's lines and the long field's last line of the video standard the list is for, D62) */
+static void build_cop(volatile u16 *l, int depth, int lc, int vl, int ll, int *col, int *ptr, int *ptr2, int *end)
 {
     int f3 = aga && depth > 1;          /* more than one plane on AGA: always at FMODE 3 */
     u16 mod = (u16)((u32)STRIDE * (u32)depth * (u32)(lc + 1) - STRIDE + (f3 ? F3_MODADJ : 0));
@@ -768,7 +774,7 @@ static void build_cop(volatile u16 *l, int depth, int lc, int *col, int *ptr, in
         MOVE(0x10C, 0x0011);            /* BPLCON4: no BPLAM colour-index XOR, sprite palettes as after reset */
     }
     MOVE(0x08E, (DIW_V << 8) | 0x81);           /* DIWSTRT, DIWSTOP: every frame, so a display server's (D38) */
-    MOVE(0x090, DIWSTOP_V);                     /* window never outlives it */
+    MOVE(0x090, DIWSTOP_OF(vl));                /* window never outlives it */
     MOVE(0x100, 0x8200 | (depth << 12) | (lc << 2));    /* BPLCON0: hires, N planes, colour burst, LACE */
     MOVE(0x102, f3 ? F3_BPLCON1 : 0);
     MOVE(0x104, 0);
@@ -797,7 +803,7 @@ static void build_cop(volatile u16 *l, int depth, int lc, int *col, int *ptr, in
         MOVE(0x082, (u32)l);
         *c++ = 0xFFDF;                  /* (cop_point: lastl's low bits when the wrap waited past 255) */
         *c++ = 0xFFFE;
-        *c++ = (u16)((lastl & 0xFF) << 8 | 1);
+        *c++ = (u16)((ll & 0xFF) << 8 | 1);
         *c++ = 0xFFFE;
         MOVE(0x080, (u32)(l + COP_WORDS) >> 16);
         MOVE(0x082, (u32)(l + COP_WORDS));
@@ -874,8 +880,9 @@ KINIT int gfx_init(void)
         dlines = vlines = 200;
         lastl = 262;
     }
-    kprintf("display: beam's last line %d: %s, %d text rows\n", fl, trows == 25 ? "NTSC" : "PAL", trows);
-    aga = lisa();
+    ntsc = trows == 25;
+    kprintf("display: beam's last line %d: %s, %d text rows\n", fl, ntsc ? "NTSC" : "PAL", trows);
+    aga = denise() == 0xF8;
     cop = mem_alloc(4 * COP_WORDS, MEM_CHIP, 0);
     if (!cop)
         return -1;
@@ -890,7 +897,7 @@ KINIT int gfx_init(void)
     if (!tbuf)
         return -1;
     say_depth();
-    build_cop(cop, gfx_depth, 0, &cop_col, &cop_ptr, &cop_ptr2, &cop_end);
+    build_cop(cop, gfx_depth, 0, vlines, lastl, &cop_col, &cop_ptr, &cop_ptr2, &cop_end);
     rstride = 8 * lstride;
     set_base(0);
     cop_point(0);
@@ -912,6 +919,12 @@ KINIT int gfx_init(void)
 
 /* DESIGN D29 9.2: what ZINE's way back writes into the display's write-only registers: the Copper list (returned)
  * and DIWSTRT, DIWSTOP as gfx_init wrote them */
+/* D62: ZINE's way back sets the machine's own standard (the blob's BEAMCON0); the one shown now again */
+void gfx_zine_back(void)
+{
+    if (agnus() & 0x20)
+        BEAMCON0 = ntsc ? 0 : 0x20;
+}
 u32 gfx_zine(u16 *diw)
 {
     diw[0] = (u16)((DIW_V << 8) | 0x81);
@@ -919,21 +932,23 @@ u32 gfx_zine(u16 *diw)
     return (u32)cop;
 }
 
-/* /etc/console's settings (init, SYS_console; D14 section 11, D28 22): show d planes (1-4), interlaced or not (lc)
+/* /etc/console's settings (init, SYS_console; D14 section 11, D28 22): show d planes (1-4), interlaced or not (lc),
+ * in NTSC or PAL (n, D62: only an ECS/AGA Agnus switches, gfx_set_mode checks; BEAMCON0 is written with the switch)
  * from now on. The new buffer and Copper lists come first, then (a new number of rows) the consoles' new grids (no
  * memory for any: -ENOMEM, the display stays as it is); the switch is one register write with interrupts masked,
  * which the Copper takes at the next vertical blank; the consoles' text moves into the new grids at once (nothing
  * draws between: no kprintf). One frame later (a timeout of 100 ms: the beam may not move) the old ones are freed and
  * the console shown is drawn again. -> 0 or -errno */
-static int screen(int d, int lc)
+static int screen(int d, int lc, int n)
 {
     if (!up)
         return -ENODEV;
     if (held)
         return -EBUSY;                  /* D38: a display server has the screen; its Copper list stays */
-    if (d == gfx_depth && lc == lace)
+    if (d == gfx_depth && lc == lace && n == ntsc)
         return 0;
-    int rows = (vlines >> 3) << lc, nr = rows + (fast ? rows : CHIP_SPARE);
+    int vl = n ? 200 : 256, ll = n ? 262 : 312;
+    int rows = (vl >> 3) << lc, nr = rows + (fast ? rows : CHIP_SPARE);
     u32 ls = (u32)STRIDE * (u32)d, rb = (u32)nr * 8 * ls;
     blit_wait();                        /* first: its timeout's kprintf draws (nothing may draw between the grids' steps) */
     volatile u16 *nc = mem_alloc(4 * COP_WORDS, MEM_CHIP, 0);
@@ -944,13 +959,25 @@ static int screen(int d, int lc)
         return -ENOMEM;
     }
     int col, ptr, ptr2, end;
-    build_cop(nc, d, lc, &col, &ptr, &ptr2, &end);
+    build_cop(nc, d, lc, vl, ll, &col, &ptr, &ptr2, &end);
     memset(nb, 0, rb);
     volatile u16 *oc = cop;
     u8 *ob = tbuf;
-    u16 s = irq_save();
+    u16 s;
+    /* D62: to NTSC, BEAMCON0 is written while the beam is above line 240 (22 lines before NTSC's last): a PAL beam
+     * already past 262 would run on to its counter's wrap, a frame without a vertical blank. At most a frame of
+     * waiting (100 ms: a beam that does not move, no display to spoil) */
+    for (u32 t0 = hr_time(), k = 0; n && !ntsc && (int)((VPOSL >> 8) & 0x1FF) >= 240 &&
+                                    (u32)(hr_time() - t0) < eclock_hz / 10 && ++k < 2000000u;)
+        ;
+    s = irq_save();
     if (lace)                           /* the old lists name the new one for the next field, not themselves */
         cop_next(oc, cop_end, (u32)nc, (u32)nc);
+    if (n != ntsc)
+        BEAMCON0 = n ? 0 : 0x20;        /* D62: from the next frame on, 262 or 312 lines */
+    ntsc = n;
+    vlines = vl;
+    lastl = ll;
     tbuf = nb;
     cop = nc;
     gfx_depth = d;
@@ -974,9 +1001,9 @@ static int screen(int d, int lc)
     if (moved)
         term_regrid(0);                 /* the text into the new grids, before anything draws (interrupts only queue) */
     dgen++;
-    u32 t0 = hr_time(), n = 0;          /* a vertical blank: the beam's line number goes down once */
+    u32 t0 = hr_time(), k = 0;          /* a vertical blank: the beam's line number goes down once */
     int last = (int)((VPOSL >> 8) & 0x1FF);
-    while ((u32)(hr_time() - t0) < ECLOCK_PAL / 10 && ++n < 2000000u) {
+    while ((u32)(hr_time() - t0) < eclock_hz / 10 && ++k < 2000000u) {
         int v = (int)((VPOSL >> 8) & 0x1FF);
         if (v < last)
             break;
@@ -998,19 +1025,28 @@ int gfx_set_colours(int colours)
         return colours ? -EINVAL : 1 << gfx_depth;
     if (d == 4 && !aga)
         d = 3;
-    int r = screen(d, lace);
+    int r = screen(d, lace, ntsc);
     return r ? r : 1 << d;
 }
 
-/* CON_MODE (D28 22): CONM_HIRES or CONM_LACE (CONM_ASK asks) -> the mode shown now */
+/* CON_MODE (D28 22): CONM_HIRES or CONM_LACE (CONM_ASK asks) -> the mode shown now. D62: CONM_PAL or CONM_NTSC
+ * added chooses the video standard too (the answer then has the standard's bit); CONM_INFO asks for the mode, the
+ * standard and what the chips can show (CONMI_*) */
 int gfx_set_mode(int m)
 {
     if (m == CONM_ASK)
         return lace;
-    if (m != CONM_HIRES && m != CONM_LACE)
+    int ag = agnus(), de = denise();
+    if (m == CONM_INFO)
+        return lace | (ntsc ? CONM_NTSC : CONM_PAL) | (de == 0xF8 ? CONMI_AGA : 0) | (de ? CONMI_SHRES : 0) |
+               (ag & 0x20 ? CONMI_BEAM : 0) | (ag & 0x10 ? CONMI_NTSCX : 0);
+    int st = m & (CONM_PAL | CONM_NTSC), n = st ? st == CONM_NTSC : ntsc;
+    if ((m & ~(CONM_LACE | CONM_PAL | CONM_NTSC)) || st == (CONM_PAL | CONM_NTSC))
         return -EINVAL;
-    int r = screen(gfx_depth, m);
-    return r ? r : m;
+    if (n != ntsc && !(ag & 0x20))
+        return -ENODEV;                 /* an OCS Agnus shows its crystal's standard only */
+    int r = screen(gfx_depth, m & CONM_LACE, n);
+    return r ? r : st ? (m & CONM_LACE) | (ntsc ? CONM_NTSC : CONM_PAL) : m;
 }
 
 int gfx_up(void) { return up && !held; }

@@ -1067,6 +1067,16 @@ _Static_assert(sizeof(struct umouse) == UMOUSE_FIRST, "umouse is 20 bytes");
 #define CONM_HIRES      0
 #define CONM_LACE       1
 #define CONM_ASK        0xFF
+/* D62 (docs/d62-screen-modes.md 3): a2 may add CONM_PAL or CONM_NTSC, the video standard (the console's and the
+ * desktop's: one beam); only an ECS/AGA Agnus switches (-ENODEV the other one on OCS); the answer then is the mode |
+ * the standard's bit. CONM_INFO (any process) -> the mode | the standard's bit | CONMI_* (what the chips are) */
+#define CONM_PAL        0x10
+#define CONM_NTSC       0x20
+#define CONM_INFO       0xFE
+#define CONMI_AGA       0x100   /* Lisa: AGA */
+#define CONMI_SHRES     0x200   /* an ECS Denise or Lisa: super-hires */
+#define CONMI_BEAM      0x400   /* an ECS/AGA Agnus: BEAMCON0, PAL and NTSC */
+#define CONMI_NTSCX     0x800   /* the Agnus is an NTSC part (the machine's crystal) */
 /* DESIGN D55 6 (docs/d55-screens.md): CON_VBLANK (no descriptor, any process): a2 the vertical-blank count to wait for
  * -> the count now (31 bits); the wait ends when the count reaches a2 ((s32)((now - a2) << 1) >= 0), after 100 ms at
  * most, or -EINTR (a signal; not restarted); a2 with bit 31 set only asks; -ENODEV without a display. CON_HOLD (the
@@ -1251,6 +1261,7 @@ void fd_zine(void);                             /* D29: floppy motors off, heads
 void ide_zine(void);                            /* D29: Gayle's IDE interrupt enable and latch as ide_init left them */
 void kbd_zine(void);                            /* D29: held keys forgotten, one handshake */
 u32 gfx_zine(u16 *diw);                         /* D29: the Copper list; DIWSTRT, DIWSTOP into diw[0..1] */
+void gfx_zine_back(void);                      /* D62: the video standard shown again after ZINE */
 void syscall_c(u32 *rb);
 void trap0_entry(void);
 void irq5_entry(void);

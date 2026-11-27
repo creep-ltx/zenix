@@ -14,8 +14,8 @@ DESCRIPTION
     which lists every size made there. The desktop reads it like any
     Amiga font, and so does AmigaOS (copy both into its FONTS:).
 
-    The desktop runs it by itself: when /etc/zdesk/screen names a font
-    that is not in /usr/share/fonts/amiga but is
+    The desktop runs it by itself: when /etc/screen's desktop-font names
+    a font that is not in /usr/share/fonts/amiga but is
     /usr/share/fonts/truetype/NAME.ttf, displayd draws that size once
     into /var/cache/fonts and reads the file from then on. A file whose
     .ttf has changed (its size or time) is drawn again. The screen stands
@@ -28,7 +28,7 @@ DESCRIPTION
     -c  makes the console's Unicode font instead (8 x 8, ZCF1): the
         letters and symbols past U+00FF the font has, into OUT.zcf
         (default /usr/share/consolefonts/NAME.zcf), chosen in
-        conprefs(1) or /etc/console. Topaz keeps Latin-1.
+        screenprefs(1) or /etc/screen. Topaz keeps Latin-1.
 
 OPTIONS
     -o DIR   where the font goes (default /var/cache/fonts)
@@ -66,4 +66,4 @@ NOTES
     Details: docs/d51-truetype.md.
 
 SEE ALSO
-    deskprefs(1), zdesk(1), conprefs(1)
+    screenprefs(1), zdesk(1)

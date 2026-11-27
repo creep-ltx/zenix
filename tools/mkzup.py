@@ -184,7 +184,8 @@ BASE_CONFIG = ["svctab", "passwd", "group", "fstab", "motd", "console", "hosts",
 SETUID = {"su", "sudo", "passwd", "zine"}
 LINKS = [("less", "/bin/more"), ("gzip", "/bin/gunzip"), ("gzip", "/bin/zcat"), ("chown", "/bin/chgrp"),
          ("pgrep", "/bin/pkill"), ("reboot", "/bin/bootamigaos"), ("reboot", "/bin/halt"), ("reboot", "/bin/poweroff"), ("reboot", "/bin/shutdown"), ("ifconfig", "/bin/ifup"), ("ifconfig", "/bin/ifdown"),
-         ("rz", "/bin/sz"), ("unlha", "/bin/unlzx")]
+         ("rz", "/bin/sz"), ("unlha", "/bin/unlzx"),
+         ("screenprefs", "/bin/conprefs"), ("screenprefs", "/bin/deskprefs")]
 SBIN = {"zup"}
 OWN_PKG = {"zpkg"}                        # a base-group package of its own (DESIGN D22 step 5): /bin/zpkg, /etc/zpkg.conf
 # The bootstrap (DESIGN D22 4.5, as built 2026-10-31): a base whose zpkg cannot write the boot partition (2026103000,
@@ -217,7 +218,7 @@ FAMILIES = [
                    "sleep date cal clear time timeout watch"),
     ("sysinfo", "who and what: uname, id, hostname, uptime", "uname whoami id hostname uptime"),
     ("procps", "processes and memory: ps, kill, nice", "ps free kill pgrep nice renice"),
-    ("sysutils", "the console, the kernel log, the disks' sync, restart", "dmesg input beep sync reboot conmirror conprefs"),
+    ("sysutils", "the console, the kernel log, the disks' sync, restart", "dmesg input beep sync reboot conmirror screenprefs"),
     ("pager", "less and man, the pager and the manual reader", "less man"),
     ("edit", "the text editor", "edit"),
     ("sumi", "Sumi, a text editor: tabs, colours for code, undo, find and replace", "sumi"),
@@ -245,7 +246,7 @@ FAMILIES = [
     ("sntp", "set the clock from the network", "sntp"),
     ("zine", "ZINE: AmigaOS programs on Zenix (zine PROGRAM)", "zine"),
     ("zinstall", "the installer: put Zenix on a disk; the boot partition's programs", "zinstall"),
-    ("desktop", "Zenix Desktop: the display server, the window manager, the terminal", "zdesk term deskprefs mouseprefs files show ttf2font"),
+    ("desktop", "Zenix Desktop: the display server, the window manager, the terminal", "zdesk term mouseprefs files show ttf2font"),
     ("sound", "the sound server, play (WAV, 8SVX, AIFF), modplay (MOD, MED, S3M, XM)", "play modplay"),
     ("usb", "the USB server (USB sticks on a CM4 PiStorm, read-only) and lsusb", "lsusb"),
     ("zenix-tests", "Zenix's test programs and the start-up programs' copies", "hello spin crash badptr msgpingd msgping "
@@ -264,7 +265,7 @@ LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz"), ("too
 FAMILY_SBIN = {"disktools": ["fatd", "ffsd", "pfs3d", "iso9660d", "exfatd"], "desktop": ["displayd", "dlogin"], "sound": ["sndd"], "usb": ["usbd"]}     # DESIGN D30, D31, D32, D44: mount's servers for a FAT volume, an OFS or FFS volume, a PFS3 volume, an ISO 9660 volume, D47: an exFAT volume
 # (DESIGN D35: the two AmigaOS programs of a boot partition, what zinstall puts there)
 # a family's own configuration files, from rootfs/ (kind "c": zup keeps a copy the owner changed, as for base's)
-FAMILY_CONFIG = {"desktop": ["etc/dlogin", "etc/zdesk/keys", "etc/zdesk/menu", "etc/zdesk/icons", "etc/zdesk/mouse", "etc/zdesk/screen",
+FAMILY_CONFIG = {"desktop": ["etc/dlogin", "etc/zdesk/keys", "etc/zdesk/menu", "etc/zdesk/icons", "etc/zdesk/mouse",
                              "etc/zdesk/bar", "etc/zdesk/themes/flat.theme", "etc/zdesk/themes/workbench.theme",
                              "etc/zdesk/themes/platinum.theme", "etc/zdesk/pointers/arrow.pointer",
                              "etc/zdesk/pointers/slim.pointer", "etc/zdesk/pointers/cross.pointer",
