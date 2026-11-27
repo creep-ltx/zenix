@@ -246,7 +246,7 @@ FAMILIES = [
     ("sntp", "set the clock from the network", "sntp"),
     ("zine", "ZINE: AmigaOS programs on Zenix (zine PROGRAM)", "zine"),
     ("zinstall", "the installer: put Zenix on a disk; the boot partition's programs", "zinstall"),
-    ("desktop", "Zenix Desktop: the display server, the window manager, the terminal", "zdesk term mouseprefs files show ttf2font"),
+    ("desktop", "Zenix Desktop: the display server, the window manager, the terminal", "zdesk term mouseprefs files show ttf2font pidisplay"),
     ("sound", "the sound server, play (WAV, 8SVX, AIFF), modplay (MOD, MED, S3M, XM)", "play modplay"),
     ("usb", "the USB server (USB sticks on a CM4 PiStorm, read-only) and lsusb", "lsusb"),
     ("zenix-tests", "Zenix's test programs and the start-up programs' copies", "hello spin crash badptr msgpingd msgping "
