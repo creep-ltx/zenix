@@ -48,7 +48,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet irc mail \
-          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror screenprefs mouseprefs files show ttf2font \
+          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror screenprefs mouseprefs pidisplay files show ttf2font \
           play modplay lsusb lua make zld zas tcc zdb \
           frotz adventure arithmetic banner fortune hangman number rain robots tetris worm worms wump zintro
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
@@ -284,8 +284,9 @@ RAMDISK_K := 640
 # it in the protection span). 649 since D60 stage 6 (2026-11-24, the speed pass: 2.6 KB of kernel.bin, 2.2 KB of it in
 # the protection span; with D61's CON_MOUSE the floppy had 700 bytes left, under the 800 kept). 648 since the audit
 # of 2026-11-23's memory and pipe wins (2026-11-24, OS-3 to OS-6 and OS-13: about 380 bytes of kernel.bin; the floppy
-# had 516 bytes left).
-RAMDISK_MOUNT_K := 648
+# had 516 bytes left). 647 since DESIGN D63 (2026-11-28, the Pi's HDMI size and EDID asked at boot, boot-only: 590
+# bytes of kernel.bin; the floppy had 568 bytes left).
+RAMDISK_MOUNT_K := 647
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/check-init.py tools/ksize-check.sh tools/ksize-budget tools/uok-check.py
@@ -584,12 +585,19 @@ STACK_exfatd := 8192
 # ---- Zenix Desktop (DESIGN D38, docs/d38-desktop.md): the display server /sbin/displayd (display/server/: the
 # protocol, the input and the font reader cold, -Os; the drawing and the fonts -O2: the golden path, input to screen), the client
 # library display/lib/libdisplay.c linked into each client (static, D38 5), the test client dpytest ----
-DPYDOBJS := $(patsubst %,$(BUILD)/dpyd-%.no,displayd win draw font amifont fb screen)
-$(BUILD)/dpyd-%.no: display/server/%.c display/server/dpyd.h display/server/amifont.h display/ttf/ttfont.h display/ttf/ttf.h display/server/fb.h kernel/hwinfo.h display/proto.h user/libz.h user/usys.h | $(BUILD)
-	$(CC) $(UCFLAGS) -Iuser -DDIW_V=$(DIWV) $(if $(filter displayd win amifont fb screen,$*),-Os) -c $< -o $@
+DPYDOBJS := $(patsubst %,$(BUILD)/dpyd-%.no,displayd win draw font amifont fb screen hvslist)
+$(BUILD)/dpyd-%.no: display/server/%.c display/server/dpyd.h display/server/amifont.h display/ttf/ttfont.h display/ttf/ttf.h display/server/fb.h display/server/hvslist.h kernel/hwinfo.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -DDIW_V=$(DIWV) $(if $(filter displayd win amifont fb screen hvslist,$*),-Os) -c $< -o $@
 $(BUILD)/displayd.uelf: $(DPYDOBJS) $(BUILD)/screenfile.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(DPYDOBJS) $(BUILD)/screenfile.no $(BUILD)/libz.uo $(LIBGCC) -o $@
 STACK_displayd := 8192
+# the Pi's own graphics (DESIGN D63, docs/d63-pistorm-gfx.md): displayd draws on the Pi's picture with
+# display/server/hvslist.c (no system calls: tools/hvs-host-test.sh builds it on the PC); /sbin/pidisplay lists the
+# modes (screenprefs runs it), shows the display list, a test picture, the console's picture back
+$(BUILD)/pidisplay.uo: display/drv/pidisplay.c display/server/hvslist.h kernel/hwinfo.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
+$(BUILD)/pidisplay.uelf: $(BUILD)/pidisplay.uo $(BUILD)/dpyd-hvslist.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/pidisplay.uo $(BUILD)/dpyd-hvslist.no $(BUILD)/libz.uo $(LIBGCC) -o $@
 # the demo floppies' displayd (audit 2026-11-12 block 6, 2.3): the same files with -DNO_RTG, without fb.c and the card's
 # branches (their bootblock writes no card record, D43 3), and -DNO_SCREEN, without screen.c (D55: no program on them
 # opens a screen of its own), put on them as /sbin/displayd; every other image the full one
@@ -623,10 +631,10 @@ $(BUILD)/cfgfile.uo: user/cfgfile.c user/cfgfile.h user/libz.h user/usys.h | $(B
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
 # screenprefs (DESIGN D62, docs/d62-screen-modes.md): the screen's settings, the console's and the desktop's (the
 # window, the text form, the command line); conprefs and deskprefs are other names of it (tools/mkroot.sh)
-$(BUILD)/screenprefs.uo: display/prefs/screenprefs.c display/prefswin.h display/display.h display/proto.h display/screenfile.h display/keys.h display/server/amifont.h user/cfgfile.h user/libz.h user/usys.h | $(BUILD)
+$(BUILD)/screenprefs.uo: display/prefs/screenprefs.c display/server/hvslist.h kernel/hwinfo.h display/prefswin.h display/display.h display/proto.h display/screenfile.h display/keys.h display/server/amifont.h user/cfgfile.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
-$(BUILD)/screenprefs.uelf: $(BUILD)/screenprefs.uo $(BUILD)/libdisplay.no $(BUILD)/prefswin.no $(BUILD)/keys.no $(BUILD)/screenfile.no $(BUILD)/dpyd-amifont.no $(BUILD)/cfgfile.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/screenprefs.uo $(BUILD)/libdisplay.no $(BUILD)/prefswin.no $(BUILD)/keys.no $(BUILD)/screenfile.no $(BUILD)/dpyd-amifont.no $(BUILD)/cfgfile.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(BUILD)/screenprefs.uelf: $(BUILD)/screenprefs.uo $(BUILD)/libdisplay.no $(BUILD)/prefswin.no $(BUILD)/keys.no $(BUILD)/screenfile.no $(BUILD)/dpyd-amifont.no $(BUILD)/dpyd-hvslist.no $(BUILD)/cfgfile.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/screenprefs.uo $(BUILD)/libdisplay.no $(BUILD)/prefswin.no $(BUILD)/keys.no $(BUILD)/screenfile.no $(BUILD)/dpyd-amifont.no $(BUILD)/dpyd-hvslist.no $(BUILD)/cfgfile.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 # the preference programs' window (display/prefswin.h): screenprefs' and mouseprefs'
 $(BUILD)/prefswin.no: display/lib/prefswin.c display/prefswin.h display/display.h display/proto.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
