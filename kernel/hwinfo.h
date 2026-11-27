@@ -90,9 +90,25 @@ struct hwinfo {
         unsigned int dl_rtg, dl_chip;   /* its value showing the card's picture, and the chipset's (the C790's) */
     } fb;                           /* 32 bytes */
 };
+/* (DESIGN D63, 2026-11-27) right after the table, in the same cleared 1 KB the boot hands over (not in struct hwinfo:
+ * the kernel keeps no copy of it): the HDMI's picture as the firmware set it up and the monitor's EDID, asked by the
+ * kernel once at boot through the mailbox (kernel/emmc.c, which has the cache calls a mailbox message needs); read
+ * by /sbin/pidisplay and the display server. All 0 when it was not asked (no Pi) */
+struct hwdisp {
+    unsigned short w, h;            /* the output's size (the firmware's tag 0x00040003), HWD_SIZE */
+    unsigned int flags;             /* HWD_* */
+    unsigned char edid[128];        /* the monitor's EDID block 0 (tag 0x00030020) as the firmware gave it, HWD_EDID */
+};                                  /* 136 bytes */
+#define HWDISP_ADDR     (HWINFO_ADDR + 440)
+#define HWD_SIZE        1               /* w, h are the firmware's answer */
+#define HWD_EDID        2               /* edid is the firmware's answer (its checksum not checked here) */
 #define HWFB_MAGIC      0x5A464231      /* "ZFB1" */
 #define HWFB_HVS        1               /* hvs, dl_rtg and dl_chip are valid: the display server flips the HDMI */
 #define HWFB_TEST       2               /* a pretend card in fast RAM (dpytest -fb, the tests) */
+#define HWFB_PI         4               /* (D63) with HWFB_TEST: a pretend Pi (dpytest -pi): width, height its HDMI, dl_rtg
+                                         * its picture memory's size; the display server makes the memory and the HVS's
+                                         * window and writes them here: base (with bpr, bpp, format: the picture now)
+                                         * and hvs (the window's start, not a register's address) */
 #define HWFB_OFF        408             /* fb's offset in the table (HWINFO_FIRST: it follows the first size) */
 /* User-visible since DESIGN D19 step 7 (SYS_drv DRV_HWINFO gives drivers a copy, at most the caller's size): it grows
  * only at the end from here, new fields first from reserved[], then after board[]; its first size is frozen */

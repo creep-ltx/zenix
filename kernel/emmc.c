@@ -15,6 +15,7 @@
  */
 #include "kernel.h"
 #include "hwinfo.h"
+#include "mbox.h"
 
 #ifdef EMMC_HOST_TEST
 #include "../tools/emmc-fake.h"
@@ -44,21 +45,20 @@ static inline u32 now_us(void) { return __builtin_bswap32(*(volatile u32 *)(time
  * is only the fallback when there is none. */
 static u32 mbox_static[16] __attribute__((aligned(64)));
 static u32 *mbox_msg = mbox_static;
+static u32 mbox_cap = 16;              /* mbox_msg's words */
 static void cache_clean(void *p)  { register void *a __asm__("a0") = p; __asm__ volatile(".word 0xF468" :: "a"(a) : "memory"); }
 static void cache_inval(void *p)  { register void *a __asm__("a0") = p; __asm__ volatile(".word 0xF448" :: "a"(a) : "memory"); }
 
+/* one tag with a value buffer of nwords (at most 34: the message in mbox_msg is 6 + nwords words): a and b its first
+ * two words, the rest 0; the answer's first two words into r0, r1 -> 0, or -1 */
 KINIT static int mbox_call(u32 tag, u32 a, u32 b, u32 nwords, u32 *r0, u32 *r1)
 {
     volatile u32 *m = mbox_msg;
-    m[0] = __builtin_bswap32(8 * 4);            /* total size */
-    m[1] = 0;                                   /* request */
-    m[2] = __builtin_bswap32(tag);
-    m[3] = __builtin_bswap32(nwords * 4);       /* value buffer size */
-    m[4] = 0;
-    m[5] = __builtin_bswap32(a);
-    m[6] = __builtin_bswap32(b);
-    m[7] = 0;                                   /* end tag */
-    cache_clean((void *)m);
+    u32 n = mbox_build(m, mbox_cap, tag, a, b, nwords);
+    if (!n)
+        return -1;                              /* (a message bigger than mbox_msg: never sent) */
+    for (u32 i = 0; i < n; i += 4)              /* every 16-byte line of it (Emu68: the ARM's lines around them) */
+        cache_clean((void *)(m + i));
     u32 t0 = now_us();
     while (__builtin_bswap32(*(volatile u32 *)(mbox_base + 0x38)) & 0x80000000u)
         if (now_us() - t0 > 100000)
@@ -73,11 +73,62 @@ KINIT static int mbox_call(u32 tag, u32 a, u32 b, u32 nwords, u32 *r0, u32 *r1)
         if ((v & 0xF) == 8)
             break;
     }
-    cache_inval((void *)m);
+    for (u32 i = 0; i < n; i += 4)
+        cache_inval((void *)(m + i));
     if (!(__builtin_bswap32(m[1]) & 0x80000000u))
         return -1;                              /* firmware did not answer the request */
     if (r0) *r0 = __builtin_bswap32(m[5]);
     if (r1) *r1 = __builtin_bswap32(m[6]);
+    return 0;
+}
+/* DESIGN D63 (docs/d63-pistorm-gfx.md 4): the HDMI picture's size and the monitor's EDID, asked once here at boot (a
+ * message needs the cache calls only the kernel makes) for the Pi's graphics; written after the hardware table at
+ * 0x1100 (HWDISP_ADDR), where the programs read it (no Pi has a 68k MMU). The EDID's message (40 words) in a block of
+ * its own below 1 GB, on whole 64-byte lines (Emu68's cinvl drops the ARM's whole line), freed after */
+KINIT static void mbox_display(void)
+{
+    struct hwdisp *d = (struct hwdisp *)HWDISP_ADDR;
+    u32 w = 0, h = 0, *b, *was = mbox_msg, wc = mbox_cap;
+    if (mbox_call(0x00040003, 0, 0, 2, &w, &h) == 0) {     /* (the readers check the sizes) */
+        d->w = (unsigned short)w;
+        d->h = (unsigned short)h;
+        d->flags = HWD_SIZE;
+    }
+    if ((b = mem_alloc(160 + 64, MEM_FASTONLY | MEM_LOW1G, 0))) {
+        mbox_msg = (u32 *)(((u32)b + 63) & ~63u);
+        mbox_cap = 40;
+        if (mbox_call(0x00030020, 0, 0, 34, &w, &h) == 0 && !h) {  /* block 0: the status 0, then its 128 bytes */
+            memcpy(d->edid, mbox_msg + 7, 128);
+            d->flags |= HWD_EDID;
+        }
+        mbox_msg = was;
+        mbox_cap = wc;
+        mem_free(b);
+    }
+    kprintf("pi: hdmi %ux%u, answers %u\n", d->w, d->h, d->flags);  /* (1 the size, 2 the EDID; 0: no answer) */
+}
+/* the mailbox for the kernel's calls (the SD card's power and clock, D63's display): once, at boot, on a Pi under
+ * Emu68, whatever disk the machine boots from */
+static u8 mbox_up;
+KINIT __attribute__((noinline)) int pi_mbox_init(void)
+{
+    const struct hwinfo *hw = HWINFO_K;
+    if (mbox_up)
+        return 0;
+    if (hw->magic != HWINFO_MAGIC || !hw->mailbox || !hw->soc_base)
+        return -1;
+    mbox_base = hw->mailbox;
+    timer_base = hw->soc_base + 0x3000;                 /* system timer: 1 MHz free running counter */
+    if ((u32)mbox_msg + sizeof mbox_static > 0x40000000u) {
+        u8 *b = mem_alloc(64 + 64, MEM_FASTONLY | MEM_LOW1G, 0);      /* kept for good: one small block */
+        if (b)
+            mbox_msg = (u32 *)(((u32)b + 63) & ~63u);
+        else
+            kprintf("emmc: no fast RAM below 1 GB for the mailbox message: the clock calls may fail\n");
+    }
+    mbox_up = 1;
+    if (hw->flags & HW_BCM2711)
+        mbox_display();
     return 0;
 }
 #endif
@@ -247,19 +298,9 @@ KINIT int emmc_init(void)
         return -1;
 #ifndef EMMC_HOST_TEST
     emmc_base = hw->emmc;
-    mbox_base = hw->mailbox;
-    timer_base = hw->soc_base + 0x3000;                 /* system timer: 1 MHz free running counter */
+    pi_mbox_init();                                     /* (blk_init asked first; done once) */
 #endif
     kprintf("emmc: controller at %p, mailbox at %p\n", hw->emmc, hw->mailbox);
-#ifndef EMMC_HOST_TEST
-    if ((u32)mbox_msg + sizeof mbox_static > 0x40000000u) {
-        u8 *b = mem_alloc(64 + 64, MEM_FASTONLY | MEM_LOW1G, 0);      /* kept for good: one small block */
-        if (b)
-            mbox_msg = (u32 *)(((u32)b + 63) & ~63u);
-        else
-            kprintf("emmc: no fast RAM below 1 GB for the mailbox message: the clock calls may fail\n");
-    }
-#endif
 
     /* power-cycle the card (firmware power domain 0 = SD card) so that it is in a known state
      * whatever the last driver did to it, and make sure the controller's clocks run */

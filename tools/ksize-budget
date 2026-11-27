@@ -161,11 +161,14 @@ start     4850   8200
 # 2026-11-27 (D62, the screen modes: CON_MODE's video standard and CONM_INFO): gfx 9,050 -> 9,500 (BEAMCON0 written above line 240
 # with the switch, the Copper lists built for either standard, the chips' answer, the standard again after ZINE); kernel.bin 235,008 -> 235,504,
 # TOTAL 235,200 -> 235,600.
+# 2026-11-28 (DESIGN D63, the Pi's own graphics): emmc 4,900 -> 5,300 (the boot asks the firmware for the HDMI's size and
+# the monitor's EDID, on a Pi whatever it boots from: boot-only code, freed after; mbox_call takes any value buffer);
+# kernel.bin 235,504 -> 235,976, TOTAL 235,600 -> 236,100; the mount tests' RAM disk 648 -> 647 KB (Makefile).
 main      5950   1700
 serial    6200   6500
 mem       4750    248
 ide       4800    560
-emmc      4900    640
+emmc      5300    640
 floppy    4500    160
 input      550     32
 audio      620     32
@@ -194,5 +197,5 @@ gcon      5000     16
 dbg       4100     20
 mmu      24700    300
 embed    51000      0
-TOTAL   235600
+TOTAL   236100
 ROOM       800

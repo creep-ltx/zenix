@@ -2,6 +2,7 @@
 #include "kernel.h"
 #include "random.h"
 void ide_zine_port(u32 *v);
+KINIT int pi_mbox_init(void);          /* emmc.c: on a Pi, the firmware's mailbox (DESIGN D63's display asked there) */
 
 /* The raw disk behind the "ide0" name of the disk server: a Gayle IDE drive when there is one, else the
  * SD card of a Raspberry Pi 4 / CM4 under Emu68 (emmc.c), else the Amiga 3000's SCSI disk (a3000.c). */
@@ -9,6 +10,9 @@ static enum { B_IDE, B_EMMC, B_A3000 } which;
 
 KINIT int blk_init(void)
 {
+#ifndef EMMC_HOST_TEST
+    pi_mbox_init();                     /* D63: before any disk, so a Pi booting from IDE asks too */
+#endif
     if (ide_init() == 0) {
         which = B_IDE;
         return 0;
