@@ -252,7 +252,7 @@ EOW
     after q-0 2 > "$OUT/q0"
     grep -q '^screenprefs: video auto (pal shown), console hires, colours auto, font auto, desktop hires, depth auto 4, desktop-font builtin$' "$OUT/q0" &&
         grep -q '^conprefs: colours auto, font auto, mode hires$' "$OUT/q0"
-    check "-q: the settings in effect in one line; conprefs -q its old line ($(tr '\n' '|' < "$OUT/q0"))" $?
+    r=$?; check "-q: the settings in effect in one line; conprefs -q its old line ($(tr '\n' '|' < "$OUT/q0"))" $r   # (the status first: the message's $(...) would set $?)
     grep -a -q '^screenprefs: bogus: not understood here$' "$L" || grep -a -q 'usage: screenprefs' "$L"
     [ "$(grep -a -c '^rc=2$' "$L")" -ge 2 ] && grep -a -q '^screenprefs: unknown option -x' "$L" && grep -a -q '^screenprefs .*[0-9]' "$L"
     check "a wrong word and an unknown option: the usage, status 2; --version" $?
@@ -278,13 +278,13 @@ EOW
     s5=$(after state-5 14)
     echo "$s5" | grep -qx 'video ntsc' && echo "$s5" | grep -qx 'console hires-lace' && echo "$s5" | grep -qx 'console-colours 8' &&
         echo "$s5" | grep -qx 'console-font auto'
-    check "-s: /etc/screen's lines written ($(echo "$s5" | grep -v '^[0-9]*$' | tr '\n' '|'))" $?
+    r=$?; check "-s: /etc/screen's lines written ($(echo "$s5" | grep -v '^[0-9]*$' | tr '\n' '|'))" $r   # (the status first: the message's $(...) would set $?)
     nc=$(grep -c '^#' rootfs/etc/screen); echo "$s5" | grep -qx "$nc"; check "... its $nc comment lines kept" $?
     ! echo "$s5" | grep -q '^colours 8' && echo "$s5" | grep -qx 'login text'
     check "... /etc/console's older colours and mode lines moved out, its login line kept" $?
     s6=$(after state-6 2)
     echo "$s6" | grep -q 'video ntsc (ntsc shown), console hires-lace, colours 8' && echo "$s6" | grep -qx 50
-    check "a reboot: init applies /etc/screen: NTSC, interlaced, 8 colours: 80 x 50 ($(echo "$s6" | tr '\n' '|'))" $?
+    r=$?; check "a reboot: init applies /etc/screen: NTSC, interlaced, 8 colours: 80 x 50 ($(echo "$s6" | tr '\n' '|'))" $r   # (the status first: the message's $(...) would set $?)
     ! grep -a -q '^init: .*not understood' "$L"; check "... init understood every line" $?
     exit $((1 - pass))
 fi
@@ -328,7 +328,7 @@ if [ "$PART" = desk ]; then
     g=$(grep -a -B4 '^guest-done' "$L")
     echo "$g" | grep -qx 'rc=0' && echo "$g" | grep -qx 'desktop superhires' && echo "$g" | grep -qx 'desktop-depth 3' &&
         echo "$g" | grep -q 'zdesk/screen: no such file'
-    check "a user's -s desktop: ~/.config/screen/screen written, the older ~/.config/zdesk/screen moved ($(echo "$g" | tr '\n' '|'))" $?
+    r=$?; check "a user's -s desktop: ~/.config/screen/screen written, the older ~/.config/zdesk/screen moved ($(echo "$g" | tr '\n' '|'))" $r   # (the status first: the message's $(...) would set $?)
     b=$(grep -a -A3 '^busy-rc' "$L")
     echo "$b" | grep -qx 'busy-rc=0' && echo "$b" | grep -qx 'console hires-lace' && echo "$b" | grep -q 'console hires,'
     check "-s console with the desktop holding the screen: saved (status 0), not applied (the console stays hires)" $?

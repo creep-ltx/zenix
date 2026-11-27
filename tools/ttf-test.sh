@@ -101,13 +101,13 @@ line=$(grep -a -o "^ttf2font: /tmp/go.zcf: [0-9]* glyphs, [0-9]* bytes, [0-9.]* 
 [ -n "$line" ] && grep -a -q "^ttf-con-0" "$L"; check "the console's font: ${line#ttf2font: }" $?
 grep -a -q "go.font" "$L" && grep -a -q "5a 54 54 46" "$L"; check "... /tmp/tf/go.font made, the font file ends in its stamp (ZTTF)" $?
 # the damaged one
-grep -a -q "^ttf2font: /usr/share/fonts/truetype/zcut.ttf: " "$L"; check "a cut .ttf: ttf2font says why ($(grep -a -o "^ttf2font: /usr/share/fonts/truetype/zcut.ttf: .*" "$L" | head -1))" $?
+grep -a -q "^ttf2font: /usr/share/fonts/truetype/zcut.ttf: " "$L"; r=$?; check "a cut .ttf: ttf2font says why ($(grep -a -o "^ttf2font: /usr/share/fonts/truetype/zcut.ttf: .*" "$L" | head -1))" $r
 [ "$(grep -a -c "^displayd: /usr/share/fonts/truetype/zcut.ttf: ttf2font could not draw it: the built-in 8x8 is used" "$L")" = 1 ]
 check "... displayd says it in one line and uses the built-in 8x8" $?
 grep -a -q "^zdesk: running, .*font 8x8 (8 lines: bar 11, title bar 11)" "$L"; check "... zdesk's bar as with the 8 x 8 (11 lines)" $?
 # go 11: drawn once, then from the cache, then again after a touch
 d=$(grep -a -o "^displayd: /usr/share/fonts/truetype/go.ttf drawn at 11 lines in [0-9.]* s" "$L")
-[ "$(echo "$d" | grep -c drawn)" = 2 ]; check "go 11 drawn twice in three starts (the first, and after the .ttf changed): $(echo "$d" | head -1 | sed 's/^displayd: //')" $?
+[ "$(echo "$d" | grep -c drawn)" = 2 ]; r=$?; check "go 11 drawn twice in three starts (the first, and after the .ttf changed): $(echo "$d" | head -1 | sed 's/^displayd: //')" $r
 [ "$(grep -a -c "^displayd: font go 11: 11 lines, proportional, 191 glyphs" "$L")" = 3 ]
 check "... read in all three starts (11 lines, proportional, 191 glyphs)" $?
 grep -a -q "^zdesk: running, .*font go 11 (11 lines: bar 14, title bar 14)" "$L"; check "zdesk: the bar and title bars 3 lines taller (14)" $?
