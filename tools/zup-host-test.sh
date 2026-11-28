@@ -101,7 +101,7 @@ for n in names:
     base = m["group"] == "base"
     assert base == (n in ("zup", "base", "zpkg")), n
     if not base:
-        assert m["takes"] == (["man"] if n == "base-man" else ["utils", "man"]), (n, m["takes"])
+        assert m["takes"] == (["man"] if n == "base-man" else ["utils", "man"] + mkzup.FAMILY_TAKES.get(n, [])), (n, m["takes"])
         assert m["desc"], n
     for e in m["entries"]:
         if e[0] != "d":

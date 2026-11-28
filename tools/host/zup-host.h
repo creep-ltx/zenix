@@ -93,6 +93,14 @@ int sys_spawn(const char *path, char *const *argv, const int *stdio);
 int sys_wait(int pid);
 int sys_port_find(const char *n);
 int sys_call(int port, struct umsg *m);
+#ifndef CALLB_RD
+/* D60 5.5's declared-buffer call (user/diskcall.h): on the PC there is no protection, so it is sys_call */
+#define CALLB_RD 1
+#define CALLB_WR 2
+struct ucallbuf { u32 addr, len, flags; };
+struct ucalldecl { u32 n; struct ucallbuf b[4]; };
+static inline int sys_callv(int port, struct umsg *m, struct ucalldecl *d) { (void)d; return sys_call(port, m); }
+#endif
 int sys_update(u32 op, u32 a, u32 b);
 extern int zerrno;
 /* libz's whole-file read and command line (user/zhelp.c) with their rules, over the calls above */

@@ -35,6 +35,14 @@ struct umsg { struct umsg *next; int from, server; u32 state; int result; u32 ty
 #define UMSG_KERNEL 1
 
 int sys_call(int port, struct umsg *m);          /* hostdisk.c: the disk server's messages on an image file */
+#ifndef CALLB_RD
+/* D60 5.5's declared-buffer call (user/diskcall.h): on the PC there is no protection, so it is sys_call */
+#define CALLB_RD 1
+#define CALLB_WR 2
+struct ucallbuf { u32 addr, len, flags; };
+struct ucalldecl { u32 n; struct ucallbuf b[4]; };
+static inline int sys_callv(int port, struct umsg *m, struct ucalldecl *d) { (void)d; return sys_call(port, m); }
+#endif
 int sys_port_find(const char *name);
 int sys_port_create(const char *name);
 struct umsg *sys_recv(int port, int wait);
