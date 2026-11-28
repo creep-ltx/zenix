@@ -688,6 +688,8 @@ static void pi_frame(void)
 /* the Pi's picture of w x h x bits in place of the screen (nothing changed on a failure) -> 0, -errno */
 static int pi_set(unsigned w, unsigned h, unsigned bits)
 {
+    if (w < HVS_MINW || h < HVS_MINH)
+        return -EINVAL;
     if (!hvs_size_ok(w, h, bits, pi.ow, pi.oh, pi.vc4size))
         return -E2BIG;
     if (pi.soc && !hvs_running(&pi)) {

@@ -406,6 +406,8 @@ static void command(char *line)
     }
     if (!strcmp(w[0], "dl") && n >= 2) { /* D63: words of its list memory from N */
         u32 k = (u32)strtoul(w[1], 0, 0);
+        if (k > 4096 - 9)
+            k = 4096 - 9;               /* (inside the list memory) */
         say("dpytest: dl 0x%x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n", k, pi_word(0x4000 + 4 * k),
             pi_word(0x4004 + 4 * k), pi_word(0x4008 + 4 * k), pi_word(0x400C + 4 * k), pi_word(0x4010 + 4 * k),
             pi_word(0x4014 + 4 * k), pi_word(0x4018 + 4 * k), pi_word(0x401C + 4 * k), pi_word(0x4020 + 4 * k));

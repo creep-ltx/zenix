@@ -402,3 +402,14 @@ record (now fb.c knows CLUT): refused there. screenprefs runs `pidisplay --list`
 the mode list. `dpytest -pi` refuses to overwrite a real `zenixboot RTG` record. Stale comments, `mode_file` read once,
 the frame rate down to 24 Hz, one-system wording, the checklist's sizes (the native one `--list` shows, not 1920 x 1080)
 and a step 0 for the changed SD message. Left: the 320 x 256 minimum (the partner's), the EDID's timings (tested).
+
+**The code review (one, on the built branch, 2026-11-28; taken):** `pidisplay --dump` stopped at the first word with
+bit 31 (an address): now at the end word only; `pidisplay console` read low memory on a pretend Pi with no server:
+refused there; the kernel clears `struct hwdisp` itself; the EDID's message block is 256 bytes (160 on whole 64-byte
+lines from any 16-byte start) and is not freed after a call the firmware never answered (it may still write it);
+`DPY_CARD` answers -EINVAL, not -E2BIG, below 320 x 256; `struct hwinfo` is closed at 440 bytes (a later field goes
+after `struct hwdisp`), said in kernel/hwinfo.h and docs/frozen-interfaces.md; `dpytest dl` stays inside the list
+memory; `pidisplay -d ""` refused. Left: the 8-bit copy keeps `memcpy` (every drawing writes pens 0-15 already: fb.c),
+the frame rate measured by every `--list` (150 ms at most). Found by the test runs meanwhile: a screenprefs-test check
+that could not fail (the `$?` trap) expected "no such file" where `ls` says "not found", and looked one line short;
+both fixed, the behaviour was right.

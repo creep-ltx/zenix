@@ -93,7 +93,7 @@ static int dump(const char *w)
     if (w) {
         char *e;
         at = (u32)strtoul(w, &e, 0);
-        if (*e || at >= HVS_DLIST_WORDS) {
+        if (!*w || *e || at >= HVS_DLIST_WORDS) {
             dprintf(2, "pidisplay: %s: not a word of the list memory (0-4095)\n", w);
             return 1;
         }
@@ -102,8 +102,8 @@ static int dump(const char *w)
     for (u32 i = 0; i < 32 && at + i < HVS_DLIST_WORDS; i++) {
         u32 v = hvs_rd(hvs_dl(&pi, at + i));
         dprintf(1, "%03x %08x\n", at + i, v);
-        if (v & HVS_DL_END)
-            break;
+        if (v == HVS_DL_END)
+            break;                      /* (the end word; addresses and PPF words have bit 31 too) */
     }
     return 0;
 }
@@ -138,7 +138,7 @@ static int test(const char *spec)
     }
     if (!hvs_size_ok(w, h, bits, pi.ow, pi.oh, pi.vc4size)) {
         dprintf(2, "pidisplay: %s: not a picture this HDMI takes (%u x %u to %u x %u, at most %u KB)\n", spec,
-                HVS_MINW, HVS_MINH, pi.ow, pi.oh, (pi.vc4size - HVS_VC4_SPARE) >> 10);
+                HVS_MINW, HVS_MINH, pi.ow, pi.oh, pi.vc4size > HVS_VC4_SPARE ? (pi.vc4size - HVS_VC4_SPARE) >> 10 : 0);
         return 1;
     }
     if (!pi.soc) {
@@ -191,6 +191,10 @@ static int console(void)
 {
     if (root("console"))
         return 1;
+    if (!pi.soc) {
+        dprintf(2, "pidisplay: console: not on a pretend Pi\n");
+        return 1;
+    }
     u32 c = hvs_con(&pi);
     if (!c) {
         dprintf(2, "pidisplay: console: no console's list was kept (no desktop ran on the Pi's picture)\n");
