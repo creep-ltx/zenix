@@ -325,9 +325,9 @@ if [ "$PART" = desk ]; then
     echo "$f1" | grep -qx 'desktop hires-lace' && echo "$f1" | grep -qx 'desktop-depth 4' && grep -a -q '^screenprefs: save: .*desktop hires-lace, desktop-depth 4.*theme platinum' "$L" &&
         after files-1 4 | grep -qx platinum
     check "the keys: interlace, 16 colours, platinum, Save and y: /etc/screen's desktop lines, /etc/zdesk/theme" $?
-    g=$(grep -a -B4 '^guest-done' "$L")
+    g=$(grep -a -B5 '^guest-done' "$L")
     echo "$g" | grep -qx 'rc=0' && echo "$g" | grep -qx 'desktop superhires' && echo "$g" | grep -qx 'desktop-depth 3' &&
-        echo "$g" | grep -q 'zdesk/screen: no such file'
+        echo "$g" | grep -q 'zdesk/screen: not found'
     r=$?; check "a user's -s desktop: ~/.config/screen/screen written, the older ~/.config/zdesk/screen moved ($(echo "$g" | tr '\n' '|'))" $r   # (the status first: the message's $(...) would set $?)
     b=$(grep -a -A3 '^busy-rc' "$L")
     echo "$b" | grep -qx 'busy-rc=0' && echo "$b" | grep -qx 'console hires-lace' && echo "$b" | grep -q 'console hires,'
