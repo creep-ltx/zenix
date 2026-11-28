@@ -89,21 +89,24 @@ KINIT static void mbox_display(void)
 {
     struct hwdisp *d = (struct hwdisp *)HWDISP_ADDR;
     u32 w = 0, h = 0, *b, *was = mbox_msg, wc = mbox_cap;
+    memset(d, 0, sizeof *d);            /* (the boot clears it too) */
     if (mbox_call(0x00040003, 0, 0, 2, &w, &h) == 0) {     /* (the readers check the sizes) */
         d->w = (unsigned short)w;
         d->h = (unsigned short)h;
         d->flags = HWD_SIZE;
     }
-    if ((b = mem_alloc(160 + 64, MEM_FASTONLY | MEM_LOW1G, 0))) {
+    if ((b = mem_alloc(256, MEM_FASTONLY | MEM_LOW1G, 0))) {      /* 160 bytes on whole lines: 192 from a 64 */
         mbox_msg = (u32 *)(((u32)b + 63) & ~63u);
         mbox_cap = 40;
-        if (mbox_call(0x00030020, 0, 0, 34, &w, &h) == 0 && !h) {  /* block 0: the status 0, then its 128 bytes */
+        int r = mbox_call(0x00030020, 0, 0, 34, &w, &h);
+        if (r == 0 && !h) {             /* block 0: the status 0, then its 128 bytes */
             memcpy(d->edid, mbox_msg + 7, 128);
             d->flags |= HWD_EDID;
         }
         mbox_msg = was;
         mbox_cap = wc;
-        mem_free(b);
+        if (r == 0)
+            mem_free(b);                /* (not after no answer: the firmware may still write it; 256 bytes kept) */
     }
     kprintf("pi: hdmi %ux%u, answers %u\n", d->w, d->h, d->flags);  /* (1 the size, 2 the EDID; 0: no answer) */
 }

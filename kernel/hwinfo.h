@@ -99,7 +99,8 @@ struct hwdisp {
     unsigned int flags;             /* HWD_* */
     unsigned char edid[128];        /* the monitor's EDID block 0 (tag 0x00030020) as the firmware gave it, HWD_EDID */
 };                                  /* 136 bytes */
-#define HWDISP_ADDR     (HWINFO_ADDR + 440)
+#define HWDISP_ADDR     (HWINFO_ADDR + 440)    /* so struct hwinfo is closed at 440 bytes: a field it ever needs goes
+                                                * after hwdisp (at 576), never between */
 #define HWD_SIZE        1               /* w, h are the firmware's answer */
 #define HWD_EDID        2               /* edid is the firmware's answer (its checksum not checked here) */
 #define HWFB_MAGIC      0x5A464231      /* "ZFB1" */
