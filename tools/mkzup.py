@@ -307,6 +307,9 @@ FAMILY_EXTRA = {"tls": [("f", 0o755, "build:tlspipe.zx", "/lib/tls/tlspipe")],
                           ("d", 0o1777, None, "/var/games"),
                           ("c", 0o666, None, "/var/games/robots_roll"),
                           ("c", 0o666, None, "/var/games/tetris.scores")]}
+# Files that moved from one family to another (zup refuses a path another installed package owns unless the new owner
+# "takes" from it, D22 8.4.4): D62 made deskprefs and its page another name of screenprefs, in sysutils
+FAMILY_TAKES = {"sysutils": ["desktop"]}
 FAMILY_DEPS = {"games": ["lua"], "irc": ["tls"], "mail": ["tls"], "wget": ["tls"]}
 
 
@@ -475,7 +478,7 @@ def std_packages(build, uapps):
                          if d not in have]
                 ents += [("c", 0o644, 0, 0, os.path.join(ROOT, "rootfs", f), "/" + f)]
             make_package(out, fam, vnum, vstr, ents, deps=[("base", vnum)] + [(d, vnum) for d in FAMILY_DEPS.get(fam, [])],
-                         desc=desc, takes=("utils", "man"))
+                         desc=desc, takes=("utils", "man") + tuple(FAMILY_TAKES.get(fam, ())))
             names.append(fam)
         if "zpkg" in progs:                 # the bootstrap package (BOOTSTRAP above): this build's zpkg, under its own name
             # (its page goes with base-man: an image has the page but not this package, so it may not own it)
